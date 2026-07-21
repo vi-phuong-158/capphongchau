@@ -210,8 +210,7 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                 <div className="rounded-lg bg-stone-50 p-4" key={index}>
                   <p className="font-semibold">{owner.fullName || "Chưa khai"}</p>
                   <p className="mt-1 text-sm text-stone-600">
-                    {owner.ownerType} · CCCD/định danh:{" "}
-                    {owner.identityNumber ? "••••••••" + owner.identityNumber.slice(-4) : "-"}
+                    {owner.ownerType} · CCCD/định danh: {owner.identityNumber || "-"}
                   </p>
                   <p className="mt-1 text-sm text-stone-600">
                     Vai trò: {owner.roleOnCertificate || "-"}

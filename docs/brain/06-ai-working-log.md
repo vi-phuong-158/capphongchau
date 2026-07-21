@@ -282,6 +282,16 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   preview và migration schema là bước tiếp theo; nút tiếp nhận chưa được mở khi bảng mã trường 12
   còn là placeholder.
 
+## [2026-07-21] Hiện PII đầy đủ trong chi tiết hồ sơ cho cán bộ
+
+- **Agent:** Codex
+- **Thay đổi:** Trang chi tiết `/submissions/:id` trả và hiển thị đầy đủ số điện thoại cùng CCCD/số
+  định danh sau khi server kiểm tra role cán bộ; danh sách hàng chờ vẫn che PII. Mỗi lượt mở chi
+  tiết ghi audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED`.
+- **Lý do:** Cán bộ cần đối chiếu trực tiếp số liên hệ và định danh với giấy tờ khi xử lý hồ sơ.
+- **Kiểm tra:** API vẫn đặt `cache-control: no-store`, không trả Drive ID/link và chỉ role nghiệp vụ
+  mới truy cập được trang/endpoint.
+
 ## Format entry
 
 ```

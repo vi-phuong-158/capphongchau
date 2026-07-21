@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
-import { maskPhone, SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
+import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function GET(
 ): Promise<NextResponse> {
   const requestId = randomUUID();
   try {
-    await requireActiveUser(SUBMISSION_READ_ROLES);
+    const user = await requireActiveUser(SUBMISSION_READ_ROLES);
     const { submissionId } = await context.params;
     const record = await getPublicIntakeRepository().findById(submissionId);
     if (!record) {
@@ -29,13 +29,19 @@ export async function GET(
         { status: 404 },
       );
     }
+    await getPublicIntakeRepository().appendAudit({
+      actorEmail: user.email,
+      action: "SUBMISSION_SENSITIVE_DETAIL_VIEWED",
+      entityId: record.submissionId,
+      requestId,
+    });
     return NextResponse.json(
       {
         submission: {
           submissionId: record.submissionId,
           receiptCode: record.receiptCode,
           status: record.status,
-          phone: maskPhone(record.phone),
+          phone: record.phone,
           version: record.version,
           claimedBy: record.claimedBy || null,
           claimedAt: record.claimedAt || null,
