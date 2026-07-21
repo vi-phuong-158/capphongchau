@@ -37,6 +37,7 @@ type Submission = {
     }[];
     assets: { assetType: string; description: string }[];
   } | null;
+  files: { fileId: string; documentType: "CITIZEN_ID_FRONT" | "CERTIFICATE" }[];
 };
 
 const labels: Record<string, string> = {
@@ -186,6 +187,43 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
       </section>
       {draft ? (
         <div className="mt-5 grid gap-5">
+          <section className="rounded-xl border border-stone-200 bg-white p-5">
+            <h2 className="text-xl font-bold">Ảnh giấy tờ</h2>
+            <p className="mt-1 text-sm text-stone-600">
+              Ảnh xem trước được lấy qua ứng dụng, không dùng link Google Drive công khai.
+            </p>
+            {submission.files.length === 0 ? (
+              <p className="mt-4 rounded-lg bg-stone-50 p-4 text-sm text-stone-600">
+                Người dân chưa tải ảnh giấy tờ.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {submission.files.map((file) => (
+                  <figure
+                    className="overflow-hidden rounded-lg border border-stone-200"
+                    key={file.fileId}
+                  >
+                    {/* Preview is an authenticated no-store route, so next/image cannot optimize it safely. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      alt={
+                        file.documentType === "CITIZEN_ID_FRONT"
+                          ? "CCCD mặt trước"
+                          : "Giấy chứng nhận"
+                      }
+                      className="aspect-[4/3] w-full bg-stone-100 object-contain"
+                      src={`/api/submissions/${submission.submissionId}/files/${file.fileId}`}
+                    />
+                    <figcaption className="border-t border-stone-200 px-3 py-2 text-sm font-semibold text-stone-700">
+                      {file.documentType === "CITIZEN_ID_FRONT"
+                        ? "CCCD mặt trước"
+                        : "Giấy chứng nhận"}
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
+          </section>
           <section className="rounded-xl border border-stone-200 bg-white p-5">
             <h2 className="text-xl font-bold">Giấy chứng nhận</h2>
             <dl className="mt-4 grid gap-3 sm:grid-cols-3">

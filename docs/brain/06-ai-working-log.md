@@ -292,6 +292,16 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** API vẫn đặt `cache-control: no-store`, không trả Drive ID/link và chỉ role nghiệp vụ
   mới truy cập được trang/endpoint.
 
+## [2026-07-21] Xem ảnh giấy tờ trong chi tiết hồ sơ
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm route ảnh preview có kiểm tra role, tra `PUBLIC_FILES`, lấy thumbnail nội bộ
+  từ Google Drive bằng OAuth rồi trả `private, no-store`; UI hiển thị CCCD/GCN trong chi tiết hồ
+  sơ. Không trả URL thumbnail hay ảnh gốc cho trình duyệt.
+- **Lý do:** Cán bộ cần đối chiếu dữ liệu khai báo với ảnh giấy tờ mà không mở Drive công khai.
+- **Kiểm tra:** Mỗi lượt preview ghi `SUBMISSION_FILE_PREVIEW_VIEWED`; typecheck, lint, Vitest và
+  Prettier đạt. Thumbnail phụ thuộc Drive tạo được preview cho loại tệp đã tải.
+
 ## Format entry
 
 ```

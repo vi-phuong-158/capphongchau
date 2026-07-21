@@ -35,6 +35,7 @@ export async function GET(
       entityId: record.submissionId,
       requestId,
     });
+    const files = await getPublicIntakeRepository().listFiles(record.submissionId);
     return NextResponse.json(
       {
         submission: {
@@ -48,6 +49,10 @@ export async function GET(
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           draft: record.draft,
+          files: files.map((file) => ({
+            fileId: file.fileId,
+            documentType: file.documentType,
+          })),
         },
         requestId,
       },

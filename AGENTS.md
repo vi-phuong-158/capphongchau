@@ -225,6 +225,7 @@ POST /api/public/submissions/current/submit
 GET /api/submissions
 GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
+GET /api/submissions/:submissionId/files/:fileId
 ```
 
 Mọi API lỗi phải trả:

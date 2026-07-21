@@ -29,6 +29,11 @@ export interface VerifiedFile {
   readonly checksum: string;
 }
 
+export interface PreviewFile {
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+}
+
 function escapeQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
@@ -138,6 +143,32 @@ export class PublicIntakeStorage {
     await drive.files.delete({ fileId: driveFileId });
   }
 
+  /**
+   * Drive sinh thumbnail riêng, nên ảnh gốc không đi qua Vercel Function khi cán bộ đối chiếu.
+   * URL thumbnail chỉ dùng nội bộ trong request này, không trả về trình duyệt và không ghi log.
+   */
+  async readPreview(driveFileId: string): Promise<PreviewFile> {
+    const { drive } = createGoogleWorkspaceClient(this.credentials);
+    const metadata = await drive.files.get({
+      fileId: driveFileId,
+      fields: "thumbnailLink,mimeType",
+    });
+    const thumbnailLink = metadata.data.thumbnailLink;
+    if (!thumbnailLink) {
+      throw new PreviewUnavailableError();
+    }
+    const token = await getGoogleAccessToken(this.credentials);
+    const response = await fetch(thumbnailLink, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      throw new PreviewUnavailableError();
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > 3 * 1024 * 1024) {
+      throw new PreviewUnavailableError();
+    }
+    return { bytes, contentType: response.headers.get("content-type") ?? "image/jpeg" };
+  }
+
   private get credentials() {
     return {
       clientId: this.environment.GOOGLE_DRIVE_CLIENT_ID,
@@ -180,6 +211,13 @@ export class UploadVerificationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "UploadVerificationError";
+  }
+}
+
+export class PreviewUnavailableError extends Error {
+  constructor() {
+    super("Chưa tạo được ảnh xem trước cho tệp này.");
+    this.name = "PreviewUnavailableError";
   }
 }
 

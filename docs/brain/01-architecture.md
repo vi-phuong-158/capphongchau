@@ -98,7 +98,8 @@ tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurr
 src/app/submissions/page.tsx ─→ src/components/submissions-queue.tsx
   └── GET /api/submissions ─→ PublicIntakeRepository (Google Sheets)
 src/app/submissions/[submissionId]/page.tsx ─→ src/components/submission-detail.tsx
-  └── GET/POST /api/submissions/:submissionId ─→ authorization + CSRF + transition/audit
+  ├── GET/POST /api/submissions/:submissionId ─→ authorization + CSRF + transition/audit
+  └── GET /api/submissions/:submissionId/files/:fileId ─→ Drive thumbnail qua route no-store + audit
 ```
 
 Ràng buộc kiến trúc bắt buộc khi mở rộng Code Graph (đã chốt trong `AGENTS.md` §3.1):
