@@ -1,5 +1,16 @@
 # AGENTS.md
 
+> Dành riêng cho **Codex**. Claude Code dùng `CLAUDE.md`.
+>
+> **BẮT BUỘC: đọc `docs/brain/` trước khi code**, đặc biệt **Code Graph** trong
+> `docs/brain/01-architecture.md` (bản đồ module — "đụng vào X ảnh hưởng đâu"; dự án hiện
+> chưa có mã nguồn nên Code Graph còn trống, agent khởi tạo code phải điền lại). File
+> `AGENTS.md` này vẫn là nguồn chi tiết nhất về mô hình dữ liệu, API và bảo mật —
+> `docs/brain/` là bản tóm tắt/tổng hợp để đọc nhanh, không thay thế. Sau khi sửa code, bắt
+> buộc thêm entry vào `docs/brain/06-ai-working-log.md`; nếu đổi kiến trúc/API/schema, cập
+> nhật đồng bộ cả `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md` và mục liên
+> quan trong chính `AGENTS.md`/`docs/architecture.md` để tài liệu không mâu thuẫn nhau.
+
 ## 1. Dự án và nguồn chỉ dẫn
 
 Tên dự án: **Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu**.
@@ -69,6 +80,8 @@ flowchart LR
 - Một ứng dụng Next.js App Router + TypeScript strict, gồm frontend và API Route Handlers.
 - Vercel là nơi chạy frontend/backend thử nghiệm, ưu tiên region `sin1`.
 - PWA, Tailwind CSS, Zod, Google API Node client, Auth.js/Google OAuth, `@zxing/browser`, Vitest và Playwright.
+- Dùng `heic2any` hoặc `libheif-js` chạy client-side để chuyển HEIC/HEIF sang JPEG trước khi upload.
+- PWA là **online-only** ở bản thử nghiệm: phải báo rõ lỗi mất kết nối, không cam kết soạn nháp hoặc upload khi offline.
 - Google My Drive lưu ảnh gốc/preview; Google Sheets là kho dữ liệu có cấu trúc duy nhất.
 - Tách rõ `DataRepository` (Sheets) và `StorageRepository` (Drive). Service nghiệp vụ và component frontend không gọi trực tiếp Google API.
 
@@ -105,6 +118,7 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 - Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
 - Xác minh file sau upload theo thư mục cha, metadata, dung lượng và checksum trước khi cập nhật trạng thái.
 - Lưu `file_id` nội bộ bất biến, tách khỏi `drive_file_id` để chuẩn bị cho migration sang Shared Drive về sau.
+- Scope `drive.file` chỉ nhìn thấy file/thư mục do OAuth client của ứng dụng tạo. Bootstrap CLI phải tạo cây thư mục gốc bằng chính OAuth client production; không dùng thư mục tạo thủ công qua Drive UI.
 
 ### 3.4. QR CCCD
 
@@ -125,18 +139,19 @@ Tạo các tab sau:
 - `OWNERS`: họ tên, CCCD, ngày sinh, giới tính, địa chỉ và nguồn `QR`/`MANUAL`.
 - `FILES`: `file_id`, `case_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
 - `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
-- `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `SEARCH_INDEX`.
+- `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX`.
 - Tạo sẵn `PARCELS`, `ASSETS`, `OCR_FIELDS` để tương thích nâng cấp nhưng không đưa vào quy trình hiện tại.
 
 Không xóa dòng, cột hoặc sheet đã dùng. Nếu thay đổi schema phải có migration, cập nhật tài liệu và bảo toàn dữ liệu cũ.
 
 ### 4.2. Mã định danh và idempotency
 
-- Case ID: `PHONGCHAU-{NAM}-{SO_THU_TU_6_CHU_SO}`, ví dụ `PHONGCHAU-2026-000001`.
-- `ID_RESERVATIONS` append-only. Dòng append thành công quyết định số thứ tự để tránh trùng mã khi tạo đồng thời.
-- Mọi API ghi yêu cầu `idempotency_key` và `request_id`.
-- Bản ghi chỉnh sửa có `version`; PATCH yêu cầu version hiện tại và trả `409 VERSION_CONFLICT` khi phát hiện xung đột.
-- Không cập nhật Google Sheets theo từng ô. Dùng batch read/write và cache đọc ngắn hạn có invalidation khi ghi.
+- Case ID: `PHONGCHAU-{NAM}-{SO_THU_TU_6_CHU_SO}`, ví dụ `PHONGCHAU-2026-000001`; năm phải tính theo `Asia/Ho_Chi_Minh`.
+- `ID_RESERVATIONS` append-only. Số thứ tự chỉ lấy từ `updatedRange` của chính lệnh `values.append`, không đọc số dòng rồi cộng một.
+- Mọi API ghi yêu cầu `idempotency_key` và `request_id`. `REQUEST_LOG` lưu key, kết quả đã cache và timestamp tối thiểu 24 giờ để trả đúng kết quả cho request lặp.
+- Bản ghi chỉnh sửa có `version`; PATCH yêu cầu version hiện tại và trả `409 VERSION_CONFLICT`. Cửa sổ race nhỏ của optimistic concurrency trên Sheets được chấp nhận ở quy mô pilot, không tự dựng lock.
+- Không cập nhật Google Sheets theo từng ô. Gộp bản ghi nghiệp vụ, audit và chỉ mục liên quan trong batch read/write; cache đọc ngắn hạn phải invalidation khi ghi.
+- Xóa ảnh GCN là soft-delete (`DELETED`) và không xóa file Drive. CCCD không được xóa trắng: upload/xác minh ảnh mới trước, sau đó chuyển ảnh cũ sang `REPLACED`.
 
 ### 4.3. Trạng thái hồ sơ
 
@@ -161,13 +176,13 @@ Giữ enum vai trò:
 
 ```ts
 export enum UserRole {
-  SYSTEM_ADMIN = 'SYSTEM_ADMIN',
-  WARD_ADMIN = 'WARD_ADMIN',
-  INTAKE_OFFICER = 'INTAKE_OFFICER',
-  REVIEW_OFFICER = 'REVIEW_OFFICER',
-  POPULATION_MATCH_OFFICER = 'POPULATION_MATCH_OFFICER',
-  REPORT_VIEWER = 'REPORT_VIEWER',
-  AUDITOR = 'AUDITOR'
+  SYSTEM_ADMIN = "SYSTEM_ADMIN",
+  WARD_ADMIN = "WARD_ADMIN",
+  INTAKE_OFFICER = "INTAKE_OFFICER",
+  REVIEW_OFFICER = "REVIEW_OFFICER",
+  POPULATION_MATCH_OFFICER = "POPULATION_MATCH_OFFICER",
+  REPORT_VIEWER = "REPORT_VIEWER",
+  AUDITOR = "AUDITOR",
 }
 ```
 
@@ -214,13 +229,14 @@ Không trả stack trace, token, Drive ID/link hoặc dữ liệu nhận dạng 
 
 ## 6. Bảo mật và vận hành
 
-- HTTPS, secure cookie, OAuth state/CSRF, rate limit và security headers là bắt buộc.
+- HTTPS, secure cookie (`HttpOnly`, `Secure`, `SameSite`), OAuth state/PKCE, CSRF cho mọi API write, rate limit và security headers là bắt buộc. Các biện pháp session/CSRF phải có từ M2, không chờ đến M5.
 - Không commit `.env`, token, Google OAuth client secret, ảnh CCCD/GCN thật hoặc fixture chứa dữ liệu thật.
 - CCCD trong danh sách, log và thông báo hiển thị dạng `0123••••8901`.
 - Dùng HMAC với secret phía server cho chỉ mục tra cứu CCCD; không đưa CCCD đầy đủ vào technical log.
 - Mọi API write, xem file nhạy cảm, xác nhận, export và thay đổi quyền phải ghi `AUDIT_LOGS` append-only.
 - File export lưu trong `03_EXPORTS` và phải ghi nhận người tạo/thời gian/lọc dữ liệu.
-- Vercel Cron tạo snapshot hằng ngày trong `99_BACKUP`; quản trị viên tạo bản backup mã hóa ngoại tuyến hằng tuần.
+- Vercel Cron tạo snapshot Drive hằng ngày trong `99_BACKUP`, nhưng đây chỉ là copy trong cùng Gmail gốc. Phải export toàn bộ Google Sheets định kỳ ra ngoài tài khoản này và tạo backup mã hóa ngoại tuyến hằng tuần ở nơi tách biệt.
+- Trước pilot dữ liệu thật phải chốt và ghi nhận cơ sở pháp lý thu thập CCCD, thời hạn lưu trữ và quy trình tiếp nhận yêu cầu xóa/chỉnh sửa dữ liệu cá nhân.
 - Phải có health check cho OAuth, token refresh, Sheets schema, Drive root folder và Google API lỗi/quota.
 
 Biến môi trường:

@@ -27,6 +27,8 @@ Giới hạn vận hành của bản thử nghiệm là khoảng 500 hồ sơ. T
 - Next.js App Router, TypeScript strict, PWA và API Route Handlers.
 - Triển khai Vercel vùng `sin1` (Singapore).
 - Dùng Tailwind CSS, Zod, Auth.js/Google OAuth, Google API Node client, `@zxing/browser`, Vitest và Playwright.
+- Dùng `heic2any` hoặc `libheif-js` (WASM, chạy client-side) để chuyển HEIC/HEIF sang JPEG trên thiết bị trước khi upload — trình duyệt (kể cả Safari) không tự giải mã HEIC trong canvas/`<img>`.
+- PWA hoạt động **online-only** ở bản thử nghiệm: không cam kết soạn nháp/upload khi mất mạng. Mất kết nối giữa chừng phải báo lỗi rõ ràng cho cán bộ, không được âm thầm mất dữ liệu đã nhập.
 - Duy trì hai abstraction bắt buộc:
   - `DataRepository`: đọc/ghi Google Sheets.
   - `StorageRepository`: thao tác My Drive.
@@ -63,6 +65,7 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 - File được tải trực tiếp từ trình duyệt lên Google Drive qua resumable upload; Vercel chỉ tạo phiên upload và xác minh kết quả.
 - URL phiên upload không được ghi log. Backend phải kiểm tra thư mục cha, kích thước, checksum và metadata trước khi xác nhận file.
 - `file_id` nội bộ tách khỏi `drive_file_id`, để có thể sao chép dữ liệu sang Shared Drive sau này mà không phá liên kết nghiệp vụ.
+- **Ràng buộc scope `drive.file`:** app chỉ nhìn thấy file/thư mục do chính OAuth client của app tạo ra. Cây thư mục gốc (`CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/...`) **bắt buộc phải được tạo bởi bootstrap CLI chạy với cùng OAuth client dùng ở production** — không được tạo thủ công qua Drive UI rồi lấy `folder_id` gán vào `GOOGLE_MY_DRIVE_ROOT_FOLDER_ID`, vì khi đó app sẽ không có quyền ghi vào thư mục đó.
 
 ### 2.4. QR CCCD
 
@@ -87,12 +90,15 @@ Các sheet dùng trong MVP:
 
 Quy tắc dữ liệu:
 
-- Case ID: `PHONGCHAU-{YYYY}-{6 chữ số}`.
-- `ID_RESERVATIONS` là append-only; số thứ tự lấy từ dòng append thành công để tránh trùng khi tạo đồng thời.
+- Case ID: `PHONGCHAU-{YYYY}-{6 chữ số}`. `YYYY` luôn tính theo múi giờ `Asia/Ho_Chi_Minh` (UTC+7), không dùng giờ UTC của Vercel — tránh sai năm quanh thời điểm giao thừa.
+- `ID_RESERVATIONS` là append-only. Số thứ tự **bắt buộc lấy từ `updatedRange` do chính lệnh `values.append` vừa gọi trả về**, tuyệt đối không đọc "số dòng hiện có" bằng một lệnh đọc riêng rồi cộng 1 — cách đó có race condition giữa đọc và ghi và có thể sinh trùng Case ID khi hai cán bộ tạo hồ sơ cùng lúc.
 - Mọi thao tác ghi có `idempotency_key`, `request_id` và `version`.
+  - `idempotency_key` lưu trong một sheet riêng (`REQUEST_LOG` hoặc tương đương) kèm `request_id`, kết quả trả về đã cache và timestamp; TTL tối thiểu 24 giờ. Request đến với key đã tồn tại trả lại đúng kết quả đã lưu thay vì ghi lại — không kiểm tra idempotency bằng cách đọc lại bản ghi nghiệp vụ.
+  - Optimistic concurrency (`version` + `409 VERSION_CONFLICT`) trên Sheets không có transaction thật nên vẫn còn cửa sổ race nhỏ giữa lúc đọc version và lúc ghi; bản thử nghiệm **chấp nhận rủi ro này ở quy mô ≤500 hồ sơ/vài chục người dùng đồng thời** thay vì tự dựng cơ chế lock. Đây là hạn chế đã biết, không phải lỗi — không cần "sửa" trừ khi thực tế phát sinh xung đột.
 - Không xóa dòng; hồ sơ loại bỏ dùng trạng thái `ARCHIVED`.
 - CCCD chỉ hiện che trong danh sách, log và thông báo. Chỉ mục tra cứu CCCD dùng HMAC với secret phía server.
 - Audit log append-only và phải che CCCD, QR, link Drive, token cùng dữ liệu nhạy cảm.
+- Google Sheets API có write quota theo phút/user. Mỗi thao tác nghiệp vụ có thể kéo theo nhiều lần ghi (bản ghi chính + `AUDIT_LOGS` + `SEARCH_INDEX`) — gộp các ghi liên quan trong một request thành một lệnh `batchUpdate` thay vì nhiều lệnh riêng lẻ, để giảm khả năng chạm quota khi nhiều cán bộ thao tác cùng lúc.
 
 Trạng thái dùng trong MVP:
 
@@ -123,7 +129,7 @@ VERIFIED → ARCHIVED (SYSTEM_ADMIN/WARD_ADMIN)
 
 ### M2 — Đăng nhập và phân quyền
 
-1. Tích hợp Google Sign-In và session bảo mật.
+1. Tích hợp Google Sign-In và session bảo mật: secure cookie (`HttpOnly`, `Secure`, `SameSite`), OAuth `state`/PKCE và CSRF token cho mọi API write — triển khai **ngay từ M2**, không để dồn đến M5, vì auth thiếu CSRF là lỗ hổng ngay cả trên môi trường Preview.
 2. Áp dụng middleware kiểm tra session, email trong `USERS`, trạng thái active và role.
 3. Tạo trang hồ sơ cá nhân và quản trị `USERS` cho `SYSTEM_ADMIN`.
 4. Khởi tạo `anmphongandn@gmail.com` với role `SYSTEM_ADMIN`.
@@ -137,6 +143,8 @@ VERIFIED → ARCHIVED (SYSTEM_ADMIN/WARD_ADMIN)
 4. Hỗ trợ HEIC/HEIF, preview, kiểm tra dung lượng/chất lượng và đọc QR client-side.
 5. Tạo resumable upload session, hiển thị tiến độ, retry và xác minh upload hoàn tất.
 6. Hỗ trợ lưu nháp, thay CCCD, thêm/xóa ảnh GCN trước khi xác nhận.
+   - **Thay CCCD**: upload ảnh mới trước, xác minh thành công, sau đó mới đổi trạng thái file CCCD cũ sang `REPLACED` (không hard-delete khỏi Drive, không xóa dòng `FILES`) rồi gán ảnh mới làm CCCD hiện hành của case — đảm bảo case không bao giờ ở trạng thái "không có CCCD" giữa chừng thao tác.
+   - **`DELETE /api/cases/:caseId/files/:fileId`**: chỉ áp dụng cho ảnh GCN (được phép xóa khi còn ≥1 ảnh GCN khác hoặc case chưa `UPLOADED`), không áp dụng cho CCCD — CCCD chỉ được "thay", không được xóa trắng. Xóa ở đây là soft-delete: đổi trạng thái dòng `FILES` sang `DELETED`, không hard-delete khỏi Drive.
 7. Chuyển `DRAFT` sang `UPLOADED` khi có CCCD mặt trước và ít nhất một ảnh GCN.
 
 ### M4 — Kiểm tra, tra cứu, dashboard và xuất
@@ -149,12 +157,15 @@ VERIFIED → ARCHIVED (SYSTEM_ADMIN/WARD_ADMIN)
 
 ### M5 — Bảo mật, triển khai và thí điểm
 
-1. Thêm rate limit, OAuth state/CSRF, secure cookie, security headers và giới hạn kích thước request.
+1. Thêm rate limit, security headers và giới hạn kích thước request (OAuth state/CSRF/secure cookie đã làm ở M2 — không lặp lại ở đây, chỉ kiểm tra lại).
 2. Bảo đảm log không chứa token, refresh token, URL upload session, Drive link, nội dung QR hoặc CCCD đầy đủ.
-3. Vercel Cron tạo snapshot hằng ngày trong `99_BACKUP`; quản trị viên tạo bản backup mã hóa ngoại tuyến mỗi tuần.
+3. Backup, có tính đến việc toàn bộ dữ liệu phụ thuộc một tài khoản Gmail cá nhân (`anmphongandn@gmail.com`) — đây là single point of failure của kiến trúc pilot, không chỉ là vấn đề "quên backup":
+   - Vercel Cron snapshot Drive hằng ngày vào `99_BACKUP` — **lưu ý đây là copy trong cùng tài khoản**, không bảo vệ khỏi việc tài khoản bị khóa/mất quyền truy cập.
+   - Bổ sung export **Google Sheets** (toàn bộ tab, dạng CSV/JSON) ra ngoài tài khoản gốc theo lịch (ví dụ ghi vào Drive của một tài khoản phụ, hoặc tải về lưu ngoại tuyến) — hiện PLAN chỉ nói backup ảnh (Drive), chưa nói backup dữ liệu cấu trúc (Sheets).
+   - Bản backup mã hóa ngoại tuyến hằng tuần do quản trị viên thực hiện thủ công phải tách khỏi tài khoản `anmphongandn@gmail.com` (ví dụ ổ cứng ngoài hoặc tài khoản lưu trữ khác), không chỉ tải xuống rồi để lại trong cùng Drive.
 4. Deploy Preview bằng dữ liệu giả, sau đó Production tại `sin1`.
 5. Thí điểm tuần tự: 20 hồ sơ giả/ẩn danh, 100 hồ sơ thật, rồi tối đa 500 hồ sơ.
-6. Viết runbook xử lý token bị thu hồi, tài khoản bị khóa, Sheet sai schema, lỗi upload và phục hồi backup.
+6. Viết runbook xử lý: token bị thu hồi, **tài khoản `anmphongandn@gmail.com` bị khóa/mất quyền truy cập** (không chỉ token — cả kịch bản mất tài khoản), Sheet sai schema, lỗi upload và phục hồi từ backup.
 
 ## 5. API và biến môi trường
 
@@ -192,7 +203,7 @@ MAX_UPLOAD_MB=30
 VERCEL_REGION=sin1
 ```
 
-Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON` hoặc `GOOGLE_SHARED_DRIVE_ID` trong bản thử nghiệm này.
+Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VISION_PROJECT_ID` hoặc `TEMP_FILE_DIR` trong bản thử nghiệm này.
 
 ## 6. Kiểm thử và nghiệm thu
 
@@ -214,6 +225,14 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON` hoặc `GOOGLE_SHARED_DRIVE_ID` trong
 - Upload lặp không tạo case hoặc file trùng.
 - Hoàn thành thí điểm 100 hồ sơ trước khi nâng lên 500.
 
-## 7. Hướng chuyển đổi sau thử nghiệm
+## 7. Tuân thủ dữ liệu cá nhân
+
+Hệ thống thu thập và lưu trữ dữ liệu cá nhân (CCCD, họ tên, ngày sinh, giới tính, địa chỉ) thuộc phạm vi điều chỉnh của Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân — việc "không tạo giá trị pháp lý" của hệ thống không miễn trừ nghĩa vụ này vì hệ thống vẫn _thu thập và xử lý_ PII. Trước khi thí điểm với dữ liệu thật (M5.5, mốc 100 hồ sơ), cần làm rõ và ghi vào [`docs/brain/03-decisions.md`](docs/brain/03-decisions.md):
+
+- Cơ sở pháp lý/thẩm quyền thu thập CCCD của người dân trong khuôn khổ chiến dịch 180 ngày.
+- Thời hạn lưu trữ dữ liệu cá nhân trong bản thử nghiệm và mốc thời gian xử lý sau khi kết thúc pilot hoặc migration.
+- Quy trình xử lý khi người dân yêu cầu xóa/chỉnh sửa dữ liệu cá nhân của họ.
+
+## 8. Hướng chuyển đổi sau thử nghiệm
 
 Khi chuyển sang Google Workspace/Shared Drive, thực hiện migration riêng: sao chép file từ My Drive, cập nhật `drive_file_id`, giữ nguyên `file_id` và `case_id`, đối chiếu checksum và audit từng lô. Không giả định file thuộc Gmail cá nhân có thể di chuyển trực tiếp sang Shared Drive của tổ chức.
