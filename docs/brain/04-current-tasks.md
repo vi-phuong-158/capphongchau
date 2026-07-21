@@ -7,6 +7,12 @@
 
 ## Đang làm
 
+**Production đã deploy** (2026-07-22): `https://capphongchau.vercel.app`, `/api/health/google`
+trả `ok`. **Chưa có domain thật gắn Cloudflare** — chỉ có URL Vercel cấp, chủ dự án không sở hữu
+DNS zone đó. Đang bật tạm `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production để
+test thủ công; **bắt buộc xóa biến này ngay khi có domain thật** (xem `03-decisions.md` và
+`06-ai-working-log.md` cùng ngày). Trước dữ liệu thật phải kiểm tra biến này đã bị gỡ.
+
 M2 đã hoàn thành và được kiểm tra build.
 
 **Cổng kê khai công khai `/ke-khai` đã chạy thật**: tạo nháp, autosave, upload trực tiếp lên

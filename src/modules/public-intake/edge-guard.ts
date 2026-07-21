@@ -21,8 +21,18 @@ function safeEquals(a: string, b: string): boolean {
  *
  * Đây là nhánh theo môi trường triển khai, cố ý **không** phải nhánh theo từng request: không có
  * đường nào để người gọi tự khai mình đáng tin.
+ *
+ * `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` là lối thoát duy nhất, chỉ dùng khi test thủ công
+ * trên `*.vercel.app` **trước khi có domain thật đứng sau Cloudflare** (chưa gắn domain thì không
+ * cách nào Cloudflare gắn được header, kể cả khi origin đòi đúng). Mặc định tắt — phải người vận
+ * hành tự đặt biến này trên Vercel, code không tự bật. Xóa biến này ngay khi có domain thật; còn
+ * bật thì `/ke-khai` và `/api/public/*` mở cho bất kỳ ai gọi thẳng, đúng thứ hàng rào này sinh ra
+ * để chặn (PLAN_NL §10.2).
  */
 export function trustedEdgeRequired(): boolean {
+  if (process.env.PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE === "true") {
+    return false;
+  }
   return process.env.NODE_ENV === "production";
 }
 

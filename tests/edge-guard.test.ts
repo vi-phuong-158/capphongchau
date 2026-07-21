@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ORIGIN_AUTH_HEADER, isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
+import {
+  ORIGIN_AUTH_HEADER,
+  isTrustedEdgeRequest,
+  trustedEdgeRequired,
+} from "@/modules/public-intake/edge-guard";
 
 const SECRET = "o".repeat(32);
 
@@ -38,5 +42,39 @@ describe("chốt chặn đi vòng qua Cloudflare", () => {
       headers: { [ORIGIN_AUTH_HEADER]: SECRET },
     });
     expect(isTrustedEdgeRequest(request.headers, SECRET, true)).toBe(true);
+  });
+});
+
+describe("trustedEdgeRequired", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalBypass = process.env.PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE;
+
+  afterEach(() => {
+    vi.stubEnv("NODE_ENV", originalNodeEnv ?? "test");
+    if (originalBypass === undefined) {
+      delete process.env.PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE;
+    } else {
+      vi.stubEnv("PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE", originalBypass);
+    }
+  });
+
+  it("đòi header khi đã triển khai production và không có cờ bỏ qua", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    delete process.env.PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE;
+    expect(trustedEdgeRequired()).toBe(true);
+  });
+
+  it("cờ bỏ qua chỉ có tác dụng khi đúng chuỗi 'true', không phải giá trị truthy bất kỳ", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE", "1");
+    expect(trustedEdgeRequired()).toBe(true);
+    vi.stubEnv("PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE", "TRUE");
+    expect(trustedEdgeRequired()).toBe(true);
+  });
+
+  it("cờ bỏ qua đúng giá trị 'true' thì tắt được chốt chặn ngay cả ở production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE", "true");
+    expect(trustedEdgeRequired()).toBe(false);
   });
 });

@@ -5,6 +5,38 @@
 
 ---
 
+## [2026-07-22] Deploy production đầu tiên; cờ tạm mở chốt chặn để test không domain
+
+- **Agent:** Claude Code
+- **Bối cảnh:** Chủ dự án yêu cầu deploy lên Vercel để test trên điện thoại. `git push` ở entry
+  trước đã tự kích hoạt build qua GitHub integration nhưng **lỗi**: thiếu `ORIGIN_SHARED_SECRET`
+  trên Vercel (biến bắt buộc, `/ke-khai` throw `EnvironmentValidationError` lúc prerender).
+- **Thay đổi:**
+  - Link thư mục local với Vercel project `capphongchau` (`vercel link`).
+  - Sinh `ORIGIN_SHARED_SECRET` ngẫu nhiên, thêm vào Vercel Production + Preview (dạng Sensitive).
+  - Deploy `vercel deploy --prod` → build thành công, alias `https://capphongchau.vercel.app`.
+    `GET /api/health/google` trả `ok` cho cả oauth/drive/sheets/schema — tích hợp Google hoạt động
+    đúng trên production thật.
+  - Kiểm tra `vercel domains ls` / `vercel inspect`: **không có domain tùy chỉnh** nào gắn với
+    project này, chỉ có `*.vercel.app`. Chủ dự án nhầm URL Vercel là domain đã "cài trên
+    Cloudflare" — thực ra chỉ mới tạo widget Turnstile (khớp với key thật đã thấy trên Vercel từ
+    trước), chưa có domain/DNS/Transform Rule nào cả. Vercel giữ DNS zone của `*.vercel.app`, chủ
+    dự án không sở hữu nên không thể trỏ Cloudflare vào được.
+  - Vì vậy `GET /ke-khai` trả **404** đúng như thiết kế chốt chặn (xem entry lớp biên trước) — nó
+    chặn đúng thứ nó sinh ra để chặn, kể cả khi chính chủ dự án gọi trực tiếp. Để chủ dự án test
+    được ngay, thêm cờ `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` — mặc định không đặt (chốt chặn vẫn
+    bắt buộc), chỉ tắt được khi đặt đúng chuỗi `"true"`. Xem quyết định kỹ thuật đầy đủ trong
+    `03-decisions.md`.
+- **File đã sửa:** `src/modules/public-intake/edge-guard.ts`, `.env.example`.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `format:check` ✅, `test` ✅ 93/93 (+3), `build` ✅.
+  Test mới khóa hành vi cờ: mặc định vẫn đòi header ở production; giá trị không phải chuỗi `"true"`
+  chính xác (`"1"`, `"TRUE"`) không có tác dụng — tránh bật nhầm qua toán tử truthy.
+- **CẦN LÀM SAU (bắt buộc trước pilot dữ liệu thật):** Xóa `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE`
+  khỏi Vercel ngay khi có domain thật gắn Cloudflare. Xem checklist domain/Cloudflare trong
+  `05-testing-and-deploy.md` §"Cấu hình Cloudflare".
+
+---
+
 ## [2026-07-22] Áp design system Cherry Gold Civic Glass, bỏ banner bản chạy thử
 
 - **Agent:** Claude Code
