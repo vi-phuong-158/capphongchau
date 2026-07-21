@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   EnvironmentValidationError,
+  loadGoogleStorageEnvironment,
   loadServerEnvironment,
   type EnvironmentSource,
 } from "@/modules/common/env";
@@ -51,5 +52,12 @@ describe("cấu hình môi trường server", () => {
         "secret-khong-duoc-xuat-ra-loi",
       );
     }
+  });
+
+  it("health check Google chỉ cần cấu hình kho Google của M1", () => {
+    expect(loadGoogleStorageEnvironment(validEnvironment)).toMatchObject({
+      GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: "drive-root-folder-id",
+      GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
+    });
   });
 });

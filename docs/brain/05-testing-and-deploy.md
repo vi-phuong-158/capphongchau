@@ -2,7 +2,7 @@
 
 > Mọi lệnh để dựng môi trường, chạy, test, build, deploy. Agent đọc đây thay vì đoán lệnh.
 >
-> **Trạng thái hiện tại: M0 hoàn thành.** `package.json`, scaffold Next.js, khung module và validation môi trường đã tồn tại. Các tích hợp Google và luồng nghiệp vụ chưa được triển khai.
+> **Trạng thái hiện tại: M1 đang hoàn thiện.** Bootstrap Google và health check đã có mã nguồn; chưa tạo kho dữ liệu thật cho đến khi OAuth client secret được đặt an toàn trong `.env.local`.
 
 ## Cài đặt môi trường local
 
@@ -12,7 +12,7 @@ npm install
 
 Trong PowerShell có execution policy chặn `npm.ps1`, dùng `npm.cmd` thay cho `npm`.
 
-Sao chép `.env.example` thành `.env` và thay toàn bộ placeholder bằng secret/ID thật. Không commit `.env`. Validation server (`loadServerEnvironment`) từ chối cấu hình thiếu/sai và chỉ nêu tên biến lỗi, không in secret.
+Sao chép `.env.example` thành `.env.local` và thay toàn bộ placeholder bằng secret/ID thật. Không commit `.env.local`. Next.js và bootstrap CLI đều tự nạp `.env.local`. Validation server (`loadServerEnvironment`) từ chối cấu hình thiếu/sai và chỉ nêu tên biến lỗi, không in secret.
 
 Biến môi trường cần thiết (xem đầy đủ trong `01-architecture.md`):
 
@@ -22,6 +22,16 @@ GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN,
 GOOGLE_MY_DRIVE_ROOT_FOLDER_ID, GOOGLE_SHEETS_SPREADSHEET_ID,
 SYSTEM_ADMIN_EMAIL, DATA_HASH_PEPPER, MAX_UPLOAD_MB, VERCEL_REGION
 ```
+
+## Bootstrap My Drive và Google Sheets (chạy một lần)
+
+1. Trong `.env.local`, đặt `GOOGLE_DRIVE_CLIENT_ID` và `GOOGLE_DRIVE_CLIENT_SECRET` của OAuth client **Desktop bootstrap**; giữ `SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com`. Có thể để trống refresh token và hai ID kho dữ liệu ở lần chạy đầu.
+2. Chạy `npm run bootstrap:google`. Trình duyệt sẽ mở trang Google OAuth; đăng nhập đúng tài khoản quản trị và chấp thuận scope `drive.file`.
+3. Script tạo hoặc dùng lại cây `CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM`, spreadsheet cùng 14 tab, seed 10 tổ dân phố và `SYSTEM_ADMIN`. Không tạo thủ công các file/folder này trong Drive UI.
+4. Sao chép `rootFolderId` và `spreadsheetId` từ `.bootstrap-state.json` sang `GOOGLE_MY_DRIVE_ROOT_FOLDER_ID` và `GOOGLE_SHEETS_SPREADSHEET_ID`; chuyển refresh token từ `.bootstrap-secrets.json` sang `GOOGLE_DRIVE_REFRESH_TOKEN`, rồi xóa `.bootstrap-secrets.json` khỏi máy. Không gửi hay commit các giá trị này.
+5. Khởi động `npm run dev`, gọi `GET http://localhost:3000/api/health/google`; kết quả `status: "ok"` xác nhận OAuth, Drive và schema Sheets. Endpoint này chỉ cần năm biến `GOOGLE_*` của kho dữ liệu, nên có thể chạy trước M2.
+
+`.bootstrap-state.json` và `.bootstrap-secrets.json` đã bị `.gitignore`; tệp thứ hai chứa refresh token và chỉ được dùng tạm trong bước bootstrap.
 
 ## Chạy local (dev)
 

@@ -40,6 +40,8 @@ Hai luồng OAuth được tách biệt:
 
 Refresh token chỉ được đặt trong Vercel Environment Variables và chỉ API phía server được đọc. Không dùng service account vì nó không sở hữu file trong My Drive cá nhân. Vì scope `drive.file` chỉ thấy file do app tạo, bootstrap CLI phải tạo cây thư mục Drive với cùng OAuth client production; không sử dụng folder được tạo thủ công qua Drive UI.
 
+Bootstrap CLI tạo Drive root, các thư mục con, spreadsheet và toàn bộ tab/dữ liệu danh mục theo cách idempotent. Trạng thái cục bộ `.bootstrap-state.json` (ID) và `.bootstrap-secrets.json` (refresh token tạm thời) không được commit. `GET /api/health/google` kiểm tra OAuth, Drive root và schema Sheets nhưng không công bố ID hay liên kết nội bộ.
+
 ## Dòng dữ liệu hồ sơ
 
 1. Cán bộ chọn tổ dân phố và tạo hồ sơ. Backend reserve case ID rồi tạo case `DRAFT`.
@@ -86,6 +88,19 @@ GCN bị xóa chỉ chuyển trạng thái `DELETED`, không hard-delete trên D
 - [`.env.example`](../.env.example) là danh sách biến môi trường duy nhất được commit; `.env` và mọi secret thật luôn bị loại khỏi Git.
 - API phía server đọc cấu hình qua `loadServerEnvironment`; lỗi validation chỉ nêu **tên biến** sai hoặc thiếu, không trả giá trị secret.
 - Mọi API route phải trả lỗi theo cấu trúc `{ error: { code, message, requestId, details } }`. `details` mặc định là `null` và không được chứa PII, token, Drive ID hay link Drive.
+
+## Đăng nhập và phân quyền (M2)
+
+- Auth.js/Google OAuth dùng Web OAuth Client riêng, chỉ xin `openid`, `email`, `profile`; OAuth Drive
+  offline không đi qua session cán bộ.
+- Session JWT dùng cookie `HttpOnly`, `SameSite=Lax`, `Secure` khi production; Google provider bắt buộc
+  `state` và PKCE.
+- `src/proxy.ts` chạy ở Edge, chỉ chặn session cho `/profile` và `/users`. Mỗi server page/API sau đó
+  gọi `requireActiveUser()` để đọc lại `USERS` qua repository Node và kiểm tra `active`/role. Việc tách
+  này khiến lệnh khóa tài khoản có hiệu lực ngay thay vì chờ JWT hết hạn.
+- `GET /api/security/csrf` cấp token HMAC theo email, hết hạn sau 10 phút. `POST`/`PATCH /api/users`
+  yêu cầu `x-csrf-token` và `idempotency-key`; các ghi `USERS`, `AUDIT_LOGS`, `REQUEST_LOG` đi trong
+  cùng một Google Sheets `batchUpdate`.
 
 ## Hướng nâng cấp
 

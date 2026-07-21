@@ -74,6 +74,72 @@
 
 ---
 
+## [2026-07-21] Hoàn thành mã M1 Task 8 — bootstrap Google và health check
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm Google API client chỉ dùng server/CLI, schema bootstrap cho 14 tab Sheets và dữ liệu danh mục, cùng `scripts/bootstrap-google.ts` tạo idempotent cây My Drive, spreadsheet và `SYSTEM_ADMIN` đầu tiên. Thêm `GET /api/health/google` kiểm tra token OAuth, thư mục gốc và schema; khai báo/lưu scope `drive.file` trong Google OAuth consent screen.
+- **File đã tạo/sửa:** `src/modules/bootstrap/*`, `src/modules/google/workspace-client.ts`, `scripts/bootstrap-google.ts`, `src/app/api/health/google/route.ts`, `tests/bootstrap-schema.test.ts`, `package.json`, `package-lock.json`, `tsconfig.typecheck.json`, `.gitignore`, `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md`, `docs/brain/05-testing-and-deploy.md`.
+- **Lý do:** Hoàn thành phần code của M1 mà không cần tạo thủ công file Drive (không tương thích với `drive.file`) và không đưa secret/refresh token vào source hoặc terminal.
+- **Kiểm tra:** `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test`, `npm.cmd run build`, `git diff --check` đều đạt. Chưa chạy bootstrap thật/health live vì OAuth client secret chưa được lưu an toàn trong `.env.local`.
+
+---
+
+## [2026-07-21] Bootstrap CLI tự nạp `.env.local`
+
+- **Agent:** Codex
+- **Thay đổi:** Bootstrap CLI dùng `@next/env` để nạp `.env.local` trước khi validation, đồng thời khai báo dependency trực tiếp.
+- **File đã sửa:** `scripts/bootstrap-google.ts`, `package.json`, `package-lock.json`, `docs/brain/05-testing-and-deploy.md`.
+- **Lý do:** Hướng dẫn vận hành dùng `.env.local`; `tsx` không tự nạp file này như Next.js nếu không có cấu hình rõ ràng.
+- **Kiểm tra:** `npm.cmd run format:check`, `npm.cmd run typecheck`, `npm.cmd run test`, `git diff --check` đều đạt.
+
+---
+
+## [2026-07-21] Sửa entrypoint CommonJS cho bootstrap CLI
+
+- **Agent:** Codex
+- **Thay đổi:** Thay top-level `await` bằng lời gọi `bootstrap()` có xử lý lỗi rõ ràng, tương thích với output CommonJS của `tsx` trong dự án.
+- **File đã sửa:** `scripts/bootstrap-google.ts`.
+- **Lý do:** Lần chạy bootstrap thật dừng trước OAuth do `tsx` báo top-level `await` không được hỗ trợ với CommonJS; chưa tạo dữ liệu Google ở lần chạy lỗi.
+- **Kiểm tra:** Chạy lại bootstrap sau typecheck.
+
+---
+
+## [2026-07-21] Bootstrap My Drive và Google Sheets thành công
+
+- **Agent:** Codex + chủ dự án xác minh Google OAuth
+- **Thay đổi:** Chạy bootstrap thật bằng tài khoản quản trị; tạo hoặc xác nhận cây My Drive, spreadsheet 14 tab, dữ liệu tham chiếu 10 tổ dân phố và dòng `SYSTEM_ADMIN` đầu tiên.
+- **File đã tạo cục bộ:** `.bootstrap-state.json`, `.bootstrap-secrets.json` (đều bị Git bỏ qua; không ghi ID/token vào working log).
+- **Lý do:** Hoàn tất phần tạo kho dữ liệu thật của M1.
+- **Kiểm tra:** Chạy lại `npm.cmd run bootstrap:google` đạt và trả thông báo `Bootstrap hoàn tất`; lần chạy lại dùng state hiện có, không tạo trùng kho dữ liệu.
+
+---
+
+## [2026-07-21] Health check M1 không phụ thuộc cấu hình đăng nhập M2
+
+- **Agent:** Codex
+- **Thay đổi:** Tách validation cấu hình kho Google khỏi validation cấu hình server đầy đủ; `GET /api/health/google` chỉ cần OAuth Drive, refresh token, Drive root ID và spreadsheet ID.
+- **File đã sửa:** `src/modules/common/env.ts`, `src/app/api/health/google/route.ts`, `tests/env.test.ts`, `docs/brain/01-architecture.md`, `docs/brain/05-testing-and-deploy.md`.
+- **Lý do:** Cần xác minh M1 ngay sau bootstrap, trước khi tạo Google Sign-In và các secret của M2.
+- **Kiểm tra:** `npm.cmd run format:check`, `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test` đều đạt (13 tests). Health check thật trả HTTP 200 với `oauth`, `drive`, `sheets`, `schema` đều `ok`.
+
+---
+
+## [2026-07-21] Hoàn thành M2 — Google Sign-In và phân quyền USERS
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm Auth.js/Google OAuth (scope đăng nhập tối thiểu, state/PKCE, session JWT cookie
+  HttpOnly/SameSite/Secure), `proxy.ts` bảo vệ session ở Edge và authorization Node đọc lại `USERS`
+  cho từng page/API. Hoàn thành `/profile`, `/users` cho SYSTEM_ADMIN, `GET/POST/PATCH /api/users`,
+  `GET /api/security/csrf`. Token CSRF HMAC gắn email, hạn 10 phút; API write yêu cầu CSRF và
+  idempotency key. Repository Users ghi `USERS`, `AUDIT_LOGS`, `REQUEST_LOG` cùng một Sheets
+  `batchUpdate`; audit từ chối đăng nhập chỉ lưu hash email.
+- **File đã tạo/sửa:** `src/auth*`, `src/proxy.ts`, routes auth/users/CSRF, module `auth`, repository
+  Users, trang profile/users, component quản trị, test CSRF, `package.json`/lockfile và tài liệu kiến trúc.
+- **Lý do:** Hoàn thành M2 trước khi tạo/upload hồ sơ để email ngoài allowlist không thể truy cập và
+  thay đổi quyền có hiệu lực ngay.
+- **Kiểm tra:** `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test` (15 tests),
+  `npm.cmd run format:check`, `npm.cmd run build` đều đạt.
+
 ## Format entry
 
 ```

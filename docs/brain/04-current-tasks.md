@@ -7,7 +7,7 @@
 
 ## Đang làm
 
-M1 đang thực hiện. Đã hoàn thành Task 5–7 (tạo Google Cloud Project, bật Google Drive API/Google Sheets API, cấu hình OAuth và tạo hai OAuth client); tiếp theo là viết bootstrap CLI.
+M2 đã hoàn thành và được kiểm tra build. Hạng mục tiếp theo là M3 (tiếp nhận hồ sơ, QR và upload).
 
 ---
 
@@ -29,7 +29,9 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ### M2: Đăng nhập và phân quyền
 
-- **Mô tả:** Google Sign-In, middleware kiểm tra `USERS`/role, trang quản trị `USERS`, seed `SYSTEM_ADMIN` đầu tiên, audit log cho hành vi liên quan tài khoản.
+- **Mô tả:** Hoàn thành Google Sign-In qua Auth.js, session cookie an toàn, state/PKCE, CSRF HMAC,
+  `USERS` allowlist/role ở Node, proxy Edge chặn session, profile và trang SYSTEM_ADMIN. `USERS`,
+  `AUDIT_LOGS`, `REQUEST_LOG` được ghi cùng batch; từ chối đăng nhập được audit bằng email băm.
 - **Liên quan:** module `auth`, `users`, `audit`.
 - **Ưu tiên:** Cao.
 
@@ -68,6 +70,9 @@ Theo thứ tự mốc trong `PLAN.md`:
 - [2026-07-21] Hoàn thành M1 Task 5: tạo Google Cloud Project dưới tài khoản `anmphongandn@gmail.com`; Project ID: `resolute-future-478306-e7`. Chưa bật API, chưa tạo OAuth client hoặc secret.
 - [2026-07-21] Hoàn thành M1 Task 6: bật `drive.googleapis.com` và `sheets.googleapis.com` trong Project ID `resolute-future-478306-e7`. Chưa tạo OAuth client, API key hoặc secret.
 - [2026-07-21] Hoàn thành M1 Task 7: cấu hình Google Auth Platform ở chế độ External/Testing và tạo OAuth client Web + Desktop bootstrap. Chỉ đăng ký URL local; URL Vercel và chuyển Production còn chờ deploy/rà soát trước pilot dữ liệu thật.
+- [2026-07-21] Hoàn thành phần mã M1 Task 8: thêm Google API client phía server/CLI, bootstrap idempotent tạo cây My Drive + spreadsheet 14 tab + danh mục/`SYSTEM_ADMIN`, endpoint `GET /api/health/google` và test schema. Đã khai báo/lưu scope OAuth `drive.file`. Chưa chạy bootstrap trên My Drive thật vì không đưa OAuth client secret vào source hay terminal; cần cấu hình `.env.local` an toàn trước.
+- [2026-07-21] Hoàn thành bootstrap thật bằng tài khoản `anmphongandn@gmail.com`: OAuth `drive.file` thành công, cây My Drive và spreadsheet 14 tab đã được tạo; ID và refresh token chỉ nằm trong các tệp cục bộ bị Git bỏ qua. Chưa đưa các giá trị này vào cấu hình Vercel.
+- [2026-07-21] Hoàn thành M1: `GET /api/health/google` trả HTTP 200 với OAuth, Drive, Sheets và schema đều `ok` sau khi cấu hình ID/refresh token cục bộ. M2 là hạng mục tiếp theo.
 - [2026-07-21] Hoàn thành M0 Task 2: tạo Next.js App Router + TypeScript strict, PWA online-only, Tailwind, ESLint/Prettier, Vitest và Playwright; build/typecheck/unit test đạt.
 - [2026-07-21] Hoàn thành M0 Task 3: tạo khung module domain, repository và hợp đồng dữ liệu; `DataRepository`/`StorageRepository` tách khỏi service/frontend.
 - [2026-07-21] Hoàn thành M0 Task 4: thêm `.env.example`, validation server không lộ secret và payload lỗi API thống nhất.

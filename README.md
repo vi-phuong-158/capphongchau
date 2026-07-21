@@ -6,7 +6,7 @@ Web app hỗ trợ tiếp nhận, kiểm tra và theo dõi hồ sơ đất đai 
 
 ## Trạng thái
 
-M0 đã hoàn thành: nền Next.js/PWA, module boundary, validation biến môi trường và định dạng lỗi API đã sẵn sàng. Tích hợp Google và luồng nghiệp vụ sẽ triển khai theo các mốc tiếp theo trong [PLAN.md](PLAN.md).
+M1 đang hoàn thiện: nền Next.js/PWA, module boundary, validation môi trường, bootstrap Google My Drive/Sheets và health check đã sẵn sàng. Cần chạy bootstrap với OAuth client secret được giữ cục bộ trước khi kho dữ liệu thật được tạo; luồng nghiệp vụ sẽ triển khai theo các mốc tiếp theo trong [PLAN.md](PLAN.md).
 
 ## Phạm vi bản thử nghiệm
 
@@ -49,8 +49,8 @@ Tài khoản `anmphongandn@gmail.com` sở hữu My Drive, spreadsheet, Google C
 
 ## Khởi tạo sau khi có mã nguồn
 
-1. Tạo Google Cloud Project và bật Google Drive API, Google Sheets API.
-2. Cấu hình OAuth consent screen, redirect URI của Vercel và chuyển sang `In production` trước khi dùng dữ liệu thật.
-3. Chạy bootstrap bằng OAuth client production để tạo cấu trúc My Drive, spreadsheet, `REQUEST_LOG` và dữ liệu danh mục.
-4. Khai báo environment variables trên Vercel.
+1. Đã tạo Google Cloud Project, bật Google Drive API/Google Sheets API và khai báo scope `drive.file`.
+2. Đặt OAuth client secret Desktop bootstrap trong `.env.local` (không commit), rồi chạy `npm run bootstrap:google` để tạo cấu trúc My Drive, spreadsheet, `REQUEST_LOG` và dữ liệu danh mục.
+3. Sao chép các ID và refresh token do bootstrap tạo vào `.env.local`; gọi `GET /api/health/google` để xác minh.
+4. Khi deploy, thêm redirect URI Vercel và các biến môi trường tương ứng; chuyển OAuth consent screen sang `In production` trước khi dùng dữ liệu thật.
 5. Thử nghiệm bằng dữ liệu giả trước; trước pilot dữ liệu thật, chốt cơ sở pháp lý, thời hạn lưu trữ và quy trình xử lý yêu cầu dữ liệu cá nhân.

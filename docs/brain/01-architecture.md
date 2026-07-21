@@ -25,6 +25,7 @@ Scaffold mã nguồn hiện có:
 ├── docs/
 │   ├── architecture.md       — kiến trúc thử nghiệm (bản rút gọn, có sơ đồ mermaid)
 │   └── brain/                — bộ nhớ AI dùng chung (thư mục này)
+├── scripts/                  — bootstrap My Drive/Google Sheets chạy cục bộ
 ├── src/
 │   ├── app/                  — App Router, manifest và global styles
 │   ├── components/           — đăng ký PWA client-side
@@ -35,7 +36,7 @@ Scaffold mã nguồn hiện có:
 └── Tai lieu/                 — nguồn nghiệp vụ gốc, giữ nguyên nội dung
 ```
 
-Cấu trúc module đã tạo ở M0 Task 3: `auth`, `cases`, `files`, `drive`, `sheets`, `qr`, `users`, `reports`, `audit`, `common`. Đây mới là hợp đồng/kiểu dữ liệu; chưa có lời gọi Google API hoặc service nghiệp vụ.
+Cấu trúc module đã tạo ở M0 Task 3: `auth`, `cases`, `files`, `drive`, `sheets`, `qr`, `users`, `reports`, `audit`, `common`. M1 bổ sung client Google chỉ dành cho server/CLI và schema bootstrap; repository nghiệp vụ vẫn sẽ được triển khai ở các mốc sau.
 
 ## Code Graph (bản đồ module)
 
@@ -66,6 +67,25 @@ src/modules/drive/index.ts ─────→ src/modules/drive/storage-reposito
 tests/domain.test.ts ───────────→ src/modules/common/domain.ts
 tests/api-error.test.ts ───────→ src/modules/common/api-error.ts
 tests/env.test.ts ─────────────→ src/modules/common/env.ts
+
+src/modules/bootstrap/schema.ts
+├── src/modules/common/domain.ts
+├── scripts/bootstrap-google.ts
+├── src/app/api/health/google/route.ts
+└── tests/bootstrap-schema.test.ts
+
+src/modules/bootstrap/index.ts ─→ src/modules/bootstrap/schema.ts
+src/modules/google/workspace-client.ts ─→ Google API Node client (`googleapis`)
+
+scripts/bootstrap-google.ts
+├── src/modules/bootstrap
+└── src/modules/google/workspace-client.ts
+
+src/app/api/health/google/route.ts
+├── src/modules/bootstrap
+├── src/modules/common/api-error.ts
+├── src/modules/common/env.ts
+└── src/modules/google/workspace-client.ts
 ```
 
 Ràng buộc kiến trúc bắt buộc khi mở rộng Code Graph (đã chốt trong `AGENTS.md` §3.1):
@@ -88,6 +108,25 @@ Cán bộ chọn tổ dân phố → tạo hồ sơ (reserve case ID qua ID_RESE
   → VERIFIED → ARCHIVED (chỉ SYSTEM_ADMIN/WARD_ADMIN)
 ```
 
+### Code Graph bổ sung M2
+
+```text
+src/auth.config.ts -> Google OAuth config an toàn cho Node/Edge
+src/auth.ts
+├── src/auth.config.ts
+├── src/modules/auth/authorization.ts -> USERS allowlist + audit từ chối đăng nhập
+└── src/app/api/auth/[...nextauth]/route.ts
+src/proxy.ts -> src/auth.config.ts (chặn session ở Edge cho /profile, /users)
+src/modules/auth/authorization.ts
+├── src/auth.ts (đọc session)
+└── src/modules/users/google-sheets-user-repository.ts
+src/app/api/users/route.ts
+├── src/modules/auth/authorization.ts
+├── src/modules/auth/csrf.ts
+└── src/modules/users/google-sheets-user-repository.ts -> Google Sheets batchUpdate
+src/app/api/security/csrf/route.ts -> authorization + CSRF HMAC
+```
+
 ## Mô hình dữ liệu / API
 
 Chi tiết đầy đủ nằm ở `AGENTS.md` §4 (mô hình dữ liệu) và §5 (API). Tóm tắt:
@@ -108,6 +147,8 @@ POST       /api/cases/:caseId/verify
 GET        /api/dashboard/summary
 POST       /api/exports
 GET/POST/PATCH /api/users
+GET        /api/health/google
+GET        /api/security/csrf
 ```
 
 Google Drive folder layout:
@@ -144,6 +185,8 @@ VERCEL_REGION=sin1
 Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VISION_PROJECT_ID`, `TEMP_FILE_DIR` trong bản thử nghiệm.
 
 `.env.example` là mẫu cấu hình được commit. Chỉ server gọi `loadServerEnvironment` trong `src/modules/common/env.ts`; lỗi validation chỉ công bố tên biến sai/thiếu, không bao giờ giá trị secret. API route sử dụng `createApiErrorPayload` trong `src/modules/common/api-error.ts` để giữ cấu trúc lỗi `{ error: { code, message, requestId, details } }` nhất quán.
+
+M1 có `scripts/bootstrap-google.ts`, chạy cục bộ để xin OAuth offline và tạo idempotent cây thư mục, spreadsheet, 14 tab cùng dữ liệu danh mục/`SYSTEM_ADMIN`. Tệp `.bootstrap-state.json` chỉ giữ các ID cấu hình, còn `.bootstrap-secrets.json` giữ refresh token tạm thời; cả hai đã bị Git bỏ qua. Endpoint `GET /api/health/google` chỉ cần năm biến cấu hình kho Google của M1 (không đòi OAuth đăng nhập M2), kiểm tra token, thư mục gốc và schema Sheets rồi trả trạng thái tổng quát — không trả Drive ID, spreadsheet ID hoặc PII.
 
 ## Trạng thái PWA scaffold
 

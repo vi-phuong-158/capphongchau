@@ -16,7 +16,16 @@ const serverEnvironmentSchema = z.object({
   VERCEL_REGION: z.literal("sin1"),
 });
 
+const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
+  GOOGLE_DRIVE_CLIENT_ID: true,
+  GOOGLE_DRIVE_CLIENT_SECRET: true,
+  GOOGLE_DRIVE_REFRESH_TOKEN: true,
+  GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: true,
+  GOOGLE_SHEETS_SPREADSHEET_ID: true,
+});
+
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;
+export type GoogleStorageEnvironment = z.output<typeof googleStorageEnvironmentSchema>;
 
 export type EnvironmentSource = Readonly<Record<string, string | undefined>>;
 
@@ -32,7 +41,18 @@ export class EnvironmentValidationError extends Error {
 
 /** Chỉ trả tên biến lỗi để thông báo không vô tình lộ secret cấu hình. */
 export function loadServerEnvironment(source: EnvironmentSource = process.env): ServerEnvironment {
-  const result = serverEnvironmentSchema.safeParse(source);
+  return parseEnvironment(serverEnvironmentSchema, source);
+}
+
+/** Health check M1 chỉ cần cấu hình kho Google, không phụ thuộc OAuth đăng nhập M2. */
+export function loadGoogleStorageEnvironment(
+  source: EnvironmentSource = process.env,
+): GoogleStorageEnvironment {
+  return parseEnvironment(googleStorageEnvironmentSchema, source);
+}
+
+function parseEnvironment<T extends z.ZodType>(schema: T, source: EnvironmentSource): z.output<T> {
+  const result = schema.safeParse(source);
 
   if (result.success) {
     return result.data;

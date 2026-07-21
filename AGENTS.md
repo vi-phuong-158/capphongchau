@@ -210,6 +210,8 @@ POST /api/cases/:caseId/verify
 GET /api/dashboard/summary
 POST /api/exports
 GET/POST/PATCH /api/users
+GET /api/health/google
+GET /api/security/csrf
 ```
 
 Mọi API lỗi phải trả:
@@ -226,6 +228,10 @@ Mọi API lỗi phải trả:
 ```
 
 Không trả stack trace, token, Drive ID/link hoặc dữ liệu nhận dạng cá nhân đầy đủ.
+
+`GET /api/security/csrf` chỉ cấp token ngắn hạn cho session và allowlist hợp lệ. Mọi API write
+phải kiểm tra header `x-csrf-token`, `idempotency-key` và quyền ở server Node; không dựa vào
+role lưu trong JWT vì tài khoản vừa bị khóa phải mất quyền ngay.
 
 ## 6. Bảo mật và vận hành
 
