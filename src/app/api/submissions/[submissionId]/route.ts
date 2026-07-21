@@ -48,6 +48,8 @@ export async function GET(
           claimedAt: record.claimedAt || null,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
+          officialCaseId: record.officialCaseId || null,
+          acceptStep: record.acceptStep || null,
           draft: record.draft,
           files: files.map((file) => ({
             fileId: file.fileId,

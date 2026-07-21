@@ -98,6 +98,7 @@ tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurr
 src/app/submissions/page.tsx ─→ src/components/submissions-queue.tsx
   └── GET /api/submissions ─→ PublicIntakeRepository (Google Sheets)
 src/app/submissions/[submissionId]/page.tsx ─→ src/components/submission-detail.tsx
+  └── POST /api/submissions/:submissionId/accept ─→ saga checkpoint guard (blocked while field-12 catalog is provisional)
   ├── GET/POST /api/submissions/:submissionId ─→ authorization + CSRF + transition/audit
   └── GET /api/submissions/:submissionId/files/:fileId ─→ Drive thumbnail qua route no-store + audit
 ```
@@ -168,6 +169,7 @@ GET/PATCH  /api/public/submissions/current
 POST       /api/public/submissions/current/uploads/initiate
 POST       /api/public/submissions/current/uploads/complete
 POST       /api/public/submissions/current/submit
+POST       /api/submissions/:submissionId/accept
 ```
 
 Google Drive folder layout:

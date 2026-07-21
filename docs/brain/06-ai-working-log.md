@@ -302,6 +302,21 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** Mỗi lượt preview ghi `SUBMISSION_FILE_PREVIEW_VIEWED`; typecheck, lint, Vitest và
   Prettier đạt. Thumbnail phụ thuộc Drive tạo được preview cho loại tệp đã tải.
 
+## [2026-07-21] Chuẩn bị saga tiếp nhận chính thức an toàn
+
+- **Agent:** Codex
+- **Thay đổi:** Sửa ánh xạ các cột `PUBLIC_SUBMISSIONS` để mọi transition/lưu nháp/submit bảo toàn
+  consent, thời hạn lưu, `official_case_id` và checkpoint. Thêm guard/API `POST
+/api/submissions/:submissionId/accept`, định nghĩa checkpoint saga, kiểm tra role/CSRF/version/
+  idempotency và khóa rõ ràng khi danh mục mã trường 12 còn placeholder. UI hiển thị nút tiếp nhận
+  bị khóa cùng lý do; ảnh preview vẫn sử dụng được.
+- **File đã sửa:** `src/modules/public-intake/repository.ts`, `src/modules/submissions/acceptance.ts`,
+  `src/app/api/submissions/[submissionId]/accept/route.ts`, `src/app/api/submissions/[submissionId]/route.ts`,
+  `src/components/submission-detail.tsx`, `tests/submission-*.test.ts`, `AGENTS.md` và tài liệu brain.
+- **Lý do:** Tiếp nhận chính thức là quy trình nhiều hệ thống (Sheets + Drive); không được promotion
+  nửa chừng hoặc ghi dữ liệu thật bằng mã danh mục demo.
+- **Kiểm tra:** TypeScript, ESLint, 55/55 Vitest, Prettier và `git diff --check` đạt.
+
 ## Format entry
 
 ```

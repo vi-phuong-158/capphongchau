@@ -13,6 +13,8 @@ type Submission = {
   claimedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  officialCaseId: string | null;
+  acceptStep: string | null;
   draft: {
     certificate: { issueNumber: string; issueDate: string; registryNumber: string };
     owners: {
@@ -146,6 +148,14 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
               Nhận xử lý
             </button>
             <button
+              className="rounded-lg border border-emerald-800 px-4 py-2 font-semibold text-emerald-900 disabled:opacity-50"
+              disabled
+              title="Đang chờ danh mục mã trường 12 chính thức"
+              type="button"
+            >
+              Tiếp nhận chính thức
+            </button>
+            <button
               className="rounded-lg border border-amber-700 px-4 py-2 font-semibold text-amber-800 disabled:opacity-50"
               disabled={busy || submission.status !== "UNDER_REVIEW"}
               onClick={() => action("REQUEST_SUPPLEMENT")}
@@ -277,8 +287,9 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
         </div>
       ) : null}
       <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Xem ảnh preview và tiếp nhận chính thức sẽ được mở sau khi migration preview và bảng mã
-        trường 12 hoàn tất.
+        Ảnh xem trước đã sẵn sàng để đối chiếu. Tiếp nhận chính thức hiện được khóa vì danh mục mã
+        trường 12 vẫn là dữ liệu tạm; hệ thống sẽ không tạo hồ sơ chính thức khi danh mục chưa được
+        phê duyệt.
       </p>
     </main>
   );

@@ -212,6 +212,7 @@ DELETE /api/cases/:caseId/files/:fileId
 POST /api/cases/:caseId/qr/confirm
 POST /api/cases/:caseId/request-more-documents
 POST /api/cases/:caseId/verify
+POST /api/submissions/:submissionId/accept
 GET /api/dashboard/summary
 POST /api/exports
 GET/POST/PATCH /api/users
@@ -246,6 +247,12 @@ Không trả stack trace, token, Drive ID/link hoặc dữ liệu nhận dạng 
 `GET /api/security/csrf` chỉ cấp token ngắn hạn cho session và allowlist hợp lệ. Mọi API write
 phải kiểm tra header `x-csrf-token`, `idempotency-key` và quyền ở server Node; không dựa vào
 role lưu trong JWT vì tài khoản vừa bị khóa phải mất quyền ngay.
+
+`POST /api/submissions/:submissionId/accept` là điểm vào saga tiếp nhận từ khu vực công khai:
+chỉ `REVIEW_OFFICER`, `WARD_ADMIN` hoặc `SYSTEM_ADMIN` sau khi nhận xử lý mới gọi được. Saga phải
+ghi checkpoint `accept_step` theo thứ tự reserve Case ID → tạo folder → di chuyển file → ghi dữ
+liệu chính thức → hoàn tất; retry dùng cùng `idempotency_key` không được sinh CASE/file trùng.
+Route bị khóa khi danh mục trường 12 còn là placeholder hoặc schema chuẩn hóa chưa được migration.
 
 ## 6. Bảo mật và vận hành
 

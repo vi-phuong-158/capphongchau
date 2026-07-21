@@ -28,7 +28,13 @@ export interface SubmissionRecord {
   readonly phone: string;
   readonly version: number;
   readonly accessCodeHash: string;
+  readonly failedAttempts: number;
+  readonly lockedUntil: string;
+  readonly consentVersion: string;
+  readonly consentedAt: string;
+  readonly retentionUntil: string;
   readonly driveFolderId: string;
+  readonly officialCaseId: string;
   readonly acceptStep: string;
   readonly claimedBy: string;
   readonly claimedAt: string;
@@ -239,7 +245,13 @@ export class PublicIntakeRepository {
       phone: readCell(found, 3),
       version: Number(readCell(found, 4)) || 1,
       accessCodeHash: readCell(found, 5),
+      failedAttempts: Number(readCell(found, 6)) || 0,
+      lockedUntil: readCell(found, 7),
+      consentVersion: readCell(found, 8),
+      consentedAt: readCell(found, 9),
+      retentionUntil: readCell(found, 10),
       driveFolderId: readCell(found, 12),
+      officialCaseId: readCell(found, 11),
       acceptStep: readCell(found, 13),
       claimedBy: readCell(found, 14),
       claimedAt: readCell(found, 15),
@@ -265,7 +277,13 @@ export class PublicIntakeRepository {
       phone: readCell(candidate, 3),
       version: Number(readCell(candidate, 4)) || 1,
       accessCodeHash: readCell(candidate, 5),
+      failedAttempts: Number(readCell(candidate, 6)) || 0,
+      lockedUntil: readCell(candidate, 7),
+      consentVersion: readCell(candidate, 8),
+      consentedAt: readCell(candidate, 9),
+      retentionUntil: readCell(candidate, 10),
       driveFolderId: readCell(candidate, 12),
+      officialCaseId: readCell(candidate, 11),
       acceptStep: readCell(candidate, 13),
       claimedBy: readCell(candidate, 14),
       claimedAt: readCell(candidate, 15),
@@ -286,6 +304,8 @@ export class PublicIntakeRepository {
     status: PublicStatus;
     claimedBy?: string;
     claimedAt?: string;
+    officialCaseId?: string;
+    acceptStep?: string;
   }): Promise<SubmissionRecord> {
     if (input.record.version !== input.expectedVersion) {
       throw new SubmissionVersionConflictError();
@@ -299,6 +319,8 @@ export class PublicIntakeRepository {
       version: nextVersion,
       claimedBy: input.claimedBy ?? input.record.claimedBy,
       claimedAt: input.claimedAt ?? input.record.claimedAt,
+      officialCaseId: input.officialCaseId ?? input.record.officialCaseId,
+      acceptStep: input.acceptStep ?? input.record.acceptStep,
       updatedAt: now,
     };
 
@@ -315,12 +337,12 @@ export class PublicIntakeRepository {
             next.phone,
             String(next.version),
             next.accessCodeHash,
-            "0",
-            "",
-            "",
-            "",
-            "",
-            "",
+            String(next.failedAttempts),
+            next.lockedUntil,
+            next.consentVersion,
+            next.consentedAt,
+            next.retentionUntil,
+            next.officialCaseId,
             next.driveFolderId,
             next.acceptStep,
             next.claimedBy,
@@ -388,12 +410,12 @@ export class PublicIntakeRepository {
             draft.phone || record.phone,
             String(nextVersion),
             record.accessCodeHash,
-            "0",
-            "",
-            "",
-            "",
-            "",
-            "",
+            String(record.failedAttempts),
+            record.lockedUntil,
+            record.consentVersion,
+            record.consentedAt,
+            record.retentionUntil,
+            record.officialCaseId,
             record.driveFolderId,
             "",
             "",
@@ -506,12 +528,12 @@ export class PublicIntakeRepository {
               draft.phone || record.phone,
               String(record.version + 1),
               record.accessCodeHash,
-              "0",
-              "",
-              "",
-              "",
-              "",
-              "",
+              String(record.failedAttempts),
+              record.lockedUntil,
+              record.consentVersion,
+              record.consentedAt,
+              record.retentionUntil,
+              record.officialCaseId,
               record.driveFolderId,
               "",
               "",

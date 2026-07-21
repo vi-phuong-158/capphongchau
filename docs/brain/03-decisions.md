@@ -220,6 +220,19 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 
 ---
 
+## [2026-07-21] Saga tiếp nhận chính thức có checkpoint và khóa an toàn
+
+- **Quyết định:** Tiếp nhận từ `PUBLIC_SUBMISSIONS` sang các tab hồ sơ chính thức dùng trạng thái
+  `ACCEPTING` và checkpoint `accept_step`: `ID_RESERVED` → `CASE_FOLDER_READY` → `FILES_MOVED` →
+  `RECORDS_WRITTEN` → `COMPLETED`. Điểm vào API đã có CSRF, role, version và idempotency key,
+  nhưng bị khóa khi `REFERENCE_IS_PLACEHOLDER=true`.
+- **Lý do:** Google Sheets và Drive không có giao dịch phân tán. Nếu request lỗi giữa các bước,
+  retry phải tiếp tục tại checkpoint thay vì sinh mã hồ sơ, thư mục hoặc bản ghi chính thức trùng.
+  Không được ghi dữ liệu thật bằng danh mục mã trường 12 tạm.
+- **Đánh đổi:** Nút tiếp nhận chính thức chưa mở trong khi chờ danh mục mã được cơ quan phê duyệt
+  và migration schema chuẩn hóa có backup. Cán bộ vẫn xem ảnh, đối chiếu và yêu cầu bổ sung được.
+- **Người quyết định:** Codex, theo yêu cầu triển khai quy trình tiếp nhận của chủ dự án.
+
 ## Template cho entry mới
 
 ```
