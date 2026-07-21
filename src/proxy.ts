@@ -18,4 +18,4 @@ export default auth((request) => {
   return NextResponse.redirect(new URL("/", request.url));
 });
 
-export const config = { matcher: ["/profile/:path*", "/users/:path*"] };
+export const config = { matcher: ["/profile/:path*", "/users/:path*", "/submissions/:path*"] };

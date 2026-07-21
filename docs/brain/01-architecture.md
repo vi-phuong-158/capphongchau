@@ -95,6 +95,10 @@ src/app/ke-khai/wizard.tsx
     ├── src/modules/public-intake/storage.ts ─→ Google Drive 01_INBOX
     └── src/modules/public-intake/session.ts ─→ cookie + CSRF phiên công khai
 tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurrent retry, lỗi Google
+src/app/submissions/page.tsx ─→ src/components/submissions-queue.tsx
+  └── GET /api/submissions ─→ PublicIntakeRepository (Google Sheets)
+src/app/submissions/[submissionId]/page.tsx ─→ src/components/submission-detail.tsx
+  └── GET/POST /api/submissions/:submissionId ─→ authorization + CSRF + transition/audit
 ```
 
 Ràng buộc kiến trúc bắt buộc khi mở rộng Code Graph (đã chốt trong `AGENTS.md` §3.1):

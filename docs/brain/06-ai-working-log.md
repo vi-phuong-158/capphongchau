@@ -268,6 +268,20 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   Playwright runner cấu hình sẵn không khởi động được server port 3001 vì Next dev port 3000 đang
   giữ khóa `.next`; không dừng server người dùng đang thử để tránh gián đoạn.
 
+## [2026-07-21] Bắt đầu khu vực cán bộ xử lý bản kê khai
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm hàng chờ `/submissions`, trang chi tiết bản kê khai và API có allowlist, role,
+  CSRF, version và audit cho thao tác nhận xử lý, yêu cầu bổ sung và từ chối. Dữ liệu nhạy cảm bị
+  che; không trả Drive ID hoặc link Drive.
+- **File đã sửa:** `src/app/submissions/*`, `src/app/api/submissions/*`, `src/components/submission*`,
+  `src/modules/public-intake/repository.ts`, `src/modules/submissions/review.ts`, `src/proxy.ts`,
+  `src/app/profile/page.tsx`, test và tài liệu kiến trúc liên quan.
+- **Lý do:** Cổng công khai đã ghi `PUBLIC_*` nhưng chưa có đường cho cán bộ xem hoặc phân loại hồ sơ.
+- **Kiểm tra:** TypeScript, ESLint, Prettier và Vitest được chạy sau thay đổi. Tiếp nhận chính thức,
+  preview và migration schema là bước tiếp theo; nút tiếp nhận chưa được mở khi bảng mã trường 12
+  còn là placeholder.
+
 ## Format entry
 
 ```

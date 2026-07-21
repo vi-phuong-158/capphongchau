@@ -29,6 +29,9 @@ export interface SubmissionRecord {
   readonly version: number;
   readonly accessCodeHash: string;
   readonly driveFolderId: string;
+  readonly acceptStep: string;
+  readonly claimedBy: string;
+  readonly claimedAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly draft: IntakeDraft | null;
@@ -237,11 +240,129 @@ export class PublicIntakeRepository {
       version: Number(readCell(found, 4)) || 1,
       accessCodeHash: readCell(found, 5),
       driveFolderId: readCell(found, 12),
+      acceptStep: readCell(found, 13),
+      claimedBy: readCell(found, 14),
+      claimedAt: readCell(found, 15),
       createdAt: readCell(found, 16),
       updatedAt: readCell(found, 17),
       draft: parseDraft(readCell(found, 18)),
       rowIndex: index + 1,
     };
+  }
+
+  /** Hàng chờ cán bộ. Tối đa 500 bản kê khai ở pilot nên đọc theo lô, không phân trang bằng offset. */
+  async list(): Promise<SubmissionRecord[]> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: "PUBLIC_SUBMISSIONS!A2:S",
+    });
+
+    return (response.data.values ?? []).map((candidate, index) => ({
+      submissionId: readCell(candidate, 0),
+      receiptCode: readCell(candidate, 1),
+      status: (readCell(candidate, 2) || "DRAFT") as PublicStatus,
+      phone: readCell(candidate, 3),
+      version: Number(readCell(candidate, 4)) || 1,
+      accessCodeHash: readCell(candidate, 5),
+      driveFolderId: readCell(candidate, 12),
+      acceptStep: readCell(candidate, 13),
+      claimedBy: readCell(candidate, 14),
+      claimedAt: readCell(candidate, 15),
+      createdAt: readCell(candidate, 16),
+      updatedAt: readCell(candidate, 17),
+      draft: parseDraft(readCell(candidate, 18)),
+      rowIndex: index + 1,
+    }));
+  }
+
+  /**
+   * Cập nhật một transition của hàng chờ, giữ nguyên bản khai gốc. Sheets không có CAS thật;
+   * caller phải gửi version đã đọc và mọi hành động đều được audit riêng ở tầng route.
+   */
+  async transition(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    status: PublicStatus;
+    claimedBy?: string;
+    claimedAt?: string;
+  }): Promise<SubmissionRecord> {
+    if (input.record.version !== input.expectedVersion) {
+      throw new SubmissionVersionConflictError();
+    }
+    const { sheets } = this.workspace();
+    const now = new Date().toISOString();
+    const nextVersion = input.record.version + 1;
+    const next = {
+      ...input.record,
+      status: input.status,
+      version: nextVersion,
+      claimedBy: input.claimedBy ?? input.record.claimedBy,
+      claimedAt: input.claimedAt ?? input.record.claimedAt,
+      updatedAt: now,
+    };
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: `PUBLIC_SUBMISSIONS!A${input.record.rowIndex + 1}:S${input.record.rowIndex + 1}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [
+          [
+            next.submissionId,
+            next.receiptCode,
+            next.status,
+            next.phone,
+            String(next.version),
+            next.accessCodeHash,
+            "0",
+            "",
+            "",
+            "",
+            "",
+            "",
+            next.driveFolderId,
+            next.acceptStep,
+            next.claimedBy,
+            next.claimedAt,
+            next.createdAt,
+            next.updatedAt,
+            JSON.stringify(next.draft),
+          ],
+        ],
+      },
+    });
+    return next;
+  }
+
+  async appendAudit(input: {
+    actorEmail: string;
+    action: string;
+    entityId: string;
+    requestId: string;
+    metadata?: Record<string, string | number | boolean>;
+  }): Promise<void> {
+    const { sheets } = this.workspace();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: this.spreadsheetId,
+      range: "AUDIT_LOGS!A:H",
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [
+          [
+            randomUUID(),
+            new Date().toISOString(),
+            input.actorEmail,
+            input.action,
+            "PUBLIC_SUBMISSION",
+            input.entityId,
+            input.requestId,
+            JSON.stringify(input.metadata ?? {}),
+          ],
+        ],
+      },
+    });
   }
 
   /** Ghi đè cả dòng: nháp thay đổi liên tục nên cập nhật theo dòng rẻ hơn theo ô. */
@@ -511,4 +632,11 @@ export class PublicIntakeRepository {
 
 export function getPublicIntakeRepository(): PublicIntakeRepository {
   return new PublicIntakeRepository();
+}
+
+export class SubmissionVersionConflictError extends Error {
+  constructor() {
+    super("Bản kê khai đã được thay đổi bởi cán bộ khác.");
+    this.name = "SubmissionVersionConflictError";
+  }
 }

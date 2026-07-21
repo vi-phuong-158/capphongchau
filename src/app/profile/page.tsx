@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 
 import { signOut } from "@/auth";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
@@ -38,6 +39,21 @@ export default async function ProfilePage() {
           >
             Quản trị người dùng
           </a>
+        ) : null}
+        {user.roles.some((role) =>
+          [
+            UserRole.INTAKE_OFFICER,
+            UserRole.REVIEW_OFFICER,
+            UserRole.WARD_ADMIN,
+            UserRole.SYSTEM_ADMIN,
+          ].includes(role),
+        ) ? (
+          <Link
+            className="inline-flex rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white"
+            href="/submissions"
+          >
+            Hàng chờ tiếp nhận
+          </Link>
         ) : null}
         <form
           action={async () => {
