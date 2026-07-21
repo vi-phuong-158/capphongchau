@@ -11,13 +11,16 @@
     "format:check": "prettier --check .",
     "bootstrap:google": "tsx scripts/bootstrap-google.ts",
     "migrate:public-intake": "tsx scripts/migrate-public-intake.ts",
+    "migrate:citizen-id-pairs": "tsx scripts/migrate-citizen-id-pairs.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@next/env": "^16.2.10",
+    "@zxing/browser": "^0.1.5",
     "googleapis": "^173.0.0",
+    "heic2any": "^0.0.4",
     "next": "^16.2.10",
     "next-auth": "^5.0.0-beta.32",
     "react": "^19.2.7",

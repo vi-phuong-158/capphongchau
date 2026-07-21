@@ -29,6 +29,17 @@ export interface Owner {
   fullName: string;
   /** Trường 6 — CCCD 12 số, hoặc số định danh tổ chức. */
   identityNumber: string;
+  /** Dữ liệu gợi ý từ QR CCCD hoặc do người kê khai nhập tay. */
+  dateOfBirth: string;
+  gender: "NAM" | "NU" | "";
+  residenceAddress: string;
+  identitySource: "QR" | "MANUAL" | "";
+  /** Không lưu payload QR thô, chỉ giữ hash và phiên bản xử lý để truy vết. */
+  qrPayloadHash: string;
+  qrDecoderVersion: string;
+  qrParserVersion: string;
+  identityStatus: "PENDING_CONFIRMATION" | "QR_CONFIRMED" | "MANUAL_COMPLETE" | "";
+  identityConfirmedAt: string;
   /** Trường 7 — vai trò pháp nhân trên GCN. */
   roleOnCertificate: string;
 }
@@ -105,7 +116,22 @@ export function emptyParcel(id: string, landUseId: string): Parcel {
 }
 
 export function emptyOwner(id: string): Owner {
-  return { id, ownerType: "CA_NHAN", fullName: "", identityNumber: "", roleOnCertificate: "" };
+  return {
+    id,
+    ownerType: "CA_NHAN",
+    fullName: "",
+    identityNumber: "",
+    dateOfBirth: "",
+    gender: "",
+    residenceAddress: "",
+    identitySource: "",
+    qrPayloadHash: "",
+    qrDecoderVersion: "",
+    qrParserVersion: "",
+    identityStatus: "",
+    identityConfirmedAt: "",
+    roleOnCertificate: "",
+  };
 }
 
 export function emptyAsset(id: string): Asset {

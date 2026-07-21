@@ -8,7 +8,7 @@ Tài khoản `anmphongandn@gmail.com` là chủ sở hữu My Drive, Google Shee
 
 Phạm vi MVP:
 
-- Một ảnh CCCD mặt trước cho mỗi hồ sơ.
+- Một cặp ảnh CCCD mặt trước/mặt sau cho mỗi cá nhân, tối đa 10 cá nhân mỗi bản kê khai.
 - Từ 1 đến 10 ảnh GCN/bìa đỏ.
 - Đọc QR CCCD trên thiết bị; QR thất bại thì nhập tay.
 - Nhập thủ công thông tin GCN cơ bản.
@@ -112,7 +112,7 @@ VERIFIED → ARCHIVED (SYSTEM_ADMIN/WARD_ADMIN)
 
 ### M0 — Chuẩn hóa và khởi tạo
 
-1. Cập nhật `AGENTS.md`, `README.md` và tài liệu kiến trúc để ghi rõ ngoại lệ thử nghiệm: My Drive thay Shared Drive, Vercel thay backend đặt tại Việt Nam, một CCCD mặt trước và chưa có OCR.
+1. Cập nhật `AGENTS.md`, `README.md` và tài liệu kiến trúc để ghi rõ ngoại lệ thử nghiệm: My Drive thay Shared Drive, Vercel thay backend đặt tại Việt Nam, cặp ảnh CCCD cho từng cá nhân và chưa có OCR.
 2. Khởi tạo Next.js, TypeScript strict, PWA, lint, test unit và test E2E.
 3. Tạo các module `auth`, `cases`, `files`, `drive`, `sheets`, `qr`, `users`, `reports`, `audit`, `common`.
 4. Tạo `.env.example`, validation biến môi trường và định dạng lỗi API thống nhất.
@@ -139,13 +139,13 @@ VERIFIED → ARCHIVED (SYSTEM_ADMIN/WARD_ADMIN)
 
 1. Xây form mobile-first chọn tổ dân phố, nhập GCN cơ bản, thông tin chủ sử dụng và ghi chú.
 2. Tạo case ID idempotent, thư mục hồ sơ và bản ghi `DRAFT`.
-3. Cho phép chụp/chọn chính xác một CCCD mặt trước và từ 1 đến 10 ảnh GCN.
+3. Cho phép chụp/chọn cặp CCCD mặt trước/mặt sau cho từng cá nhân (tối đa 10 người) và từ 1 đến 10 ảnh GCN.
 4. Hỗ trợ HEIC/HEIF, preview, kiểm tra dung lượng/chất lượng và đọc QR client-side.
 5. Tạo resumable upload session, hiển thị tiến độ, retry và xác minh upload hoàn tất.
 6. Hỗ trợ lưu nháp, thay CCCD, thêm/xóa ảnh GCN trước khi xác nhận.
    - **Thay CCCD**: upload ảnh mới trước, xác minh thành công, sau đó mới đổi trạng thái file CCCD cũ sang `REPLACED` (không hard-delete khỏi Drive, không xóa dòng `FILES`) rồi gán ảnh mới làm CCCD hiện hành của case — đảm bảo case không bao giờ ở trạng thái "không có CCCD" giữa chừng thao tác.
    - **`DELETE /api/cases/:caseId/files/:fileId`**: chỉ áp dụng cho ảnh GCN (được phép xóa khi còn ≥1 ảnh GCN khác hoặc case chưa `UPLOADED`), không áp dụng cho CCCD — CCCD chỉ được "thay", không được xóa trắng. Xóa ở đây là soft-delete: đổi trạng thái dòng `FILES` sang `DELETED`, không hard-delete khỏi Drive.
-7. Chuyển `DRAFT` sang `UPLOADED` khi có CCCD mặt trước và ít nhất một ảnh GCN.
+7. Chuyển `DRAFT` sang `UPLOADED` khi đủ cặp CCCD của từng cá nhân và ít nhất một ảnh GCN.
 
 ### M4 — Kiểm tra, tra cứu, dashboard và xuất
 
@@ -211,7 +211,7 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
 
 - Unit: parser QR, chuẩn hóa CCCD/ngày, che/HMAC CCCD, case ID, trạng thái, phân quyền và optimistic concurrency.
 - Integration: OAuth refresh, Drive folder, Sheets batch write, resumable upload, retry, idempotency và lỗi từng phần.
-- E2E: tạo hồ sơ, upload một CCCD và nhiều GCN, QR thành công/thất bại, sửa dữ liệu, xác nhận, tìm kiếm, dashboard, export và audit.
+- E2E: tạo hồ sơ, upload cặp CCCD cho từng cá nhân và nhiều GCN, QR thành công/thất bại, sửa dữ liệu, xác nhận, tìm kiếm, dashboard, export và audit.
 - Kiểm thử Android Chrome, iPhone Safari, Wi-Fi và mạng 4G yếu.
 
 ### Tiêu chí nghiệm thu

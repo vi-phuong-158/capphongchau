@@ -61,7 +61,7 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ### M3: Tiếp nhận hồ sơ, QR và upload
 
-- **Mô tả:** Form mobile-first tạo hồ sơ, upload 1 CCCD + 1–10 GCN, đọc QR client-side, resumable upload, lưu nháp, chuyển trạng thái DRAFT → UPLOADED.
+- **Mô tả:** Form mobile-first tạo hồ sơ, upload cặp CCCD cho từng cá nhân (tối đa 10 người) + 1–10 GCN, đọc QR client-side, resumable upload, lưu nháp, chuyển trạng thái DRAFT → UPLOADED.
 - **Liên quan:** module `cases`, `files`, `qr`.
 - **Ưu tiên:** Trung bình (phụ thuộc M0–M2).
 
@@ -84,7 +84,6 @@ Theo thứ tự mốc trong `PLAN.md`:
 - OCR CCCD/GCN, Google Cloud Vision — chưa trong scope MVP (xem `03-decisions.md`).
 - PostgreSQL, Vercel Blob, Shared Drive, service account — kiến trúc đã chốt dùng My Drive + Sheets + Vercel.
 - Đối soát dân cư tự động — cần thẩm quyền pháp lý riêng, chưa có kênh kỹ thuật chính thức.
-- Ảnh CCCD mặt sau — chủ động không thu thập.
 - Cung cấp dữ liệu công khai hoặc link Drive công khai — vi phạm nguyên tắc bảo mật của dự án.
 
 ---

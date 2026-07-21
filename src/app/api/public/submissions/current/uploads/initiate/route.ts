@@ -8,6 +8,7 @@ import {
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
 import { ACCEPTED_MIME_TYPES, getPublicIntakeStorage } from "@/modules/public-intake/storage";
+import { requiresCitizenId } from "@/modules/public-intake/types";
 
 export const runtime = "nodejs";
 
@@ -30,7 +31,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  let body: { documentType?: unknown; fileName?: unknown; mimeType?: unknown; sizeBytes?: unknown };
+  let body: {
+    documentType?: unknown;
+    ownerId?: unknown;
+    replaceFileId?: unknown;
+    fileName?: unknown;
+    mimeType?: unknown;
+    sizeBytes?: unknown;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -38,7 +46,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const documentType = body.documentType;
-  if (documentType !== "CITIZEN_ID_FRONT" && documentType !== "CERTIFICATE") {
+  if (
+    documentType !== "CITIZEN_ID_FRONT" &&
+    documentType !== "CITIZEN_ID_BACK" &&
+    documentType !== "CERTIFICATE"
+  ) {
     return publicError("VALIDATION_FAILED", "Loại giấy tờ không hợp lệ.", requestId);
   }
 
@@ -73,13 +85,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  if (documentType === "CITIZEN_ID_FRONT") {
-    if (files.some((file) => file.documentType === "CITIZEN_ID_FRONT")) {
+  const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
+  const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
+  const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
+  if (identityImage) {
+    const owner = record.draft?.owners.find((candidate) => candidate.id === ownerId);
+    if (!owner || !requiresCitizenId(owner.ownerType)) {
+      return publicError("VALIDATION_FAILED", "Chủ sử dụng của ảnh CCCD không hợp lệ.", requestId);
+    }
+    const existing = files.find(
+      (file) => file.ownerId === ownerId && file.documentType === documentType,
+    );
+    if (existing && existing.fileId !== replaceFileId) {
       return publicError(
         "INVALID_STATE",
-        "Mỗi hồ sơ chỉ có đúng một ảnh CCCD mặt trước. Dùng chức năng thay ảnh nếu cần đổi.",
+        "Mỗi người chỉ có một ảnh cho từng mặt CCCD. Dùng chức năng thay ảnh nếu cần đổi.",
         requestId,
       );
+    }
+    if (!existing && replaceFileId) {
+      return publicError("VALIDATION_FAILED", "Ảnh CCCD cần thay không hợp lệ.", requestId);
     }
   } else if (
     files.filter((file) => file.documentType === "CERTIFICATE").length >= MAX_CERTIFICATE_PHOTOS

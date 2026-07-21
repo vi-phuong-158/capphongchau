@@ -48,12 +48,13 @@ export interface SubmissionRecord {
 export interface StoredFile {
   readonly fileId: string;
   readonly submissionId: string;
-  readonly documentType: "CITIZEN_ID_FRONT" | "CERTIFICATE";
+  readonly ownerId: string;
+  readonly documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
   readonly driveFileId: string;
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly checksum: string;
-  readonly status: "UPLOADED" | "DELETED";
+  readonly status: "UPLOADED" | "REPLACED" | "DELETED";
 }
 
 export interface StoredCreationRequest {
@@ -437,7 +438,7 @@ export class PublicIntakeRepository {
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A:K",
+      range: "PUBLIC_FILES!A:L",
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: {
@@ -454,6 +455,7 @@ export class PublicIntakeRepository {
             "UPLOADED",
             now,
             now,
+            file.ownerId,
           ],
         ],
       },
@@ -464,17 +466,18 @@ export class PublicIntakeRepository {
     const { sheets } = this.workspace();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A2:K",
+      range: "PUBLIC_FILES!A2:L",
     });
 
     return (response.data.values ?? [])
       .filter(
         (candidate) =>
-          readCell(candidate, 1) === submissionId && readCell(candidate, 8) !== "DELETED",
+          readCell(candidate, 1) === submissionId && readCell(candidate, 8) === "UPLOADED",
       )
       .map((candidate) => ({
         fileId: readCell(candidate, 0),
         submissionId: readCell(candidate, 1),
+        ownerId: readCell(candidate, 11),
         documentType: readCell(candidate, 2) as StoredFile["documentType"],
         driveFileId: readCell(candidate, 4),
         mimeType: readCell(candidate, 5),
@@ -482,6 +485,31 @@ export class PublicIntakeRepository {
         checksum: readCell(candidate, 7),
         status: "UPLOADED" as const,
       }));
+  }
+
+  /** CCCD chỉ được thay sau khi ảnh mới đã xác minh và được lưu thành công. */
+  async markFileReplaced(submissionId: string, fileId: string): Promise<void> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: "PUBLIC_FILES!A2:L",
+    });
+    const index = (response.data.values ?? []).findIndex(
+      (candidate) =>
+        readCell(candidate, 0) === fileId &&
+        readCell(candidate, 1) === submissionId &&
+        readCell(candidate, 8) === "UPLOADED",
+    );
+    if (index < 0) throw new Error("Không tìm thấy ảnh CCCD cần thay.");
+    const existing = response.data.values?.[index] ?? [];
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: `PUBLIC_FILES!I${index + 2}:K${index + 2}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["REPLACED", readCell(existing, 9), new Date().toISOString()]],
+      },
+    });
   }
 
   /**
@@ -574,6 +602,15 @@ export class PublicIntakeRepository {
               owner.identityNumber,
               owner.roleOnCertificate,
               now,
+              owner.dateOfBirth,
+              owner.gender,
+              owner.residenceAddress,
+              owner.identitySource,
+              owner.qrPayloadHash,
+              owner.qrDecoderVersion,
+              owner.qrParserVersion,
+              owner.identityStatus,
+              owner.identityConfirmedAt,
             ]),
           ),
           fields: "userEnteredValue",

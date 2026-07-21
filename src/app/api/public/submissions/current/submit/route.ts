@@ -6,7 +6,7 @@ import {
   publicError,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
-import type { IntakeDraft } from "@/modules/public-intake/types";
+import { requiresCitizenId, type IntakeDraft } from "@/modules/public-intake/types";
 import { validateDraftForSubmit } from "@/modules/public-intake/validation";
 
 export const runtime = "nodejs";
@@ -43,13 +43,18 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Không tin dòng PUBLIC_FILES của client: đọc lại từ kho trước khi cho gửi.
   const files = await getPublicIntakeRepository().listFiles(record.submissionId);
-  const hasCitizenId = files.some((file) => file.documentType === "CITIZEN_ID_FRONT");
+  const identityOwners = draft.owners.filter((owner) => requiresCitizenId(owner.ownerType));
+  const hasEveryCitizenIdPair = identityOwners.every((owner) =>
+    ["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK"].every((documentType) =>
+      files.some((file) => file.ownerId === owner.id && file.documentType === documentType),
+    ),
+  );
   const certificateCount = files.filter((file) => file.documentType === "CERTIFICATE").length;
 
-  if (!hasCitizenId || certificateCount < 1) {
+  if (!hasEveryCitizenIdPair || certificateCount < 1) {
     return publicError(
       "UPLOAD_INCOMPLETE",
-      "Cần đúng một ảnh CCCD mặt trước và ít nhất một ảnh Giấy chứng nhận.",
+      "Cần đủ ảnh CCCD mặt trước/mặt sau cho từng cá nhân và ít nhất một ảnh Giấy chứng nhận.",
       requestId,
     );
   }

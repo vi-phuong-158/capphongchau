@@ -20,6 +20,9 @@ type Submission = {
     owners: {
       fullName: string;
       identityNumber: string;
+      dateOfBirth: string;
+      gender: string;
+      residenceAddress: string;
       ownerType: string;
       roleOnCertificate: string;
     }[];
@@ -39,7 +42,10 @@ type Submission = {
     }[];
     assets: { assetType: string; description: string }[];
   } | null;
-  files: { fileId: string; documentType: "CITIZEN_ID_FRONT" | "CERTIFICATE" }[];
+  files: {
+    fileId: string;
+    documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
+  }[];
 };
 
 const labels: Record<string, string> = {
@@ -219,7 +225,9 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                       alt={
                         file.documentType === "CITIZEN_ID_FRONT"
                           ? "CCCD mặt trước"
-                          : "Giấy chứng nhận"
+                          : file.documentType === "CITIZEN_ID_BACK"
+                            ? "CCCD mặt sau"
+                            : "Giấy chứng nhận"
                       }
                       className="aspect-[4/3] w-full bg-stone-100 object-contain"
                       src={`/api/submissions/${submission.submissionId}/files/${file.fileId}`}
@@ -227,7 +235,9 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                     <figcaption className="border-t border-stone-200 px-3 py-2 text-sm font-semibold text-stone-700">
                       {file.documentType === "CITIZEN_ID_FRONT"
                         ? "CCCD mặt trước"
-                        : "Giấy chứng nhận"}
+                        : file.documentType === "CITIZEN_ID_BACK"
+                          ? "CCCD mặt sau"
+                          : "Giấy chứng nhận"}
                     </figcaption>
                   </figure>
                 ))}
@@ -259,6 +269,12 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                   <p className="font-semibold">{owner.fullName || "Chưa khai"}</p>
                   <p className="mt-1 text-sm text-stone-600">
                     {owner.ownerType} · CCCD/định danh: {owner.identityNumber || "-"}
+                  </p>
+                  <p className="mt-1 text-sm text-stone-600">
+                    Sinh: {owner.dateOfBirth || "-"} · Giới tính: {owner.gender || "-"}
+                  </p>
+                  <p className="mt-1 text-sm text-stone-600">
+                    Thường trú: {owner.residenceAddress || "-"}
                   </p>
                   <p className="mt-1 text-sm text-stone-600">
                     Vai trò: {owner.roleOnCertificate || "-"}

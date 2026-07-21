@@ -8,6 +8,16 @@ import { requiresCitizenId } from "./types";
 
 const PHONE_PATTERN = /^0\d{9}$/;
 const CITIZEN_ID_PATTERN = /^\d{12}$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidDate(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
 
 export function isValidPhone(value: string): boolean {
   return PHONE_PATTERN.test(value.trim());
@@ -49,6 +59,20 @@ export function validateDraftForSubmit(draft: IntakeDraft): string | null {
     }
     if (requiresCitizenId(owner.ownerType) && !CITIZEN_ID_PATTERN.test(owner.identityNumber)) {
       return "Số định danh cá nhân phải gồm đúng 12 chữ số.";
+    }
+    if (requiresCitizenId(owner.ownerType)) {
+      if (!isValidDate(owner.dateOfBirth)) {
+        return "Ngày sinh của chủ sử dụng phải đầy đủ.";
+      }
+      if (owner.gender !== "NAM" && owner.gender !== "NU") {
+        return "Thiếu giới tính của chủ sử dụng.";
+      }
+      if (!owner.residenceAddress.trim()) {
+        return "Thiếu địa chỉ thường trú của chủ sử dụng.";
+      }
+      if (owner.identityStatus !== "QR_CONFIRMED" && owner.identityStatus !== "MANUAL_COMPLETE") {
+        return "Cần xác nhận thông tin CCCD của chủ sử dụng.";
+      }
     }
   }
 

@@ -69,6 +69,7 @@ export const SHEET_DEFINITIONS: readonly SheetDefinition[] = [
       "status",
       "created_at",
       "updated_at",
+      "owner_id",
     ],
   },
   {
@@ -87,6 +88,7 @@ export const SHEET_DEFINITIONS: readonly SheetDefinition[] = [
       "status",
       "confirmed_by",
       "confirmed_at",
+      "owner_id",
     ],
   },
   {
@@ -182,6 +184,15 @@ export const PUBLIC_SHEET_DEFINITIONS: readonly SheetDefinition[] = [
       "identity_number",
       "role_on_certificate",
       "created_at",
+      "date_of_birth",
+      "gender",
+      "residence_address",
+      "identity_source",
+      "qr_payload_hash",
+      "qr_decoder_version",
+      "qr_parser_version",
+      "identity_status",
+      "identity_confirmed_at",
     ],
   },
   {
@@ -230,6 +241,7 @@ export const PUBLIC_SHEET_DEFINITIONS: readonly SheetDefinition[] = [
       "status",
       "created_at",
       "updated_at",
+      "owner_id",
     ],
   },
 ] as const;

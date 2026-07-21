@@ -46,7 +46,7 @@ Trong phạm vi:
 - Web app/PWA dùng trên máy tính, Android và iPhone.
 - Google Sign-In, allowlist người dùng và phân quyền theo vai trò.
 - Tạo hồ sơ, lưu nháp, tiếp nhận và kiểm tra thủ công.
-- Đúng **một ảnh CCCD mặt trước** cho mỗi hồ sơ.
+- Với mỗi cá nhân, thu một cặp ảnh CCCD gồm mặt trước và mặt sau; tối đa mười cá nhân mỗi bản kê khai.
 - Từ một đến mười ảnh GCN/bìa đỏ cho mỗi hồ sơ.
 - Đọc QR của CCCD trên thiết bị để gợi ý nhập liệu; QR thất bại thì nhập tay.
 - Nhập thủ công thông tin GCN cơ bản: số phát hành, ngày cấp, số vào sổ, chủ sử dụng và ghi chú.
@@ -56,7 +56,6 @@ Trong phạm vi:
 Ngoài phạm vi bản thử nghiệm:
 
 - OCR CCCD hoặc GCN, Google Cloud Vision, parser OCR và hàng đợi OCR.
-- Ảnh CCCD mặt sau.
 - Đối soát dân cư tự động hoặc kết nối CSDL đất đai quốc gia.
 - PostgreSQL, Vercel Blob, Google Shared Drive và service account.
 - Cung cấp dữ liệu cho người dân hoặc link Drive công khai.
@@ -122,7 +121,7 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 
 ### 3.4. QR CCCD
 
-- Dùng `@zxing/browser` hoàn toàn phía client; thử ảnh gốc và xoay 0/90/180/270 độ.
+- Dùng `@zxing/browser` hoàn toàn phía client; đọc từ ảnh CCCD đã tải và thử xoay 0/90/180/270 độ.
 - Chỉ chấp nhận CCCD gồm 12 chữ số và ngày hợp lệ.
 - QR chỉ là dữ liệu gợi ý. Cán bộ phải xem/xác nhận; QR không được ghi đè dữ liệu đã sửa thủ công.
 - Không lưu payload QR thô. Chỉ lưu dữ liệu đã tách, hash payload, phiên bản decoder/parser, trạng thái và người xác nhận.
@@ -137,8 +136,8 @@ Tạo các tab sau:
 - `CASES`: case ID, tổ dân phố, trạng thái, người tiếp nhận, thời gian, ghi chú, version, Drive folder ID.
 - `CERTIFICATES`: số phát hành, ngày cấp, số vào sổ và thông tin GCN nhập tay.
 - `OWNERS`: họ tên, CCCD, ngày sinh, giới tính, địa chỉ và nguồn `QR`/`MANUAL`.
-- `FILES`: `file_id`, `case_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
-- `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
+- `FILES`: `file_id`, `case_id`, `owner_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
+- `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, `owner_id`, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
 - `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX`.
 - Tạo sẵn `PARCELS`, `ASSETS`, `OCR_FIELDS` để tương thích nâng cấp nhưng không đưa vào quy trình hiện tại.
 
@@ -169,7 +168,7 @@ VERIFIED → ARCHIVED (SYSTEM_ADMIN hoặc WARD_ADMIN)
 ```
 
 - `DRAFT`: đã tạo nhưng chưa đủ ảnh bắt buộc.
-- `UPLOADED`: có đúng một CCCD mặt trước và ít nhất một ảnh GCN.
+- `UPLOADED`: có đủ hai mặt CCCD cho từng cá nhân và ít nhất một ảnh GCN.
 - `PENDING_REVIEW`: chờ kiểm tra/hoàn thiện dữ liệu.
 - `NEEDS_MORE_DOCUMENTS`: cần bổ sung ảnh hoặc thông tin.
 - `VERIFIED`: cán bộ có thẩm quyền xác nhận.
@@ -292,7 +291,7 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
 
 - Unit test: parser QR, chuẩn hóa CCCD/ngày, che/HMAC CCCD, case ID, transition, phân quyền và version conflict.
 - Integration test: refresh token, Drive folders, Sheets batch writes, resumable upload, retry, idempotency và lỗi từng phần.
-- E2E: tạo hồ sơ, upload một CCCD và nhiều GCN, QR thành công/thất bại, sửa dữ liệu, verify, tìm kiếm, dashboard, export và audit log.
+- E2E: tạo hồ sơ, upload cặp CCCD cho từng cá nhân (tối đa 10 người) và nhiều GCN, QR thành công/thất bại, sửa dữ liệu, verify, tìm kiếm, dashboard, export và audit log.
 - Thử nghiệm Android Chrome, iPhone Safari, Wi-Fi và 4G yếu.
 - Chỉ dùng dữ liệu giả/ẩn danh cho test tự động và môi trường Preview.
 
@@ -305,7 +304,7 @@ Một hạng mục hoàn thành khi:
 - Không lộ PII, token, QR raw hoặc link Drive trong log.
 - Có test phù hợp và tài liệu liên quan được cập nhật.
 - Không tạo case/file trùng khi upload hoặc gửi lại request.
-- Không thể tải CCCD thứ hai nếu chưa thực hiện thao tác thay ảnh.
+- Không thể tải hai ảnh cùng một mặt CCCD của cùng người nếu chưa thực hiện thao tác thay ảnh; ảnh thay được xác minh trước khi ảnh cũ chuyển `REPLACED`.
 - Ảnh gốc không đi qua body của Vercel Function và không có link Drive công khai.
 - Email ngoài `USERS` bị từ chối dù đăng nhập Google thành công.
 - QR thất bại không làm mất hồ sơ.

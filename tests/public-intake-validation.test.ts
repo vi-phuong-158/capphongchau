@@ -17,6 +17,15 @@ function completeDraft() {
     ownerType: "CA_NHAN",
     fullName: "Trần Thị Demo",
     identityNumber: "098765432109",
+    dateOfBirth: "1990-01-01",
+    gender: "NU",
+    residenceAddress: "Phường Phong Châu, Phú Thọ",
+    identitySource: "MANUAL",
+    qrPayloadHash: "",
+    qrDecoderVersion: "",
+    qrParserVersion: "",
+    identityStatus: "MANUAL_COMPLETE",
+    identityConfirmedAt: "",
     roleOnCertificate: "CHU_SU_DUNG",
   };
   draft.parcels[0] = {
@@ -74,6 +83,13 @@ describe("validateDraftForSubmit", () => {
     draft.owners[0] = { ...draft.owners[0], identityNumber: "123" };
 
     expect(validateDraftForSubmit(draft)).toContain("12 chữ số");
+  });
+
+  it("bắt buộc ngày sinh hợp lệ khi QR không đọc được", () => {
+    const draft = completeDraft();
+    draft.owners[0] = { ...draft.owners[0], dateOfBirth: "1990-02-31" };
+
+    expect(validateDraftForSubmit(draft)).toContain("Ngày sinh");
   });
 
   it("không bắt buộc CCCD với tổ chức", () => {

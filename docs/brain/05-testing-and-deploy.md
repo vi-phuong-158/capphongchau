@@ -64,7 +64,7 @@ Checklist thủ công trước khi commit/push (theo `AGENTS.md` §7.2 — Defin
 - [ ] Có kiểm tra quyền và audit log cho thao tác write/nhạy cảm.
 - [ ] Không lộ PII, token, QR raw hoặc link Drive trong log.
 - [ ] Không tạo case/file trùng khi upload hoặc gửi lại request (idempotency).
-- [ ] Không thể tải CCCD thứ hai nếu chưa thực hiện thao tác thay ảnh.
+- [ ] Không thể tải trùng một mặt CCCD của cùng người nếu chưa thực hiện thao tác thay ảnh; thay ảnh chỉ chuyển ảnh cũ sang `REPLACED` sau khi ảnh mới xác minh thành công.
 - [ ] Ảnh gốc không đi qua body của Vercel Function.
 - [ ] Email ngoài `USERS` bị từ chối dù đăng nhập Google thành công.
 - [ ] QR thất bại không làm mất hồ sơ.

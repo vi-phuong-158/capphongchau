@@ -339,6 +339,27 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 
 ---
 
+## [2026-07-21] Cặp ảnh CCCD theo người và tự điền QR từ ảnh
+
+- **Agent:** Codex
+- **Thay đổi:** Chuyển bước đầu của `/ke-khai` thành tạo nháp sau đồng ý rồi tải cặp CCCD mặt trước/mặt sau cho từng cá nhân (tối đa 10). Browser chuyển HEIC cục bộ, dùng ZXing thử ảnh/xoay, parse QR bảo thủ và chỉ lưu dữ liệu tách, hash, phiên bản xử lý; người kê khai phải xác nhận kết quả QR. QR thất bại bắt buộc nhập tay ngày sinh, giới tính và thường trú. Bổ sung liên kết `owner_id` cho ảnh, thay ảnh an toàn `REPLACED`, migration append-only và preview cán bộ cho hai mặt.
+- **File đã sửa:** `wizard.tsx`, public upload/submit routes, public-intake types/repository/QR parser, schema bootstrap, migration script, test và tài liệu kiến trúc.
+- **Lý do:** Giảm thời gian nhập CCCD nhưng không dùng OCR; hỗ trợ QR ở mặt sau thẻ căn cước mới và đối chiếu đầy đủ hai mặt.
+- **Kiểm tra:** `npm.cmd run test` (59/59), `typecheck`, `lint`, `format:check`, `build` và `git diff --check` đạt. Cần chạy migration schema trước deploy.
+
+---
+
+## [2026-07-22] Áp dụng migration cặp CCCD trên Google Sheets
+
+- **Agent:** Codex
+- **Thay đổi:** Chạy `migrate:citizen-id-pairs`, thêm append-only `owner_id` vào `FILES`, `IDENTITY_QR_SCANS`, `PUBLIC_FILES`; thêm ngày sinh, giới tính, thường trú, nguồn và metadata QR vào `PUBLIC_OWNERS`.
+- **Lý do:** Đồng bộ schema Google Sheets thật với luồng cặp ảnh CCCD theo từng cá nhân.
+- **Kiểm tra:** Chạy lại migration ngay sau đó không ghi thêm cột nào, xác nhận idempotent.
+
+---
+
+---
+
 ## [2026-07-21] Khởi tạo bộ não dự án (AI project brain)
 
 - **Agent:** Claude Code

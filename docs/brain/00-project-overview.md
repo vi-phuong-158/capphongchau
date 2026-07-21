@@ -23,7 +23,7 @@ Mã nội bộ dự án: `land-ocr-180`.
 - Web app/PWA dùng trên máy tính, Android và iPhone, phạm vi Phường Phong Châu (10 tổ dân phố).
 - Google Sign-In, allowlist người dùng (sheet `USERS`) và phân quyền theo vai trò.
 - Tạo hồ sơ, lưu nháp, tiếp nhận và kiểm tra thủ công.
-- Đúng một ảnh CCCD mặt trước và 1–10 ảnh GCN/bìa đỏ cho mỗi hồ sơ.
+- Cặp ảnh CCCD mặt trước/mặt sau cho từng cá nhân (tối đa 10 người) và 1–10 ảnh GCN/bìa đỏ cho mỗi hồ sơ.
 - Đọc QR CCCD trên thiết bị (client-side) để gợi ý nhập liệu; QR thất bại thì nhập tay.
 - Nhập thủ công thông tin GCN cơ bản: số phát hành, ngày cấp, số vào sổ, chủ sử dụng, ghi chú.
 - Lưu ảnh trong Google My Drive cá nhân của tài khoản quản trị; lưu dữ liệu cấu trúc trong Google Sheets.

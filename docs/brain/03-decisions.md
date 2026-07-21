@@ -43,11 +43,11 @@
 - **Đánh đổi:** Thông tin GCN phải nhập tay hoàn toàn, tăng thời gian tác nghiệp của cán bộ.
 - **Người quyết định:** Chủ dự án.
 
-## [2026-07-21] Chỉ một ảnh CCCD mặt trước (không lưu mặt sau)
+## [2026-07-21] Thu cặp ảnh CCCD cho từng cá nhân và đọc QR từ ảnh tải lên
 
-- **Quyết định:** Mỗi hồ sơ chỉ lưu đúng một ảnh CCCD mặt trước; không thu thập/lưu mặt sau.
-- **Lý do:** Giảm thu thập dữ liệu cá nhân nhạy cảm không cần thiết cho mục tiêu thử nghiệm.
-- **Đánh đổi:** Không có dữ liệu mặt sau CCCD nếu sau này cần đối chiếu thêm.
+- **Quyết định:** Mỗi cá nhân có một cặp CCCD mặt trước/mặt sau, tối đa mười cá nhân mỗi bản kê khai. Sau đồng ý và tạo nháp, người kê khai tải ảnh ngay tại bước đầu; QR được đọc hoàn toàn trên thiết bị từ các ảnh này, không mở luồng quét camera hoặc OCR riêng.
+- **Lý do:** Mặt sau thẻ căn cước đời mới có QR; thu đủ cặp giúp cán bộ đối chiếu mà giảm nhập lại họ tên, CCCD, ngày sinh, giới tính và thường trú.
+- **Đánh đổi:** Thu thập thêm dữ liệu nhạy cảm, cần cặp ảnh và xác nhận người dùng trước khi tiếp tục. QR không đọc được thì các trường nhận dạng bắt buộc phải nhập tay.
 - **Người quyết định:** Chủ dự án.
 
 ---

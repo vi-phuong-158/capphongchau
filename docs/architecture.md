@@ -45,14 +45,14 @@ Bootstrap CLI tạo Drive root, các thư mục con, spreadsheet và toàn bộ 
 ## Dòng dữ liệu hồ sơ
 
 1. Cán bộ chọn tổ dân phố và tạo hồ sơ. Backend reserve case ID rồi tạo case `DRAFT`.
-2. Cán bộ chụp/chọn một CCCD mặt trước và 1–10 ảnh GCN/bìa đỏ.
-3. Trình duyệt kiểm tra dung lượng/định dạng, chuyển HEIC/HEIF nếu cần, tạo preview nhỏ và thử đọc QR cục bộ. PWA online-only phải báo lỗi rõ ràng khi mất kết nối.
+2. Người kê khai tạo nháp sau khi đồng ý, rồi ngay tại bước đầu chụp/chọn cặp CCCD mặt trước/mặt sau cho từng cá nhân (tối đa 10 người) và 1–10 ảnh GCN/bìa đỏ.
+3. Trình duyệt kiểm tra dung lượng/định dạng, chuyển HEIC/HEIF nếu cần và thử đọc QR cục bộ từ ảnh CCCD. PWA online-only phải báo lỗi rõ ràng khi mất kết nối.
 4. API khởi tạo phiên resumable upload. File gốc đi trực tiếp từ trình duyệt đến Drive; Vercel không nhận body ảnh gốc.
 5. Backend xác minh metadata, dung lượng, checksum và thư mục cha của file Drive.
-6. Khi có CCCD mặt trước và tối thiểu một GCN, case chuyển sang `UPLOADED`.
+6. Khi có đủ cặp CCCD của từng cá nhân và tối thiểu một GCN, case chuyển sang `UPLOADED`.
 7. Cán bộ kiểm tra chuyển `UPLOADED` sang `PENDING_REVIEW`, xác nhận sang `VERIFIED` hoặc yêu cầu bổ sung sang `NEEDS_MORE_DOCUMENTS`.
 
-QR là dữ liệu gợi ý. Hệ thống không lưu payload QR thô và không tự ghi đè dữ liệu cán bộ đã chỉnh sửa.
+QR là dữ liệu gợi ý. Hệ thống không lưu payload QR thô, chỉ giữ hash/phiên bản xử lý cùng trường đã tách sau khi người kê khai xác nhận; QR không tự ghi đè dữ liệu đã sửa tay.
 
 ## Lưu trữ
 
@@ -68,6 +68,8 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 ```
 
 Google Sheets có các tab vận hành chính: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG` và `SEARCH_INDEX`. `REQUEST_LOG` lưu idempotency key cùng kết quả đã cache tối thiểu 24 giờ. Các tab mở rộng `PARCELS`, `ASSETS`, `OCR_FIELDS` được tạo sẵn nhưng chưa dùng.
+
+Trong cổng kê khai, `PUBLIC_FILES.owner_id` gắn từng ảnh CCCD với một người; `PUBLIC_OWNERS` lưu ngày sinh, giới tính, thường trú, nguồn nhập và metadata QR đã xác nhận. Migration chỉ thêm cột, không đổi hoặc xóa dữ liệu cũ.
 
 `file_id` nội bộ không thay đổi. `drive_file_id` là định danh hạ tầng có thể thay đổi khi migration sang Shared Drive sau này. Case ID lấy số thứ tự từ `updatedRange` của lệnh append vào `ID_RESERVATIONS`, tính năm theo `Asia/Ho_Chi_Minh`; không đọc số dòng rồi cộng một.
 

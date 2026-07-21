@@ -15,6 +15,10 @@ import {
 import { lastSecretGroup } from "@/modules/public-intake/receipt-code";
 import { uploadWithResume, UploadCancelledError } from "@/modules/public-intake/resumable-upload";
 import {
+  prepareCitizenIdImage,
+  readCitizenIdQr,
+} from "@/modules/public-intake/citizen-id-qr.client";
+import {
   OWNER_TYPES,
   OWNER_TYPE_LABELS,
   emptyAsset,
@@ -28,22 +32,26 @@ import {
 } from "@/modules/public-intake/types";
 
 const STEPS = [
-  "Thông báo và liên hệ",
+  "Khởi tạo và ảnh CCCD",
   "Thông tin GCN",
-  "Chủ sử dụng",
   "Thửa đất",
   "Loại đất",
   "Tài sản",
-  "Tải giấy tờ",
+  "Tải ảnh GCN",
   "Kiểm tra và gửi",
 ] as const;
 
 const MAX_CERTIFICATE_PHOTOS = 10;
+const MAX_INDIVIDUAL_OWNERS = 10;
 const CREATE_IDEMPOTENCY_STORAGE_KEY = "pc_kk_create_idempotency";
 
 type Errors = Record<string, string>;
 
 type SaveStatus = "IDLE" | "SAVING" | "SAVED" | "FAILED" | "OFFLINE";
+
+type IdentityDocumentType = "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK";
+type UploadedIdentityImage = { file: File; fileId: string };
+type IdentityPhotos = Record<string, Partial<Record<IdentityDocumentType, UploadedIdentityImage>>>;
 
 const SAVE_STATUS_LABELS: Record<SaveStatus, string> = {
   IDLE: "",
@@ -182,7 +190,7 @@ export function IntakeWizard() {
   const [secretEcho, setSecretEcho] = useState("");
   const [secretConfirmed, setSecretConfirmed] = useState(false);
 
-  const [citizenIdPhoto, setCitizenIdPhoto] = useState<File | null>(null);
+  const [identityPhotos, setIdentityPhotos] = useState<IdentityPhotos>({});
   const [certificatePhotos, setCertificatePhotos] = useState<File[]>([]);
   const [submitted, setSubmitted] = useState(false);
 
@@ -208,7 +216,7 @@ export function IntakeWizard() {
   const validate = useCallback((): Errors => {
     const found: Errors = {};
 
-    if (step === 0) {
+    if (step === 0 && !receipt) {
       if (!hasCertificate) found.hasCertificate = "Chọn một phương án.";
       if (!certificateCount) found.certificateCount = "Chọn một phương án.";
       if (!/^0\d{9}$/.test(draft.phone)) found.phone = "Nhập số điện thoại 10 số, bắt đầu bằng 0.";
@@ -222,17 +230,32 @@ export function IntakeWizard() {
         found.registryNumber = "Bắt buộc theo Phụ lục 8.";
     }
 
-    if (step === 2) {
+    if (step === 0 && receipt) {
       draft.owners.forEach((owner, index) => {
         if (!owner.fullName.trim()) found[`owner-${index}-name`] = "Bắt buộc theo Phụ lục 8.";
         if (!owner.roleOnCertificate) found[`owner-${index}-role`] = "Bắt buộc theo Phụ lục 8.";
         if (requiresCitizenId(owner.ownerType) && !/^\d{12}$/.test(owner.identityNumber)) {
           found[`owner-${index}-id`] = "CCCD gồm đúng 12 chữ số.";
         }
+        if (requiresCitizenId(owner.ownerType)) {
+          if (!owner.dateOfBirth) found[`owner-${index}-dob`] = "Cần ngày sinh.";
+          if (!owner.gender) found[`owner-${index}-gender`] = "Cần giới tính.";
+          if (!owner.residenceAddress.trim())
+            found[`owner-${index}-address`] = "Cần địa chỉ thường trú.";
+          if (owner.identityStatus === "PENDING_CONFIRMATION") {
+            found[`owner-${index}-identity`] = "Xem và xác nhận thông tin đọc từ QR.";
+          }
+          if (!identityPhotos[owner.id]?.CITIZEN_ID_FRONT) {
+            found[`owner-${index}-front`] = "Cần ảnh CCCD mặt trước.";
+          }
+          if (!identityPhotos[owner.id]?.CITIZEN_ID_BACK) {
+            found[`owner-${index}-back`] = "Cần ảnh CCCD mặt sau.";
+          }
+        }
       });
     }
 
-    if (step === 3) {
+    if (step === 2) {
       draft.parcels.forEach((parcel, index) => {
         if (!parcel.addressOnCertificate.trim())
           found[`parcel-${index}-address`] = "Bắt buộc theo Phụ lục 8.";
@@ -241,7 +264,7 @@ export function IntakeWizard() {
       });
     }
 
-    if (step === 4) {
+    if (step === 3) {
       draft.parcels.forEach((parcel, parcelIndex) => {
         parcel.landUses.forEach((landUse, useIndex) => {
           const key = `use-${parcelIndex}-${useIndex}`;
@@ -265,9 +288,8 @@ export function IntakeWizard() {
       });
     }
 
-    if (step === 6) {
+    if (step === 5) {
       if (!secretConfirmed) found.secretEcho = "Cần xác nhận đã lưu mã bí mật trước khi tải ảnh.";
-      if (!citizenIdPhoto) found.citizenIdPhoto = "Cần đúng một ảnh CCCD mặt trước.";
       if (certificatePhotos.length < 1) found.certificatePhotos = "Cần ít nhất một ảnh GCN.";
     }
 
@@ -277,8 +299,9 @@ export function IntakeWizard() {
     draft,
     hasCertificate,
     certificateCount,
+    receipt,
     secretConfirmed,
-    citizenIdPhoto,
+    identityPhotos,
     certificatePhotos,
   ]);
 
@@ -395,6 +418,9 @@ export function IntakeWizard() {
         } catch {
           // Không có gì cần làm nếu storage bị chặn.
         }
+        // Giữ nguyên bước đầu: ngay sau khi tạo nháp/thư mục Drive, người dân tải ảnh CCCD tại
+        // chính màn hình này thay vì phải đi qua toàn bộ biểu mẫu rồi mới quay lại.
+        return;
       } else if (!(await saveDraft())) {
         return;
       }
@@ -411,12 +437,19 @@ export function IntakeWizard() {
 
   /** Trình duyệt tải thẳng lên Drive qua phiên resumable; ảnh không đi qua server của app. */
   const uploadFile = useCallback(
-    async (file: File, documentType: "CITIZEN_ID_FRONT" | "CERTIFICATE"): Promise<boolean> => {
+    async (
+      file: File,
+      documentType: IdentityDocumentType | "CERTIFICATE",
+      ownerId = "",
+      replaceFileId = "",
+    ): Promise<string | null> => {
       const initiate = await fetchApi("/api/public/submissions/current/uploads/initiate", {
         method: "POST",
         headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
         body: JSON.stringify({
           documentType,
+          ownerId,
+          replaceFileId,
           fileName: file.name,
           mimeType: file.type,
           sizeBytes: file.size,
@@ -425,7 +458,7 @@ export function IntakeWizard() {
 
       if (!initiate.ok) {
         setServerError(await readErrorMessage(initiate, "Không tạo được phiên tải lên."));
-        return false;
+        return null;
       }
 
       const { uploadUrl } = (await initiate.json()) as { uploadUrl: string };
@@ -451,21 +484,21 @@ export function IntakeWizard() {
               : "Tải ảnh lên thất bại.",
           );
         }
-        return false;
+        return null;
       }
 
       const complete = await fetchApi("/api/public/submissions/current/uploads/complete", {
         method: "POST",
         headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
-        body: JSON.stringify({ driveFileId: id, documentType }),
+        body: JSON.stringify({ driveFileId: id, documentType, ownerId, replaceFileId }),
       });
 
       if (!complete.ok) {
         setServerError(await readErrorMessage(complete, "Ảnh tải lên không hợp lệ."));
-        return false;
+        return null;
       }
 
-      return true;
+      return ((await complete.json()) as { fileId: string }).fileId;
     },
     [csrfToken],
   );
@@ -476,27 +509,74 @@ export function IntakeWizard() {
   }, []);
 
   const handleCitizenIdUpload = useCallback(
-    async (file: File | null) => {
+    async (ownerId: string, documentType: IdentityDocumentType, file: File | null) => {
       if (!file) return;
       uploadAbort.current = new AbortController();
       setBusy(true);
       setServerError("");
       setUploadPercent(0);
-      setUploadNote("Đang tải ảnh CCCD…");
+      const sideLabel = documentType === "CITIZEN_ID_FRONT" ? "mặt trước" : "mặt sau";
+      setUploadNote(`Đang chuẩn bị và tải ảnh CCCD ${sideLabel}…`);
       try {
-        if (await uploadFile(file, "CITIZEN_ID_FRONT")) {
-          setCitizenIdPhoto(file);
-          setUploadNote("Đã tải ảnh CCCD lên hệ thống.");
+        const prepared = await prepareCitizenIdImage(file);
+        const replaceFileId = identityPhotos[ownerId]?.[documentType]?.fileId ?? "";
+        const fileId = await uploadFile(prepared, documentType, ownerId, replaceFileId);
+        if (fileId) {
+          setIdentityPhotos((current) => ({
+            ...current,
+            [ownerId]: { ...current[ownerId], [documentType]: { file: prepared, fileId } },
+          }));
+          setUploadNote(`Đã tải ảnh CCCD ${sideLabel}. Đang đọc QR ngay trên thiết bị…`);
+          const result = await readCitizenIdQr(prepared);
+          if (result) {
+            update((next) => {
+              const owner = next.owners.find((candidate) => candidate.id === ownerId);
+              if (!owner) return;
+              // QR chỉ là gợi ý; không ghi đè dữ liệu người dân đã sửa tay.
+              if (owner.identitySource === "MANUAL" || owner.identityStatus === "QR_CONFIRMED")
+                return;
+              owner.identityNumber = result.parsed.identityNumber;
+              owner.fullName = result.parsed.fullName;
+              owner.dateOfBirth = result.parsed.dateOfBirth;
+              owner.gender = result.parsed.gender;
+              owner.residenceAddress = result.parsed.residenceAddress;
+              owner.identitySource = "QR";
+              owner.qrPayloadHash = result.payloadHash;
+              owner.qrDecoderVersion = result.decoderVersion;
+              owner.qrParserVersion = result.parserVersion;
+              owner.identityStatus = "PENDING_CONFIRMATION";
+              owner.identityConfirmedAt = "";
+            });
+            setUploadNote("Đã đọc QR. Kiểm tra và xác nhận các thông tin vừa tự điền.");
+          } else {
+            update((next) => {
+              const owner = next.owners.find((candidate) => candidate.id === ownerId);
+              if (
+                !owner ||
+                owner.identityStatus === "QR_CONFIRMED" ||
+                owner.identitySource === "MANUAL"
+              ) {
+                return;
+              }
+              owner.identityStatus = "";
+            });
+            setUploadNote("Không đọc được QR. Hãy nhập đầy đủ thông tin CCCD bằng tay.");
+          }
         } else {
           setUploadNote("");
         }
+      } catch (error) {
+        setServerError(
+          error instanceof Error ? error.message : "Không thể xử lý ảnh CCCD. Hãy chọn lại ảnh.",
+        );
+        setUploadNote("");
       } finally {
         setBusy(false);
         setUploadPercent(0);
         uploadAbort.current = null;
       }
     },
-    [uploadFile],
+    [identityPhotos, update, uploadFile],
   );
 
   const handleCertificateUpload = useCallback(
@@ -567,6 +647,10 @@ export function IntakeWizard() {
     () => draft.parcels.reduce((sum, parcel) => sum + parcel.landUses.length, 0),
     [draft.parcels],
   );
+  const individualOwnerCount = useMemo(
+    () => draft.owners.filter((owner) => requiresCitizenId(owner.ownerType)).length,
+    [draft.owners],
+  );
 
   if (submitted && receipt) {
     return (
@@ -629,99 +713,112 @@ export function IntakeWizard() {
       <section className="pc-card pc-step-panel space-y-5">
         {step === 0 ? (
           <>
-            <Field
-              label="Thửa đất của bạn đã có Giấy chứng nhận (sổ đỏ/sổ hồng) chưa?"
-              required
-              error={errors.hasCertificate}
-            >
-              <Select
-                value={hasCertificate}
-                onChange={setHasCertificate}
-                invalid={Boolean(errors.hasCertificate)}
-                placeholder="— Chọn —"
-                options={[
-                  { code: "CO", label: "Đã có Giấy chứng nhận" },
-                  { code: "KHONG", label: "Chưa có Giấy chứng nhận" },
-                ]}
-              />
-            </Field>
+            {!receipt ? (
+              <>
+                <Field
+                  label="Thửa đất của bạn đã có Giấy chứng nhận (sổ đỏ/sổ hồng) chưa?"
+                  required
+                  error={errors.hasCertificate}
+                >
+                  <Select
+                    value={hasCertificate}
+                    onChange={setHasCertificate}
+                    invalid={Boolean(errors.hasCertificate)}
+                    placeholder="— Chọn —"
+                    options={[
+                      { code: "CO", label: "Đã có Giấy chứng nhận" },
+                      { code: "KHONG", label: "Chưa có Giấy chứng nhận" },
+                    ]}
+                  />
+                </Field>
 
-            <Field
-              label="Lần kê khai này gồm mấy Giấy chứng nhận?"
-              required
-              error={errors.certificateCount}
-              hint="Mỗi lần kê khai chỉ dùng cho một Giấy chứng nhận."
-            >
-              <Select
-                value={certificateCount}
-                onChange={setCertificateCount}
-                invalid={Boolean(errors.certificateCount)}
-                placeholder="— Chọn —"
-                options={[
-                  { code: "MOT", label: "Một Giấy chứng nhận" },
-                  { code: "NHIEU", label: "Từ hai Giấy chứng nhận trở lên" },
-                ]}
-              />
-            </Field>
+                <Field
+                  label="Lần kê khai này gồm mấy Giấy chứng nhận?"
+                  required
+                  error={errors.certificateCount}
+                  hint="Mỗi lần kê khai chỉ dùng cho một Giấy chứng nhận."
+                >
+                  <Select
+                    value={certificateCount}
+                    onChange={setCertificateCount}
+                    invalid={Boolean(errors.certificateCount)}
+                    placeholder="— Chọn —"
+                    options={[
+                      { code: "MOT", label: "Một Giấy chứng nhận" },
+                      { code: "NHIEU", label: "Từ hai Giấy chứng nhận trở lên" },
+                    ]}
+                  />
+                </Field>
 
-            {outOfScope ? (
-              <div
-                className="pc-card"
-                style={{
-                  background: "var(--warning-surface)",
-                  borderColor: "var(--warning-border)",
-                }}
-              >
-                <p className="font-semibold">Trường hợp của bạn cần làm trực tiếp</p>
-                <p className="mt-2">
-                  Cổng kê khai trực tuyến hiện chỉ phục vụ trường hợp đã có một Giấy chứng nhận. Đề
-                  nghị mang giấy tờ đến Bộ phận một cửa UBND phường Phong Châu để được hướng dẫn.
+                {outOfScope ? (
+                  <div
+                    className="pc-card"
+                    style={{
+                      background: "var(--warning-surface)",
+                      borderColor: "var(--warning-border)",
+                    }}
+                  >
+                    <p className="font-semibold">Trường hợp của bạn cần làm trực tiếp</p>
+                    <p className="mt-2">
+                      Cổng kê khai trực tuyến hiện chỉ phục vụ trường hợp đã có một Giấy chứng nhận.
+                      Đề nghị mang giấy tờ đến Bộ phận một cửa UBND phường Phong Châu để được hướng
+                      dẫn.
+                    </p>
+                  </div>
+                ) : null}
+
+                <Field
+                  label="Số điện thoại liên hệ"
+                  required
+                  error={errors.phone}
+                  hint="Cán bộ sẽ gọi vào số này nếu hồ sơ cần bổ sung. Hệ thống không gửi tin nhắn tự động."
+                >
+                  <input
+                    className="pc-input"
+                    inputMode="numeric"
+                    value={draft.phone}
+                    aria-invalid={errors.phone ? "true" : undefined}
+                    onChange={(event) =>
+                      update((next) => {
+                        next.phone = event.target.value.replace(/\D/g, "").slice(0, 10);
+                      })
+                    }
+                  />
+                </Field>
+
+                <div>
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1.5 h-5 w-5"
+                      checked={draft.consentAccepted}
+                      onChange={(event) =>
+                        update((next) => {
+                          next.consentAccepted = event.target.checked;
+                        })
+                      }
+                    />
+                    <span>
+                      Tôi đồng ý cung cấp thông tin và ảnh giấy tờ để phục vụ kê khai, đăng ký đất
+                      đai trong đợt cao điểm 180 ngày.
+                    </span>
+                  </label>
+                  {errors.consent ? <p className="pc-field-error">{errors.consent}</p> : null}
+                  <p className="pc-field-hint">
+                    Nội dung thông báo bảo vệ dữ liệu cá nhân và thời hạn lưu trữ sẽ được bổ sung
+                    nguyên văn trước khi vận hành thật.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
+                <p className="font-semibold">Tải ảnh CCCD cho từng người</p>
+                <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+                  Bản kê khai đã được tạo. Hãy thêm chủ sử dụng và tải đủ hai mặt CCCD; QR trên ảnh
+                  được đọc ngay trên thiết bị để gợi ý tự điền, không dùng OCR.
                 </p>
               </div>
-            ) : null}
-
-            <Field
-              label="Số điện thoại liên hệ"
-              required
-              error={errors.phone}
-              hint="Cán bộ sẽ gọi vào số này nếu hồ sơ cần bổ sung. Hệ thống không gửi tin nhắn tự động."
-            >
-              <input
-                className="pc-input"
-                inputMode="numeric"
-                value={draft.phone}
-                aria-invalid={errors.phone ? "true" : undefined}
-                onChange={(event) =>
-                  update((next) => {
-                    next.phone = event.target.value.replace(/\D/g, "").slice(0, 10);
-                  })
-                }
-              />
-            </Field>
-
-            <div>
-              <label className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-1.5 h-5 w-5"
-                  checked={draft.consentAccepted}
-                  onChange={(event) =>
-                    update((next) => {
-                      next.consentAccepted = event.target.checked;
-                    })
-                  }
-                />
-                <span>
-                  Tôi đồng ý cung cấp thông tin và ảnh giấy tờ để phục vụ kê khai, đăng ký đất đai
-                  trong đợt cao điểm 180 ngày.
-                </span>
-              </label>
-              {errors.consent ? <p className="pc-field-error">{errors.consent}</p> : null}
-              <p className="pc-field-hint">
-                Nội dung thông báo bảo vệ dữ liệu cá nhân và thời hạn lưu trữ sẽ được bổ sung nguyên
-                văn trước khi vận hành thật.
-              </p>
-            </div>
+            )}
           </>
         ) : null}
 
@@ -767,7 +864,7 @@ export function IntakeWizard() {
           </>
         ) : null}
 
-        {step === 2 ? (
+        {step === 0 && receipt ? (
           <>
             {draft.owners.map((owner, index) => (
               <div key={owner.id} className="pc-card">
@@ -790,6 +887,19 @@ export function IntakeWizard() {
                       onChange={(value) =>
                         update((next) => {
                           next.owners[index].ownerType = value as OwnerType;
+                          // Vợ/chồng phải là hai dòng cá nhân để mỗi người có một cặp ảnh CCCD.
+                          if (
+                            value === "VO_CHONG" &&
+                            next.owners.filter((candidate) =>
+                              requiresCitizenId(candidate.ownerType),
+                            ).length < MAX_INDIVIDUAL_OWNERS &&
+                            !next.owners.some(
+                              (candidate, candidateIndex) =>
+                                candidateIndex !== index && candidate.ownerType === "VO_CHONG",
+                            )
+                          ) {
+                            next.owners.push({ ...emptyOwner(newId()), ownerType: "VO_CHONG" });
+                          }
                         })
                       }
                       placeholder="— Chọn —"
@@ -811,6 +921,8 @@ export function IntakeWizard() {
                       onChange={(event) =>
                         update((next) => {
                           next.owners[index].fullName = event.target.value;
+                          next.owners[index].identitySource = "MANUAL";
+                          next.owners[index].identityStatus = "MANUAL_COMPLETE";
                         })
                       }
                     />
@@ -837,10 +949,129 @@ export function IntakeWizard() {
                       onChange={(event) =>
                         update((next) => {
                           next.owners[index].identityNumber = event.target.value.trim();
+                          next.owners[index].identitySource = "MANUAL";
+                          next.owners[index].identityStatus = "MANUAL_COMPLETE";
                         })
                       }
                     />
                   </Field>
+                  {requiresCitizenId(owner.ownerType) ? (
+                    <>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Ngày sinh" required error={errors[`owner-${index}-dob`]}>
+                          <input
+                            className="pc-input"
+                            type="date"
+                            value={owner.dateOfBirth}
+                            onChange={(event) =>
+                              update((next) => {
+                                next.owners[index].dateOfBirth = event.target.value;
+                                next.owners[index].identitySource = "MANUAL";
+                                next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Giới tính" required error={errors[`owner-${index}-gender`]}>
+                          <select
+                            className="pc-select"
+                            value={owner.gender}
+                            onChange={(event) =>
+                              update((next) => {
+                                next.owners[index].gender = event.target.value as "NAM" | "NU" | "";
+                                next.owners[index].identitySource = "MANUAL";
+                                next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                              })
+                            }
+                          >
+                            <option value="">— Chọn —</option>
+                            <option value="NAM">Nam</option>
+                            <option value="NU">Nữ</option>
+                          </select>
+                        </Field>
+                      </div>
+                      <Field
+                        label="Địa chỉ thường trú"
+                        required
+                        error={errors[`owner-${index}-address`]}
+                      >
+                        <textarea
+                          className="pc-textarea"
+                          value={owner.residenceAddress}
+                          onChange={(event) =>
+                            update((next) => {
+                              next.owners[index].residenceAddress = event.target.value;
+                              next.owners[index].identitySource = "MANUAL";
+                              next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                            })
+                          }
+                        />
+                      </Field>
+                      <div className="rounded-lg border border-stone-200 p-4">
+                        <p className="font-semibold">Ảnh CCCD của người này</p>
+                        <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+                          Tải đủ hai mặt. Hệ thống thử đọc QR từ từng ảnh ngay trên thiết bị.
+                        </p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          {(["CITIZEN_ID_BACK", "CITIZEN_ID_FRONT"] as const).map(
+                            (documentType) => {
+                              const isFront = documentType === "CITIZEN_ID_FRONT";
+                              const uploaded = identityPhotos[owner.id]?.[documentType];
+                              return (
+                                <Field
+                                  key={documentType}
+                                  label={isFront ? "CCCD mặt trước" : "CCCD mặt sau"}
+                                  required
+                                  error={errors[`owner-${index}-${isFront ? "front" : "back"}`]}
+                                >
+                                  <input
+                                    className="pc-input"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                                    disabled={busy}
+                                    onChange={(event) => {
+                                      void handleCitizenIdUpload(
+                                        owner.id,
+                                        documentType,
+                                        event.target.files?.[0] ?? null,
+                                      );
+                                    }}
+                                  />
+                                  {uploaded ? (
+                                    <p className="pc-field-hint">
+                                      Đã tải: {uploaded.file.name}. Chọn tệp khác để thay ảnh.
+                                    </p>
+                                  ) : null}
+                                </Field>
+                              );
+                            },
+                          )}
+                        </div>
+                        {owner.identityStatus === "PENDING_CONFIRMATION" ? (
+                          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                            <span>
+                              QR đã tự điền thông tin. Hãy đối chiếu ảnh trước khi xác nhận.
+                            </span>
+                            <button
+                              className="pc-button-quiet"
+                              type="button"
+                              onClick={() =>
+                                update((next) => {
+                                  next.owners[index].identityStatus = "QR_CONFIRMED";
+                                  next.owners[index].identityConfirmedAt = new Date().toISOString();
+                                })
+                              }
+                            >
+                              Xác nhận thông tin QR
+                            </button>
+                          </div>
+                        ) : null}
+                        {errors[`owner-${index}-identity`] ? (
+                          <p className="pc-field-error">{errors[`owner-${index}-identity`]}</p>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
                   <Field
                     label="Vai trò trên GCN"
                     required
@@ -870,13 +1101,27 @@ export function IntakeWizard() {
                   next.owners.push(emptyOwner(newId()));
                 })
               }
+              disabled={individualOwnerCount >= MAX_INDIVIDUAL_OWNERS}
             >
-              + Thêm chủ sử dụng
+              + Thêm chủ sử dụng (tối đa {MAX_INDIVIDUAL_OWNERS} người)
             </button>
+            {uploadNote ? (
+              <div className="space-y-2">
+                <p style={{ color: "var(--muted)" }} aria-live="polite">
+                  {uploadNote}
+                  {busy && uploadPercent > 0 ? ` ${uploadPercent}%` : ""}
+                </p>
+                {busy ? (
+                  <button type="button" className="pc-button-quiet" onClick={cancelUpload}>
+                    Hủy tải ảnh
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </>
         ) : null}
 
-        {step === 3 ? (
+        {step === 2 ? (
           <>
             {draft.parcels.map((parcel, index) => (
               <div key={parcel.id} className="pc-card">
@@ -997,7 +1242,7 @@ export function IntakeWizard() {
           </>
         ) : null}
 
-        {step === 4 ? (
+        {step === 3 ? (
           <>
             <div
               className="pc-card"
@@ -1126,7 +1371,7 @@ export function IntakeWizard() {
           </>
         ) : null}
 
-        {step === 5 ? (
+        {step === 4 ? (
           <>
             <p style={{ color: "var(--muted)" }}>
               Chỉ khai nếu Giấy chứng nhận có ghi tài sản gắn liền với đất (nhà ở, công trình, cây
@@ -1184,7 +1429,7 @@ export function IntakeWizard() {
           </>
         ) : null}
 
-        {step === 6 ? (
+        {step === 5 ? (
           <>
             {!secretConfirmed ? (
               <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
@@ -1209,26 +1454,6 @@ export function IntakeWizard() {
               </div>
             ) : (
               <>
-                <Field
-                  label="Ảnh CCCD mặt trước"
-                  required
-                  error={errors.citizenIdPhoto}
-                  hint="Đúng một ảnh. Không thu ảnh mặt sau."
-                >
-                  <input
-                    className="pc-input"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                    disabled={busy || Boolean(citizenIdPhoto)}
-                    onChange={(event) => {
-                      void handleCitizenIdUpload(event.target.files?.[0] ?? null);
-                    }}
-                  />
-                </Field>
-                {citizenIdPhoto ? (
-                  <p className="pc-field-hint">Đã tải lên: {citizenIdPhoto.name}</p>
-                ) : null}
-
                 <Field
                   label="Ảnh Giấy chứng nhận"
                   required
@@ -1277,7 +1502,7 @@ export function IntakeWizard() {
           </>
         ) : null}
 
-        {step === 7 ? (
+        {step === 6 ? (
           <>
             <h2 className="text-xl font-bold">Kiểm tra lại trước khi gửi</h2>
             <dl className="space-y-3">
@@ -1309,8 +1534,8 @@ export function IntakeWizard() {
               <div>
                 <dt className="font-semibold">Giấy tờ</dt>
                 <dd>
-                  {citizenIdPhoto ? "1 ảnh CCCD" : "Chưa có ảnh CCCD"}, {certificatePhotos.length}{" "}
-                  ảnh GCN
+                  {draft.owners.filter((owner) => requiresCitizenId(owner.ownerType)).length} cặp
+                  ảnh CCCD, {certificatePhotos.length} ảnh GCN
                 </dd>
               </div>
               <div>

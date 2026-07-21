@@ -2,7 +2,7 @@
 
 ## Stack
 
-> Đây là stack đã **chốt trong tài liệu** (`AGENTS.md`, `PLAN.md`). Nền Next.js, TypeScript, Tailwind, Zod và bộ test đã có trong `package.json`; các dependency tích hợp Google/QR/HEIC sẽ chỉ được thêm ở mốc cần dùng.
+> Đây là stack đã **chốt trong tài liệu** (`AGENTS.md`, `PLAN.md`). Nền Next.js, TypeScript, Tailwind, Zod, Google/QR/HEIC và bộ test đã có trong `package.json`.
 
 | Layer             | Công nghệ                                                                                                                                                                         |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -61,6 +61,7 @@ src/modules/common/domain.ts
 
 src/modules/files/index.ts ─────→ kiểu file nội bộ (file_id tách Drive ID)
 src/modules/qr/index.ts ────────→ quy ước giải mã QR phía client
+src/modules/public-intake/citizen-id-qr* → parser QR bảo thủ + ZXing/HEIC chỉ chạy client
 src/modules/audit/index.ts ─────→ kiểu tham chiếu audit append-only
 src/modules/sheets/index.ts ────→ src/modules/sheets/data-repository.ts
 src/modules/drive/index.ts ─────→ src/modules/drive/storage-repository.ts
@@ -113,12 +114,12 @@ Ràng buộc kiến trúc bắt buộc khi mở rộng Code Graph (đã chốt t
 ```
 Cán bộ chọn tổ dân phố → tạo hồ sơ (reserve case ID qua ID_RESERVATIONS append-only)
   → case DRAFT
-  → chụp/chọn 1 CCCD mặt trước + 1-10 ảnh GCN
+  → chụp/chọn cặp CCCD mặt trước/mặt sau cho từng cá nhân + 1-10 ảnh GCN
   → browser: kiểm tra định dạng/dung lượng, tạo preview, thử đọc QR (@zxing/browser)
   → API initiate resumable upload session
   → browser upload trực tiếp lên Google Drive (KHÔNG qua body của Vercel Function)
   → API complete: xác minh metadata/dung lượng/checksum/thư mục cha
-  → đủ 1 CCCD + ≥1 GCN → case chuyển UPLOADED
+  → đủ cặp CCCD từng cá nhân + ≥1 GCN → case chuyển UPLOADED
   → cán bộ kiểm tra/xác nhận dữ liệu → PENDING_REVIEW → VERIFIED (hoặc NEEDS_MORE_DOCUMENTS → quay lại UPLOADED)
   → VERIFIED → ARCHIVED (chỉ SYSTEM_ADMIN/WARD_ADMIN)
 ```
