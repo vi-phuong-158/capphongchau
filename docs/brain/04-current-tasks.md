@@ -15,9 +15,17 @@ bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab mới — **
 `CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN_NL.md` (kế hoạch đầy đủ M3.5) và entry log
 [2026-07-21] trong `06-ai-working-log.md`.
 
-**Chưa làm, bắt buộc trước khi mở công khai:** Turnstile, Cloudflare rate limiting,
-`ORIGIN_SHARED_SECRET`, luồng truy cập lại bằng mã tiếp nhận + mã bí mật, và toàn bộ đường cán bộ
-duyệt (`/api/submissions/*` + acceptance saga).
+**Lớp biên — phần code đã xong (2026-07-22, nhánh `feat/edge-protection`):** Turnstile fail-closed
+ở hai hành động `create`/`submit`, và chốt chặn `ORIGIN_SHARED_SECRET` ở `/api/public/*` +
+`/ke-khai`. **Phần dashboard chưa làm và AI không làm được:** DNS proxy qua Cloudflare, SSL Full
+(strict), Transform Rule gắn header `X-Origin-Auth`, cache rule bypass `/api/*` + `/ke-khai*`,
+rate limiting rules, đặt biến môi trường mới trên Vercel, bật Deployment Protection cho Preview.
+Chưa xong các mục đó thì chốt chặn ở origin **chưa bảo vệ được gì**.
+
+**Chưa làm, bắt buộc trước khi mở công khai:** luồng truy cập lại bằng mã tiếp nhận + mã bí mật
+(hiện `accessSecretMatches` là mã chết, `failedAttempts`/`lockedUntil` không ai ghi — người dân mất
+cookie là mất bản khai), security headers, và toàn bộ đường cán bộ duyệt
+(`/api/submissions/*` + acceptance saga).
 
 Hạng mục tiếp theo theo kế hoạch là **M3** (tiếp nhận hồ sơ phía cán bộ, QR, upload) — phải làm
 trước M3.5 để `modules/uploads` + `modules/media` được dùng chung, tránh hai đường upload.
@@ -90,6 +98,9 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ## Đã hoàn thành gần đây
 
+- [2026-07-22] Phần code của lớp biên: chốt chặn `ORIGIN_SHARED_SECRET` chống gọi thẳng
+  `*.vercel.app`, Turnstile fail-closed ở `create`/`submit`, token đã dùng chỉ mở đường replay
+  idempotency. 82 test xanh. Phần cấu hình Cloudflare/Vercel còn chờ chủ dự án.
 - [2026-07-21] Sửa lỗi tạo bản kê khai trên mạng yếu: request tạo nháp dùng idempotency key HMAC
   ổn định, `PUBLIC_SUBMISSIONS` + `REQUEST_LOG` ghi cùng batch, retry trả lại đúng mã/phiên, lỗi
   Google trả JSON an toàn và giao diện bắt lỗi mạng thay vì bị kẹt.

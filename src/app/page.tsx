@@ -7,6 +7,11 @@ export default function HomePage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl items-center px-6 py-16">
       <section className="w-full space-y-6">
+        <div
+          aria-hidden="true"
+          className="h-1 w-16 rounded-full"
+          style={{ background: "linear-gradient(90deg, var(--cherry-700), var(--gold-500))" }}
+        />
         <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
           PHƯỜNG PHONG CHÂU
         </p>

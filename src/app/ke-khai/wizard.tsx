@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import {
   ASSET_TYPE_OPTIONS,
   CERTIFICATE_ROLE_OPTIONS,
@@ -17,6 +18,7 @@ import { uploadWithResume, UploadCancelledError } from "@/modules/public-intake/
 import {
   prepareCitizenIdImage,
   readCitizenIdQr,
+  type CitizenIdQrReadResult,
 } from "@/modules/public-intake/citizen-id-qr.client";
 import {
   OWNER_TYPES,
@@ -195,6 +197,14 @@ export function IntakeWizard() {
   const [submitted, setSubmitted] = useState(false);
 
   const [csrfToken, setCsrfToken] = useState("");
+  // Token Turnstile gắn với đúng hành động sinh ra nó; đổi bước là token cũ hết giá trị.
+  const [challenge, setChallenge] = useState<{ action: string; token: string }>({
+    action: "",
+    token: "",
+  });
+  const [challengeNonce, setChallengeNonce] = useState(0);
+  const [scanNotes, setScanNotes] = useState<Record<string, string>>({});
+  const [scanningOwnerId, setScanningOwnerId] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("IDLE");
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -204,6 +214,25 @@ export function IntakeWizard() {
   const createIdempotencyKey = useRef<string | null>(null);
 
   const outOfScope = hasCertificate === "KHONG" || certificateCount === "NHIEU";
+
+  // Hai hành động phải qua Turnstile: tạo bản kê khai và gửi chính thức. Các bước ở giữa chỉ lưu
+  // nháp trong phiên đã có, không cần bắt người dân giải lại.
+  const challengeAction: "create" | "submit" | null =
+    step === 0 && !receipt ? "create" : step === STEPS.length - 1 ? "submit" : null;
+  const challengeToken = challenge.action === challengeAction ? challenge.token : "";
+
+  const handleChallengeToken = useCallback(
+    (token: string) => {
+      setChallenge({ action: challengeAction ?? "", token });
+    },
+    [challengeAction],
+  );
+
+  /** Token dùng một lần: sau mỗi lần gửi đi phải lấy widget mới, không tái sử dụng. */
+  const refreshChallenge = useCallback(() => {
+    setChallenge({ action: "", token: "" });
+    setChallengeNonce((current) => current + 1);
+  }, []);
 
   const update = useCallback((mutate: (next: IntakeDraft) => void) => {
     setDraft((current) => {
@@ -373,6 +402,7 @@ export function IntakeWizard() {
                 headers: {
                   "content-type": "application/json",
                   "idempotency-key": createIdempotencyKey.current,
+                  "x-turnstile-token": challengeToken,
                 },
                 body: JSON.stringify({ phone: draft.phone }),
               },
@@ -401,6 +431,8 @@ export function IntakeWizard() {
               // Không có gì cần làm nếu storage bị chặn.
             }
           }
+          // Token đã tiêu dù request hỏng — phải có widget mới thì lần bấm sau mới đi được.
+          refreshChallenge();
           setServerError(await readErrorMessage(response, "Chưa tạo được bản kê khai."));
           return;
         }
@@ -427,13 +459,14 @@ export function IntakeWizard() {
 
       setStep((current) => Math.min(current + 1, STEPS.length - 1));
     } catch {
+      refreshChallenge();
       setServerError(
         "Kết nối bị gián đoạn khi tạo bản kê khai. Dữ liệu đã nhập vẫn còn; bấm Tiếp tục để khôi phục và thử lại.",
       );
     } finally {
       setBusy(false);
     }
-  }, [validate, step, receipt, draft.phone, saveDraft]);
+  }, [validate, step, receipt, draft.phone, saveDraft, challengeToken, refreshChallenge]);
 
   /** Trình duyệt tải thẳng lên Drive qua phiên resumable; ảnh không đi qua server của app. */
   const uploadFile = useCallback(
@@ -508,6 +541,51 @@ export function IntakeWizard() {
     uploadAbort.current?.abort();
   }, []);
 
+  /**
+   * Đổ kết quả QR vào một chủ sử dụng. Dùng chung cho hai đường: đọc ngầm khi tải ảnh CCCD, và
+   * quét chủ động bằng nút trong khối thông tin.
+   *
+   * `force` phân biệt hai đường đó. Đọc ngầm thì không được ghi đè thứ người dân đã tự sửa. Còn
+   * khi người dân **bấm nút quét**, im lặng không đổi gì mới là hỏng — nên lần đó luôn ghi đè và
+   * đặt lại trạng thái về chờ xác nhận để không có dữ liệu nào được coi là đã đối chiếu mà thực
+   * ra chưa.
+   *
+   * Trả về việc có đọc được mã hay không, phục vụ thông báo cho người dùng.
+   */
+  const applyQrResult = useCallback(
+    (ownerId: string, result: CitizenIdQrReadResult | null, options?: { force?: boolean }) => {
+      update((next) => {
+        const owner = next.owners.find((candidate) => candidate.id === ownerId);
+        if (!owner) return;
+
+        const locked =
+          !options?.force &&
+          (owner.identitySource === "MANUAL" || owner.identityStatus === "QR_CONFIRMED");
+        if (locked) return;
+
+        if (!result) {
+          owner.identityStatus = "";
+          return;
+        }
+
+        owner.identityNumber = result.parsed.identityNumber;
+        owner.fullName = result.parsed.fullName;
+        owner.dateOfBirth = result.parsed.dateOfBirth;
+        owner.gender = result.parsed.gender;
+        owner.residenceAddress = result.parsed.residenceAddress;
+        owner.identitySource = "QR";
+        owner.qrPayloadHash = result.payloadHash;
+        owner.qrDecoderVersion = result.decoderVersion;
+        owner.qrParserVersion = result.parserVersion;
+        owner.identityStatus = "PENDING_CONFIRMATION";
+        owner.identityConfirmedAt = "";
+      });
+
+      return result !== null;
+    },
+    [update],
+  );
+
   const handleCitizenIdUpload = useCallback(
     async (ownerId: string, documentType: IdentityDocumentType, file: File | null) => {
       if (!file) return;
@@ -527,41 +605,11 @@ export function IntakeWizard() {
             [ownerId]: { ...current[ownerId], [documentType]: { file: prepared, fileId } },
           }));
           setUploadNote(`Đã tải ảnh CCCD ${sideLabel}. Đang đọc QR ngay trên thiết bị…`);
-          const result = await readCitizenIdQr(prepared);
-          if (result) {
-            update((next) => {
-              const owner = next.owners.find((candidate) => candidate.id === ownerId);
-              if (!owner) return;
-              // QR chỉ là gợi ý; không ghi đè dữ liệu người dân đã sửa tay.
-              if (owner.identitySource === "MANUAL" || owner.identityStatus === "QR_CONFIRMED")
-                return;
-              owner.identityNumber = result.parsed.identityNumber;
-              owner.fullName = result.parsed.fullName;
-              owner.dateOfBirth = result.parsed.dateOfBirth;
-              owner.gender = result.parsed.gender;
-              owner.residenceAddress = result.parsed.residenceAddress;
-              owner.identitySource = "QR";
-              owner.qrPayloadHash = result.payloadHash;
-              owner.qrDecoderVersion = result.decoderVersion;
-              owner.qrParserVersion = result.parserVersion;
-              owner.identityStatus = "PENDING_CONFIRMATION";
-              owner.identityConfirmedAt = "";
-            });
-            setUploadNote("Đã đọc QR. Kiểm tra và xác nhận các thông tin vừa tự điền.");
-          } else {
-            update((next) => {
-              const owner = next.owners.find((candidate) => candidate.id === ownerId);
-              if (
-                !owner ||
-                owner.identityStatus === "QR_CONFIRMED" ||
-                owner.identitySource === "MANUAL"
-              ) {
-                return;
-              }
-              owner.identityStatus = "";
-            });
-            setUploadNote("Không đọc được QR. Hãy nhập đầy đủ thông tin CCCD bằng tay.");
-          }
+          setUploadNote(
+            applyQrResult(ownerId, await readCitizenIdQr(prepared))
+              ? "Đã đọc QR. Kiểm tra và xác nhận các thông tin vừa tự điền."
+              : "Không đọc được QR. Dùng nút “Quét QR” ở trên hoặc nhập bằng tay.",
+          );
         } else {
           setUploadNote("");
         }
@@ -576,7 +624,37 @@ export function IntakeWizard() {
         uploadAbort.current = null;
       }
     },
-    [identityPhotos, update, uploadFile],
+    [applyQrResult, identityPhotos, uploadFile],
+  );
+
+  /**
+   * Quét chủ động ngay trong khối thông tin người khai: mở camera chụp một kiểu mặt sau CCCD,
+   * giải mã tại chỗ rồi tự điền các ô bên dưới. Ảnh này **không** được tải lên — nó chỉ tồn tại
+   * trong bộ nhớ trình duyệt đủ lâu để đọc mã, nên không tốn dung lượng Drive và không thêm một
+   * bản sao giấy tờ tùy thân nào vào kho.
+   */
+  const handleQrScan = useCallback(
+    async (ownerId: string, file: File | null) => {
+      if (!file) return;
+      setScanningOwnerId(ownerId);
+      setScanNotes((current) => ({ ...current, [ownerId]: "Đang đọc mã trên thiết bị…" }));
+      try {
+        const prepared = await prepareCitizenIdImage(file);
+        const read = await readCitizenIdQr(prepared);
+        const note = applyQrResult(ownerId, read, { force: true })
+          ? "Đã đọc xong. Đối chiếu với thẻ rồi bấm “Xác nhận thông tin QR”."
+          : "Chưa đọc được mã. Chụp lại gần hơn, đủ sáng và không bị loá, hoặc nhập bằng tay.";
+        setScanNotes((current) => ({ ...current, [ownerId]: note }));
+      } catch {
+        setScanNotes((current) => ({
+          ...current,
+          [ownerId]: "Không mở được ảnh vừa chụp. Thử lại hoặc nhập bằng tay.",
+        }));
+      } finally {
+        setScanningOwnerId("");
+      }
+    },
+    [applyQrResult],
   );
 
   const handleCertificateUpload = useCallback(
@@ -612,11 +690,16 @@ export function IntakeWizard() {
     try {
       const response = await fetchApi("/api/public/submissions/current/submit", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
+        headers: {
+          "content-type": "application/json",
+          "x-public-csrf-token": csrfToken,
+          "x-turnstile-token": challengeToken,
+        },
         body: JSON.stringify({ draft }),
       });
 
       if (!response.ok) {
+        refreshChallenge();
         setServerError(await readErrorMessage(response, "Chưa gửi được bản kê khai."));
         return;
       }
@@ -625,7 +708,7 @@ export function IntakeWizard() {
     } finally {
       setBusy(false);
     }
-  }, [csrfToken, draft]);
+  }, [csrfToken, draft, challengeToken, refreshChallenge]);
 
   const goBack = useCallback(() => {
     setErrors({});
@@ -698,11 +781,11 @@ export function IntakeWizard() {
           <p className="text-sm font-semibold" style={{ color: "var(--muted)" }}>
             Mã tiếp nhận
           </p>
-          <p className="text-xl font-bold tracking-wider">{receipt.code}</p>
+          <p className="pc-code text-xl font-bold">{receipt.code}</p>
           <p className="mt-3 text-sm font-semibold" style={{ color: "var(--muted)" }}>
             Mã bí mật — chỉ hiển thị một lần
           </p>
-          <p className="text-xl font-bold tracking-wider">{receipt.secret}</p>
+          <p className="pc-code text-xl font-bold">{receipt.secret}</p>
           <p className="pc-field-hint">
             Chụp màn hình hoặc ghi lại ngay. Mất mã thì phải mang giấy tờ đến UBND phường, không có
             cách khôi phục trực tuyến.
@@ -909,6 +992,43 @@ export function IntakeWizard() {
                       }))}
                     />
                   </Field>
+                  {requiresCitizenId(owner.ownerType) ? (
+                    <div
+                      className="rounded-lg border p-4"
+                      style={{
+                        background: "var(--warning-surface)",
+                        borderColor: "var(--warning-border)",
+                      }}
+                    >
+                      <p className="font-semibold">Quét mã QR trên thẻ để tự điền</p>
+                      <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+                        Chụp <strong>mặt sau</strong> thẻ căn cước, nơi có mã QR. Các ô bên dưới sẽ
+                        tự điền. Ảnh chụp ở bước này chỉ dùng để đọc mã ngay trên máy của bạn và{" "}
+                        <strong>không được tải lên hệ thống</strong>.
+                      </p>
+                      <label className="pc-button mt-3 inline-flex cursor-pointer focus-within:outline focus-within:outline-2">
+                        {scanningOwnerId === owner.id ? "Đang đọc mã…" : "Quét QR căn cước"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="sr-only"
+                          disabled={busy || scanningOwnerId === owner.id}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] ?? null;
+                            // Xóa giá trị để chụp lại cùng một tấm vẫn kích hoạt onChange.
+                            event.target.value = "";
+                            void handleQrScan(owner.id, file);
+                          }}
+                        />
+                      </label>
+                      {scanNotes[owner.id] ? (
+                        <p className="mt-2 text-sm" aria-live="polite">
+                          {scanNotes[owner.id]}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <Field
                     label={owner.ownerType === "TO_CHUC" ? "Tên tổ chức" : "Họ và tên"}
                     required
@@ -1560,6 +1680,22 @@ export function IntakeWizard() {
         </div>
       ) : null}
 
+      {challengeAction && !outOfScope ? (
+        <div>
+          <TurnstileWidget
+            key={`${challengeAction}-${challengeNonce}`}
+            action={challengeAction}
+            onToken={handleChallengeToken}
+          />
+          {challengeToken ? null : (
+            <p className="text-sm" style={{ color: "var(--muted)" }} aria-live="polite">
+              Đang xác minh bạn không phải chương trình tự động. Nếu ô kiểm tra không hiện, kiểm tra
+              lại kết nối mạng rồi tải lại trang.
+            </p>
+          )}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
         {step > 0 ? (
           <button type="button" className="pc-button-quiet" onClick={goBack} disabled={busy}>
@@ -1573,7 +1709,7 @@ export function IntakeWizard() {
             onClick={() => {
               void goNext();
             }}
-            disabled={outOfScope || busy}
+            disabled={outOfScope || busy || (challengeAction !== null && !challengeToken)}
           >
             {busy ? "Đang xử lý…" : "Tiếp tục"}
           </button>
@@ -1584,7 +1720,7 @@ export function IntakeWizard() {
             onClick={() => {
               void handleSubmit();
             }}
-            disabled={busy}
+            disabled={busy || !challengeToken}
           >
             {busy ? "Đang gửi…" : "Gửi bản kê khai"}
           </button>

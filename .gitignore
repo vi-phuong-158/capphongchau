@@ -14,6 +14,7 @@ test-results/
 # Local tooling
 .vercel/
 .claude/
+.codex-remote-attachments/
 .bootstrap-state.json
 .bootstrap-secrets.json
 *.log

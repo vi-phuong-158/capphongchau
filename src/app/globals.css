@@ -1,25 +1,104 @@
 @import "tailwindcss";
 
 /**
- * Design token — nguồn duy nhất cho màu/kích thước, không phụ thuộc skill cài ở máy nào
- * (PLAN_NL §3). Phong cách dịch vụ công tối giản: nền ngà, mặt nhập liệu trắng, một màu nhấn.
+ * Design tokens — Cherry Gold Civic Glass (DESIGN.md §4).
+ *
+ * Nguồn duy nhất cho màu và kích thước; component không được rải mã hex tùy ý (DESIGN.md §16.3).
+ * Đỏ cherry là màu nhận diện, vàng kim là màu nhấn có kiểm soát, nền sáng trung tính để dữ liệu
+ * nghiệp vụ dễ đọc.
  */
 :root {
-  --background: #f7f6f3;
-  --foreground: #17211d;
-  --surface: #ffffff;
-  --border: #eaeaea;
-  --border-strong: #d4d4d0;
-  --muted: #5c635f;
-  --accent: #1b5e43;
-  --accent-hover: #164c37;
-  --danger: #9b1c1c;
-  --warning-surface: #fdf6e3;
-  --warning-border: #e3d08a;
+  --cherry-950: #3f0712;
+  --cherry-900: #5c0b1c;
+  --cherry-800: #781127;
+  --cherry-700: #991b35;
+  --cherry-600: #b42343;
+  --cherry-500: #cf3657;
+  --cherry-400: #e75d77;
+  --cherry-300: #f18da0;
+  --cherry-200: #f8bdc8;
+  --cherry-100: #fde3e8;
+  --cherry-50: #fff4f6;
 
-  --radius-control: 7px;
-  --radius-block: 12px;
-  --control-height: 48px;
+  --gold-900: #6b4500;
+  --gold-800: #895c00;
+  --gold-700: #aa7605;
+  --gold-600: #cc9512;
+  --gold-500: #e9b52c;
+  --gold-400: #f4ca56;
+  --gold-300: #f8db86;
+  --gold-200: #fbe9b5;
+  --gold-100: #fff5d8;
+  --gold-50: #fffbef;
+
+  --background: #f7f5f3;
+  --background-subtle: #fbfaf9;
+  --surface: #ffffff;
+  --surface-raised: rgba(255, 255, 255, 0.86);
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.88);
+
+  --text-primary: #22181b;
+  --text-secondary: #5f5357;
+  --text-muted: #83777b;
+  --text-inverse: #fffaf7;
+
+  --border: #e7dfe1;
+  --border-strong: #d5c6ca;
+  --border-glass: rgba(255, 255, 255, 0.72);
+
+  --success: #177447;
+  --success-soft: #e8f6ef;
+  --warning: #9a5b00;
+  --warning-soft: #fff4dc;
+  --danger: #b42336;
+  --danger-soft: #fdebec;
+  --info: #2463a5;
+  --info-soft: #eaf3fc;
+  --neutral-soft: #f1eeee;
+
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 30px;
+  --radius-pill: 999px;
+
+  --shadow-xs: 0 1px 2px rgba(63, 7, 18, 0.06);
+  --shadow-sm: 0 4px 14px rgba(63, 7, 18, 0.08);
+  --shadow-md: 0 12px 30px rgba(63, 7, 18, 0.12);
+  --shadow-lg: 0 24px 64px rgba(63, 7, 18, 0.18);
+  --shadow-focus: 0 0 0 4px rgba(180, 35, 67, 0.18);
+
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /*
+   * Bí danh giữ lại cho mã đang chạy: các component hiện dùng `--accent`, `--muted`,
+   * `--foreground`, `--warning-surface`, `--warning-border`. Ánh xạ ở đây để đổi bảng màu mà
+   * không phải sửa rải rác trong JSX.
+   */
+  --foreground: var(--text-primary);
+  --muted: var(--text-secondary);
+  --accent: var(--cherry-700);
+  --accent-hover: var(--cherry-800);
+  --warning-surface: var(--gold-100);
+  --warning-border: var(--gold-300);
+
+  --control-height: 44px;
+  --radius-control: var(--radius-sm);
+  --radius-block: var(--radius-md);
+}
+
+@media (max-width: 640px) {
+  :root {
+    /* Vùng chạm tối thiểu 44×44px; trên mobile nới lên 48px cho dễ bấm (DESIGN.md §6.3, §7.2). */
+    --control-height: 48px;
+  }
 }
 
 * {
@@ -34,25 +113,46 @@ body {
   margin: 0;
   min-width: 320px;
   background: var(--background);
-  color: var(--foreground);
-  /* Chưa chốt Geist: phải xác minh subset `vietnamese` trước (PLAN_NL §3). */
-  font-family: system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  color: var(--text-primary);
+  /* Font hệ thống, không tải từ CDN lúc chạy (DESIGN.md §4.4). */
+  font-family: Inter, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 16px;
-  line-height: 1.65;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+/** Mã hồ sơ và mã tiếp nhận: mono, dễ đọc từng ký tự, cho phép bôi đen để copy. */
+.pc-code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  user-select: all;
 }
 
 .pc-field-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: var(--foreground);
+  color: var(--text-primary);
 }
 
+/*
+ * Dùng `--text-secondary` chứ không phải `--text-muted`: đo được `--text-muted` (#83777b) trên
+ * nền trắng chỉ đạt 4.29:1, dưới ngưỡng AA 4.5:1 mà DESIGN.md §13 yêu cầu. Token `--text-muted`
+ * vẫn giữ nguyên giá trị theo DESIGN.md §4.2, chỉ không dùng cho chữ nhỏ trên nền sáng.
+ */
 .pc-field-hint {
   margin-top: 6px;
   font-size: 0.875rem;
-  color: var(--muted);
+  color: var(--text-secondary);
 }
 
 .pc-field-error {
@@ -71,8 +171,11 @@ body {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
   background: var(--surface);
-  color: var(--foreground);
+  color: var(--text-primary);
   font: inherit;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .pc-textarea {
@@ -80,62 +183,106 @@ body {
   resize: vertical;
 }
 
+.pc-input:hover,
+.pc-select:hover,
+.pc-textarea:hover {
+  border-color: var(--cherry-300);
+}
+
+/* Focus ring rõ ràng, không chỉ đổi màu nền (DESIGN.md §13). */
 .pc-input:focus-visible,
 .pc-select:focus-visible,
 .pc-textarea:focus-visible,
 .pc-button:focus-visible,
-.pc-button-quiet:focus-visible {
-  outline: 3px solid var(--accent);
+.pc-button-quiet:focus-visible,
+.pc-button-gold:focus-visible {
+  outline: 2px solid var(--cherry-600);
   outline-offset: 2px;
+  box-shadow: var(--shadow-focus);
 }
 
 .pc-input[aria-invalid="true"],
-.pc-select[aria-invalid="true"] {
+.pc-select[aria-invalid="true"],
+.pc-textarea[aria-invalid="true"] {
   border-color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .pc-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-block);
   background: var(--surface);
+  box-shadow: var(--shadow-xs);
   padding: 20px;
 }
 
-.pc-button {
+.pc-button,
+.pc-button-quiet,
+.pc-button-gold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: var(--control-height);
   padding: 0 20px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--accent);
-  color: #ffffff;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.pc-button {
+  background: var(--cherry-700);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-xs);
 }
 
 .pc-button:hover {
-  background: var(--accent-hover);
+  background: var(--cherry-800);
 }
 
-.pc-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.pc-button:active {
+  transform: translateY(1px);
+}
+
+/* Vàng kim chỉ dành cho một CTA nổi bật, chữ cherry đậm để đủ tương phản (DESIGN.md §7.1). */
+.pc-button-gold {
+  background: var(--gold-500);
+  color: var(--cherry-950);
+  box-shadow: var(--shadow-xs);
+}
+
+.pc-button-gold:hover {
+  background: var(--gold-400);
 }
 
 .pc-button-quiet {
-  min-height: var(--control-height);
-  padding: 0 20px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control);
   background: var(--surface);
-  color: var(--foreground);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
+  border-color: var(--cherry-200);
+  color: var(--cherry-800);
+}
+
+.pc-button-quiet:hover {
+  background: var(--cherry-50);
+  border-color: var(--cherry-300);
+}
+
+.pc-button:disabled,
+.pc-button-quiet:disabled,
+.pc-button-gold:disabled,
+.pc-button:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .pc-step-panel {
-  animation: pc-step-in 180ms ease-out;
+  animation: pc-step-in var(--duration-base) var(--ease-standard);
 }
 
 @keyframes pc-step-in {
@@ -149,8 +296,13 @@ body {
   }
 }
 
+/* Chuyển động ngắn, và tôn trọng lựa chọn giảm chuyển động của người dùng (DESIGN.md §12.4). */
 @media (prefers-reduced-motion: reduce) {
-  .pc-step-panel {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

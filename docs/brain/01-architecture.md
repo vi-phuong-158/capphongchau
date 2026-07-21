@@ -62,6 +62,9 @@ src/modules/common/domain.ts
 src/modules/files/index.ts ─────→ kiểu file nội bộ (file_id tách Drive ID)
 src/modules/qr/index.ts ────────→ quy ước giải mã QR phía client
 src/modules/public-intake/citizen-id-qr* → parser QR bảo thủ + ZXing/HEIC chỉ chạy client
+  ├── bắt buộc hint TRY_HARDER (mặc định trượt thất thường — tests/citizen-id-qr-decoding.test.ts)
+  ├── đọc ngầm khi tải ảnh CCCD, và nút "Quét QR" chụp một kiểu (ảnh quét không tải lên)
+  └── wizard.tsx: applyQrResult dùng chung hai đường, cờ force phân biệt ghi đè
 src/modules/audit/index.ts ─────→ kiểu tham chiếu audit append-only
 src/modules/sheets/index.ts ────→ src/modules/sheets/data-repository.ts
 src/modules/drive/index.ts ─────→ src/modules/drive/storage-repository.ts
@@ -87,6 +90,16 @@ src/app/api/health/google/route.ts
 ├── src/modules/common/api-error.ts
 ├── src/modules/common/env.ts
 └── src/modules/google/workspace-client.ts
+
+src/app/ke-khai/page.tsx ─→ src/modules/public-intake/edge-guard.ts (404 nếu không qua Cloudflare)
+src/app/ke-khai/wizard.tsx ─→ src/components/turnstile-widget.tsx (action create/submit)
+src/modules/public-intake/edge-guard.ts ─→ header X-Origin-Auth vs ORIGIN_SHARED_SECRET
+├── src/modules/public-intake/route-context.ts (phủ mọi route current/*)
+└── src/app/api/public/submissions/route.ts
+src/modules/public-intake/turnstile.ts ─→ Cloudflare siteverify (fail-closed)
+├── src/app/api/public/submissions/route.ts (action create, duplicate → chỉ replay)
+└── src/app/api/public/submissions/current/submit/route.ts (action submit)
+tests/public-surface-guard.test.ts ─→ mọi route /api/public + matcher src/proxy.ts
 
 src/app/ke-khai/wizard.tsx
 └── POST /api/public/submissions (UUID idempotency-key, retry 5xx/network)
@@ -202,6 +215,11 @@ SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com
 DATA_HASH_PEPPER=
 MAX_UPLOAD_MB=30
 VERCEL_REGION=sin1
+PUBLIC_SESSION_SECRET=
+PUBLIC_ACCESS_CODE_PEPPER=
+ORIGIN_SHARED_SECRET=
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
 ```
 
 Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VISION_PROJECT_ID`, `TEMP_FILE_DIR` trong bản thử nghiệm.

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { loadPublicIntakeEnvironment } from "@/modules/common/env";
+import { loadPublicIntakeEnvironment, type PublicIntakeEnvironment } from "@/modules/common/env";
 import {
   deriveAccessSecret,
   derivePhoneFingerprint,
@@ -12,6 +12,7 @@ import {
   isValidPublicIdempotencyKey,
   publicRequestLogKey,
 } from "@/modules/public-intake/creation-idempotency";
+import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { publicError } from "@/modules/public-intake/route-context";
 import {
@@ -22,6 +23,11 @@ import {
   SESSION_COOKIE_OPTIONS,
 } from "@/modules/public-intake/session";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
+import {
+  TURNSTILE_HEADER,
+  turnstileHostname,
+  verifyTurnstileToken,
+} from "@/modules/public-intake/turnstile";
 import { emptyDraft } from "@/modules/public-intake/types";
 
 export const runtime = "nodejs";
@@ -50,6 +56,14 @@ class CreationConflictError extends Error {
   }
 }
 
+/** Token Turnstile đã dùng nhưng không có bản nháp cũ để trả lại — không được tạo bản mới. */
+class StaleChallengeError extends Error {
+  constructor() {
+    super("Mã xác minh đã được sử dụng.");
+    this.name = "StaleChallengeError";
+  }
+}
+
 /**
  * Tạo bản kê khai nháp. Không cần đăng nhập.
  *
@@ -59,6 +73,17 @@ class CreationConflictError extends Error {
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const requestId = randomUUID();
+
+  let environment: PublicIntakeEnvironment;
+  try {
+    environment = loadPublicIntakeEnvironment();
+  } catch {
+    return publicError("INTERNAL_ERROR", "Hệ thống chưa sẵn sàng nhận kê khai.", requestId);
+  }
+
+  if (!isTrustedEdgeRequest(request.headers, environment.ORIGIN_SHARED_SECRET)) {
+    return publicError("ACCESS_DENIED", "Yêu cầu không hợp lệ.", requestId);
+  }
 
   let body: { phone?: unknown };
   try {
@@ -85,8 +110,24 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
+  // Turnstile đứng trước mọi lệnh gọi Google: một bản kê khai rác không được phép tốn lượt ghi
+  // Sheets hay một thư mục Drive nào. Token dùng một lần, nên lần retry trên mạng yếu gửi lại
+  // đúng token cũ — trường hợp đó chỉ được đi tiếp vào đường replay, không được tạo bản mới.
+  const turnstile = await verifyTurnstileToken({
+    token: request.headers.get(TURNSTILE_HEADER),
+    action: "create",
+    secretKey: environment.TURNSTILE_SECRET_KEY,
+    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
+  });
+  if (!turnstile.ok && !turnstile.duplicate) {
+    return publicError(
+      "ACCESS_DENIED",
+      "Chưa xác minh được thao tác này do người thật thực hiện. Tải lại trang và thử lại.",
+      requestId,
+    );
+  }
+
   try {
-    const environment = loadPublicIntakeEnvironment();
     const idempotencyKey = publicRequestLogKey(rawIdempotencyKey);
     const mutationHash = derivePhoneFingerprint(environment.PUBLIC_ACCESS_CODE_PEPPER, phone);
     let activeCreation = inFlightCreations.get(idempotencyKey);
@@ -103,6 +144,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         requestId,
         sessionSecret: environment.PUBLIC_SESSION_SECRET,
         accessPepper: environment.PUBLIC_ACCESS_CODE_PEPPER,
+        replayOnly: turnstile.duplicate,
       });
       activeCreation = { mutationHash, operation };
       inFlightCreations.set(idempotencyKey, activeCreation);
@@ -133,6 +175,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         requestId,
       );
     }
+    if (error instanceof StaleChallengeError) {
+      return publicError(
+        "ACCESS_DENIED",
+        "Chưa xác minh được thao tác này do người thật thực hiện. Tải lại trang và thử lại.",
+        requestId,
+      );
+    }
     // Google/biến môi trường có thể lỗi sau một phần thao tác. Không trả stack, Drive ID hay PII;
     // cùng idempotency key ở lần thử sau sẽ tiếp tục đúng bản nháp thay vì tạo bản mới.
     return publicError(
@@ -151,6 +200,7 @@ async function createOrRecoverSubmission(input: {
   requestId: string;
   sessionSecret: string;
   accessPepper: string;
+  replayOnly: boolean;
 }): Promise<CreationResult> {
   const repository = getPublicIntakeRepository();
   const accessSecret = deriveAccessSecret(input.accessPepper, input.rawIdempotencyKey);
@@ -166,6 +216,10 @@ async function createOrRecoverSubmission(input: {
       accessSecret,
       recovered: true,
     };
+  }
+
+  if (input.replayOnly) {
+    throw new StaleChallengeError();
   }
 
   const submissionId = deriveSubmissionId(input.sessionSecret, input.rawIdempotencyKey);

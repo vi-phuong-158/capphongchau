@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { createApiErrorPayload, type ApiErrorCode } from "@/modules/common/api-error";
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 
+import { isTrustedEdgeRequest } from "./edge-guard";
 import { getPublicIntakeRepository, type SubmissionRecord } from "./repository";
 import {
   PUBLIC_CSRF_HEADER,
@@ -60,6 +61,9 @@ export interface PublicRequestContext {
  * Giải phiên từ cookie và kiểm CSRF cho mọi thao tác ghi. Bản kê khai được xác định hoàn toàn
  * từ cookie đã ký — không bao giờ nhận `submission_id` từ URL hay body, để không ai đọc được
  * hồ sơ của người khác bằng cách đoán ID.
+ *
+ * Cũng là chốt chặn lớp biên cho toàn bộ `/api/public/submissions/current/*`: route mới chỉ cần
+ * đi qua đây là đã được bảo vệ.
  */
 export async function resolvePublicRequest(
   request: Request,
@@ -67,6 +71,10 @@ export async function resolvePublicRequest(
 ): Promise<PublicRequestContext | NextResponse> {
   const requestId = randomUUID();
   const environment = loadPublicIntakeEnvironment();
+
+  if (!isTrustedEdgeRequest(request.headers, environment.ORIGIN_SHARED_SECRET)) {
+    return publicError("ACCESS_DENIED", "Yêu cầu không hợp lệ.", requestId);
+  }
 
   const cookieStore = await cookies();
   const session = verifySessionToken(

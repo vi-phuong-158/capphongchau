@@ -12,7 +12,7 @@
 
 - Ngôn ngữ / runtime: TypeScript strict (không dùng `any`), Next.js App Router.
 - Tài liệu và giao tiếp trong dự án bằng tiếng Việt (README, AGENTS.md, PLAN.md đều tiếng Việt).
-- Linter / formatter: chưa cấu hình — khi khởi tạo code (M0), thêm ESLint + Prettier theo chuẩn Next.js.
+- Linter / formatter: ESLint (`eslint.config.mjs`) + Prettier đã cấu hình. Chạy `npm run lint` và `npm run format:check` trước khi commit.
 
 ## Đặt tên
 
@@ -41,7 +41,7 @@
 
 ## Test
 
-Chưa có test tự động (chưa có code). Kế hoạch tối thiểu khi triển khai (theo `AGENTS.md` §7 và `PLAN.md`):
+Vitest (`npm run test`) và Playwright (`npm run test:e2e`) đã chạy được; hiện có 82 unit test. Phạm vi tối thiểu cần đạt (theo `AGENTS.md` §7 và `PLAN.md`):
 
 - Unit: parser QR, chuẩn hóa CCCD/ngày, che/HMAC CCCD, case ID, transition trạng thái, phân quyền, version conflict.
 - Integration: refresh token OAuth, Drive folders, Sheets batch writes, resumable upload, retry, idempotency, lỗi từng phần.

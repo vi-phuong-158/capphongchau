@@ -234,6 +234,63 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
   và migration schema chuẩn hóa có backup. Cán bộ vẫn xem ảnh, đối chiếu và yêu cầu bổ sung được.
 - **Người quyết định:** Codex, theo yêu cầu triển khai quy trình tiếp nhận của chủ dự án.
 
+## [2026-07-22] `DESIGN.md` là nguồn thiết kế; áp theo mốc, không đổi cây route
+
+- **Quyết định:** `DESIGN.md` (phong cách Cherry Gold Civic Glass) là nguồn chỉ dẫn giao diện của
+  dự án. Áp dụng theo mốc như chính §18 của nó đề ra, bắt đầu bằng "M0 — Nền tảng thiết kế"
+  (tokens, typography, button/input/card, responsive). **Không** đổi cây route sang `/app/...` và
+  `/public/...` như §3 mô tả.
+- **Lý do:** Token là thứ đổi một chỗ mà toàn bộ màn hình hiện có hưởng theo, nên làm trước là
+  hiệu quả nhất. Ngược lại, cây route trong §3 khác hoàn toàn route đang chạy (`/ke-khai`,
+  `/submissions`, `/api/public/*`) — đổi sẽ phá hợp đồng API, phá matcher của `proxy.ts` và phá cả
+  cấu hình Cloudflare sắp đặt theo đường dẫn. `DESIGN.md` §7 cũng tự ràng buộc "không thay đổi
+  schema/API/quy tắc nghiệp vụ chỉ để thuận tiện cho giao diện".
+- **Đánh đổi:** Tài liệu thiết kế và cây route thực tế lệch nhau; ai đọc §3 phải biết đó là đích
+  dài hạn chứ không phải hiện trạng. Đổi lại giữ được hệ thống đang chạy.
+- **Người quyết định:** Chủ dự án (2026-07-22) giao áp `DESIGN.md`; Claude Code chọn phạm vi theo mốc.
+
+## [2026-07-22] Quét QR chủ động bằng chụp một kiểu, không mở luồng video
+
+- **Quyết định:** Khối thông tin từng chủ sử dụng có nút "Quét QR căn cước" mở camera **chụp một
+  kiểu** (`<input type="file" capture="environment">`), giải mã tại chỗ rồi tự điền. **Không** mở
+  luồng video quét liên tục kiểu app ngân hàng. Ảnh chụp ở bước này không được tải lên, chỉ tồn
+  tại trong bộ nhớ trình duyệt đủ lâu để đọc mã.
+- **Lý do:** Chủ dự án muốn thao tác quét chủ động, tiện hơn là phải tải ảnh rồi chờ đọc ngầm.
+  Chụp một kiểu đạt được điều đó mà vẫn nằm trong quyết định [2026-07-21] "đọc QR từ ảnh, không mở
+  luồng quét camera hoặc OCR riêng" — nên đây là làm rõ phạm vi, không phải đảo quyết định cũ.
+  Không tải ảnh lên giữ đúng nguyên tắc thu thập tối thiểu: hệ thống đã có cặp ảnh CCCD nộp riêng,
+  không cần thêm bản sao thứ ba của giấy tờ tùy thân.
+- **Đánh đổi:** Người dân chụp thêm một kiểu ngoài hai mặt CCCD phải nộp. Đổi lại luồng quét không
+  phụ thuộc kết quả tải ảnh, chạy được cả trên máy tính, và không cần xin quyền camera thường trực.
+- **Người quyết định:** Chủ dự án (2026-07-22), Claude Code triển khai.
+
+## [2026-07-22] Token Turnstile đã dùng chỉ mở đường replay, không mở đường tạo mới
+
+- **Quyết định:** `POST /api/public/submissions` phân biệt hai kiểu Turnstile trượt. Token giả →
+  từ chối thẳng. Token đã dùng (`timeout-or-duplicate`) → cho request đi tiếp nhưng **chỉ** tới
+  nhánh trả lại kết quả cũ theo idempotency key; nếu không có bản nháp cũ thì từ chối
+  (`StaleChallengeError`), tuyệt đối không tạo bản kê khai mới.
+- **Lý do:** Token Turnstile dùng một lần, còn luồng tạo nháp cố ý retry cùng idempotency key trên
+  mạng yếu (quyết định 2026-07-21). Nếu chặn thẳng token trùng thì chính lần retry cứu người dân
+  khỏi mất mã lại bị 403 — hỏng đúng bản sửa lỗi trước đó. Nếu ngược lại cho token trùng đi tự do
+  thì một token giải một lần dùng được mãi.
+- **Đánh đổi:** Thêm một nhánh trạng thái trong route tạo nháp. Đổi lại giữ được cả hai tính chất:
+  chống bot ở lần tạo thật, và retry không sinh hồ sơ trùng.
+- **Người quyết định:** Claude Code, khi triển khai lớp biên (Phase A).
+
+## [2026-07-22] Chốt chặn lớp biên đặt ở route, không đặt ở middleware
+
+- **Quyết định:** Kiểm `ORIGIN_SHARED_SECRET` tại ba điểm trong Node runtime —
+  `resolvePublicRequest`, route tạo nháp, và trang `/ke-khai` — thay vì mở rộng matcher của
+  `src/proxy.ts`.
+- **Lý do:** `PLAN_NL` §10.1 cảnh báo sửa matcher là thay đổi rủi ro hai chiều (đá nhầm người dân
+  về trang đăng nhập, hoặc mở nhầm route cán bộ). Ngoài ra Edge runtime không có `timingSafeEqual`
+  của Node. Next.js cũng bắt buộc `matcher` là literal tĩnh nên không tách hằng số dùng chung được.
+- **Đánh đổi:** Route công khai mới có thể quên gắn chốt chặn. Bù lại bằng
+  `tests/public-surface-guard.test.ts`: test tự liệt kê mọi `route.ts` dưới `src/app/api/public`
+  và đỏ nếu file nào không đi qua chốt chặn.
+- **Người quyết định:** Claude Code, khi triển khai lớp biên (Phase A).
+
 ## Template cho entry mới
 
 ```

@@ -1,4 +1,9 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { notFound } from "next/navigation";
+
+import { loadPublicIntakeEnvironment } from "@/modules/common/env";
+import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
 
 import { IntakeWizard } from "./wizard";
 
@@ -7,23 +12,26 @@ export const metadata: Metadata = {
   description: "Người dân kê khai và nộp giấy tờ đất đai trực tuyến, không cần tài khoản.",
 };
 
-export default function IntakePage() {
+export default async function IntakePage() {
+  // Trang này cũng phải sau Cloudflare, không riêng API: mở được biểu mẫu ở URL *.vercel.app là
+  // mở luôn đường tấn công không qua WAF (PLAN_NL §10.2). 404 để không xác nhận trang có tồn tại.
+  const environment = loadPublicIntakeEnvironment();
+  if (!isTrustedEdgeRequest(await headers(), environment.ORIGIN_SHARED_SECRET)) {
+    notFound();
+  }
+
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
-      <div
-        className="pc-card mb-6"
-        style={{ background: "var(--warning-surface)", borderColor: "var(--warning-border)" }}
-      >
-        <p className="font-bold">BẢN CHẠY THỬ — DỮ LIỆU ĐƯỢC LƯU THẬT</p>
-        <p className="mt-1 text-sm">
-          Bản kê khai và ảnh giấy tờ bạn nhập ở đây <strong>được lưu thật</strong> vào Google Sheets
-          và Google Drive của hệ thống. Hệ thống đang chạy thử và{" "}
-          <strong>chưa bật lớp chống lạm dụng (Turnstile, giới hạn truy cập)</strong> — vì vậy chỉ
-          dùng dữ liệu giả để kiểm thử, đừng nhập CCCD hoặc thông tin cá nhân thật.
-        </p>
-      </div>
-
+      {/* Dải cherry ở đầu trang thay cho một khối màu lớn — màu thương hiệu làm điểm neo thị
+          giác, không phủ dày toàn màn hình (DESIGN.md §1.3, §9.1). */}
       <header className="mb-8">
+        <div
+          aria-hidden="true"
+          className="mb-6 h-1 w-16 rounded-full"
+          style={{
+            background: "linear-gradient(90deg, var(--cherry-700), var(--gold-500))",
+          }}
+        />
         <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
           PHƯỜNG PHONG CHÂU
         </p>

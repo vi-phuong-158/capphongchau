@@ -24,6 +24,9 @@ const validEnvironment: EnvironmentSource = {
   VERCEL_REGION: "sin1",
   PUBLIC_SESSION_SECRET: "c".repeat(32),
   PUBLIC_ACCESS_CODE_PEPPER: "d".repeat(32),
+  ORIGIN_SHARED_SECRET: "e".repeat(32),
+  TURNSTILE_SECRET_KEY: "turnstile-secret-key",
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: "turnstile-site-key",
 };
 
 describe("cấu hình môi trường server", () => {
@@ -64,11 +67,33 @@ describe("cấu hình môi trường server", () => {
     });
   });
 
-  it("cổng công khai chỉ cần secret phiên, pepper và giới hạn upload", () => {
+  it("cổng công khai cần secret phiên, pepper, giới hạn upload và cấu hình lớp biên", () => {
     expect(loadPublicIntakeEnvironment(validEnvironment)).toMatchObject({
       PUBLIC_SESSION_SECRET: "c".repeat(32),
       MAX_UPLOAD_MB: 30,
+      ORIGIN_SHARED_SECRET: "e".repeat(32),
+      TURNSTILE_SECRET_KEY: "turnstile-secret-key",
+      APP_BASE_URL: "http://localhost:3000",
     });
+  });
+
+  it("thiếu cấu hình lớp biên là lỗi cấu hình, không phải mặc định bỏ qua", () => {
+    const withoutEdge = {
+      ...validEnvironment,
+      ORIGIN_SHARED_SECRET: "",
+      TURNSTILE_SECRET_KEY: "",
+    };
+
+    try {
+      loadPublicIntakeEnvironment(withoutEdge);
+      throw new Error("Lẽ ra phải ném EnvironmentValidationError.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvironmentValidationError);
+      expect((error as EnvironmentValidationError).invalidKeys).toEqual([
+        "ORIGIN_SHARED_SECRET",
+        "TURNSTILE_SECRET_KEY",
+      ]);
+    }
   });
 
   it("secret phiên công khai tách khỏi AUTH_SECRET và pepper tách khỏi DATA_HASH_PEPPER", () => {

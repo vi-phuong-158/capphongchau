@@ -2,7 +2,9 @@
 
 > Mọi lệnh để dựng môi trường, chạy, test, build, deploy. Agent đọc đây thay vì đoán lệnh.
 >
-> **Trạng thái hiện tại: M1 đang hoàn thiện.** Bootstrap Google và health check đã có mã nguồn; chưa tạo kho dữ liệu thật cho đến khi OAuth client secret được đặt an toàn trong `.env.local`.
+> **Trạng thái hiện tại (2026-07-22): M0–M2 xong, cổng kê khai công khai M3.5 đã chạy thật.**
+> Kho Google đã bootstrap; `npm run dev`, `build`, `lint`, `test` đều chạy được. Phần code của lớp
+> biên (Turnstile + chốt chặn Cloudflare) đã có; phần cấu hình dashboard Cloudflare/Vercel chưa làm.
 
 ## Cài đặt môi trường local
 
@@ -20,8 +22,15 @@ Biến môi trường cần thiết (xem đầy đủ trong `01-architecture.md`
 APP_BASE_URL, AUTH_SECRET, AUTH_GOOGLE_CLIENT_ID, AUTH_GOOGLE_CLIENT_SECRET,
 GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN,
 GOOGLE_MY_DRIVE_ROOT_FOLDER_ID, GOOGLE_SHEETS_SPREADSHEET_ID,
-SYSTEM_ADMIN_EMAIL, DATA_HASH_PEPPER, MAX_UPLOAD_MB, VERCEL_REGION
+SYSTEM_ADMIN_EMAIL, DATA_HASH_PEPPER, MAX_UPLOAD_MB, VERCEL_REGION,
+PUBLIC_SESSION_SECRET, PUBLIC_ACCESS_CODE_PEPPER,
+ORIGIN_SHARED_SECRET, NEXT_PUBLIC_TURNSTILE_SITE_KEY, TURNSTILE_SECRET_KEY
 ```
+
+Ở máy local, dùng đúng cặp khóa thử nghiệm chính thức của Cloudflare cho Turnstile
+(`1x00000000000000000000AA` và `1x0000000000000000000000000000000AA`) — chúng luôn pass nên mã
+nguồn không cần bất kỳ nhánh bypass nào cho dev. `ORIGIN_SHARED_SECRET` chỉ được kiểm khi
+`NODE_ENV=production`, nhưng vẫn phải có giá trị hợp lệ, nếu không `build` sẽ dừng.
 
 ## Bootstrap My Drive và Google Sheets (chạy một lần)
 
@@ -72,6 +81,33 @@ Checklist thủ công trước khi commit/push (theo `AGENTS.md` §7.2 — Defin
 ## Deploy
 
 Kế hoạch (M5 trong `PLAN.md`): Deploy Preview trên Vercel bằng dữ liệu giả trước, sau đó Production tại region `sin1`. OAuth consent screen phải chuyển sang `In production` trước khi dùng dữ liệu thật. Thí điểm tuần tự: 20 hồ sơ giả/ẩn danh → 100 hồ sơ thật → tối đa 500 hồ sơ.
+
+### Cấu hình Cloudflare (làm trong dashboard, trước khi deploy code lớp biên)
+
+Thứ tự quan trọng: cấu hình Cloudflare **trước**, deploy code **sau**. Làm ngược thì trong khoảng
+giữa cổng công khai trả 404/403 cho mọi người.
+
+1. Turnstile → tạo widget chế độ **Managed**, lấy site key + secret key.
+2. DNS trỏ domain về Vercel, bật **proxy** (mây cam). SSL/TLS đặt **Full (strict)** — chế độ
+   Flexible gây vòng lặp chuyển hướng với Vercel.
+3. **Transform Rule** (Modify Request Header): thêm `X-Origin-Auth` mang giá trị
+   `ORIGIN_SHARED_SECRET` vào mọi request. Thiếu bước này thì origin từ chối toàn bộ cổng công khai.
+4. **Cache Rule**: bypass cache cho `/api/*` và `/ke-khai*`. Không bật "Cache Everything" hay
+   Automatic Platform Optimization — một trang nháp bị cache là lộ PII sang người khác.
+5. **Rate limiting** theo bảng `PLAN_NL` §10.2 (`/api/public/*` 120 req/10 phút/IP;
+   `/api/public/submissions/access` 10 req/10 phút/IP; POST tạo nháp 5 req/giờ/IP). Bật chế độ
+   **Log** trước, quan sát rồi mới chuyển Block. Kiểm số rule gói hiện tại cho phép trước khi
+   thiết kế — gói Free thường chỉ được một rule.
+6. Vercel: đặt `ORIGIN_SHARED_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
+   cho **cả Production lẫn Preview**; bật Deployment Protection cho Preview.
+
+Nghiệm thu bắt buộc (`PLAN_NL` §11):
+
+- [ ] `curl -X POST https://<project>.vercel.app/api/public/submissions` → **403**.
+- [ ] Cùng request qua domain thật → chạy bình thường.
+- [ ] `curl -I https://<domain>/ke-khai` → `CF-Cache-Status` không bao giờ là `HIT`.
+- [ ] Turnstile: token rỗng → 403; token gửi lại lần hai → 403; chặn mạng tới siteverify → 403.
+- [ ] Cán bộ vẫn đăng nhập được và `/ke-khai` không bị đá về trang chủ.
 
 ## Môi trường
 

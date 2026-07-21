@@ -18,6 +18,11 @@ const serverEnvironmentSchema = z.object({
   // AUTH_SECRET; pepper mã bí mật tách khỏi DATA_HASH_PEPPER để xoay được độc lập.
   PUBLIC_SESSION_SECRET: z.string().min(32),
   PUBLIC_ACCESS_CODE_PEPPER: z.string().min(32),
+  // Lớp biên Cloudflare. Thiếu bất kỳ biến nào ở đây là cổng công khai chạy không có lớp chống
+  // lạm dụng, nên chúng bắt buộc chứ không tùy chọn (PLAN_NL §10, §10.2).
+  ORIGIN_SHARED_SECRET: z.string().min(32),
+  TURNSTILE_SECRET_KEY: z.string().min(1),
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1),
 });
 
 const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
@@ -32,6 +37,9 @@ const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
   PUBLIC_SESSION_SECRET: true,
   PUBLIC_ACCESS_CODE_PEPPER: true,
   MAX_UPLOAD_MB: true,
+  ORIGIN_SHARED_SECRET: true,
+  TURNSTILE_SECRET_KEY: true,
+  APP_BASE_URL: true,
 });
 
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;

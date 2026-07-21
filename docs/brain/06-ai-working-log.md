@@ -5,6 +5,131 @@
 
 ---
 
+## [2026-07-22] Áp design system Cherry Gold Civic Glass, bỏ banner bản chạy thử
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - Bỏ khối cảnh báo "BẢN CHẠY THỬ — DỮ LIỆU ĐƯỢC LƯU THẬT" ở đầu `/ke-khai` theo yêu cầu chủ dự án.
+  - `globals.css` thay toàn bộ token cũ (xanh lá dịch vụ công) bằng bảng token của `DESIGN.md` §4:
+    thang cherry và gold đầy đủ, nền/chữ/viền, màu ngữ nghĩa, bo góc, đổ bóng, thời lượng chuyển
+    động. Giữ nguyên tên sáu biến mà JSX đang dùng (`--accent`, `--muted`, `--danger`,
+    `--warning-surface`, `--warning-border`, `--foreground`) và ánh xạ chúng sang bảng mới, nên đổi
+    được toàn bộ diện mạo mà không phải sửa rải rác trong component.
+  - Restyle `pc-input/select/textarea/card/button` theo §7: nút chính cherry-700, nút phụ viền
+    cherry-200 chữ cherry-800, focus ring 2px + `--shadow-focus`, chiều cao điều khiển 44px trên
+    desktop và 48px trên mobile (§6.3, §7.2). Thêm `.pc-button-gold` cho CTA vàng và `.pc-code`
+    cho mã hồ sơ/mã bí mật (mono, `tabular-nums`, bôi đen được — §4.4).
+  - `prefers-reduced-motion` giờ áp cho toàn trang, không riêng panel bước (§12.4).
+  - Thêm dải gradient cherry→gold ở đầu trang chủ và `/ke-khai` làm điểm neo thị giác, thay vì phủ
+    màu thương hiệu dày (§1.3).
+- **Phạm vi cố ý không làm:** `DESIGN.md` mô tả cả app shell nội bộ, sidebar, dashboard, bảng dữ
+  liệu, modal kính mờ và một cây route khác (`/app/ho-so`, `/public/bat-dau`…). Những màn hình đó
+  **chưa tồn tại**; đổi cây route sẽ phá hợp đồng API đang chạy. Lần này chỉ làm mốc "M0 — Nền tảng
+  thiết kế" của chính `DESIGN.md` §18, là phần các màn hình sau kế thừa được ngay.
+- **File đã sửa:** `src/app/globals.css`, `src/app/page.tsx`, `src/app/ke-khai/page.tsx`,
+  `src/app/ke-khai/wizard.tsx`.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `format:check` ✅, `test` ✅ 90/90, `build` ✅. Đo trên
+  trình duyệt: token áp đúng (nút cherry-700 `#991b35`, cao 44px desktop / 48px mobile, bo 10px);
+  không tràn ngang ở 360×800, 390×844 và 1440×900; không lỗi console.
+- **Sửa thêm một lỗi tương phản của chính DESIGN.md:** `--text-muted` (#83777b) trên nền trắng đo
+  được **4.29:1**, dưới ngưỡng AA 4.5:1 mà §13 yêu cầu. Giữ nguyên giá trị token theo §4.2 nhưng
+  `.pc-field-hint` chuyển sang `--text-secondary` (7.0:1). Các cặp màu còn lại đều đạt: chữ chính
+  15.9:1, chữ trắng trên nút cherry 7.9:1, nút phụ 11.0:1, danger 6.5:1, chữ trên nút vàng 8.9:1.
+
+---
+
+## [2026-07-22] Sửa lỗi quét QR CCCD và thêm nút quét chủ động
+
+- **Agent:** Claude Code
+- **Vấn đề:** Chủ dự án báo quét QR "không hoạt động". **Nguyên nhân gốc: thiếu hint
+  `TRY_HARDER`.** Ở cấu hình mặc định, ZXing chỉ quét một số dòng ngang cố định của ảnh, nên mã QR
+  có đọc được hay không phụ thuộc việc nó rơi trúng dòng quét nào — kết quả thất thường chứ không
+  theo ngưỡng dự đoán được. Đo trên 9 bố cục: QR 120px **trượt**, 150px đọc được, 240px **trượt**,
+  300px đọc được — cùng một khung ảnh 1200×1600. Ảnh gốc 12MP chụp dọc và ảnh vuông cũng trượt.
+  Bật `TRY_HARDER` đọc được **9/9**, tốn 7–52ms. Đây là lý do lỗi sống sót qua thử nghiệm tay:
+  vài bố cục ngang vẫn chạy đúng.
+- **Thay đổi:**
+  - `citizen-id-qr.client.ts` viết lại đường giải mã: truyền `TRY_HARDER`, thu nhỏ cạnh dài về
+    1600px, và dùng `decodeFromCanvas` đọc thẳng pixel.
+  - Bỏ vòng lặp thử 4 hướng xoay. Nó chỉ tồn tại để chữa cháy đúng lỗi trên (xoay ảnh dọc thành
+    ngang thì đôi khi may mắn đọc được), trong khi QR vốn bất biến với hướng xoay. Cách cũ tạo 3
+    chuỗi data URL vài MB từ ảnh 12MP — chậm, tốn bộ nhớ, và trên iOS canvas quá lớn có thể trả
+    ảnh rỗng khiến quét hỏng im lặng.
+  - Thêm nút **"Quét QR căn cước"** ngay đầu khối thông tin từng chủ sử dụng: mở camera chụp một
+    kiểu mặt sau thẻ, giải mã tại chỗ, tự điền các ô bên dưới. Ảnh này **không** được tải lên.
+  - Gộp phần đổ dữ liệu QR vào chủ sử dụng thành `applyQrResult` dùng chung cho hai đường (đọc
+    ngầm khi tải ảnh, và quét chủ động), kèm cờ `force` phân biệt hai hành vi ghi đè.
+- **File đã tạo:** `tests/citizen-id-qr-decoding.test.ts`.
+- **File đã sửa:** `src/modules/public-intake/citizen-id-qr.client.ts`, `src/app/ke-khai/wizard.tsx`.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `format:check` ✅, `test` ✅ 90/90 (+8), `build` ✅.
+  Test mới khóa lại kết luận đo được: liệt kê đúng các bố cục mà cấu hình mặc định trượt, và
+  khẳng định `TRY_HARDER` đọc được tất cả — ai bỏ hint đi thì test đỏ. Trang `/ke-khai` nạp sạch,
+  không lỗi console hay server.
+- **Chưa kiểm chứng được ở môi trường này:** camera thật trên điện thoại, và luồng quét trong thẻ
+  chủ sử dụng (phải tạo một bản kê khai thật mới hiện ra khối đó — thao tác ghi dữ liệu thật vào
+  Sheets/Drive nên chưa tự ý chạy). Cần một lượt thử trên điện thoại với thẻ căn cước thật.
+- **Rủi ro còn lại cần thẻ thật để kiểm:** `parseCitizenIdQr` yêu cầu đúng 7 trường ngăn bằng `|`
+  và 12 chữ số ở trường đầu. Chưa ai đối chiếu định dạng này với **thẻ căn cước mẫu 2024**. Ngoài
+  ra chưa ép `CHARACTER_SET`, nên nếu thẻ không khai báo ECI UTF-8 thì địa chỉ có dấu tiếng Việt
+  có thể ra sai chữ. Cả hai chỉ kết luận được khi quét một thẻ thật — **không được đoán rồi nới
+  lỏng parser**.
+
+---
+
+## [2026-07-22] Lớp biên cổng công khai: chặn đi vòng qua Cloudflare + Turnstile
+
+- **Agent:** Claude Code
+- **Vấn đề:** `/api/public/*` và `/ke-khai` là bề mặt ẩn danh, mỗi lần tạo nháp sinh một thư mục
+  Drive và hai dòng Sheets, mà toàn bộ kho nằm trên **một tài khoản Gmail cá nhân**. Trước thay
+  đổi này cả mã nguồn chỉ có đúng một dòng TODO — không Turnstile, không rate limit, không chặn
+  đường gọi thẳng `*.vercel.app`. Một script đơn giản đủ đốt hết quota Drive/Sheets trong một
+  đêm. Đây là hạng mục "chặn trước khi mở công khai" trong `04-current-tasks.md`.
+- **Thay đổi (phần code — phần dashboard Cloudflare do chủ dự án làm):**
+  - `edge-guard.ts`: so sánh constant-time header `X-Origin-Auth` do Cloudflare gắn với
+    `ORIGIN_SHARED_SECRET`. Chỉ bắt buộc khi `NODE_ENV=production` — gồm cả Preview của Vercel.
+    Đây là nhánh theo môi trường triển khai, **không** có đường nào để người gọi tự khai mình
+    đáng tin.
+  - `turnstile.ts`: siteverify với timeout 5s, **fail-closed** mọi hướng (lỗi mạng, timeout,
+    HTTP lỗi, body không parse được đều là từ chối), kiểm cả `action` lẫn `hostname`, không log
+    token.
+  - Va chạm đã lường: token Turnstile dùng một lần, còn luồng tạo nháp **cố ý retry cùng
+    idempotency key** trên mạng yếu. Nếu chặn thẳng `timeout-or-duplicate` thì phá đúng bản sửa
+    lỗi mạng yếu ngày 2026-07-21. Cách xử lý: phân biệt "token đã dùng" với "token giả" — token
+    đã dùng chỉ được đi tiếp vào **đường replay idempotency**, không bao giờ tạo bản mới
+    (`StaleChallengeError`).
+  - Gắn chốt chặn ở ba điểm: `resolvePublicRequest` (phủ 4 route `current/*`), route tạo nháp, và
+    trang `/ke-khai` (404 khi không qua Cloudflare). Cố ý **không** dùng middleware: `proxy.ts`
+    sửa matcher có rủi ro hai chiều (`PLAN_NL` §10.1) và Edge runtime không có `timingSafeEqual`.
+  - Widget Turnstile ở hai hành động `create` và `submit`; token gắn với đúng hành động, lấy
+    widget mới sau mỗi lần dùng, nút hành động khóa khi chưa có token.
+- **File đã tạo:** `src/modules/public-intake/edge-guard.ts`,
+  `src/modules/public-intake/turnstile.ts`, `src/components/turnstile-widget.tsx`,
+  `tests/edge-guard.test.ts`, `tests/turnstile.test.ts`, `tests/public-surface-guard.test.ts`.
+- **File đã sửa:** `src/modules/common/env.ts`, `src/modules/public-intake/route-context.ts`,
+  `src/app/api/public/submissions/route.ts`,
+  `src/app/api/public/submissions/current/submit/route.ts`, `src/app/ke-khai/page.tsx`,
+  `src/app/ke-khai/wizard.tsx`, `src/proxy.ts` (chỉ thêm comment), `.env.example`,
+  `tests/env.test.ts`, `tests/public-submission-create.test.ts`.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `format:check` ✅, `test` ✅ 82/82 (+22), `build` ✅.
+  Test mới gồm: gọi thẳng deployment không có header → từ chối; header sai giá trị/sai độ dài →
+  từ chối; Turnstile fail-closed khi siteverify timeout hoặc lỗi mạng; token sai `action` hoặc
+  sai hostname → từ chối; token đã dùng + có nháp cũ → replay được; token đã dùng + chưa có nháp
+  → **không** tạo mới; mọi route `/api/public` đều qua chốt chặn (test tự liệt kê thư mục, route
+  mới quên gắn sẽ đỏ); matcher `proxy.ts` chặn đúng đường cán bộ và không chạm `/ke-khai`.
+  Chạy thật trên trình duyệt: `/ke-khai` render widget, test key cấp token, nút mở khóa;
+  `POST /api/public/submissions` thiếu token → 403, token giả → 403 kèm thông báo không lộ chi
+  tiết. Hai lượt 403 này bị chặn **trước** mọi lệnh gọi Google. Chưa chạy tạo nháp trọn vẹn vì
+  thao tác đó ghi dữ liệu thật vào Sheets/Drive của chủ dự án.
+- **Chưa xong (phần dashboard, AI không làm được):** DNS proxy qua Cloudflare, SSL Full (strict),
+  Transform Rule gắn `X-Origin-Auth`, cache rule bypass `/api/*` + `/ke-khai*`, rate limiting
+  rules, và đặt ba biến môi trường mới trên Vercel cho cả Production lẫn Preview. Chưa làm xong
+  các mục này thì `ORIGIN_SHARED_SECRET` ở origin **chưa có tác dụng bảo vệ nào**.
+- **Ghi chú cho agent sau:** chưa có chỗ nào đọc `CF-Connecting-IP`. Khi làm audit HMAC(IP) thì
+  bắt buộc chỉ đọc header đó **sau** khi đã qua `isTrustedEdgeRequest`, nếu không ai cũng tự khai
+  IP tùy ý (`PLAN_NL` §10.2).
+
+---
+
 ## [2026-07-21] Xử lý treo khi tải ảnh: timeout, tiếp tục từ chỗ dở, hủy được
 
 - **Agent:** Claude Code

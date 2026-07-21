@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 
+import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import {
   isEditable,
   publicError,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
+import {
+  TURNSTILE_HEADER,
+  turnstileHostname,
+  verifyTurnstileToken,
+} from "@/modules/public-intake/turnstile";
 import { requiresCitizenId, type IntakeDraft } from "@/modules/public-intake/types";
 import { validateDraftForSubmit } from "@/modules/public-intake/validation";
 
@@ -20,6 +26,23 @@ export async function POST(request: Request): Promise<NextResponse> {
   const { record, requestId } = context;
   if (!isEditable(record)) {
     return publicError("INVALID_STATE", "Bản kê khai này đã được gửi.", requestId);
+  }
+
+  // Gửi chính thức cần token Turnstile mới, không dùng lại token của bước tạo nháp: đây là hành
+  // động sinh ra nhiều dòng Sheets nhất trong toàn luồng công khai.
+  const environment = loadPublicIntakeEnvironment();
+  const turnstile = await verifyTurnstileToken({
+    token: request.headers.get(TURNSTILE_HEADER),
+    action: "submit",
+    secretKey: environment.TURNSTILE_SECRET_KEY,
+    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
+  });
+  if (!turnstile.ok) {
+    return publicError(
+      "ACCESS_DENIED",
+      "Chưa xác minh được thao tác này do người thật thực hiện. Tải lại trang và gửi lại.",
+      requestId,
+    );
   }
 
   let body: { draft?: unknown };

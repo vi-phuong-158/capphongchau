@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   createSubmissionFolder: vi.fn(),
   findCreationByIdempotencyKey: vi.fn(),
+  verifyTurnstileToken: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -16,7 +17,15 @@ vi.mock("@/modules/common/env", () => ({
     PUBLIC_SESSION_SECRET: "s".repeat(32),
     PUBLIC_ACCESS_CODE_PEPPER: "p".repeat(32),
     MAX_UPLOAD_MB: 30,
+    ORIGIN_SHARED_SECRET: "o".repeat(32),
+    TURNSTILE_SECRET_KEY: "turnstile-secret",
+    APP_BASE_URL: "http://localhost:3000",
   }),
+}));
+
+vi.mock("@/modules/public-intake/turnstile", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/public-intake/turnstile")>()),
+  verifyTurnstileToken: mocks.verifyTurnstileToken,
 }));
 
 vi.mock("@/modules/public-intake/repository", () => ({
@@ -33,8 +42,10 @@ vi.mock("@/modules/public-intake/storage", () => ({
 }));
 
 import { POST } from "@/app/api/public/submissions/route";
+import { derivePhoneFingerprint } from "@/modules/public-intake/creation-idempotency";
 
 const IDEMPOTENCY_KEY = "123e4567-e89b-42d3-a456-426614174000";
+const PHONE_FINGERPRINT = derivePhoneFingerprint("p".repeat(32), "0912345678");
 
 function createRequest(phone = "0912345678", idempotencyKey = IDEMPOTENCY_KEY): Request {
   return new Request("http://localhost/api/public/submissions", {
@@ -42,6 +53,7 @@ function createRequest(phone = "0912345678", idempotencyKey = IDEMPOTENCY_KEY): 
     headers: {
       "content-type": "application/json",
       "idempotency-key": idempotencyKey,
+      "x-turnstile-token": "turnstile-token",
     },
     body: JSON.stringify({ phone }),
   });
@@ -56,6 +68,8 @@ describe("POST /api/public/submissions", () => {
     mocks.findCreationByIdempotencyKey.mockResolvedValue(null);
     mocks.createSubmissionFolder.mockResolvedValue("drive-folder-internal");
     mocks.create.mockResolvedValue(undefined);
+    mocks.verifyTurnstileToken.mockReset();
+    mocks.verifyTurnstileToken.mockResolvedValue({ ok: true, duplicate: false });
   });
 
   it("tạo nháp cùng dấu vết idempotency và không lưu mã bí mật rõ", async () => {
@@ -143,6 +157,42 @@ describe("POST /api/public/submissions", () => {
     });
     expect(mocks.createSubmissionFolder).toHaveBeenCalledOnce();
     expect(mocks.create).toHaveBeenCalledOnce();
+  });
+
+  it("từ chối trước khi chạm Google khi Turnstile không đạt", async () => {
+    mocks.verifyTurnstileToken.mockResolvedValue({ ok: false, duplicate: false });
+
+    const response = await POST(createRequest());
+
+    expect(response.status).toBe(403);
+    expect(mocks.findCreationByIdempotencyKey).not.toHaveBeenCalled();
+    expect(mocks.createSubmissionFolder).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("token đã dùng vẫn lấy lại được bản nháp cũ: retry trên mạng yếu không bị chặn", async () => {
+    mocks.verifyTurnstileToken.mockResolvedValue({ ok: false, duplicate: true });
+    mocks.findCreationByIdempotencyKey.mockResolvedValue({
+      submissionId: "1f3d4c9a-1111-5222-8333-444455556666",
+      receiptCode: "PC-KK-2026-ABCDEFGH",
+      mutationHash: PHONE_FINGERPRINT,
+    });
+
+    const response = await POST(createRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("token đã dùng nhưng chưa từng có bản nháp thì không được tạo mới", async () => {
+    mocks.verifyTurnstileToken.mockResolvedValue({ ok: false, duplicate: true });
+    mocks.findCreationByIdempotencyKey.mockResolvedValue(null);
+
+    const response = await POST(createRequest());
+
+    expect(response.status).toBe(403);
+    expect(mocks.createSubmissionFolder).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("trả lỗi JSON an toàn khi Google lỗi", async () => {

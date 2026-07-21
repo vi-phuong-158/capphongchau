@@ -1,5 +1,8 @@
 "use client";
 
+// Chỉ lấy kiểu: câu lệnh này bị xóa khi biên dịch nên không kéo `@zxing/library` vào bundle đầu.
+import type { DecodeHintType } from "@zxing/library";
+
 import {
   CITIZEN_ID_QR_DECODER_VERSION,
   CITIZEN_ID_QR_PARSER_VERSION,
@@ -14,15 +17,11 @@ export interface CitizenIdQrReadResult {
   readonly parserVersion: string;
 }
 
-async function loadImage(source: string): Promise<HTMLImageElement> {
-  const image = new Image();
-  image.src = source;
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error("Không thể mở ảnh CCCD."));
-  });
-  return image;
-}
+/**
+ * Thu nhỏ cạnh dài trước khi giải mã. Ảnh 12MP thẳng từ điện thoại vừa tốn bộ nhớ vừa chậm, và
+ * trên iOS canvas quá lớn có thể trả về ảnh rỗng. 1600px vẫn thừa nét cho một mã QR trên thẻ.
+ */
+const MAX_DECODE_EDGE = 1600;
 
 async function hashPayload(payload: string): Promise<string> {
   const bytes = new TextEncoder().encode(payload);
@@ -39,56 +38,80 @@ export async function prepareCitizenIdImage(file: File): Promise<File> {
   return new File([jpeg], `${file.name.replace(/\.[^.]+$/, "")}.jpg`, { type: "image/jpeg" });
 }
 
-async function rotatedSources(file: File): Promise<string[]> {
+async function loadBitmap(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
+  if (typeof createImageBitmap === "function") {
+    return createImageBitmap(file);
+  }
   const objectUrl = URL.createObjectURL(file);
   try {
-    const image = await loadImage(objectUrl);
-    const sources: string[] = [objectUrl];
-    for (const rotation of [90, 180, 270]) {
-      const sideways = rotation === 90 || rotation === 270;
-      const canvas = document.createElement("canvas");
-      canvas.width = sideways ? image.naturalHeight : image.naturalWidth;
-      canvas.height = sideways ? image.naturalWidth : image.naturalHeight;
-      const context = canvas.getContext("2d");
-      if (!context) continue;
-      context.translate(canvas.width / 2, canvas.height / 2);
-      context.rotate((rotation * Math.PI) / 180);
-      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
-      sources.push(canvas.toDataURL("image/jpeg", 0.92));
-    }
-    return sources;
-  } catch {
+    const image = new Image();
+    image.src = objectUrl;
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Không thể mở ảnh CCCD."));
+    });
+    return image;
+  } finally {
     URL.revokeObjectURL(objectUrl);
-    throw new Error("Không thể chuẩn bị ảnh CCCD để đọc QR.");
   }
 }
 
-/** Đọc QR cục bộ, thử ảnh gốc và 3 hướng xoay; không trả hay log payload thô. */
+function drawScaled(source: ImageBitmap | HTMLImageElement): HTMLCanvasElement | null {
+  const width = source.width;
+  const height = source.height;
+  if (!width || !height) return null;
+
+  const scale = Math.min(1, MAX_DECODE_EDGE / Math.max(width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/**
+ * Đọc QR cục bộ từ một ảnh. Không trả và không ghi log payload thô.
+ *
+ * `TRY_HARDER` là bắt buộc, không phải tinh chỉnh cho vui: ở cấu hình mặc định ZXing chỉ đọc được
+ * ảnh nằm ngang — ảnh dọc và ảnh vuông đều trả `NotFoundException` dù mã QR rõ nét. Ảnh chụp CCCD
+ * bằng điện thoại gần như luôn là ảnh dọc, nên thiếu hint này thì tính năng coi như không chạy.
+ * `tests/citizen-id-qr-decoding.test.ts` khóa lại kết luận đó.
+ */
 export async function readCitizenIdQr(file: File): Promise<CitizenIdQrReadResult | null> {
-  const sources = await rotatedSources(file);
+  const source = await loadBitmap(file);
   try {
-    const { BrowserQRCodeReader } = await import("@zxing/browser");
-    const reader = new BrowserQRCodeReader();
-    for (const source of sources) {
-      try {
-        const result = await reader.decodeFromImageUrl(source);
-        const payload = result.getText();
-        const parsed = parseCitizenIdQr(payload);
-        if (!parsed) continue;
-        return {
-          parsed,
-          payloadHash: await hashPayload(payload),
-          decoderVersion: CITIZEN_ID_QR_DECODER_VERSION,
-          parserVersion: CITIZEN_ID_QR_PARSER_VERSION,
-        };
-      } catch {
-        // QR có thể ở hướng khác hoặc không phải định dạng CCCD được hỗ trợ.
-      }
+    const canvas = drawScaled(source);
+    if (!canvas) return null;
+
+    const [{ BrowserQRCodeReader }, zxing] = await Promise.all([
+      import("@zxing/browser"),
+      import("@zxing/library"),
+    ]);
+
+    const hints = new Map<DecodeHintType, unknown>([[zxing.DecodeHintType.TRY_HARDER, true]]);
+    const reader = new BrowserQRCodeReader(hints);
+
+    let payload: string;
+    try {
+      // `decodeFromCanvas` đọc thẳng pixel, không phải dựng chuỗi data URL vài MB như trước.
+      payload = reader.decodeFromCanvas(canvas).getText();
+    } catch {
+      return null;
     }
-    return null;
+
+    const parsed = parseCitizenIdQr(payload);
+    if (!parsed) return null;
+
+    return {
+      parsed,
+      payloadHash: await hashPayload(payload),
+      decoderVersion: CITIZEN_ID_QR_DECODER_VERSION,
+      parserVersion: CITIZEN_ID_QR_PARSER_VERSION,
+    };
   } finally {
-    for (const source of sources) {
-      if (source.startsWith("blob:")) URL.revokeObjectURL(source);
-    }
+    if ("close" in source) source.close();
   }
 }
