@@ -13,8 +13,12 @@ test-results/
 
 # Local tooling
 .vercel/
+.claude/
 *.log
 *.tsbuildinfo
+
+# Nguồn tài liệu nghiệp vụ cục bộ, không đưa lên GitHub.
+Tai lieu/
 
 # Operating system files
 .DS_Store
