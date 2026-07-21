@@ -26,3 +26,20 @@ export function createGoogleWorkspaceClient(
     sheets: google.sheets({ version: "v4", auth }),
   };
 }
+
+/**
+ * Access token dùng cho các endpoint Drive mà client `googleapis` không bọc sẵn — cụ thể là
+ * tạo phiên resumable upload. Token chỉ tồn tại trong bộ nhớ của request, không ghi log.
+ */
+export async function getGoogleAccessToken(
+  credentials: GoogleWorkspaceCredentials,
+): Promise<string> {
+  const auth = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
+  auth.setCredentials({ refresh_token: credentials.refreshToken });
+
+  const { token } = await auth.getAccessToken();
+  if (!token) {
+    throw new Error("Không lấy được access token của Google.");
+  }
+  return token;
+}

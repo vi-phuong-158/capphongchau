@@ -5,6 +5,113 @@
 
 ---
 
+## [2026-07-21] Xử lý treo khi tải ảnh: timeout, tiếp tục từ chỗ dở, hủy được
+
+- **Agent:** Claude Code
+- **Vấn đề:** Lần trước mới sửa **nguyên nhân** của một lần treo cụ thể (thiếu header `Origin`
+  nên Google không gắn CORS cho phiên resumable), chưa xử lý **việc bị treo nói chung**. `fetch`
+  PUT lên Drive không có timeout, không retry, không hủy được: mạng 4G rớt giữa chừng thì giao
+  diện đứng ở "Đang tải…" cho tới khi hệ điều hành đóng socket, `busy` kẹt `true` nên mọi nút bị
+  khóa và người dân không có đường thoát. `PLAN.md` §6 và `PLAN_NL.md` §11 đều yêu cầu kiểm thử
+  "mất mạng giữa upload, retry" — tức đây là lỗi thật, không phải chuyện phụ.
+- **Thay đổi:** Thêm `src/modules/public-intake/resumable-upload.ts`:
+  - Mỗi lần thử có timeout riêng (60s) bằng `AbortController`, ghép với tín hiệu hủy của người
+    dùng.
+  - Thất bại thì hỏi Google đã nhận bao nhiêu byte (`Content-Range: bytes */tổng` → 308 kèm
+    header `Range`) rồi **gửi tiếp phần còn thiếu**, không tải lại từ đầu. Tối đa 3 lần thử.
+  - Nhận ra trường hợp tệp thực ra đã lên đủ dù lần thử báo lỗi (tránh tải lại thừa).
+  - Ném `UploadCancelledError`/`UploadFailedError` để giao diện phân biệt được hủy và lỗi.
+  - Thêm `fetchApi` (timeout 20s) cho toàn bộ lệnh gọi API của app — trước đó cũng không có
+    timeout nào.
+  - Giao diện: hiện phần trăm tiến độ, nút **"Hủy tải ảnh"**, xóa lỗi cũ khi bắt đầu lượt mới,
+    và `busy` luôn được trả về `false` trong `finally`.
+- **File đã tạo:** `src/modules/public-intake/resumable-upload.ts`, `tests/resumable-upload.test.ts`.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `test` ✅ 46/46, `format:check` ✅, `build` ✅.
+  9 test mới cho module upload, gồm: gửi tiếp đúng `Content-Range` khi mới nhận một phần; rớt
+  mạng giữa chừng thì hỏi tiến độ rồi gửi nốt phần thiếu; nhận ra tệp đã lên đủ; bỏ cuộc sau số
+  lần thử tối đa **thay vì treo**; hủy thì dừng ngay không thử lại; timeout tự kết thúc lần thử.
+  Chạy thật trên trình duyệt: tải ảnh 175 KB thành công; bắt đầu tải ảnh **12,7 MB** rồi bấm
+  "Hủy tải ảnh" → dừng ngay, hiện "Đã hủy tải ảnh...", **các nút mở khóa lại**; sau đó chọn tệp
+  khác tải lại thành công.
+
+---
+
+## [2026-07-21] Cổng kê khai công khai lưu thật vào Google Sheets + Drive
+
+- **Agent:** Claude Code
+- **Thay đổi:** Nâng demo `/ke-khai` từ UI-only lên lưu trữ thật. Migration idempotent thêm 7 tab
+  `PUBLIC_*`; phiên công khai bằng cookie ký HMAC + CSRF riêng (người dân không có email nên
+  không dùng lại `modules/auth/csrf.ts`); 5 API route công khai; upload resumable trực tiếp
+  browser → Drive; submit trải nháp JSON thành các dòng chuẩn hóa trong **một** `batchUpdate`.
+- **Quyết định thiết kế đáng chú ý:** nháp lưu dạng JSON trong `PUBLIC_SUBMISSIONS.draft_json`,
+  chỉ chuẩn hóa ra 5 tab con **khi gửi**. Nháp bị sửa liên tục; nếu chuẩn hóa ngay thì mỗi lần
+  lưu phải xóa/ghi lại nhiều dòng ở năm tab, đốt đúng cái quota ghi Sheets vốn là trần thật của
+  hệ thống (`PLAN_NL.md` §9.1).
+- **File đã tạo:** `scripts/migrate-public-intake.ts`, `src/modules/public-intake/{session,
+repository,storage,route-context,validation}.ts`, `src/app/api/public/submissions/**` (5 route),
+  `tests/public-intake-validation.test.ts`.
+- **File đã sửa:** `src/modules/bootstrap/{schema,index}.ts`, `src/modules/common/env.ts`,
+  `src/modules/google/workspace-client.ts`, `src/app/ke-khai/{page,wizard}.tsx`, `.env.example`,
+  `package.json`, `tests/env.test.ts`.
+- **Hai lỗi phát hiện khi chạy thật, đã sửa:**
+  1. **Upload từ trình duyệt bị treo.** Google chỉ gắn CORS header cho phiên resumable nếu header
+     `Origin` được gửi **lúc tạo phiên**. Thiếu nó thì PUT từ browser treo vô hạn (không phải lỗi
+     CORS rõ ràng nên rất khó đoán). Đã truyền `browserOrigin` lấy từ `new URL(request.url).origin`
+     — không lấy từ header `Origin` của client để tránh phản chiếu origin lạ.
+  2. **PATCH không validate lại dữ liệu.** Chỉ endpoint tạo mới kiểm số điện thoại; PATCH nhận
+     nguyên `draft` nên số điện thoại hỏng ghi thẳng vào Sheets (phát hiện khi một giá trị `002`
+     lọt vào kho lúc kiểm thử). Thêm `validation.ts` kiểm ở cả PATCH lẫn submit.
+- **Bảo mật đã có:** cookie `HttpOnly`/`SameSite=Strict` trượt 2h–trần 12h; CSRF buộc vào phiên;
+  submission_id **chỉ** lấy từ cookie đã ký, không nhận từ URL/body; mã bí mật chỉ lưu HMAC với
+  pepper riêng; xác minh parent/MIME/kích thước sau upload và **xóa tệp không đạt**; ngân sách
+  byte và số lượng ảnh enforce ở server; không trả Drive ID ra client.
+- **Chưa có, bắt buộc trước khi deploy công khai:** Turnstile, Cloudflare rate limiting, kiểm tra
+  `ORIGIN_SHARED_SECRET` (`PLAN_NL.md` §10, §10.2). Banner trên `/ke-khai` đang nói rõ điều này.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `test` ✅ 37/37, `format:check` ✅, `build` ✅.
+  Migration chạy hai lần: lần đầu tạo 7 tab, lần hai báo "không có tab nào cần thêm" (idempotent).
+  Chạy thật đầu-cuối trên trình duyệt: tạo nháp → autosave hiện "Đã lưu" → xác nhận mã bí mật →
+  tải 1 ảnh CCCD + 2 ảnh GCN thẳng lên Drive → gửi. Đối chiếu Sheets sau khi gửi:
+  `PUBLIC_SUBMISSIONS` `SUBMITTED`, `PUBLIC_CERTIFICATES`/`OWNERS`/`PARCELS`/`LAND_USES` mỗi tab
+  1 dòng, `PUBLIC_ASSETS` 0 dòng (đúng, không có tài sản), `PUBLIC_FILES` 3 dòng đều có checksum.
+  Xác nhận CSRF chặn: gọi `uploads/initiate` thiếu token trả 403 `ACCESS_DENIED`.
+- **Dữ liệu demo còn lại trong Sheets:** 2 dòng `PUBLIC_SUBMISSIONS` (một `DRAFT`, một
+  `SUBMITTED`) và 3 ảnh trong `01_INBOX` — dữ liệu giả, xóa được bất cứ lúc nào.
+
+---
+
+## [2026-07-21] Demo cổng kê khai công khai `/ke-khai` (UI-only, không đụng Google)
+
+- **Agent:** Claude Code
+- **Thay đổi:** Dựng bản chạy thử cổng kê khai cho người dân — wizard 8 bước phủ đủ 15 trường
+  Phụ lục 8, sinh mã tiếp nhận/mã bí mật, sàng lọc trường hợp ngoài phạm vi, xác nhận đã lưu mã
+  trước khi cho tải ảnh. Thêm design token vào `globals.css` (nền `#F7F6F3`, mặt trắng, viền
+  `#EAEAEA`, nhấn xanh lục, input cao 48px, focus ring rõ, tắt animation khi
+  `prefers-reduced-motion`), thay font Arial bằng system stack. Trang chủ tách hai đường đi
+  "Người dân" / "Cán bộ".
+- **Phạm vi có chủ đích:** **không** gọi Google Sheets/Drive, **không** migration, **không**
+  upload thật, **không** API route mới. Dữ liệu chỉ nằm trong state React và mất khi tải lại
+  trang. Có banner "BẢN CHẠY THỬ — KHÔNG NHẬP DỮ LIỆU THẬT" trên đầu trang để không ai nhập PII
+  thật vào form chưa có lớp bảo vệ nào.
+- **File đã tạo:** `src/modules/public-intake/types.ts`, `src/modules/public-intake/reference.ts`,
+  `src/modules/public-intake/receipt-code.ts`, `src/app/ke-khai/page.tsx`,
+  `src/app/ke-khai/wizard.tsx`, `tests/receipt-code.test.ts`, `.claude/launch.json`.
+- **File đã sửa:** `src/app/globals.css`, `src/app/page.tsx`.
+- **Lý do:** Chủ dự án yêu cầu có bản demo chạy thử trước, các hạng mục còn tồn đọng note lại
+  hoàn thiện sau. Chọn phạm vi UI-only để tránh migration cột trên `CASES`/`CERTIFICATES`/`OWNERS`
+  (rủi ro cao, không hoàn tác được) và để không phụ thuộc bảng mã trường 12 hiện chưa có.
+- **Nợ kỹ thuật đã ghi rõ trong code:** `reference.ts` có cờ `REFERENCE_IS_PLACEHOLDER` và cảnh
+  báo — **toàn bộ danh mục mã là giá trị tạm**, phải thay bằng bảng mã chính thức từ Chi nhánh
+  VPĐKĐĐ Phú Thọ/đơn vị thi công trước khi dùng dữ liệu thật (xem `PLAN_NL.md` §5.3 mục V1).
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `test` ✅ 25/25 (thêm 10 test cho mã tiếp nhận: bảng chữ
+  không chứa `0/O/1/I/L/U`, năm theo `Asia/Ho_Chi_Minh` — có case 31/12 23:00 UTC phải ra 2027,
+  ký tự kiểm tra, 200 mã liên tiếp không trùng), `format:check` ✅, `build` ✅ (`/ke-khai` prerender
+  tĩnh). Chạy thật trên trình duyệt: xác nhận render tiếng Việt đúng, chọn "Chưa có GCN" hiện khối
+  định tuyến ra một cửa và khóa nút Tiếp tục, thiếu ô đồng ý thì chặn chuyển bước, qua bước 2 sinh
+  `PC-KK-2026-2GTT7JG9` (ký tự kiểm tra khớp) và mã bí mật 4 nhóm.
+
+---
+
 ## [2026-07-21] Sửa sau review Task 4: fail-fast cấu hình, Zod v4, chuẩn hóa line ending
 
 - **Agent:** Claude Code

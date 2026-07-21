@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
+/**
+ * Design token — nguồn duy nhất cho màu/kích thước, không phụ thuộc skill cài ở máy nào
+ * (PLAN_NL §3). Phong cách dịch vụ công tối giản: nền ngà, mặt nhập liệu trắng, một màu nhấn.
+ */
 :root {
-  --background: #f7f8f5;
+  --background: #f7f6f3;
   --foreground: #17211d;
+  --surface: #ffffff;
+  --border: #eaeaea;
+  --border-strong: #d4d4d0;
+  --muted: #5c635f;
+  --accent: #1b5e43;
+  --accent-hover: #164c37;
+  --danger: #9b1c1c;
+  --warning-surface: #fdf6e3;
+  --warning-border: #e3d08a;
+
+  --radius-control: 7px;
+  --radius-block: 12px;
+  --control-height: 48px;
 }
 
 * {
@@ -18,5 +35,122 @@ body {
   min-width: 320px;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Chưa chốt Geist: phải xác minh subset `vietnamese` trước (PLAN_NL §3). */
+  font-family: system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.pc-field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.pc-field-hint {
+  margin-top: 6px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.pc-field-error {
+  margin-top: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--danger);
+}
+
+.pc-input,
+.pc-select,
+.pc-textarea {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.pc-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.pc-input:focus-visible,
+.pc-select:focus-visible,
+.pc-textarea:focus-visible,
+.pc-button:focus-visible,
+.pc-button-quiet:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pc-input[aria-invalid="true"],
+.pc-select[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.pc-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-block);
+  background: var(--surface);
+  padding: 20px;
+}
+
+.pc-button {
+  min-height: var(--control-height);
+  padding: 0 20px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pc-button:hover {
+  background: var(--accent-hover);
+}
+
+.pc-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pc-button-quiet {
+  min-height: var(--control-height);
+  padding: 0 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pc-step-panel {
+  animation: pc-step-in 180ms ease-out;
+}
+
+@keyframes pc-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-step-panel {
+    animation: none;
+  }
 }

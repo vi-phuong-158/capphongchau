@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   EnvironmentValidationError,
   loadGoogleStorageEnvironment,
+  loadPublicIntakeEnvironment,
   loadServerEnvironment,
   type EnvironmentSource,
 } from "@/modules/common/env";
@@ -21,6 +22,8 @@ const validEnvironment: EnvironmentSource = {
   DATA_HASH_PEPPER: "b".repeat(32),
   MAX_UPLOAD_MB: "30",
   VERCEL_REGION: "sin1",
+  PUBLIC_SESSION_SECRET: "c".repeat(32),
+  PUBLIC_ACCESS_CODE_PEPPER: "d".repeat(32),
 };
 
 describe("cấu hình môi trường server", () => {
@@ -59,5 +62,31 @@ describe("cấu hình môi trường server", () => {
       GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: "drive-root-folder-id",
       GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
     });
+  });
+
+  it("cổng công khai chỉ cần secret phiên, pepper và giới hạn upload", () => {
+    expect(loadPublicIntakeEnvironment(validEnvironment)).toMatchObject({
+      PUBLIC_SESSION_SECRET: "c".repeat(32),
+      MAX_UPLOAD_MB: 30,
+    });
+  });
+
+  it("secret phiên công khai tách khỏi AUTH_SECRET và pepper tách khỏi DATA_HASH_PEPPER", () => {
+    const shared = {
+      ...validEnvironment,
+      PUBLIC_SESSION_SECRET: "",
+      PUBLIC_ACCESS_CODE_PEPPER: "",
+    };
+
+    try {
+      loadServerEnvironment(shared);
+      throw new Error("Lẽ ra phải ném EnvironmentValidationError.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvironmentValidationError);
+      expect((error as EnvironmentValidationError).invalidKeys).toEqual([
+        "PUBLIC_SESSION_SECRET",
+        "PUBLIC_ACCESS_CODE_PEPPER",
+      ]);
+    }
   });
 });

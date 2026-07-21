@@ -7,7 +7,31 @@
 
 ## Đang làm
 
-M2 đã hoàn thành và được kiểm tra build. Hạng mục tiếp theo là M3 (tiếp nhận hồ sơ, QR và upload).
+M2 đã hoàn thành và được kiểm tra build.
+
+**Cổng kê khai công khai `/ke-khai` đã chạy thật**: tạo nháp, autosave, upload trực tiếp lên
+Drive và gửi hồ sơ đều ghi vào Google Sheets + Google Drive thật. 7 tab `PUBLIC_*` đã được tạo
+bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab mới — **chưa** đụng cột của
+`CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN_NL.md` (kế hoạch đầy đủ M3.5) và entry log
+[2026-07-21] trong `06-ai-working-log.md`.
+
+**Chưa làm, bắt buộc trước khi mở công khai:** Turnstile, Cloudflare rate limiting,
+`ORIGIN_SHARED_SECRET`, luồng truy cập lại bằng mã tiếp nhận + mã bí mật, và toàn bộ đường cán bộ
+duyệt (`/api/submissions/*` + acceptance saga).
+
+Hạng mục tiếp theo theo kế hoạch là **M3** (tiếp nhận hồ sơ phía cán bộ, QR, upload) — phải làm
+trước M3.5 để `modules/uploads` + `modules/media` được dùng chung, tránh hai đường upload.
+
+### Chặn trước khi đưa cổng công khai vào dữ liệu thật
+
+- **Bảng mã trường 12 Phụ lục 8** (loại đất/nguồn gốc/hình thức/thời hạn) — chưa có, phải xin từ
+  Chi nhánh VPĐKĐĐ Phú Thọ hoặc đơn vị thi công. Hiện `src/modules/public-intake/reference.ts` chỉ
+  là giá trị tạm, có cờ `REFERENCE_IS_PLACEHOLDER`. **Không dùng cho dữ liệu thật.**
+- **Định nghĩa phân nhóm A/B/C/E** (KH 247/KH-UBND ngày 30/6/2026 của tỉnh) — ảnh hưởng schema và
+  dashboard báo cáo, phải chốt trước migration.
+- Ba việc cần người am hiểu nghiệp vụ, AI không làm thay: nội hàm trường 7 "vai trò pháp nhân";
+  cách xử lý địa chỉ 2 cấp mới so với địa danh cũ in trên GCN; tỷ lệ GCN nhiều thửa ở Phong Châu
+  (đếm trên ~30 GCN thật).
 
 ---
 

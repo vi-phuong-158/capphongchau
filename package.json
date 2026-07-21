@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "format:check": "prettier --check .",
     "bootstrap:google": "tsx scripts/bootstrap-google.ts",
+    "migrate:public-intake": "tsx scripts/migrate-public-intake.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"

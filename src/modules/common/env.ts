@@ -14,6 +14,10 @@ const serverEnvironmentSchema = z.object({
   DATA_HASH_PEPPER: z.string().min(32),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().max(30),
   VERCEL_REGION: z.literal("sin1"),
+  // Cổng kê khai công khai: phiên của người dân không có email nên không dùng chung
+  // AUTH_SECRET; pepper mã bí mật tách khỏi DATA_HASH_PEPPER để xoay được độc lập.
+  PUBLIC_SESSION_SECRET: z.string().min(32),
+  PUBLIC_ACCESS_CODE_PEPPER: z.string().min(32),
 });
 
 const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
@@ -24,8 +28,15 @@ const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
   GOOGLE_SHEETS_SPREADSHEET_ID: true,
 });
 
+const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
+  PUBLIC_SESSION_SECRET: true,
+  PUBLIC_ACCESS_CODE_PEPPER: true,
+  MAX_UPLOAD_MB: true,
+});
+
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;
 export type GoogleStorageEnvironment = z.output<typeof googleStorageEnvironmentSchema>;
+export type PublicIntakeEnvironment = z.output<typeof publicIntakeEnvironmentSchema>;
 
 export type EnvironmentSource = Readonly<Record<string, string | undefined>>;
 
@@ -49,6 +60,13 @@ export function loadGoogleStorageEnvironment(
   source: EnvironmentSource = process.env,
 ): GoogleStorageEnvironment {
   return parseEnvironment(googleStorageEnvironmentSchema, source);
+}
+
+/** Cổng công khai chỉ cần secret phiên/pepper và giới hạn upload, không cần OAuth đăng nhập. */
+export function loadPublicIntakeEnvironment(
+  source: EnvironmentSource = process.env,
+): PublicIntakeEnvironment {
+  return parseEnvironment(publicIntakeEnvironmentSchema, source);
 }
 
 function parseEnvironment<T extends z.ZodType>(schema: T, source: EnvironmentSource): z.output<T> {

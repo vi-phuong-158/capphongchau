@@ -127,6 +127,115 @@ export const SHEET_DEFINITIONS: readonly SheetDefinition[] = [
   { title: "OCR_FIELDS", headers: ["ocr_field_id", "case_id", "created_at", "updated_at"] },
 ] as const;
 
+/**
+ * Khu vực chờ của cổng kê khai công khai — tách hẳn khỏi các tab hồ sơ chính thức
+ * (`CASES`, `CERTIFICATES`, ...). Cán bộ chấp nhận mới sinh `CASE`.
+ *
+ * Nháp lưu dạng JSON trong `draft_json` của `PUBLIC_SUBMISSIONS`: nháp bị sửa liên tục, nếu
+ * chuẩn hóa ngay từ đầu thì mỗi lần autosave phải xóa/ghi lại nhiều dòng ở năm tab. Chỉ khi
+ * người dân bấm Gửi mới trải phẳng ra các tab con — lúc đó dữ liệu mới ổn định. Cách này giữ
+ * số lần ghi Sheets ở mức thấp, vốn là trần thật của hệ thống (PLAN_NL §9.1).
+ */
+export const PUBLIC_SHEET_DEFINITIONS: readonly SheetDefinition[] = [
+  {
+    title: "PUBLIC_SUBMISSIONS",
+    headers: [
+      "submission_id",
+      "receipt_code",
+      "status",
+      "phone",
+      "version",
+      "access_code_hash",
+      "failed_attempts",
+      "locked_until",
+      "consent_version",
+      "consented_at",
+      "retention_until",
+      "official_case_id",
+      "drive_folder_id",
+      "accept_step",
+      "claimed_by",
+      "claimed_at",
+      "created_at",
+      "updated_at",
+      "draft_json",
+    ],
+  },
+  {
+    title: "PUBLIC_CERTIFICATES",
+    headers: [
+      "certificate_id",
+      "submission_id",
+      "issue_number",
+      "issue_date",
+      "registry_number",
+      "created_at",
+    ],
+  },
+  {
+    title: "PUBLIC_OWNERS",
+    headers: [
+      "owner_id",
+      "submission_id",
+      "owner_type",
+      "full_name",
+      "identity_number",
+      "role_on_certificate",
+      "created_at",
+    ],
+  },
+  {
+    title: "PUBLIC_PARCELS",
+    headers: [
+      "parcel_id",
+      "submission_id",
+      "parcel_id_code",
+      "map_sheet_number",
+      "parcel_number",
+      "address_on_certificate",
+      "neighborhood_hint",
+      "area",
+      "created_at",
+    ],
+  },
+  {
+    title: "PUBLIC_LAND_USES",
+    headers: [
+      "land_use_id",
+      "submission_id",
+      "parcel_id",
+      "purpose_code",
+      "origin_code",
+      "form_code",
+      "term_code",
+      "area",
+      "created_at",
+    ],
+  },
+  {
+    title: "PUBLIC_ASSETS",
+    headers: ["asset_id", "submission_id", "asset_type", "description", "created_at"],
+  },
+  {
+    title: "PUBLIC_FILES",
+    headers: [
+      "file_id",
+      "submission_id",
+      "document_type",
+      "variant",
+      "drive_file_id",
+      "mime_type",
+      "size_bytes",
+      "checksum_sha256",
+      "status",
+      "created_at",
+      "updated_at",
+    ],
+  },
+] as const;
+
+export const PUBLIC_SHEET_TITLES = PUBLIC_SHEET_DEFINITIONS.map(({ title }) => title);
+
 export const NEIGHBORHOOD_CODES = [
   "HA_THACH",
   "LUNG_THUONG",
