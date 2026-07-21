@@ -86,6 +86,15 @@ src/app/api/health/google/route.ts
 ├── src/modules/common/api-error.ts
 ├── src/modules/common/env.ts
 └── src/modules/google/workspace-client.ts
+
+src/app/ke-khai/wizard.tsx
+└── POST /api/public/submissions (UUID idempotency-key, retry 5xx/network)
+    ├── src/modules/public-intake/creation-idempotency.ts (HMAC định danh/mã ổn định)
+    ├── src/modules/public-intake/repository.ts
+    │   └── Google Sheets batch PUBLIC_SUBMISSIONS + REQUEST_LOG
+    ├── src/modules/public-intake/storage.ts ─→ Google Drive 01_INBOX
+    └── src/modules/public-intake/session.ts ─→ cookie + CSRF phiên công khai
+tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurrent retry, lỗi Google
 ```
 
 Ràng buộc kiến trúc bắt buộc khi mở rộng Code Graph (đã chốt trong `AGENTS.md` §3.1):
@@ -131,7 +140,7 @@ src/app/api/security/csrf/route.ts -> authorization + CSRF HMAC
 
 Chi tiết đầy đủ nằm ở `AGENTS.md` §4 (mô hình dữ liệu) và §5 (API). Tóm tắt:
 
-**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP). `REQUEST_LOG` giữ idempotency key và kết quả đã cache tối thiểu 24 giờ.
+**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), cùng bảy tab `PUBLIC_*` của cổng kê khai. `REQUEST_LOG` giữ idempotency key và kết quả đã cache tối thiểu 24 giờ; tạo nháp công khai ghi `PUBLIC_SUBMISSIONS` + `REQUEST_LOG` trong cùng batch và không cache mã bí mật rõ.
 
 **API chính**:
 
@@ -149,6 +158,11 @@ POST       /api/exports
 GET/POST/PATCH /api/users
 GET        /api/health/google
 GET        /api/security/csrf
+POST       /api/public/submissions
+GET/PATCH  /api/public/submissions/current
+POST       /api/public/submissions/current/uploads/initiate
+POST       /api/public/submissions/current/uploads/complete
+POST       /api/public/submissions/current/submit
 ```
 
 Google Drive folder layout:

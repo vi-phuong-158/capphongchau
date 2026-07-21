@@ -182,6 +182,23 @@
   migration đầu**, vì thêm cột sau khi đã có dữ liệu thật đắt hơn nhiều.
 - **Người quyết định:** _(cần chủ dự án — xem `PLAN_NL.md` §5.3 mục V2)_
 
+## [2026-07-21] Retry tạo bản kê khai dùng định danh và mã HMAC ổn định
+
+- **Quyết định:** `POST /api/public/submissions` bắt buộc UUID v4 `idempotency-key`; server
+  namespace key trong `REQUEST_LOG`, dùng HMAC với secret/pepper phía server để suy ra ổn định
+  `submission_id`, mã tiếp nhận và mã bí mật. `PUBLIC_SUBMISSIONS` và `REQUEST_LOG` được append
+  cùng một Sheets batch; mã bí mật rõ không được lưu. Client giữ key trong `sessionStorage`, tự
+  retry một lần và dùng lại key khi người dùng bấm lại. Request chồng nhau trong cùng instance
+  dùng chung một tác vụ đang chạy.
+- **Lý do:** Trên mạng 5G/tunnel, backend có thể đã ghi Drive/Sheets nhưng response không về tới
+  điện thoại. Nếu mỗi retry sinh mã mới, người dân bị kẹt không nhận được mã và hệ thống tạo hồ
+  sơ trùng.
+- **Đánh đổi:** Tạo nháp cần thêm một lượt đọc `REQUEST_LOG` và metadata Sheets trước batch. Route
+  được cấp tối đa 30 giây, client chờ 35 giây. Google Sheets không có unique constraint nên vẫn
+  còn cửa sổ race rất nhỏ nếu cùng key đồng thời đi vào nhiều serverless instance; định danh HMAC
+  ổn định và khóa trong-instance giảm hậu quả, cần đánh giá lại khi vượt quy mô pilot.
+- **Người quyết định:** Codex, theo yêu cầu sửa lỗi của chủ dự án.
+
 ## Hướng nâng cấp đã lường trước (không phải quyết định "làm ngay")
 
 Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến trúc đã chừa chỗ:

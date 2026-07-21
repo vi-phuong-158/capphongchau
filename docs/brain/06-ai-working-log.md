@@ -247,6 +247,27 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test` (15 tests),
   `npm.cmd run format:check`, `npm.cmd run build` đều đạt.
 
+## [2026-07-21] Sửa tạo bản kê khai bị báo lỗi sau khi backend đã ghi
+
+- **Agent:** Codex
+- **Thay đổi:** Bắt buộc UUID `idempotency-key` cho API tạo nháp công khai; sinh ổn định
+  submission ID, mã tiếp nhận và mã bí mật bằng HMAC; cache kết quả không chứa secret trong
+  `REQUEST_LOG`; batch dòng nháp và request log; gộp retry chồng nhau trong cùng instance. Giao
+  diện giữ key theo phiên, tự retry một lần khi lỗi mạng/5xx, bắt rejection và hiển thị hướng dẫn
+  khôi phục. Route trả lỗi JSON an toàn, có `maxDuration=30`; client chờ 35 giây.
+- **File đã sửa:** `src/app/api/public/submissions/route.ts`, `src/app/ke-khai/wizard.tsx`,
+  `src/modules/public-intake/repository.ts`, `src/modules/public-intake/creation-idempotency.ts`,
+  `tests/public-submission-create.test.ts`, `AGENTS.md`, `docs/architecture.md`,
+  `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`,
+  `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Lần thử trên điện thoại đã tạo `DRAFT` và thư mục Drive thật nhưng mất response sau
+  khoảng 8,4 giây; UI báo thất bại và lần bấm lại có nguy cơ tạo hồ sơ trùng.
+- **Kiểm tra:** Test route bao phủ tạo mới, replay sau mất response, hai retry chồng nhau và lỗi
+  Google không lộ chi tiết. `typecheck`, lint, 50/50 Vitest, Prettier và `git diff --check` đạt;
+  smoke trực tiếp `/ke-khai` trả HTTP 200 và API thiếu idempotency key trả JSON 400 đúng chuẩn.
+  Playwright runner cấu hình sẵn không khởi động được server port 3001 vì Next dev port 3000 đang
+  giữ khóa `.next`; không dừng server người dùng đang thử để tránh gián đoạn.
+
 ## Format entry
 
 ```

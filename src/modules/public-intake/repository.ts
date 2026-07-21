@@ -47,6 +47,12 @@ export interface StoredFile {
   readonly status: "UPLOADED" | "DELETED";
 }
 
+export interface StoredCreationRequest {
+  readonly submissionId: string;
+  readonly receiptCode: string;
+  readonly mutationHash: string;
+}
+
 const SUBMISSION_COLUMNS = 19;
 
 function cell(value: string): sheets_v4.Schema$CellData {
@@ -82,6 +88,9 @@ export class PublicIntakeRepository {
     submissionId: string;
     receiptCode: string;
     accessCodeHash: string;
+    idempotencyKey: string;
+    mutationHash: string;
+    requestId: string;
     phone: string;
     driveFolderId: string;
     draft: IntakeDraft;
@@ -89,38 +98,121 @@ export class PublicIntakeRepository {
   }): Promise<void> {
     const { sheets } = this.workspace();
     const now = new Date().toISOString();
-
-    await sheets.spreadsheets.values.append({
+    const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_SUBMISSIONS!A:S",
-      valueInputOption: "RAW",
-      insertDataOption: "INSERT_ROWS",
+      fields: "sheets.properties(sheetId,title)",
+    });
+    const ids = new Map(
+      (spreadsheet.data.sheets ?? []).map((sheet) => [
+        sheet.properties?.title ?? "",
+        sheet.properties?.sheetId ?? -1,
+      ]),
+    );
+    const submissionsSheetId = ids.get("PUBLIC_SUBMISSIONS");
+    const requestLogSheetId = ids.get("REQUEST_LOG");
+    if (
+      typeof submissionsSheetId !== "number" ||
+      submissionsSheetId < 0 ||
+      typeof requestLogSheetId !== "number" ||
+      requestLogSheetId < 0
+    ) {
+      throw new Error("Google Sheets thiếu tab tạo bản kê khai hoặc idempotency.");
+    }
+
+    // Hai dòng phải cùng một batch: không được có nháp mà thiếu dấu vết idempotency sau khi
+    // response bị đứt, vì retry khi đó sẽ tạo hồ sơ trùng.
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
       requestBody: {
-        values: [
-          [
-            input.submissionId,
-            input.receiptCode,
-            "DRAFT",
-            input.phone,
-            "1",
-            input.accessCodeHash,
-            "0",
-            "",
-            input.consentVersion,
-            now,
-            "",
-            "",
-            input.driveFolderId,
-            "",
-            "",
-            "",
-            now,
-            now,
-            JSON.stringify(input.draft),
-          ],
+        requests: [
+          {
+            appendCells: {
+              sheetId: submissionsSheetId,
+              rows: [
+                row([
+                  input.submissionId,
+                  input.receiptCode,
+                  "DRAFT",
+                  input.phone,
+                  "1",
+                  input.accessCodeHash,
+                  "0",
+                  "",
+                  input.consentVersion,
+                  now,
+                  "",
+                  "",
+                  input.driveFolderId,
+                  "",
+                  "",
+                  "",
+                  now,
+                  now,
+                  JSON.stringify(input.draft),
+                ]),
+              ],
+              fields: "userEnteredValue",
+            },
+          },
+          {
+            appendCells: {
+              sheetId: requestLogSheetId,
+              rows: [
+                row([
+                  input.idempotencyKey,
+                  input.requestId,
+                  JSON.stringify({
+                    kind: "PUBLIC_CREATE",
+                    submissionId: input.submissionId,
+                    receiptCode: input.receiptCode,
+                    mutationHash: input.mutationHash,
+                  }),
+                  now,
+                  new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                ]),
+              ],
+              fields: "userEnteredValue",
+            },
+          },
         ],
       },
     });
+  }
+
+  async findCreationByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<StoredCreationRequest | null> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: "REQUEST_LOG!A2:E",
+    });
+
+    const rows = response.data.values ?? [];
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const candidate = rows[index];
+      if (readCell(candidate, 0) !== idempotencyKey) continue;
+      try {
+        const cached = JSON.parse(readCell(candidate, 2)) as Partial<StoredCreationRequest> & {
+          kind?: string;
+        };
+        if (
+          cached.kind === "PUBLIC_CREATE" &&
+          typeof cached.submissionId === "string" &&
+          typeof cached.receiptCode === "string" &&
+          typeof cached.mutationHash === "string"
+        ) {
+          return {
+            submissionId: cached.submissionId,
+            receiptCode: cached.receiptCode,
+            mutationHash: cached.mutationHash,
+          };
+        }
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   async findById(submissionId: string): Promise<SubmissionRecord | null> {

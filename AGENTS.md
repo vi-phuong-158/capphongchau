@@ -149,6 +149,11 @@ Không xóa dòng, cột hoặc sheet đã dùng. Nếu thay đổi schema phả
 - Case ID: `PHONGCHAU-{NAM}-{SO_THU_TU_6_CHU_SO}`, ví dụ `PHONGCHAU-2026-000001`; năm phải tính theo `Asia/Ho_Chi_Minh`.
 - `ID_RESERVATIONS` append-only. Số thứ tự chỉ lấy từ `updatedRange` của chính lệnh `values.append`, không đọc số dòng rồi cộng một.
 - Mọi API ghi yêu cầu `idempotency_key` và `request_id`. `REQUEST_LOG` lưu key, kết quả đã cache và timestamp tối thiểu 24 giờ để trả đúng kết quả cho request lặp.
+- Riêng `POST /api/public/submissions`, trình duyệt gửi UUID v4 trong header `idempotency-key`.
+  Server namespace key bằng `PUBLIC_CREATE:`, dùng HMAC để suy ra ổn định `submission_id`, mã tiếp
+  nhận và mã bí mật, nhưng `REQUEST_LOG` tuyệt đối không lưu mã bí mật rõ. Dòng
+  `PUBLIC_SUBMISSIONS` và dòng `REQUEST_LOG` phải được append trong cùng một Sheets batch để retry
+  sau khi mất response không tạo nháp mới.
 - Bản ghi chỉnh sửa có `version`; PATCH yêu cầu version hiện tại và trả `409 VERSION_CONFLICT`. Cửa sổ race nhỏ của optimistic concurrency trên Sheets được chấp nhận ở quy mô pilot, không tự dựng lock.
 - Không cập nhật Google Sheets theo từng ô. Gộp bản ghi nghiệp vụ, audit và chỉ mục liên quan trong batch read/write; cache đọc ngắn hạn phải invalidation khi ghi.
 - Xóa ảnh GCN là soft-delete (`DELETED`) và không xóa file Drive. CCCD không được xóa trắng: upload/xác minh ảnh mới trước, sau đó chuyển ảnh cũ sang `REPLACED`.
@@ -212,6 +217,11 @@ POST /api/exports
 GET/POST/PATCH /api/users
 GET /api/health/google
 GET /api/security/csrf
+POST /api/public/submissions
+GET/PATCH /api/public/submissions/current
+POST /api/public/submissions/current/uploads/initiate
+POST /api/public/submissions/current/uploads/complete
+POST /api/public/submissions/current/submit
 ```
 
 Mọi API lỗi phải trả:

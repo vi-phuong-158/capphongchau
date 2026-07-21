@@ -39,6 +39,7 @@ const STEPS = [
 ] as const;
 
 const MAX_CERTIFICATE_PHOTOS = 10;
+const CREATE_IDEMPOTENCY_STORAGE_KEY = "pc_kk_create_idempotency";
 
 type Errors = Record<string, string>;
 
@@ -71,10 +72,15 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
 
 /** Mọi lệnh gọi API đều có timeout: mạng yếu không được phép làm giao diện đứng im vô hạn. */
 const API_TIMEOUT_MS = 20_000;
+const CREATE_API_TIMEOUT_MS = 35_000;
 
-async function fetchApi(url: string, init: RequestInit): Promise<Response> {
+async function fetchApi(
+  url: string,
+  init: RequestInit,
+  timeoutMs = API_TIMEOUT_MS,
+): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -187,6 +193,7 @@ export function IntakeWizard() {
   const [uploadNote, setUploadNote] = useState("");
   const [uploadPercent, setUploadPercent] = useState(0);
   const uploadAbort = useRef<AbortController | null>(null);
+  const createIdempotencyKey = useRef<string | null>(null);
 
   const outOfScope = hasCertificate === "KHONG" || certificateCount === "NHIEU";
 
@@ -317,13 +324,60 @@ export function IntakeWizard() {
     try {
       // Bước 0 tạo bản kê khai thật: sinh mã, tạo thư mục Drive, ghi dòng PUBLIC_SUBMISSIONS.
       if (step === 0 && !receipt) {
-        const response = await fetchApi("/api/public/submissions", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ phone: draft.phone }),
-        });
+        if (!createIdempotencyKey.current) {
+          try {
+            createIdempotencyKey.current = sessionStorage.getItem(CREATE_IDEMPOTENCY_STORAGE_KEY);
+          } catch {
+            // Trình duyệt có thể chặn sessionStorage; ref trong bộ nhớ vẫn đủ cho retry cùng trang.
+          }
+        }
+        if (!createIdempotencyKey.current) {
+          createIdempotencyKey.current = crypto.randomUUID();
+          try {
+            sessionStorage.setItem(CREATE_IDEMPOTENCY_STORAGE_KEY, createIdempotencyKey.current);
+          } catch {
+            // Không làm hỏng kê khai chỉ vì storage riêng tư bị chặn.
+          }
+        }
+
+        let response: Response | null = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            response = await fetchApi(
+              "/api/public/submissions",
+              {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  "idempotency-key": createIdempotencyKey.current,
+                },
+                body: JSON.stringify({ phone: draft.phone }),
+              },
+              CREATE_API_TIMEOUT_MS,
+            );
+          } catch {
+            if (attempt === 0) continue;
+            throw new Error("CREATE_NETWORK_FAILED");
+          }
+
+          // 5xx có thể là proxy mất response sau khi backend đã ghi. Retry cùng key sẽ lấy lại
+          // đúng kết quả cũ, không tạo thêm dòng Sheets/thư mục Drive.
+          if (response.ok || response.status < 500 || attempt === 1) break;
+        }
+
+        if (!response) {
+          throw new Error("CREATE_NETWORK_FAILED");
+        }
 
         if (!response.ok) {
+          if (response.status === 409) {
+            createIdempotencyKey.current = null;
+            try {
+              sessionStorage.removeItem(CREATE_IDEMPOTENCY_STORAGE_KEY);
+            } catch {
+              // Không có gì cần làm nếu storage bị chặn.
+            }
+          }
           setServerError(await readErrorMessage(response, "Chưa tạo được bản kê khai."));
           return;
         }
@@ -335,11 +389,21 @@ export function IntakeWizard() {
         };
         setReceipt({ code: created.receiptCode, secret: created.accessSecret });
         setCsrfToken(created.csrfToken);
+        createIdempotencyKey.current = null;
+        try {
+          sessionStorage.removeItem(CREATE_IDEMPOTENCY_STORAGE_KEY);
+        } catch {
+          // Không có gì cần làm nếu storage bị chặn.
+        }
       } else if (!(await saveDraft())) {
         return;
       }
 
       setStep((current) => Math.min(current + 1, STEPS.length - 1));
+    } catch {
+      setServerError(
+        "Kết nối bị gián đoạn khi tạo bản kê khai. Dữ liệu đã nhập vẫn còn; bấm Tiếp tục để khôi phục và thử lại.",
+      );
     } finally {
       setBusy(false);
     }

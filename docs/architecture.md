@@ -102,6 +102,20 @@ GCN bị xóa chỉ chuyển trạng thái `DELETED`, không hard-delete trên D
   yêu cầu `x-csrf-token` và `idempotency-key`; các ghi `USERS`, `AUDIT_LOGS`, `REQUEST_LOG` đi trong
   cùng một Google Sheets `batchUpdate`.
 
+## Cổng kê khai công khai
+
+- `/ke-khai` gọi `POST /api/public/submissions` với một UUID v4 `idempotency-key` giữ trong phiên
+  trình duyệt cho đến khi nhận được phản hồi thành công. Client tự retry một lần khi mất kết nối
+  hoặc nhận lỗi 5xx; lần bấm sau tiếp tục dùng cùng key.
+- Server namespace key thành `PUBLIC_CREATE:*`, dùng HMAC phía server để suy ra ổn định
+  `submission_id`, mã tiếp nhận và mã bí mật. Vì vậy response đầu bị mất vẫn trả lại đúng kết quả;
+  mã bí mật rõ không được ghi vào Sheets hoặc log.
+- `PUBLIC_SUBMISSIONS` và `REQUEST_LOG` được append trong cùng một Sheets `batchUpdate`; các request
+  chồng nhau trong cùng instance dùng chung một promise. Lỗi Google được trả theo JSON lỗi chuẩn,
+  không lộ stack, PII, Drive ID hoặc token.
+- Route tạo nháp có `maxDuration=30`; client chờ tối đa 35 giây vì cold request phải đọc Sheets,
+  tạo cây thư mục Drive và batch ghi Google trước khi trả cookie phiên.
+
 ## Hướng nâng cấp
 
 Khi vận hành ổn định, migration sang Shared Drive hoặc kho của cơ quan phải sao chép file, đối chiếu checksum, cập nhật `drive_file_id` và giữ nguyên `file_id`/`case_id`. Sau đó mới xem xét OCR Google Vision, dữ liệu thửa đất đầy đủ, đối soát dân cư và PostgreSQL.

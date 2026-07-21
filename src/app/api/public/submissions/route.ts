@@ -4,8 +4,15 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
+import {
+  deriveAccessSecret,
+  derivePhoneFingerprint,
+  deriveReceiptCode,
+  deriveSubmissionId,
+  isValidPublicIdempotencyKey,
+  publicRequestLogKey,
+} from "@/modules/public-intake/creation-idempotency";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
-import { createAccessSecret, createReceiptCode } from "@/modules/public-intake/receipt-code";
 import { publicError } from "@/modules/public-intake/route-context";
 import {
   createPublicCsrfToken,
@@ -18,9 +25,30 @@ import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import { emptyDraft } from "@/modules/public-intake/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 /** Phiên bản thông báo bảo vệ dữ liệu mà người dân đã đồng ý — chờ văn bản chính thức. */
 const CONSENT_VERSION = "draft-2026-07";
+
+interface CreationResult {
+  readonly submissionId: string;
+  readonly receiptCode: string;
+  readonly accessSecret: string;
+  readonly recovered: boolean;
+}
+
+/** Chặn hai retry chồng nhau trong cùng instance; định danh HMAC vẫn là hàng rào liên-instance. */
+const inFlightCreations = new Map<
+  string,
+  { readonly mutationHash: string; readonly operation: Promise<CreationResult> }
+>();
+
+class CreationConflictError extends Error {
+  constructor() {
+    super("Idempotency key đã được dùng với số điện thoại khác.");
+    this.name = "CreationConflictError";
+  }
+}
 
 /**
  * Tạo bản kê khai nháp. Không cần đăng nhập.
@@ -48,32 +76,134 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const environment = loadPublicIntakeEnvironment();
-  const submissionId = randomUUID();
-  const receiptCode = createReceiptCode();
-  const accessSecret = createAccessSecret();
+  const rawIdempotencyKey = request.headers.get("idempotency-key");
+  if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {
+    return publicError(
+      "VALIDATION_FAILED",
+      "Thiếu khóa chống gửi trùng. Tải lại trang và thử lại.",
+      requestId,
+    );
+  }
 
+  try {
+    const environment = loadPublicIntakeEnvironment();
+    const idempotencyKey = publicRequestLogKey(rawIdempotencyKey);
+    const mutationHash = derivePhoneFingerprint(environment.PUBLIC_ACCESS_CODE_PEPPER, phone);
+    let activeCreation = inFlightCreations.get(idempotencyKey);
+    if (activeCreation && activeCreation.mutationHash !== mutationHash) {
+      throw new CreationConflictError();
+    }
+    const ownsOperation = !activeCreation;
+    if (!activeCreation) {
+      const operation = createOrRecoverSubmission({
+        rawIdempotencyKey,
+        idempotencyKey,
+        mutationHash,
+        phone,
+        requestId,
+        sessionSecret: environment.PUBLIC_SESSION_SECRET,
+        accessPepper: environment.PUBLIC_ACCESS_CODE_PEPPER,
+      });
+      activeCreation = { mutationHash, operation };
+      inFlightCreations.set(idempotencyKey, activeCreation);
+    }
+
+    let result: CreationResult;
+    try {
+      result = await activeCreation.operation;
+    } finally {
+      if (ownsOperation && inFlightCreations.get(idempotencyKey) === activeCreation) {
+        inFlightCreations.delete(idempotencyKey);
+      }
+    }
+
+    return createSuccessResponse({
+      submissionId: result.submissionId,
+      receiptCode: result.receiptCode,
+      accessSecret: result.accessSecret,
+      sessionSecret: environment.PUBLIC_SESSION_SECRET,
+      requestId,
+      recovered: result.recovered,
+    });
+  } catch (error) {
+    if (error instanceof CreationConflictError) {
+      return publicError(
+        "IDEMPOTENCY_CONFLICT",
+        "Lần thử trước dùng số điện thoại khác. Kiểm tra lại số và thử lần nữa.",
+        requestId,
+      );
+    }
+    // Google/biến môi trường có thể lỗi sau một phần thao tác. Không trả stack, Drive ID hay PII;
+    // cùng idempotency key ở lần thử sau sẽ tiếp tục đúng bản nháp thay vì tạo bản mới.
+    return publicError(
+      "INTERNAL_ERROR",
+      "Hệ thống chưa hoàn tất tạo bản kê khai. Vui lòng bấm Tiếp tục để thử lại.",
+      requestId,
+    );
+  }
+}
+
+async function createOrRecoverSubmission(input: {
+  rawIdempotencyKey: string;
+  idempotencyKey: string;
+  mutationHash: string;
+  phone: string;
+  requestId: string;
+  sessionSecret: string;
+  accessPepper: string;
+}): Promise<CreationResult> {
+  const repository = getPublicIntakeRepository();
+  const accessSecret = deriveAccessSecret(input.accessPepper, input.rawIdempotencyKey);
+  const previous = await repository.findCreationByIdempotencyKey(input.idempotencyKey);
+
+  if (previous) {
+    if (previous.mutationHash !== input.mutationHash) {
+      throw new CreationConflictError();
+    }
+    return {
+      submissionId: previous.submissionId,
+      receiptCode: previous.receiptCode,
+      accessSecret,
+      recovered: true,
+    };
+  }
+
+  const submissionId = deriveSubmissionId(input.sessionSecret, input.rawIdempotencyKey);
+  const receiptCode = deriveReceiptCode(input.sessionSecret, input.rawIdempotencyKey);
   const driveFolderId = await getPublicIntakeStorage().createSubmissionFolder(submissionId);
-
   const draft = emptyDraft(randomUUID(), randomUUID(), randomUUID());
-  draft.phone = phone;
+  draft.phone = input.phone;
   draft.consentAccepted = true;
 
-  await getPublicIntakeRepository().create({
+  await repository.create({
     submissionId,
     receiptCode,
-    accessCodeHash: hashAccessSecret(environment.PUBLIC_ACCESS_CODE_PEPPER, accessSecret),
-    phone,
+    accessCodeHash: hashAccessSecret(input.accessPepper, accessSecret),
+    idempotencyKey: input.idempotencyKey,
+    mutationHash: input.mutationHash,
+    requestId: input.requestId,
+    phone: input.phone,
     driveFolderId,
     draft,
     consentVersion: CONSENT_VERSION,
   });
 
+  return { submissionId, receiptCode, accessSecret, recovered: false };
+}
+
+async function createSuccessResponse(input: {
+  submissionId: string;
+  receiptCode: string;
+  accessSecret: string;
+  sessionSecret: string;
+  requestId: string;
+  recovered: boolean;
+}): Promise<NextResponse> {
   const cookieStore = await cookies();
   cookieStore.set(
     PUBLIC_SESSION_COOKIE,
-    createSessionToken(environment.PUBLIC_SESSION_SECRET, {
-      submissionId,
+    createSessionToken(input.sessionSecret, {
+      submissionId: input.submissionId,
       issuedAt: Math.floor(Date.now() / 1000),
     }),
     {
@@ -82,11 +212,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     },
   );
 
-  // Mã bí mật trả về đúng một lần và không bao giờ được lưu dạng rõ.
   return NextResponse.json({
-    receiptCode,
-    accessSecret,
-    csrfToken: createPublicCsrfToken(environment.PUBLIC_SESSION_SECRET, submissionId),
-    requestId,
+    receiptCode: input.receiptCode,
+    accessSecret: input.accessSecret,
+    csrfToken: createPublicCsrfToken(input.sessionSecret, input.submissionId),
+    requestId: input.requestId,
+    recovered: input.recovered,
   });
 }
