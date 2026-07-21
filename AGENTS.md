@@ -1,0 +1,289 @@
+# AGENTS.md
+
+## 1. Dự án và nguồn chỉ dẫn
+
+Tên dự án: **Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu**.
+
+Mã nội bộ: `land-ocr-180`.
+
+Tài liệu này là chỉ dẫn kiến trúc và triển khai bắt buộc cho coding agent. Kế hoạch theo giai đoạn nằm tại `PLAN.md`. Nếu có mâu thuẫn, ưu tiên yêu cầu mới nhất của người dùng, sau đó là `AGENTS.md`, rồi `PLAN.md`.
+
+Nguồn nghiệp vụ cần giữ lại:
+
+- `UB - KH chiến dịch 180 ngày XD CSDL đất đai.signed.pdf`
+- `Phụ lục 8.docx`
+
+Hệ thống là công cụ thu thập và chuẩn hóa trung gian; không thay thế CSDL đất đai chuyên ngành, không tự tạo giá trị pháp lý và không tự xác nhận tính pháp lý của hồ sơ.
+
+## 2. Phạm vi bản thử nghiệm
+
+Hệ thống chỉ phục vụ **Phường Phong Châu**, với mười tổ dân phố cố định:
+
+1. Hà Thạch
+2. Lũng Thượng
+3. Phú An
+4. Phú Cường
+5. Phú Điền
+6. Phú Hộ
+7. Phú Lợi
+8. Phú Xuân
+9. Phúc Lợi
+10. Thống Nhất
+
+Trong phạm vi:
+
+- Web app/PWA dùng trên máy tính, Android và iPhone.
+- Google Sign-In, allowlist người dùng và phân quyền theo vai trò.
+- Tạo hồ sơ, lưu nháp, tiếp nhận và kiểm tra thủ công.
+- Đúng **một ảnh CCCD mặt trước** cho mỗi hồ sơ.
+- Từ một đến mười ảnh GCN/bìa đỏ cho mỗi hồ sơ.
+- Đọc QR của CCCD trên thiết bị để gợi ý nhập liệu; QR thất bại thì nhập tay.
+- Nhập thủ công thông tin GCN cơ bản: số phát hành, ngày cấp, số vào sổ, chủ sử dụng và ghi chú.
+- Lưu file trên Google My Drive cá nhân, dữ liệu cấu trúc trên Google Sheets.
+- Tra cứu, dashboard theo tổ dân phố, xuất CSV và audit log.
+
+Ngoài phạm vi bản thử nghiệm:
+
+- OCR CCCD hoặc GCN, Google Cloud Vision, parser OCR và hàng đợi OCR.
+- Ảnh CCCD mặt sau.
+- Đối soát dân cư tự động hoặc kết nối CSDL đất đai quốc gia.
+- PostgreSQL, Vercel Blob, Google Shared Drive và service account.
+- Cung cấp dữ liệu cho người dân hoặc link Drive công khai.
+
+Quy mô mục tiêu là tối đa 500 hồ sơ. Trước khi mở rộng cần đánh giá lại My Drive, Google Sheets và nơi đặt backend.
+
+## 3. Kiến trúc hiện tại
+
+```mermaid
+flowchart LR
+    U[Cán bộ: điện thoại hoặc máy tính] --> W[Next.js PWA trên Vercel sin1]
+    W --> A[Google Sign-In và phân quyền USERS]
+    W --> S[Google Sheets: dữ liệu và audit]
+    W --> D[Google My Drive của quản trị viên]
+    U --> Q[Đọc QR CCCD tại thiết bị]
+    Q --> W
+```
+
+### 3.1. Công nghệ bắt buộc
+
+- Một ứng dụng Next.js App Router + TypeScript strict, gồm frontend và API Route Handlers.
+- Vercel là nơi chạy frontend/backend thử nghiệm, ưu tiên region `sin1`.
+- PWA, Tailwind CSS, Zod, Google API Node client, Auth.js/Google OAuth, `@zxing/browser`, Vitest và Playwright.
+- Google My Drive lưu ảnh gốc/preview; Google Sheets là kho dữ liệu có cấu trúc duy nhất.
+- Tách rõ `DataRepository` (Sheets) và `StorageRepository` (Drive). Service nghiệp vụ và component frontend không gọi trực tiếp Google API.
+
+### 3.2. Tài khoản và OAuth
+
+- `anmphongandn@gmail.com` là chủ sở hữu My Drive, Google Sheet, Google Cloud Project và `SYSTEM_ADMIN` đầu tiên.
+- Tài khoản này không mặc định là Google Workspace Admin; đây là kiến trúc My Drive cá nhân.
+- Đăng nhập cán bộ chỉ xin `openid`, `email`, `profile`.
+- Kết nối kho dữ liệu xin `drive.file` với `access_type=offline`.
+- Không lưu mật khẩu Google ở bất cứ đâu. Refresh token chỉ lưu trong Vercel Environment Variables phía server.
+- Không dùng service account: service account không thể sở hữu file trên My Drive cá nhân.
+- OAuth consent screen phải ở `In production` trước khi dùng dữ liệu thật. Trạng thái `Testing` có thể làm refresh token Drive hết hạn sau bảy ngày.
+- Đăng nhập thành công chỉ cấp session; quyền dùng hệ thống do sheet `USERS` quyết định.
+
+### 3.3. Drive và upload
+
+```text
+CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
+├── 00_CONFIG/
+├── 01_INBOX/
+├── 02_CASES/
+│   └── {TDP_CODE}/{CASE_ID}/
+│       ├── originals/
+│       └── previews/
+├── 03_EXPORTS/
+└── 99_BACKUP/
+```
+
+- My Drive và file phải ở chế độ `Restricted`; không tạo link công khai.
+- Không chia sẻ thư mục gốc cho cán bộ. Mọi truy cập đi qua ứng dụng và quyền trong `USERS`.
+- Giữ nguyên file gốc. Tạo preview JPEG tối đa 2.5 MB để giao diện xem qua Vercel; ảnh gốc không đi qua body của Vercel Function.
+- Browser kiểm tra JPEG, PNG, WebP, HEIC/HEIF; giới hạn 30 MB/file. HEIC/HEIF được chuyển sang JPEG tại thiết bị khi cần.
+- Backend tạo resumable upload session; browser upload trực tiếp Drive và hiển thị tiến độ/retry.
+- Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
+- Xác minh file sau upload theo thư mục cha, metadata, dung lượng và checksum trước khi cập nhật trạng thái.
+- Lưu `file_id` nội bộ bất biến, tách khỏi `drive_file_id` để chuẩn bị cho migration sang Shared Drive về sau.
+
+### 3.4. QR CCCD
+
+- Dùng `@zxing/browser` hoàn toàn phía client; thử ảnh gốc và xoay 0/90/180/270 độ.
+- Chỉ chấp nhận CCCD gồm 12 chữ số và ngày hợp lệ.
+- QR chỉ là dữ liệu gợi ý. Cán bộ phải xem/xác nhận; QR không được ghi đè dữ liệu đã sửa thủ công.
+- Không lưu payload QR thô. Chỉ lưu dữ liệu đã tách, hash payload, phiên bản decoder/parser, trạng thái và người xác nhận.
+- Không đọc được QR không được ngăn việc lưu nháp hoặc nhập thủ công.
+
+## 4. Mô hình dữ liệu và quy tắc nghiệp vụ
+
+### 4.1. Google Sheets
+
+Tạo các tab sau:
+
+- `CASES`: case ID, tổ dân phố, trạng thái, người tiếp nhận, thời gian, ghi chú, version, Drive folder ID.
+- `CERTIFICATES`: số phát hành, ngày cấp, số vào sổ và thông tin GCN nhập tay.
+- `OWNERS`: họ tên, CCCD, ngày sinh, giới tính, địa chỉ và nguồn `QR`/`MANUAL`.
+- `FILES`: `file_id`, `case_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
+- `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
+- `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `SEARCH_INDEX`.
+- Tạo sẵn `PARCELS`, `ASSETS`, `OCR_FIELDS` để tương thích nâng cấp nhưng không đưa vào quy trình hiện tại.
+
+Không xóa dòng, cột hoặc sheet đã dùng. Nếu thay đổi schema phải có migration, cập nhật tài liệu và bảo toàn dữ liệu cũ.
+
+### 4.2. Mã định danh và idempotency
+
+- Case ID: `PHONGCHAU-{NAM}-{SO_THU_TU_6_CHU_SO}`, ví dụ `PHONGCHAU-2026-000001`.
+- `ID_RESERVATIONS` append-only. Dòng append thành công quyết định số thứ tự để tránh trùng mã khi tạo đồng thời.
+- Mọi API ghi yêu cầu `idempotency_key` và `request_id`.
+- Bản ghi chỉnh sửa có `version`; PATCH yêu cầu version hiện tại và trả `409 VERSION_CONFLICT` khi phát hiện xung đột.
+- Không cập nhật Google Sheets theo từng ô. Dùng batch read/write và cache đọc ngắn hạn có invalidation khi ghi.
+
+### 4.3. Trạng thái hồ sơ
+
+Dùng enum cố định, không dùng chuỗi tùy ý. Luồng MVP:
+
+```text
+DRAFT → UPLOADED → PENDING_REVIEW → VERIFIED
+                     └→ NEEDS_MORE_DOCUMENTS → UPLOADED
+VERIFIED → ARCHIVED (SYSTEM_ADMIN hoặc WARD_ADMIN)
+```
+
+- `DRAFT`: đã tạo nhưng chưa đủ ảnh bắt buộc.
+- `UPLOADED`: có đúng một CCCD mặt trước và ít nhất một ảnh GCN.
+- `PENDING_REVIEW`: chờ kiểm tra/hoàn thiện dữ liệu.
+- `NEEDS_MORE_DOCUMENTS`: cần bổ sung ảnh hoặc thông tin.
+- `VERIFIED`: cán bộ có thẩm quyền xác nhận.
+- `ARCHIVED`: hồ sơ bị lưu trữ; không xóa dữ liệu.
+
+### 4.4. Phân quyền
+
+Giữ enum vai trò:
+
+```ts
+export enum UserRole {
+  SYSTEM_ADMIN = 'SYSTEM_ADMIN',
+  WARD_ADMIN = 'WARD_ADMIN',
+  INTAKE_OFFICER = 'INTAKE_OFFICER',
+  REVIEW_OFFICER = 'REVIEW_OFFICER',
+  POPULATION_MATCH_OFFICER = 'POPULATION_MATCH_OFFICER',
+  REPORT_VIEWER = 'REPORT_VIEWER',
+  AUDITOR = 'AUDITOR'
+}
+```
+
+- `SYSTEM_ADMIN`: cấu hình, người dùng, tích hợp và toàn bộ dữ liệu.
+- `WARD_ADMIN`: quản lý hồ sơ của Phường Phong Châu.
+- `INTAKE_OFFICER`: tạo hồ sơ, upload và xem hồ sơ được phân công.
+- `REVIEW_OFFICER`: sửa/kiểm tra/xác nhận hồ sơ.
+- `REPORT_VIEWER`: xem dashboard và xuất dữ liệu trong phạm vi được cấp.
+- `AUDITOR`: xem audit log, không sửa dữ liệu.
+- `POPULATION_MATCH_OFFICER` được giữ cho nâng cấp, chưa có UI/luồng đối soát tự động.
+
+Nguyên tắc mặc định từ chối và chỉ cấp quyền tối thiểu.
+
+## 5. API bắt buộc
+
+```text
+POST/GET /api/cases
+GET/PATCH /api/cases/:caseId
+POST /api/cases/:caseId/uploads/initiate
+POST /api/cases/:caseId/uploads/complete
+DELETE /api/cases/:caseId/files/:fileId
+POST /api/cases/:caseId/qr/confirm
+POST /api/cases/:caseId/request-more-documents
+POST /api/cases/:caseId/verify
+GET /api/dashboard/summary
+POST /api/exports
+GET/POST/PATCH /api/users
+```
+
+Mọi API lỗi phải trả:
+
+```json
+{
+  "error": {
+    "code": "ACCESS_DENIED",
+    "message": "Bạn không có quyền thực hiện thao tác này.",
+    "requestId": "req_...",
+    "details": null
+  }
+}
+```
+
+Không trả stack trace, token, Drive ID/link hoặc dữ liệu nhận dạng cá nhân đầy đủ.
+
+## 6. Bảo mật và vận hành
+
+- HTTPS, secure cookie, OAuth state/CSRF, rate limit và security headers là bắt buộc.
+- Không commit `.env`, token, Google OAuth client secret, ảnh CCCD/GCN thật hoặc fixture chứa dữ liệu thật.
+- CCCD trong danh sách, log và thông báo hiển thị dạng `0123••••8901`.
+- Dùng HMAC với secret phía server cho chỉ mục tra cứu CCCD; không đưa CCCD đầy đủ vào technical log.
+- Mọi API write, xem file nhạy cảm, xác nhận, export và thay đổi quyền phải ghi `AUDIT_LOGS` append-only.
+- File export lưu trong `03_EXPORTS` và phải ghi nhận người tạo/thời gian/lọc dữ liệu.
+- Vercel Cron tạo snapshot hằng ngày trong `99_BACKUP`; quản trị viên tạo bản backup mã hóa ngoại tuyến hằng tuần.
+- Phải có health check cho OAuth, token refresh, Sheets schema, Drive root folder và Google API lỗi/quota.
+
+Biến môi trường:
+
+```env
+APP_BASE_URL=
+AUTH_SECRET=
+AUTH_GOOGLE_CLIENT_ID=
+AUTH_GOOGLE_CLIENT_SECRET=
+GOOGLE_DRIVE_CLIENT_ID=
+GOOGLE_DRIVE_CLIENT_SECRET=
+GOOGLE_DRIVE_REFRESH_TOKEN=
+GOOGLE_MY_DRIVE_ROOT_FOLDER_ID=
+GOOGLE_SHEETS_SPREADSHEET_ID=
+SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com
+DATA_HASH_PEPPER=
+MAX_UPLOAD_MB=30
+VERCEL_REGION=sin1
+```
+
+Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VISION_PROJECT_ID` hoặc `TEMP_FILE_DIR` trong bản thử nghiệm.
+
+## 7. Kiểm thử và Definition of Done
+
+### 7.1. Kiểm thử tối thiểu
+
+- Unit test: parser QR, chuẩn hóa CCCD/ngày, che/HMAC CCCD, case ID, transition, phân quyền và version conflict.
+- Integration test: refresh token, Drive folders, Sheets batch writes, resumable upload, retry, idempotency và lỗi từng phần.
+- E2E: tạo hồ sơ, upload một CCCD và nhiều GCN, QR thành công/thất bại, sửa dữ liệu, verify, tìm kiếm, dashboard, export và audit log.
+- Thử nghiệm Android Chrome, iPhone Safari, Wi-Fi và 4G yếu.
+- Chỉ dùng dữ liệu giả/ẩn danh cho test tự động và môi trường Preview.
+
+### 7.2. Definition of Done
+
+Một hạng mục hoàn thành khi:
+
+- Code chạy được, TypeScript strict, có validation và xử lý lỗi.
+- Có kiểm tra quyền và audit log cho thao tác write/nhạy cảm.
+- Không lộ PII, token, QR raw hoặc link Drive trong log.
+- Có test phù hợp và tài liệu liên quan được cập nhật.
+- Không tạo case/file trùng khi upload hoặc gửi lại request.
+- Không thể tải CCCD thứ hai nếu chưa thực hiện thao tác thay ảnh.
+- Ảnh gốc không đi qua body của Vercel Function và không có link Drive công khai.
+- Email ngoài `USERS` bị từ chối dù đăng nhập Google thành công.
+- QR thất bại không làm mất hồ sơ.
+
+## 8. Nâng cấp sau thử nghiệm
+
+Chỉ thực hiện sau khi MVP ổn định:
+
+- Chuyển sang Google Workspace Shared Drive hoặc kho lưu trữ của cơ quan.
+- Migration sao chép file, cập nhật `drive_file_id`, giữ nguyên `file_id` và `case_id`, đối chiếu checksum/audit theo lô.
+- Bổ sung OCR Google Vision và lưu raw OCR JSON, parser versioning, queue và retry.
+- Bổ sung dữ liệu thửa đất/tài sản, bộ 15 rồi 50 nhóm trường nghiệp vụ.
+- Chuyển Google Sheets sang PostgreSQL khi quy mô/đồng thời vượt khả năng vận hành an toàn.
+- Bổ sung tích hợp đối soát dân cư hoặc hệ thống đất đai khi có thẩm quyền pháp lý và kênh kỹ thuật chính thức.
+
+## 9. Quy tắc làm việc cho coding agent
+
+1. Đọc toàn bộ `AGENTS.md`, sau đó đọc `PLAN.md` trước khi thay đổi code/kiến trúc.
+2. Kiểm tra repository và dữ liệu hiện có; không tự ý thêm database hoặc cloud storage ngoài kiến trúc đã chốt.
+3. Dùng TypeScript strict, tránh `any`; mọi thao tác ngoài phải timeout và xử lý lỗi.
+4. Không gọi Google API trực tiếp từ frontend component hoặc business service.
+5. Không đưa secret hay dữ liệu thật vào source, fixture, log hoặc ảnh chụp màn hình.
+6. Không xóa cột/sheet/file dữ liệu đang dùng. Mọi thay đổi schema phải có migration và cập nhật tài liệu.
+7. Với mỗi hạng mục hoàn thành, báo cáo file thay đổi, chức năng, test đã chạy, hạn chế, biến môi trường mới và thao tác quản trị cần thiết.
