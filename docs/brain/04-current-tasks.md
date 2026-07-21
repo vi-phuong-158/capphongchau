@@ -24,9 +24,9 @@ trước M3.5 để `modules/uploads` + `modules/media` được dùng chung, tr
 
 ### Chặn trước khi đưa cổng công khai vào dữ liệu thật
 
-- **Bảng mã trường 12 Phụ lục 8** (loại đất/nguồn gốc/hình thức/thời hạn) — chưa có, phải xin từ
-  Chi nhánh VPĐKĐĐ Phú Thọ hoặc đơn vị thi công. Hiện `src/modules/public-intake/reference.ts` chỉ
-  là giá trị tạm, có cờ `REFERENCE_IS_PLACEHOLDER`. **Không dùng cho dữ liệu thật.**
+- **Danh mục trường 12 Phụ lục 8:** mã loại đất demo đã dùng Mục A, Phụ lục II Thông tư
+  08/2024/TT-BTNMT; các mã nguồn gốc/hình thức/thời hạn là mã nội bộ có thể map lại. Trước dữ liệu
+  thật vẫn cần đối chiếu danh mục trao đổi dữ liệu của Chi nhánh VPĐKĐĐ Phú Thọ.
 - **Định nghĩa phân nhóm A/B/C/E** (KH 247/KH-UBND ngày 30/6/2026 của tỉnh) — ảnh hưởng schema và
   dashboard báo cáo, phải chốt trước migration.
 - Ba việc cần người am hiểu nghiệp vụ, AI không làm thay: nội hàm trường 7 "vai trò pháp nhân";

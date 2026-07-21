@@ -176,8 +176,9 @@
 - **Lý do quan trọng:** Đây là rủi ro dữ liệu lớn nhất của dự án. Sai mã thì toàn bộ hồ sơ đã thu
   phải nhập lại, và lỗi **không lộ ra khi chạy thử** — code chạy đúng, form hiển thị đẹp, dữ liệu
   sai. **Tuyệt đối không để AI tự sinh danh sách mã.**
-- **Hiện trạng:** `src/modules/public-intake/reference.ts` chứa giá trị **tạm** cho bản demo, đánh
-  dấu bằng cờ `REFERENCE_IS_PLACEHOLDER` và cảnh báo ở đầu file.
+- **Hiện trạng:** bản demo dùng mã loại đất quốc gia tại Mục A, Phụ lục II Thông tư
+  08/2024/TT-BTNMT. Các mã nguồn gốc/hình thức/thời hạn là mã chuẩn hóa nội bộ và vẫn phải map với
+  danh mục trao đổi dữ liệu của VPĐKĐĐ trước khi vận hành chính thức.
 - **Người quyết định:** _(cần chủ dự án lấy tài liệu — xem `PLAN_NL.md` §5.3 mục V1)_
 
 ## [2026-07-21 — CHƯA CHỐT] Phân nhóm hồ sơ A/B/C/E của chiến dịch

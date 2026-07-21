@@ -150,7 +150,7 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
             <button
               className="rounded-lg border border-emerald-800 px-4 py-2 font-semibold text-emerald-900 disabled:opacity-50"
               disabled
-              title="Đang chờ danh mục mã trường 12 chính thức"
+              title="Đang hoàn thiện migration hồ sơ chính thức"
               type="button"
             >
               Tiếp nhận chính thức
@@ -287,9 +287,8 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
         </div>
       ) : null}
       <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Ảnh xem trước đã sẵn sàng để đối chiếu. Tiếp nhận chính thức hiện được khóa vì danh mục mã
-        trường 12 vẫn là dữ liệu tạm; hệ thống sẽ không tạo hồ sơ chính thức khi danh mục chưa được
-        phê duyệt.
+        Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất demo dùng mã từ Thông tư
+        08/2024/TT-BTNMT; tiếp nhận chính thức sẽ được mở cùng migration hồ sơ chuẩn hóa. phê duyệt.
       </p>
     </main>
   );

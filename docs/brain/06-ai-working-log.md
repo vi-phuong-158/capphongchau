@@ -317,6 +317,15 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   nửa chừng hoặc ghi dữ liệu thật bằng mã danh mục demo.
 - **Kiểm tra:** TypeScript, ESLint, 55/55 Vitest, Prettier và `git diff --check` đạt.
 
+## [2026-07-21] Dùng mã loại đất theo Thông tư 08/2024/TT-BTNMT cho bản demo
+
+- **Agent:** Codex
+- **Thay đổi:** Thay danh mục loại đất minh họa bằng các mã dùng trong Mục A, Phụ lục II Thông tư
+  08/2024/TT-BTNMT; thêm version catalog và test. Mã nguồn gốc, hình thức, thời hạn được giữ là
+  mã chuẩn hóa nội bộ để map về danh mục trao đổi của VPĐKĐĐ sau này.
+- **Nguồn:** Công báo điện tử Chính phủ, Thông tư 08/2024/TT-BTNMT, hiệu lực 01/08/2024.
+- **Kiểm tra:** TypeScript, ESLint, Vitest và Prettier.
+
 ## Format entry
 
 ```
