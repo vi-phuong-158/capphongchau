@@ -7,7 +7,7 @@
 
 ## Đang làm
 
-_(trống — M0 Task 1–4 đã hoàn thành; M1 chưa bắt đầu)_
+M1 đang thực hiện. Đã hoàn thành Task 5–7 (tạo Google Cloud Project, bật Google Drive API/Google Sheets API, cấu hình OAuth và tạo hai OAuth client); tiếp theo là viết bootstrap CLI.
 
 ---
 
@@ -65,6 +65,9 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ## Đã hoàn thành gần đây
 
+- [2026-07-21] Hoàn thành M1 Task 5: tạo Google Cloud Project dưới tài khoản `anmphongandn@gmail.com`; Project ID: `resolute-future-478306-e7`. Chưa bật API, chưa tạo OAuth client hoặc secret.
+- [2026-07-21] Hoàn thành M1 Task 6: bật `drive.googleapis.com` và `sheets.googleapis.com` trong Project ID `resolute-future-478306-e7`. Chưa tạo OAuth client, API key hoặc secret.
+- [2026-07-21] Hoàn thành M1 Task 7: cấu hình Google Auth Platform ở chế độ External/Testing và tạo OAuth client Web + Desktop bootstrap. Chỉ đăng ký URL local; URL Vercel và chuyển Production còn chờ deploy/rà soát trước pilot dữ liệu thật.
 - [2026-07-21] Hoàn thành M0 Task 2: tạo Next.js App Router + TypeScript strict, PWA online-only, Tailwind, ESLint/Prettier, Vitest và Playwright; build/typecheck/unit test đạt.
 - [2026-07-21] Hoàn thành M0 Task 3: tạo khung module domain, repository và hợp đồng dữ liệu; `DataRepository`/`StorageRepository` tách khỏi service/frontend.
 - [2026-07-21] Hoàn thành M0 Task 4: thêm `.env.example`, validation server không lộ secret và payload lỗi API thống nhất.

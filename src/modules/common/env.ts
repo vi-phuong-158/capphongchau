@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const serverEnvironmentSchema = z.object({
-  APP_BASE_URL: z.string().url(),
+  APP_BASE_URL: z.url(),
   AUTH_SECRET: z.string().min(32),
   AUTH_GOOGLE_CLIENT_ID: z.string().min(1),
   AUTH_GOOGLE_CLIENT_SECRET: z.string().min(1),
@@ -10,7 +10,7 @@ const serverEnvironmentSchema = z.object({
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().min(1),
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: z.string().min(1),
   GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1),
-  SYSTEM_ADMIN_EMAIL: z.string().email(),
+  SYSTEM_ADMIN_EMAIL: z.email(),
   DATA_HASH_PEPPER: z.string().min(32),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().max(30),
   VERCEL_REGION: z.literal("sin1"),

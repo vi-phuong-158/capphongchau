@@ -1,0 +1,13 @@
+# Chuẩn hóa line ending: repo luôn lưu và checkout bằng LF, kể cả trên Windows.
+# Không có file này, core.autocrlf=true sẽ tạo CRLF trong working tree và làm
+# `npm run format:check` (Prettier mặc định endOfLine=lf) đỏ sau mỗi lần checkout/merge.
+* text=auto eol=lf
+
+# Nguồn nghiệp vụ và ảnh: nhị phân, tuyệt đối không chuẩn hóa nội dung.
+*.pdf binary
+*.docx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary

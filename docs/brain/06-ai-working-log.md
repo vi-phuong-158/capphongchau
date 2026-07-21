@@ -5,6 +5,47 @@
 
 ---
 
+## [2026-07-21] Sửa sau review Task 4: fail-fast cấu hình, Zod v4, chuẩn hóa line ending
+
+- **Agent:** Claude Code
+- **Thay đổi:** (1) Thêm `src/instrumentation.ts` gọi `loadServerEnvironment()` khi server khởi động — trước đó hàm này không có caller nào nên validation cấu hình chỉ tồn tại trên giấy; guard bỏ qua ở dev và lúc build để `next build` và Playwright vẫn chạy được trên máy chưa dựng `.env`. (2) Đổi `env.ts` sang cú pháp Zod v4 (`z.url()`, `z.email()` thay cho `z.string().url()/.email()` kiểu v3 đã deprecated). (3) Thêm `.gitattributes` (`* text=auto eol=lf`) vì `core.autocrlf=true` trên Windows tạo CRLF trong working tree, làm `format:check` đỏ lại sau **mỗi** lần checkout/merge — file nhị phân (`*.pdf`, `*.docx`, ảnh) đánh dấu `binary` để không bị chuẩn hóa.
+- **File đã tạo:** `src/instrumentation.ts`, `tests/instrumentation.test.ts`, `.gitattributes`.
+- **File đã sửa:** `src/modules/common/env.ts`, và chuẩn hóa line ending LF trên toàn repo.
+- **Lý do:** Khắc phục phát hiện khi review M0 Task 4 — cấu hình sai lẽ ra phải làm hỏng deploy chứ không phải hỏng request đầu tiên chạm Google API giữa lúc cán bộ đang nộp hồ sơ; và gate format phải ổn định thay vì đỏ/xanh theo thao tác git.
+- **Kiểm tra:** `lint` ✅, `typecheck` ✅, `test` ✅ 10/10 (thêm 3 test cho các nhánh guard, gồm test chứng minh server production thiếu biến môi trường thì **ném lỗi thật**), `format:check` ✅, `build` ✅. Xác nhận `.next/server/instrumentation.js` được sinh ra (Next đã nhận hook), `git check-attr` trả `eol: lf` cho mã nguồn và `binary: set` cho PDF/DOCX, kích thước hai file nghiệp vụ không đổi (1102991 / 15946 bytes).
+
+---
+
+## [2026-07-21] Hoàn thành M1 Task 7 — cấu hình OAuth và tạo clients
+
+- **Agent:** Codex
+- **Thay đổi:** Tạo cấu hình Google Auth Platform với app name `Ho so dat dai Phong Chau`, nhóm người dùng External và email hỗ trợ/liên hệ `anmphongandn@gmail.com`; tạo hai OAuth client: `Phong Chau Web Sign-In` (Web application) và `Phong Chau Drive Sheets Bootstrap` (Desktop app). Web client chỉ có origin `http://localhost:3000` và redirect URI `http://localhost:3000/api/auth/callback/google`.
+- **File đã sửa:** `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Tách OAuth đăng nhập web khỏi OAuth offline dùng để bootstrap kho My Drive/Google Sheets, không dùng service account.
+- **Kiểm tra:** Google Auth Platform xác nhận tạo thành công cả hai clients. Không download, commit hoặc ghi client secret vào tài liệu/source. OAuth hiện ở trạng thái External/Testing; phải thêm URL Vercel, kiểm tra consent screen và chuyển Production trước dữ liệu thật.
+
+---
+
+## [2026-07-21] Hoàn thành M1 Task 6 — bật Google Drive API và Google Sheets API
+
+- **Agent:** Codex
+- **Thay đổi:** Bật hai dịch vụ bắt buộc trong Google Cloud Project `resolute-future-478306-e7`: `drive.googleapis.com` và `sheets.googleapis.com`.
+- **File đã sửa:** `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Cho phép bước tiếp theo tạo OAuth clients và bootstrap an toàn My Drive/Google Sheets cho ứng dụng.
+- **Kiểm tra:** Trang API/Service Details của từng dịch vụ hiển thị trạng thái `Enabled` và nút `Disable API`.
+
+---
+
+## [2026-07-21] Hoàn thành M1 Task 5 — tạo Google Cloud Project
+
+- **Agent:** Codex
+- **Thay đổi:** Tạo Google Cloud Project bằng tài khoản chủ sở hữu đã chốt `anmphongandn@gmail.com`; Project ID `resolute-future-478306-e7`, Project number `192974001854`.
+- **File đã sửa:** `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Hoàn thành bước 1 của M1 để chuẩn bị bật Google Drive API, Google Sheets API và tạo OAuth clients. Chưa tạo API key, OAuth client, refresh token hay thay đổi cấu hình ứng dụng.
+- **Kiểm tra:** Google Cloud Console hiển thị dashboard của Project ID `resolute-future-478306-e7` dưới đúng tài khoản chủ sở hữu.
+
+---
+
 ## [2026-07-21] Sửa 3 điểm sau review M0: ghim version, typecheck tests, prettier
 
 - **Agent:** Claude Code
