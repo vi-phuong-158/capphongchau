@@ -109,6 +109,13 @@ src/modules/public-intake/image-format.ts → tên chuẩn của loại ảnh + 
 │     đọc mimeType do Drive tự nhận dạng từ nội dung)
 └── tests/image-format.test.ts
 
+src/modules/public-intake/map-sheet-reference.ts → tra tờ bản đồ cũ (trên GCN) sang tờ Phong Châu mới
+├── 164 dòng sinh từ `Tai lieu/DS THAM CHIEU ... 25052026.pdf` (lọc xã mới = 07954)
+├── khóa tra cứu = (đơn vị cũ, số tờ, TỶ LỆ) — Phong Châu cũ có hai bộ bản đồ cùng đánh số từ 1
+├── trả RESOLVED / AMBIGUOUS / NOT_FOUND, không bao giờ tự đoán
+└── tests/map-sheet-reference.test.ts
+    (chưa nối vào biểu mẫu — còn thiếu trường "thửa đất thuộc đơn vị cũ nào")
+
 src/modules/public-intake/support-contacts.ts → danh bạ cán bộ theo tổ dân phố + phạm vi áp dụng
 ├── src/app/ke-khai/wizard.tsx (khối "Không tự làm được?", link `tel:`)
 └── src/app/ke-khai/page.tsx (COVERAGE_NOTICE ở đầu trang)

@@ -5,6 +5,38 @@
 
 ---
 
+## [2026-07-22] Bảng tham chiếu tờ bản đồ cũ → mới cho Phong Châu (trường 19 của PL3)
+
+- **Agent:** Claude Code
+- **Bối cảnh:** Chủ dự án cung cấp `Tai lieu/PL3.xlsx` (bộ **49 trường**, đích xuất cuối cùng — khác
+  với 15 trường Phụ lục 8 đang làm) và `Tai lieu/DS THAM CHIEU PHUTHO VINHPHUC HOABINH 25052026.pdf`
+  (313 trang, 33.309 dòng), yêu cầu quy đổi số tờ trên GCN sang số tờ bản đồ hiện nay khi xuất báo cáo.
+- **Thay đổi:** Trích 164 dòng có xã mới là Phường Phong Châu (mã `07954`, khớp mẫu PL3), sinh
+  `src/modules/public-intake/map-sheet-reference.ts` kèm hàm `lookupNewMapSheet`.
+- **Quy tắc quy đổi:**
+  - Xã Phú Hộ (07954): tờ 1–84 → **giữ nguyên số**.
+  - Xã Hà Thạch (07963): tờ 1–59 → tờ **85–143**.
+  - Phường Phong Châu cũ (07945): 21 tờ → tờ **144–164**.
+- **Phát hiện quan trọng — khóa tra cứu phải gồm TỶ LỆ:** phường Phong Châu cũ có **hai** bộ bản đồ
+  đánh số độc lập từ 1. Tờ 7 tỷ lệ 1/500 ra tờ 150, tờ 7 tỷ lệ 1/1000 ra tờ 156. GCN thường không
+  ghi tỷ lệ nên ca này **không tự quyết được** — hàm trả `AMBIGUOUS` để cán bộ đối chiếu. Đã kiểm
+  bằng test: đây là ca mập mờ **duy nhất** trong toàn bộ 164 dòng.
+- **File đã tạo:** `src/modules/public-intake/map-sheet-reference.ts`,
+  `tests/map-sheet-reference.test.ts`.
+- **File đã sửa:** `docs/brain/01-architecture.md`.
+- **Lý do:** Trường 19 "Số hiệu tờ trên bản đồ địa chính" của PL3 đang trống ở mọi dòng mẫu — đây
+  chính là việc cần tự động hóa.
+- **Kiểm tra:** `vitest run` 116/116 đạt (11 test mới, gồm ca mập mờ tờ 7 và ca số 0 đứng đầu như
+  `"07"` mà PL3 mẫu dùng); typecheck và lint sạch. Đối chiếu tổng: 84+59+21 = 164 dòng, tờ mới phủ
+  kín 1–164 không trùng không khuyết.
+- **CHƯA NỐI VÀO LUỒNG — còn thiếu một trường bắt buộc:** cả ba đơn vị cũ đều đánh số tờ từ 1, nên
+  **phải biết thửa đất thuộc đơn vị cũ nào** mới tra được. Hệ thống hiện chỉ có
+  `addressOnCertificate` (chữ tự do) và `addressTwoLevel` (chọn tổ dân phố) — không suy ra được.
+  Cần thêm một ô chọn "Thửa đất thuộc đơn vị nào trước sáp nhập?" (Phú Hộ / Hà Thạch / Phong Châu
+  cũ / Không rõ).
+- **Bảng này KHÔNG giải quyết trường 20** ("Số thứ tự thửa trên bản đồ địa chính") — nó chỉ quy đổi
+  số tờ, không quy đổi số thửa. Trường 20 vẫn cần nguồn khác hoặc cán bộ làm thủ công.
+
 ## [2026-07-22] Sửa lỗi ảnh JPG từ Zalo bị từ chối; thêm danh bạ cán bộ và phạm vi áp dụng
 
 - **Agent:** Claude Code
