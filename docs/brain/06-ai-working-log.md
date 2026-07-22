@@ -5,6 +5,45 @@
 
 ---
 
+## [2026-07-22] Sửa lỗi tải ảnh CCCD báo "Chủ sử dụng không hợp lệ" (400)
+
+- **Agent:** Claude Code
+- **Vấn đề:** Chủ dự án test trên production, tải đủ hai mặt CCCD nhưng
+  `POST /api/public/submissions/current/uploads/initiate` luôn trả **400** kèm
+  "Chủ sử dụng của ảnh CCCD không hợp lệ", giao diện lại báo thiếu ảnh.
+- **Nguyên nhân gốc — hai bản nháp có ID chủ sử dụng khác nhau:**
+  - Trình duyệt sinh nháp riêng lúc mở trang: `emptyDraft(newId(), …)` (`wizard.tsx`).
+  - Máy chủ sinh nháp riêng lúc tạo hồ sơ: `emptyDraft(randomUUID(), …)`
+    (`api/public/submissions/route.ts`).
+  - Khi tải ảnh, client gửi `ownerId` của nó; route `initiate` tra
+    `record.draft.owners.find(c => c.id === ownerId)` trong nháp **của máy chủ** → không thấy → 400.
+  - Nháp chỉ được đồng bộ khi bấm "Tiếp tục", mà ảnh CCCD lại tải **trước** lúc đó, nên không lần
+    nào tải được. Lỗi có hai biểu hiện: (1) ngay chủ sử dụng đầu tiên, (2) mỗi khi người dân thêm
+    người mới rồi tải ảnh ngay.
+- **Thay đổi:**
+  - Thêm `adoptServerDraft()`: sau khi tạo hồ sơ, lấy nháp máy chủ về bằng
+    `GET /api/public/submissions/current`. Chọn hướng _lấy về_ thay vì _đẩy lên_ vì ở lần khôi phục
+    (`recovered`), nháp máy chủ mới là bản có dữ liệu đã lưu — đẩy bản rỗng trên máy lên sẽ xoá dữ
+    liệu người dân.
+  - `handleCitizenIdUpload` gọi `saveDraft()` trước khi tải ảnh, để chủ sử dụng vừa thêm chắc chắn
+    đã có trong nháp máy chủ.
+- **Lỗi thứ hai phát hiện trong lúc kiểm chứng (do chính lượt trước gây ra):** siteverify của
+  Cloudflare với **khóa sandbox** không trả trường `action` và luôn báo `hostname: "example.com"`
+  (đã kiểm bằng curl). Phép kiểm nghiêm ngặt thêm ở lượt trước vì thế chặn luôn khóa test — tức
+  quy trình chạy local ghi trong `.env.example`/`05-testing-and-deploy.md` **thực ra không dùng
+  được**, và lượt trước chưa hề chạy thử đường verify này. Sửa: nhận diện bộ khóa sandbox công bố
+  công khai của Cloudflare và bỏ qua hai phép kiểm đó; khóa thật vẫn kiểm nghiêm ngặt như cũ.
+  Nhận diện dựa trên secret trong cấu hình máy chủ nên kẻ tấn công không tác động được.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`, `src/modules/public-intake/turnstile.ts`,
+  `tests/turnstile.test.ts`.
+- **Kiểm tra:** `typecheck` ✅, `lint` ✅, `format:check` ✅, `test` ✅ 95/95 (+2), `build` ✅.
+  **Chạy thật đầu-cuối trên máy** (Google Sheets + Drive thật, khóa Turnstile sandbox tạm thời rồi
+  khôi phục lại khóa thật ngay sau): tạo hồ sơ `200` → `GET /current` `200` (đồng bộ ID) →
+  `PATCH /current` `200` (đẩy nháp) → `uploads/initiate` **`200`** (trước khi sửa là `400`) →
+  `uploads/complete` `200`. Không còn thông báo "Chủ sử dụng … không hợp lệ".
+
+---
+
 ## [2026-07-22] Deploy production đầu tiên; cờ tạm mở chốt chặn để test không domain
 
 - **Agent:** Claude Code

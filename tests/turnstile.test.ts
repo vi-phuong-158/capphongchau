@@ -137,6 +137,39 @@ describe("xác minh Turnstile", () => {
     expect(init.body).toContain("response=secret-token");
   });
 
+  it("khóa sandbox vẫn qua dù siteverify không trả action và báo hostname example.com", async () => {
+    // Đây đúng là phản hồi thật của Cloudflare cho khóa test (đã kiểm bằng curl 2026-07-22):
+    // không có trường `action`, `hostname` cố định. Kiểm nghiêm ngặt sẽ chặn luôn cả môi trường
+    // dev — chính là lỗi khiến quy trình chạy local ghi trong tài liệu không dùng được.
+    fetchMock.mockResolvedValue(
+      siteverifyResponse({
+        success: true,
+        hostname: "example.com",
+        "error-codes": [],
+        metadata: { result_with_testing_key: true },
+      }),
+    );
+
+    await expect(
+      verifyTurnstileToken({
+        ...BASE,
+        secretKey: "1x0000000000000000000000000000000AA",
+        token: "XXXX.DUMMY.TOKEN.XXXX",
+      }),
+    ).resolves.toEqual({ ok: true, duplicate: false });
+  });
+
+  it("khóa thật vẫn bị kiểm nghiêm ngặt: cùng phản hồi đó nhưng secret thật thì bị từ chối", async () => {
+    fetchMock.mockResolvedValue(
+      siteverifyResponse({ success: true, hostname: "example.com", "error-codes": [] }),
+    );
+
+    await expect(verifyTurnstileToken({ ...BASE, token: "token" })).resolves.toEqual({
+      ok: false,
+      duplicate: false,
+    });
+  });
+
   it("lấy hostname mong đợi từ APP_BASE_URL", () => {
     expect(turnstileHostname("https://kekhai.example.vn")).toBe("kekhai.example.vn");
     expect(turnstileHostname("http://localhost:3000")).toBe("localhost");

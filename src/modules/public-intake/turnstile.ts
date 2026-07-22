@@ -11,6 +11,20 @@
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const VERIFY_TIMEOUT_MS = 5_000;
 
+/**
+ * Bộ khóa sandbox mà Cloudflare công bố công khai để chạy local/CI.
+ *
+ * Với các khóa này, siteverify **không trả `action`** và luôn báo `hostname: "example.com"` —
+ * không có gì để đối chiếu, nên hai phép kiểm bên dưới bị bỏ qua. Nhận diện dựa trên secret trong
+ * cấu hình máy chủ, thứ kẻ tấn công không tác động được: gửi token kiểu gì cũng không tự biến
+ * cấu hình production thành sandbox.
+ */
+const CLOUDFLARE_TESTING_SECRETS: ReadonlySet<string> = new Set([
+  "1x0000000000000000000000000000000AA",
+  "2x0000000000000000000000000000000AA",
+  "3x0000000000000000000000000000000AA",
+]);
+
 export const TURNSTILE_HEADER = "x-turnstile-token";
 
 export type TurnstileAction = "create" | "submit";
@@ -70,9 +84,12 @@ export async function verifyTurnstileToken(input: {
     };
   }
 
-  // `success` chưa đủ: token phải được sinh cho đúng hành động và đúng site này.
-  if (payload.action !== input.action || payload.hostname !== input.expectedHostname) {
-    return REJECTED;
+  // `success` chưa đủ: token phải được sinh cho đúng hành động và đúng site này. Khóa sandbox
+  // không cung cấp hai trường đó nên chỉ kiểm với khóa thật.
+  if (!CLOUDFLARE_TESTING_SECRETS.has(input.secretKey)) {
+    if (payload.action !== input.action || payload.hostname !== input.expectedHostname) {
+      return REJECTED;
+    }
   }
 
   return { ok: true, duplicate: false };

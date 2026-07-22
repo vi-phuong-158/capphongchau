@@ -364,6 +364,32 @@ export function IntakeWizard() {
     }
   }, [csrfToken, draft]);
 
+  /**
+   * Lấy bản nháp mà máy chủ đang giữ về máy.
+   *
+   * Bắt buộc gọi ngay sau khi tạo: ID chủ sử dụng trong bản nháp là do **máy chủ** sinh, còn
+   * trình duyệt lại sinh bộ ID riêng lúc mở trang. Hai bên lệch nhau thì mọi lần tải ảnh CCCD
+   * đều bị từ chối vì máy chủ không tìm thấy chủ sử dụng ứng với `ownerId` gửi lên.
+   *
+   * Ở lần khôi phục (`recovered`), bản của máy chủ còn là bản duy nhất có dữ liệu đã lưu trước
+   * đó — nên phải lấy về, không được đẩy bản rỗng trên máy lên đè.
+   */
+  const adoptServerDraft = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await fetchApi("/api/public/submissions/current", { method: "GET" });
+      if (!response.ok) {
+        return false;
+      }
+      const body = (await response.json()) as { draft: IntakeDraft | null };
+      if (body.draft) {
+        setDraft(body.draft);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const goNext = useCallback(async () => {
     const found = validate();
     setErrors(found);
@@ -450,6 +476,13 @@ export function IntakeWizard() {
         } catch {
           // Không có gì cần làm nếu storage bị chặn.
         }
+        // Đồng bộ ID chủ sử dụng với máy chủ trước khi người dân kịp chọn ảnh CCCD ở ngay bước
+        // này; thiếu bước đồng bộ thì `ownerId` gửi kèm ảnh là ID lạ và máy chủ trả 400.
+        if (!(await adoptServerDraft())) {
+          setServerError(
+            "Đã tạo được bản kê khai nhưng chưa tải được dữ liệu về máy. Ghi lại mã ở trên, kiểm tra mạng rồi bấm Tiếp tục để thử lại.",
+          );
+        }
         // Giữ nguyên bước đầu: ngay sau khi tạo nháp/thư mục Drive, người dân tải ảnh CCCD tại
         // chính màn hình này thay vì phải đi qua toàn bộ biểu mẫu rồi mới quay lại.
         return;
@@ -466,7 +499,16 @@ export function IntakeWizard() {
     } finally {
       setBusy(false);
     }
-  }, [validate, step, receipt, draft.phone, saveDraft, challengeToken, refreshChallenge]);
+  }, [
+    validate,
+    step,
+    receipt,
+    draft.phone,
+    saveDraft,
+    challengeToken,
+    refreshChallenge,
+    adoptServerDraft,
+  ]);
 
   /** Trình duyệt tải thẳng lên Drive qua phiên resumable; ảnh không đi qua server của app. */
   const uploadFile = useCallback(
@@ -596,6 +638,13 @@ export function IntakeWizard() {
       const sideLabel = documentType === "CITIZEN_ID_FRONT" ? "mặt trước" : "mặt sau";
       setUploadNote(`Đang chuẩn bị và tải ảnh CCCD ${sideLabel}…`);
       try {
+        // Máy chủ chỉ nhận ảnh cho chủ sử dụng đã có trong bản nháp mà nó đang giữ. Người dân có
+        // thể vừa bấm "Thêm người" xong là chọn ảnh ngay, lúc đó người mới chưa được lưu — nên
+        // đẩy bản nháp lên trước, rồi mới tải ảnh.
+        if (!(await saveDraft())) {
+          setUploadNote("");
+          return;
+        }
         const prepared = await prepareCitizenIdImage(file);
         const replaceFileId = identityPhotos[ownerId]?.[documentType]?.fileId ?? "";
         const fileId = await uploadFile(prepared, documentType, ownerId, replaceFileId);
@@ -624,7 +673,7 @@ export function IntakeWizard() {
         uploadAbort.current = null;
       }
     },
-    [applyQrResult, identityPhotos, uploadFile],
+    [applyQrResult, identityPhotos, saveDraft, uploadFile],
   );
 
   /**
