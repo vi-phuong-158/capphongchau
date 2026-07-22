@@ -104,10 +104,9 @@
   2. Số trùng là của đồng chí Hoàng Minh Trung (không phải Vũ Đình Lâm) — sửa thành `0375998437`
      cho cả hai tổ Phú An/Phú Lợi mà đồng chí phụ trách. Số của Vũ Đình Lâm (`0962558662`) giữ
      nguyên, nay không còn trùng ai.
-- **Tồn đọng còn lại, chưa xác nhận:**
-  1. `NEIGHBORHOOD_HINTS` trong `reference.ts` đang liệt 10 tổ dân phố, gồm "Phú Cường" và
-     "Phúc Lợi"; theo danh bạ mới thì Phú Cường là **khu** thuộc TDP Phú An, còn danh bạ chỉ có 8
-     TDP. Chưa sửa `reference.ts` vì danh sách này đã dùng để thu dữ liệu — cần chốt trước.
+- **Đã chốt, KHÔNG sửa:** `NEIGHBORHOOD_HINTS` giữ nguyên **10 tổ dân phố**. Chủ dự án xác nhận
+  (2026-07-22) danh sách 10 là đúng; danh bạ cán bộ chỉ có 8 đầu mối vì một cán bộ phụ trách nhiều
+  tổ, không phải vì thiếu tổ. Đừng rút danh sách này xuống 8.
 
 ## [2026-07-22] Sửa lỗi tải ảnh CCCD báo "Chủ sử dụng không hợp lệ" (400)
 
