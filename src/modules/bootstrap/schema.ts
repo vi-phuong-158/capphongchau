@@ -207,6 +207,10 @@ export const PUBLIC_SHEET_DEFINITIONS: readonly SheetDefinition[] = [
       "neighborhood_hint",
       "area",
       "created_at",
+      // Đơn vị hành chính cũ nơi cấp GCN. Bắt buộc để quy đổi số tờ bản đồ sang bản đồ Phong Châu
+      // mới (trường 19 của PL3): cả ba xã cũ đều đánh số tờ từ 1 nên thiếu cột này thì cùng một
+      // số tờ ra ba kết quả khác nhau. Thêm ở CUỐI để không dịch cột của dữ liệu đã có.
+      "old_ward",
     ],
   },
   {

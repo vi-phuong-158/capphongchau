@@ -1,5 +1,8 @@
+import { OLD_WARD_OPTIONS } from "./reference";
 import type { IntakeDraft } from "./types";
 import { requiresCitizenId } from "./types";
+
+const OLD_WARD_CODES: readonly string[] = OLD_WARD_OPTIONS.map((option) => option.code);
 
 /**
  * Kiểm tra ở ranh giới tin cậy. Trình duyệt đã validate theo từng bước, nhưng mọi endpoint ghi
@@ -82,6 +85,12 @@ export function validateDraftForSubmit(draft: IntakeDraft): string | null {
   for (const parcel of draft.parcels) {
     if (!parcel.addressOnCertificate.trim()) {
       return "Thiếu địa chỉ thửa đất ghi trên Giấy chứng nhận.";
+    }
+
+    // Bắt buộc chọn, nhưng "KHONG_RO" là lựa chọn hợp lệ: thà biết là chưa xác định còn hơn để
+    // trống rồi sau này không phân biệt được với hồ sơ chưa ai đụng tới.
+    if (!OLD_WARD_CODES.includes(parcel.oldWard)) {
+      return "Thiếu đơn vị hành chính cũ của thửa đất.";
     }
 
     const parcelArea = Number(parcel.area);

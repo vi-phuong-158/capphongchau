@@ -5,6 +5,31 @@
 
 ---
 
+## [2026-07-22] Thêm trường "đơn vị hành chính cũ" của thửa đất
+
+- **Agent:** Claude Code
+- **Thay đổi:** Thêm ô chọn bắt buộc *"Thửa đất thuộc đơn vị nào trước sáp nhập?"* ở bước Thửa đất:
+  Xã Phú Hộ (cũ) / Xã Hà Thạch (cũ) / Phường Phong Châu (cũ) / Không rõ.
+- **Lý do:** Mảnh cuối để `lookupNewMapSheet` chạy được. Ba xã cũ đều đánh số tờ bản đồ từ 1, nên
+  không có trường này thì "tờ 5" ra ba đáp án (5, 89, hoặc 148) và không thể điền trường 19 của PL3.
+- **`KHONG_RO` là lựa chọn hợp lệ, không phải để trống:** bắt buộc người dân chọn một mục, nhưng có
+  lối thoát. Phân biệt được "chưa xác định" với "chưa ai đụng tới" — để trống thì hai trạng thái
+  này lẫn vào nhau khi cán bộ lọc hàng chờ.
+- **File đã sửa:** `src/modules/public-intake/types.ts` (thêm `Parcel.oldWard`),
+  `reference.ts` (`OLD_WARD_OPTIONS`), `validation.ts` (kiểm ở ranh giới tin cậy),
+  `repository.ts` (ghi vào `PUBLIC_PARCELS`), `src/app/ke-khai/wizard.tsx` (ô chọn + kiểm theo bước),
+  `src/modules/bootstrap/schema.ts` (cột `old_ward`), `scripts/migrate-public-intake.ts`,
+  `tests/public-intake-validation.test.ts`.
+- **Migration:** cột `old_ward` thêm ở **cuối** `PUBLIC_PARCELS` để không dịch cột của dữ liệu đã
+  có (mã định vị theo chỉ số cột). `scripts/migrate-public-intake.ts` nay còn **nối cột thiếu vào
+  tab đã tồn tại**, không chỉ tạo tab mới — vẫn idempotent, chỉ nối thêm chứ không đổi tên/chèn
+  giữa/xóa. **Phải chạy `npm run migrate:public-intake` trước khi deploy bản này.**
+- **Kiểm tra:** `vitest run` 119/119 đạt (3 test mới: bắt buộc chọn, chấp nhận `KHONG_RO`, từ chối
+  mã lạ); typecheck và lint sạch; `/ke-khai` tải không lỗi console và trường mới có trong chunk gửi
+  xuống trình duyệt.
+- **Chưa làm:** màn hình chi tiết của cán bộ chưa hiện `oldWard` — nằm trong hạng mục lớn hơn "chi
+  tiết cán bộ chưa hiển thị đầy đủ land-use/assets" đã ghi nhận từ trước.
+
 ## [2026-07-22] Bảng tham chiếu tờ bản đồ cũ → mới cho Phong Châu (trường 19 của PL3)
 
 - **Agent:** Claude Code
@@ -29,11 +54,7 @@
 - **Kiểm tra:** `vitest run` 116/116 đạt (11 test mới, gồm ca mập mờ tờ 7 và ca số 0 đứng đầu như
   `"07"` mà PL3 mẫu dùng); typecheck và lint sạch. Đối chiếu tổng: 84+59+21 = 164 dòng, tờ mới phủ
   kín 1–164 không trùng không khuyết.
-- **CHƯA NỐI VÀO LUỒNG — còn thiếu một trường bắt buộc:** cả ba đơn vị cũ đều đánh số tờ từ 1, nên
-  **phải biết thửa đất thuộc đơn vị cũ nào** mới tra được. Hệ thống hiện chỉ có
-  `addressOnCertificate` (chữ tự do) và `addressTwoLevel` (chọn tổ dân phố) — không suy ra được.
-  Cần thêm một ô chọn "Thửa đất thuộc đơn vị nào trước sáp nhập?" (Phú Hộ / Hà Thạch / Phong Châu
-  cũ / Không rõ).
+- **Trường còn thiếu đã được bổ sung ngay sau đó** — xem entry kế tiếp cùng ngày.
 - **Bảng này KHÔNG giải quyết trường 20** ("Số thứ tự thửa trên bản đồ địa chính") — nó chỉ quy đổi
   số tờ, không quy đổi số thửa. Trường 20 vẫn cần nguồn khác hoặc cán bộ làm thủ công.
 

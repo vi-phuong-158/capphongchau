@@ -31,6 +31,7 @@ function completeDraft() {
   draft.parcels[0] = {
     ...draft.parcels[0],
     addressOnCertificate: "Khu Thống Nhất, phường Phong Châu",
+    oldWard: "PHONG_CHAU_CU",
     area: "220",
     landUses: [
       {
@@ -117,6 +118,28 @@ describe("validateDraftForSubmit", () => {
     draft.parcels[0].landUses[0] = { ...draft.parcels[0].landUses[0], originCode: "" };
 
     expect(validateDraftForSubmit(draft)).toContain("nguồn gốc");
+  });
+
+  /**
+   * Trường này không thuộc Phụ lục 8 nhưng bắt buộc để quy đổi số tờ bản đồ (trường 19 của PL3):
+   * ba xã cũ đều đánh số tờ từ 1 nên thiếu nó thì "tờ 5" có ba đáp án.
+   */
+  it("bắt buộc chọn đơn vị hành chính cũ của thửa đất", () => {
+    const draft = completeDraft();
+    draft.parcels[0].oldWard = "";
+    expect(validateDraftForSubmit(draft)).toBe("Thiếu đơn vị hành chính cũ của thửa đất.");
+  });
+
+  it('chấp nhận "Không rõ" — thà biết là chưa xác định còn hơn để trống', () => {
+    const draft = completeDraft();
+    draft.parcels[0].oldWard = "KHONG_RO";
+    expect(validateDraftForSubmit(draft)).toBeNull();
+  });
+
+  it("từ chối mã đơn vị cũ không có trong danh mục", () => {
+    const draft = completeDraft();
+    draft.parcels[0].oldWard = "XA_KHAC";
+    expect(validateDraftForSubmit(draft)).toBe("Thiếu đơn vị hành chính cũ của thửa đất.");
   });
 
   it("chỉ kiểm tổng diện tích theo mục đích khi người dân có nhập", () => {

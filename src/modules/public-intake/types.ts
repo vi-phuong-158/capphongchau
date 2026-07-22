@@ -69,6 +69,13 @@ export interface Parcel {
    */
   addressOnCertificate: string;
   addressTwoLevel: string;
+  /**
+   * Đơn vị hành chính cũ nơi cấp GCN — `PHU_HO` | `HA_THACH` | `PHONG_CHAU_CU` | `KHONG_RO`.
+   *
+   * Không thuộc Phụ lục 8 nhưng bắt buộc để suy ra trường 19 của PL3 ("Số hiệu tờ trên bản đồ địa
+   * chính"): ba xã cũ đều đánh số tờ bản đồ từ 1, nên không biết đơn vị cũ thì "tờ 5" có ba đáp án.
+   */
+  oldWard: string;
   /** Trường 11 — bắt buộc, đơn vị m². */
   area: string;
   landUses: LandUse[];
@@ -110,6 +117,7 @@ export function emptyParcel(id: string, landUseId: string): Parcel {
     parcelNumber: "",
     addressOnCertificate: "",
     addressTwoLevel: "",
+    oldWard: "",
     area: "",
     landUses: [emptyLandUse(landUseId)],
   };

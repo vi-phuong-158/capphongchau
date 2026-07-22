@@ -11,6 +11,7 @@ import {
   LAND_USE_FORM_OPTIONS,
   LAND_USE_TERM_OPTIONS,
   NEIGHBORHOOD_HINTS,
+  OLD_WARD_OPTIONS,
   type ReferenceOption,
 } from "@/modules/public-intake/reference";
 import { canonicalImageMimeType, IMAGE_FILE_ACCEPT } from "@/modules/public-intake/image-format";
@@ -293,6 +294,8 @@ export function IntakeWizard() {
       draft.parcels.forEach((parcel, index) => {
         if (!parcel.addressOnCertificate.trim())
           found[`parcel-${index}-address`] = "Bắt buộc theo Phụ lục 8.";
+        if (!parcel.oldWard)
+          found[`parcel-${index}-oldward`] = "Chọn một mục; không rõ thì chọn “Không rõ”.";
         if (!parcel.area.trim() || Number(parcel.area) <= 0)
           found[`parcel-${index}-area`] = "Nhập diện tích lớn hơn 0.";
       });
@@ -1385,6 +1388,24 @@ export function IntakeWizard() {
                           next.parcels[index].addressOnCertificate = event.target.value;
                         })
                       }
+                    />
+                  </Field>
+                  <Field
+                    label="Thửa đất thuộc đơn vị nào trước sáp nhập?"
+                    required
+                    error={errors[`parcel-${index}-oldward`]}
+                    hint="Xem tên xã/phường in trên bìa GCN. Cần thông tin này để đối chiếu số tờ bản đồ cũ với bản đồ hiện nay."
+                  >
+                    <Select
+                      value={parcel.oldWard}
+                      invalid={Boolean(errors[`parcel-${index}-oldward`])}
+                      onChange={(value) =>
+                        update((next) => {
+                          next.parcels[index].oldWard = value;
+                        })
+                      }
+                      placeholder="— Chọn —"
+                      options={OLD_WARD_OPTIONS}
                     />
                   </Field>
                   <Field

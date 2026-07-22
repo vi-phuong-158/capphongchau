@@ -101,6 +101,20 @@ export const CERTIFICATE_ROLE_OPTIONS: readonly ReferenceOption[] = [
   { code: "DAI_DIEN_TO_CHUC", label: "Người đại diện tổ chức" },
 ];
 
+/**
+ * Đơn vị hành chính cũ nơi cấp GCN. Mã trùng `OldWard` trong `map-sheet-reference.ts`, thêm
+ * `KHONG_RO` làm lối thoát cho người dân không đọc được tên xã cũ trên bìa GCN.
+ *
+ * Cần thiết vì ba xã cũ đều đánh số tờ bản đồ từ 1: thiếu trường này thì không quy đổi được số tờ
+ * sang bản đồ Phong Châu mới (trường 19 của PL3).
+ */
+export const OLD_WARD_OPTIONS: readonly ReferenceOption[] = [
+  { code: "PHU_HO", label: "Xã Phú Hộ (cũ)" },
+  { code: "HA_THACH", label: "Xã Hà Thạch (cũ)" },
+  { code: "PHONG_CHAU_CU", label: "Phường Phong Châu (cũ)" },
+  { code: "KHONG_RO", label: "Không rõ — đề nghị cán bộ xác định" },
+];
+
 export const NEIGHBORHOOD_HINTS: readonly string[] = [
   "Hà Thạch",
   "Lũng Thượng",

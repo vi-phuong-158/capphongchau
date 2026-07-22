@@ -630,6 +630,7 @@ export class PublicIntakeRepository {
               parcel.addressTwoLevel,
               parcel.area,
               now,
+              parcel.oldWard,
             ]),
           ),
           fields: "userEnteredValue",
