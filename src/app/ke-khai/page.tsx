@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
+import { COVERAGE_NOTICE } from "@/modules/public-intake/support-contacts";
 
 import { IntakeWizard } from "./wizard";
 
@@ -41,6 +42,17 @@ export default async function IntakePage() {
         <p className="mt-3 text-lg" style={{ color: "var(--muted)" }}>
           Dành cho trường hợp thửa đất đã có Giấy chứng nhận. Bạn không cần tài khoản — kê khai xong
           sẽ nhận mã tra cứu.
+        </p>
+        {/* Phạm vi áp dụng nêu ngay đầu trang: người có thửa đất ngoài địa bàn phải biết trước khi
+            bỏ công kê khai và tải ảnh, không phải sau khi cán bộ từ chối. */}
+        <p
+          className="mt-4 rounded-lg border p-3 text-sm"
+          style={{
+            background: "var(--warning-surface)",
+            borderColor: "var(--warning-border)",
+          }}
+        >
+          {COVERAGE_NOTICE}
         </p>
       </header>
 

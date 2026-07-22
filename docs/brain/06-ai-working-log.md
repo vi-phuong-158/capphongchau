@@ -5,6 +5,56 @@
 
 ---
 
+## [2026-07-22] Sửa lỗi ảnh JPG từ Zalo bị từ chối; thêm danh bạ cán bộ và phạm vi áp dụng
+
+- **Agent:** Claude Code
+- **Vấn đề:** Người dùng thật báo "một số đuôi ảnh không hoạt động, có người dùng đuôi JPG nhưng
+  không được". Ảnh chụp màn hình kèm theo cho thấy tên tệp dạng
+  `z8070298699198_b736ca25543c2e1e8d31942dab4553cf.jpg` — **tên tệp ảnh Zalo**.
+- **Nguyên nhân gốc:** Client gửi thẳng `File.type` lên `uploads/initiate`, route so khớp tuyệt đối
+  với `ACCEPTED_MIME_TYPES`. Ảnh nhận qua Zalo/Messenger thường về với `File.type` **rỗng** (hệ điều
+  hành không có đăng ký cho phần mở rộng) hoặc bí danh **`image/jpg`** — không có trong danh sách,
+  nên bị 400 "Chỉ chấp nhận ảnh JPEG, PNG, WebP hoặc HEIC" dù tệp là JPEG hợp lệ. Thuộc tính
+  `accept` chỉ có MIME còn khiến nhiều trình quản lý tệp Android làm mờ đúng ảnh cần chọn.
+- **Thay đổi:**
+  - Thêm `modules/public-intake/image-format.ts`: quy bí danh (`image/jpg`, `image/pjpeg`,
+    `image/x-png`, `image/heic-sequence`…) về tên chuẩn, suy từ phần mở rộng khi trình duyệt khai
+    rỗng, và chuỗi `IMAGE_FILE_ACCEPT` có cả đuôi lẫn MIME.
+  - `initiate` chuẩn hóa loại rồi **trả `mimeType` đã chuẩn** về client; client dùng đúng giá trị đó
+    cho `Content-Type` của lệnh PUT, không dùng lại `File.type` — lệnh PUT phải khai đúng loại đã
+    đăng ký với phiên resumable.
+  - Ảnh GCN nay cũng đi qua `prepareCitizenIdImage` (chuyển HEIC→JPEG) như ảnh CCCD. Trước đó chỉ
+    ảnh CCCD được chuyển, ảnh GCN chụp bằng iPhone đi thẳng lên Drive ở dạng HEIC.
+  - Ghi chú "Đã tải N ảnh GCN" đếm theo **tổng** ảnh của hồ sơ thay vì theo lượt chọn tệp vừa rồi
+    (trước đó chọn 2 lượt × 1 ảnh hiển thị "Đã tải 1 ảnh" dù danh sách có 2 dòng — thấy rõ trong ảnh
+    chụp màn hình người dùng gửi). Khóa React của danh sách kèm vị trí vì tệp Zalo dễ trùng tên.
+  - Thêm `modules/public-intake/support-contacts.ts`: danh bạ cán bộ hỗ trợ theo 8 tổ dân phố, đầu
+    mối tư vấn chung, và `COVERAGE_NOTICE` về phạm vi áp dụng. Hiển thị ở khối "Không tự làm được?"
+    (link `tel:` bấm gọi thẳng) và ngay đầu `/ke-khai`.
+- **File đã tạo:** `src/modules/public-intake/image-format.ts`,
+  `src/modules/public-intake/support-contacts.ts`, `tests/image-format.test.ts`.
+- **File đã sửa:** `src/modules/public-intake/storage.ts`,
+  `src/app/api/public/submissions/current/uploads/initiate/route.ts`, `src/app/ke-khai/wizard.tsx`,
+  `src/app/ke-khai/page.tsx`, `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`.
+- **Lý do:** Lỗi định dạng chặn người dân thật ngay ở bước tải ảnh — họ có tệp đúng nhưng hệ thống
+  bảo sai. Danh bạ và phạm vi áp dụng để người dân biết gọi ai và biết trước mình có thuộc địa bàn
+  không, thay vì kê khai xong mới bị từ chối.
+- **Không làm yếu kiểm soát:** Giá trị chuẩn hóa chỉ là lời khai lúc tạo phiên. Chốt chặn thật vẫn
+  là `verifyUploadedFile` đọc `mimeType` do Drive nhận dạng **từ nội dung tệp** — PDF đổi đuôi
+  `.jpg` vẫn bị chặn và xóa.
+- **Kiểm tra:** `vitest run` 105/105 đạt (thêm 10 test mới cho `image-format`, gồm đúng ca tên tệp
+  Zalo với `File.type` rỗng); `npm run typecheck` và `npm run lint` sạch; `next build` đạt. Kiểm
+  trực tiếp `/ke-khai` trên dev server: danh bạ hiện đủ 8 tổ, 8 liên kết `tel:`, phạm vi áp dụng
+  hiện đầu trang, không tràn ngang ở khung 375px, console không lỗi.
+- **Tồn đọng cần chủ dự án xác nhận (đã giữ nguyên bản gốc, không tự suy đoán):**
+  1. TDP Hà Thạch — đồng chí Dương Văn Dũng **chưa có số điện thoại** trong danh sách được cung cấp;
+     giao diện đang hiện tên kèm hướng dẫn gọi đầu mối chung.
+  2. Số của đồng chí Vũ Đình Lâm (`0962558662`) **trùng** số của đồng chí Hoàng Minh Trung — có thể
+     là lỗi chép, cần xác nhận.
+  3. `NEIGHBORHOOD_HINTS` trong `reference.ts` đang liệt 10 tổ dân phố, gồm "Phú Cường" và
+     "Phúc Lợi"; theo danh bạ mới thì Phú Cường là **khu** thuộc TDP Phú An, còn danh bạ chỉ có 8
+     TDP. Chưa sửa `reference.ts` vì danh sách này đã dùng để thu dữ liệu — cần chốt trước.
+
 ## [2026-07-22] Sửa lỗi tải ảnh CCCD báo "Chủ sử dụng không hợp lệ" (400)
 
 - **Agent:** Claude Code

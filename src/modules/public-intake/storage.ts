@@ -4,18 +4,17 @@ import {
   getGoogleAccessToken,
 } from "@/modules/google/workspace-client";
 
+import { CANONICAL_IMAGE_MIME_TYPES, isCanonicalImageMimeType } from "./image-format";
+
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const RESUMABLE_ENDPOINT =
   "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id";
 
-/** Định dạng ảnh chấp nhận. HEIC/HEIF được trình duyệt chuyển sang JPEG trước khi tải lên. */
-export const ACCEPTED_MIME_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-] as const;
+/**
+ * Định dạng ảnh chấp nhận, dùng tên chuẩn trong `image-format.ts`. Bí danh như `image/jpg` được
+ * quy về tên chuẩn **trước** khi tới đây, nên danh sách này giữ nguyên độ chặt.
+ */
+export const ACCEPTED_MIME_TYPES = CANONICAL_IMAGE_MIME_TYPES;
 
 export interface UploadSession {
   readonly uploadUrl: string;
@@ -119,8 +118,10 @@ export class PublicIntakeStorage {
       throw new UploadVerificationError("Tệp không nằm trong thư mục của bản kê khai.");
     }
 
+    // Ranh giới tin cậy thật của luồng upload: `mimeType` ở đây do chính Drive nhận dạng từ nội
+    // dung tệp, không phải thứ trình duyệt khai. Tệp đổi đuôi để qua mặt sẽ bị chặn tại đây.
     const mimeType = file.mimeType ?? "";
-    if (!ACCEPTED_MIME_TYPES.includes(mimeType as (typeof ACCEPTED_MIME_TYPES)[number])) {
+    if (!isCanonicalImageMimeType(mimeType)) {
       throw new UploadVerificationError("Định dạng tệp không được chấp nhận.");
     }
 

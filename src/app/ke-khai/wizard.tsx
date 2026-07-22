@@ -13,7 +13,12 @@ import {
   NEIGHBORHOOD_HINTS,
   type ReferenceOption,
 } from "@/modules/public-intake/reference";
+import { canonicalImageMimeType, IMAGE_FILE_ACCEPT } from "@/modules/public-intake/image-format";
 import { lastSecretGroup } from "@/modules/public-intake/receipt-code";
+import {
+  SUPPORT_CONTACTS,
+  GENERAL_SUPPORT_CONTACT,
+} from "@/modules/public-intake/support-contacts";
 import { uploadWithResume, UploadCancelledError } from "@/modules/public-intake/resumable-upload";
 import {
   prepareCitizenIdImage,
@@ -518,6 +523,16 @@ export function IntakeWizard() {
       ownerId = "",
       replaceFileId = "",
     ): Promise<string | null> => {
+      // Ảnh nhận qua Zalo/Messenger hay tải về từ trình duyệt thường có `File.type` rỗng hoặc là
+      // bí danh `image/jpg`. Quy về tên chuẩn ngay ở đây để không bị từ chối oan.
+      const declaredMimeType = canonicalImageMimeType(file.type, file.name);
+      if (!declaredMimeType) {
+        setServerError(
+          `Không nhận dạng được định dạng của tệp "${file.name}". Hãy chọn ảnh JPG, PNG, WebP hoặc HEIC.`,
+        );
+        return null;
+      }
+
       const initiate = await fetchApi("/api/public/submissions/current/uploads/initiate", {
         method: "POST",
         headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
@@ -526,7 +541,7 @@ export function IntakeWizard() {
           ownerId,
           replaceFileId,
           fileName: file.name,
-          mimeType: file.type,
+          mimeType: declaredMimeType,
           sizeBytes: file.size,
         }),
       });
@@ -536,14 +551,18 @@ export function IntakeWizard() {
         return null;
       }
 
-      const { uploadUrl } = (await initiate.json()) as { uploadUrl: string };
+      // Dùng đúng loại máy chủ đã đăng ký với phiên, không dùng lại `file.type`.
+      const { uploadUrl, mimeType } = (await initiate.json()) as {
+        uploadUrl: string;
+        mimeType: string;
+      };
 
       let id: string;
       try {
         id = await uploadWithResume({
           uploadUrl,
           file,
-          contentType: file.type,
+          contentType: mimeType,
           signal: uploadAbort.current?.signal,
           onProgress: (sent, total) => {
             setUploadPercent(total > 0 ? Math.round((sent / total) * 100) : 0);
@@ -717,20 +736,26 @@ export function IntakeWizard() {
         for (const [index, file] of files.entries()) {
           setUploadPercent(0);
           setUploadNote(`Đang tải ảnh GCN ${index + 1}/${files.length}…`);
-          if (!(await uploadFile(file, "CERTIFICATE"))) {
+          // Ảnh GCN cũng phải qua bước chuyển HEIC như ảnh CCCD: iPhone mặc định chụp HEIC, mà
+          // Drive không phải lúc nào cũng nhận dạng được định dạng này khi xác minh sau tải.
+          const prepared = await prepareCitizenIdImage(file);
+          if (!(await uploadFile(prepared, "CERTIFICATE"))) {
             break;
           }
-          accepted.push(file);
+          accepted.push(prepared);
         }
         setCertificatePhotos((current) => [...current, ...accepted]);
-        setUploadNote(accepted.length > 0 ? `Đã tải ${accepted.length} ảnh GCN.` : "");
+        // Đếm theo tổng số ảnh của cả hồ sơ, không theo lượt chọn tệp vừa rồi — người dân chọn ảnh
+        // làm nhiều lượt phải thấy con số cộng dồn đúng.
+        const total = certificatePhotos.length + accepted.length;
+        setUploadNote(total > 0 ? `Đã tải ${total} ảnh GCN.` : "");
       } finally {
         setBusy(false);
         setUploadPercent(0);
         uploadAbort.current = null;
       }
     },
-    [uploadFile],
+    [uploadFile, certificatePhotos.length],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -1196,7 +1221,7 @@ export function IntakeWizard() {
                                   <input
                                     className="pc-input"
                                     type="file"
-                                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                                    accept={IMAGE_FILE_ACCEPT}
                                     disabled={busy}
                                     onChange={(event) => {
                                       void handleCitizenIdUpload(
@@ -1632,7 +1657,7 @@ export function IntakeWizard() {
                   <input
                     className="pc-input"
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    accept={IMAGE_FILE_ACCEPT}
                     multiple
                     disabled={busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS}
                     onChange={(event) => {
@@ -1647,8 +1672,9 @@ export function IntakeWizard() {
                 </Field>
                 {certificatePhotos.length > 0 ? (
                   <ul className="pc-field-hint list-disc pl-5">
-                    {certificatePhotos.map((file) => (
-                      <li key={file.name}>{file.name}</li>
+                    {/* Khóa kèm vị trí: hai tệp trùng tên là chuyện thường khi ảnh đến từ Zalo. */}
+                    {certificatePhotos.map((file, fileIndex) => (
+                      <li key={`${file.name}-${fileIndex}`}>{file.name}</li>
                     ))}
                   </ul>
                 ) : null}
@@ -1788,8 +1814,43 @@ export function IntakeWizard() {
         <p className="font-semibold">Không tự làm được?</p>
         <p className="mt-1" style={{ color: "var(--muted)" }}>
           Mang Giấy chứng nhận và CCCD đến Bộ phận một cửa UBND phường Phong Châu trong giờ hành
-          chính để được cán bộ hướng dẫn kê khai trực tiếp.
+          chính để được cán bộ hướng dẫn kê khai trực tiếp. Hoặc liên hệ trưởng khu, cán bộ phụ
+          trách địa bàn theo danh bạ dưới đây.
         </p>
+
+        <p className="mt-4 font-semibold">Tư vấn chung</p>
+        <p className="mt-1">
+          {GENERAL_SUPPORT_CONTACT.officerName} —{" "}
+          <a className="font-semibold underline" href={`tel:${GENERAL_SUPPORT_CONTACT.phone}`}>
+            {GENERAL_SUPPORT_CONTACT.phone}
+          </a>
+        </p>
+
+        <p className="mt-4 font-semibold">Cán bộ phụ trách theo tổ dân phố</p>
+        <ul className="mt-2 space-y-3">
+          {SUPPORT_CONTACTS.map((contact) => (
+            <li key={`${contact.neighborhood}-${contact.officerName}`}>
+              <span className="font-semibold">TDP {contact.neighborhood}</span>{" "}
+              <span style={{ color: "var(--muted)" }}>({contact.areas})</span>
+              <br />
+              {contact.officerName}
+              {contact.phone ? (
+                <>
+                  {" — "}
+                  {/* `tel:` để người dân bấm gọi thẳng trên điện thoại, không phải chép tay. */}
+                  <a className="font-semibold underline" href={`tel:${contact.phone}`}>
+                    {contact.phone}
+                  </a>
+                </>
+              ) : (
+                <span style={{ color: "var(--muted)" }}>
+                  {" "}
+                  — liên hệ qua đầu mối tư vấn chung ở trên
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
       </aside>
     </div>
   );

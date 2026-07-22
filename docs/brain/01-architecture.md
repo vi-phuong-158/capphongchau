@@ -101,6 +101,18 @@ src/modules/public-intake/turnstile.ts ─→ Cloudflare siteverify (fail-closed
 └── src/app/api/public/submissions/current/submit/route.ts (action submit)
 tests/public-surface-guard.test.ts ─→ mọi route /api/public + matcher src/proxy.ts
 
+src/modules/public-intake/image-format.ts → tên chuẩn của loại ảnh + chuỗi `accept` dùng chung
+├── src/app/ke-khai/wizard.tsx (chuẩn hóa `File.type` trước khi gọi initiate; `accept` có cả đuôi)
+├── src/app/api/public/submissions/current/uploads/initiate/route.ts (quy bí danh → tên chuẩn,
+│     trả `mimeType` đã chuẩn để trình duyệt PUT đúng loại đã đăng ký với phiên)
+├── src/modules/public-intake/storage.ts (ACCEPTED_MIME_TYPES; chốt chặn thật ở verifyUploadedFile
+│     đọc mimeType do Drive tự nhận dạng từ nội dung)
+└── tests/image-format.test.ts
+
+src/modules/public-intake/support-contacts.ts → danh bạ cán bộ theo tổ dân phố + phạm vi áp dụng
+├── src/app/ke-khai/wizard.tsx (khối "Không tự làm được?", link `tel:`)
+└── src/app/ke-khai/page.tsx (COVERAGE_NOTICE ở đầu trang)
+
 src/app/ke-khai/wizard.tsx
 └── POST /api/public/submissions (UUID idempotency-key, retry 5xx/network)
     ├── src/modules/public-intake/creation-idempotency.ts (HMAC định danh/mã ổn định)
@@ -248,3 +260,5 @@ M1 có `scripts/bootstrap-google.ts`, chạy cục bộ để xin OAuth offline 
 - Case ID tính năm theo múi giờ `Asia/Ho_Chi_Minh` (UTC+7), không dùng UTC mặc định của Vercel.
 - PWA online-only: báo lỗi mất kết nối rõ ràng, không cam kết lưu nháp hoặc upload khi offline.
 - Xóa GCN chỉ là soft-delete; CCCD chỉ được thay sau khi ảnh mới upload/xác minh thành công, không được xóa trắng.
+- Loại ảnh do trình duyệt khai không đáng tin (`File.type` rỗng hoặc bí danh với ảnh từ Zalo/Messenger). Chuẩn hóa ở `modules/public-intake/image-format.ts`; chốt chặn thật là `mimeType` do Drive nhận dạng từ nội dung trong `verifyUploadedFile`.
+- **Chưa xây — đối chiếu Gemini (đã chốt hướng, xem `03-decisions.md` 2026-07-22):** sau khi hồ sơ chuyển `SUBMITTED`, server đọc ảnh **GCN** (bản preview, không gửi ảnh CCCD) qua Gemini, lưu JSON thô vào `OCR_FIELDS` kèm version model, rồi so từng trường với `draft_json`. Cán bộ chỉ duyệt phần lệch. Không sinh mã trường 12; không tự ghi hồ sơ chính thức.
