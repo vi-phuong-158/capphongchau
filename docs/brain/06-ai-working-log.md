@@ -8,7 +8,7 @@
 ## [2026-07-22] Thêm trường "đơn vị hành chính cũ" của thửa đất
 
 - **Agent:** Claude Code
-- **Thay đổi:** Thêm ô chọn bắt buộc *"Thửa đất thuộc đơn vị nào trước sáp nhập?"* ở bước Thửa đất:
+- **Thay đổi:** Thêm ô chọn bắt buộc _"Thửa đất thuộc đơn vị nào trước sáp nhập?"_ ở bước Thửa đất:
   Xã Phú Hộ (cũ) / Xã Hà Thạch (cũ) / Phường Phong Châu (cũ) / Không rõ.
 - **Lý do:** Mảnh cuối để `lookupNewMapSheet` chạy được. Ba xã cũ đều đánh số tờ bản đồ từ 1, nên
   không có trường này thì "tờ 5" ra ba đáp án (5, 89, hoặc 148) và không thể điền trường 19 của PL3.

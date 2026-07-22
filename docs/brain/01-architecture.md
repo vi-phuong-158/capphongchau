@@ -175,6 +175,19 @@ src/app/api/users/route.ts
 src/app/api/security/csrf/route.ts -> authorization + CSRF HMAC
 ```
 
+## Đầu ra cuối cùng: PL3 (49 trường)
+
+`Tai lieu/PL3.xlsx` thay cho bộ 15 trường Phụ lục 8 (đổi 2026-07-22, xem `03-decisions.md`).
+
+- **Mỗi dòng = một (GCN × thửa × người)** — dữ liệu GCN và thửa lặp lại theo từng chủ sử dụng.
+- Giá trị ghi **bằng chữ** (`Đất ở tại đô thị`, `Lâu dài`), không phải mã. Cần bảng ánh xạ mã→chữ
+  **được cơ quan duyệt** — không để AI tự dịch nhãn.
+- Tối đa **3** dòng mục đích sử dụng mỗi thửa.
+- Mã ĐVHC cấp xã Phường Phong Châu: **`07954`** (trường 1).
+- Trường 19 tự tính được từ `Parcel.oldWard` + `map-sheet-reference.ts`. **Trường 20 chưa có nguồn.**
+
+Bảng đối chiếu đầy đủ 49 trường → nguồn dữ liệu: Phụ lục của [`PLAN2.md`](../../PLAN2.md).
+
 ## Mô hình dữ liệu / API
 
 Chi tiết đầy đủ nằm ở `AGENTS.md` §4 (mô hình dữ liệu) và §5 (API). Tóm tắt:
