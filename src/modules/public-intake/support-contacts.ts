@@ -4,12 +4,8 @@
  * Đây là thông tin liên hệ công vụ, cố ý hiển thị công khai cho người dân — khác với PII của người
  * kê khai. Khi cán bộ phụ trách thay đổi, sửa đúng tệp này; không rải số điện thoại vào JSX.
  *
- * Nguồn: danh sách do chủ dự án cung cấp ngày 2026-07-22.
- *
- * Hai điểm còn tồn đọng, đã giữ nguyên theo bản gốc thay vì tự suy đoán:
- * - TDP Hà Thạch: bản gốc không kèm số điện thoại của đồng chí Dương Văn Dũng.
- * - TDP Phú Xuân/Phú Điền: số của đồng chí Vũ Đình Lâm trùng với số của đồng chí Hoàng Minh Trung.
- * Giao diện tự xử lý trường hợp thiếu số bằng cách chỉ nêu tên và hướng người dân về đầu mối chung.
+ * Nguồn: danh sách do chủ dự án cung cấp ngày 2026-07-22; hai số còn thiếu/trùng ở bản gốc
+ * (Dương Văn Dũng, Hoàng Minh Trung) đã được chủ dự án bổ sung/sửa cùng ngày.
  */
 
 export interface SupportContact {
@@ -34,19 +30,19 @@ export const SUPPORT_CONTACTS: readonly SupportContact[] = [
     neighborhood: "Phú An",
     areas: "khu Phú Cường, Phú Hà, Phú An",
     officerName: "Hoàng Minh Trung",
-    phone: "0962558662",
+    phone: "0375998437",
   },
   {
     neighborhood: "Phú Lợi",
     areas: "khu Phú Lợi",
     officerName: "Hoàng Minh Trung",
-    phone: "0962558662",
+    phone: "0375998437",
   },
   {
     neighborhood: "Hà Thạch",
     areas: "khu Ngọc Tháp, Hùng Thao, Hoàng Phú Thịnh, Ngũ Phúc",
     officerName: "Dương Văn Dũng",
-    phone: "",
+    phone: "0964216333",
   },
   {
     neighborhood: "Lũng Thượng",

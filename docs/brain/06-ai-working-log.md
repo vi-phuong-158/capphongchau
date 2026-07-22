@@ -46,12 +46,13 @@
   Zalo với `File.type` rỗng); `npm run typecheck` và `npm run lint` sạch; `next build` đạt. Kiểm
   trực tiếp `/ke-khai` trên dev server: danh bạ hiện đủ 8 tổ, 8 liên kết `tel:`, phạm vi áp dụng
   hiện đầu trang, không tràn ngang ở khung 375px, console không lỗi.
-- **Tồn đọng cần chủ dự án xác nhận (đã giữ nguyên bản gốc, không tự suy đoán):**
-  1. TDP Hà Thạch — đồng chí Dương Văn Dũng **chưa có số điện thoại** trong danh sách được cung cấp;
-     giao diện đang hiện tên kèm hướng dẫn gọi đầu mối chung.
-  2. Số của đồng chí Vũ Đình Lâm (`0962558662`) **trùng** số của đồng chí Hoàng Minh Trung — có thể
-     là lỗi chép, cần xác nhận.
-  3. `NEIGHBORHOOD_HINTS` trong `reference.ts` đang liệt 10 tổ dân phố, gồm "Phú Cường" và
+- **Tồn đọng đã chủ dự án xác nhận cùng ngày (2026-07-22), cập nhật ngay:**
+  1. TDP Hà Thạch — đồng chí Dương Văn Dũng: bổ sung số `0964216333`.
+  2. Số trùng là của đồng chí Hoàng Minh Trung (không phải Vũ Đình Lâm) — sửa thành `0375998437`
+     cho cả hai tổ Phú An/Phú Lợi mà đồng chí phụ trách. Số của Vũ Đình Lâm (`0962558662`) giữ
+     nguyên, nay không còn trùng ai.
+- **Tồn đọng còn lại, chưa xác nhận:**
+  1. `NEIGHBORHOOD_HINTS` trong `reference.ts` đang liệt 10 tổ dân phố, gồm "Phú Cường" và
      "Phúc Lợi"; theo danh bạ mới thì Phú Cường là **khu** thuộc TDP Phú An, còn danh bạ chỉ có 8
      TDP. Chưa sửa `reference.ts` vì danh sách này đã dùng để thu dữ liệu — cần chốt trước.
 
