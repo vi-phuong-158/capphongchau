@@ -81,7 +81,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Ràng buộc số lượng và ngân sách kiểm ở server, không tin phía trình duyệt.
-  const files = await getPublicIntakeRepository().listFiles(record.submissionId);
+  const files = record.fileSummaries.length
+    ? record.fileSummaries.filter((file) => file.status === "UPLOADED")
+    : await getPublicIntakeRepository().listFiles(record.submissionId);
   const usedBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   if (usedBytes + sizeBytes > SUBMISSION_BYTE_BUDGET) {
     return publicError(
@@ -93,6 +95,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
   const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
+  if (record.status === "NEEDS_SUPPLEMENT") {
+    const supplement = await getPublicIntakeRepository().getOpenSupplementRequest(
+      record.submissionId,
+    );
+    const allowed = supplement?.items.some(
+      (item) =>
+        item.itemType === "FILE" &&
+        item.documentType === documentType &&
+        (!item.targetEntityId || item.targetEntityId === ownerId),
+    );
+    if (!allowed) {
+      return publicError(
+        "ACCESS_DENIED",
+        "Tài liệu này không nằm trong nội dung cán bộ yêu cầu bổ sung.",
+        requestId,
+      );
+    }
+  }
   const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
   if (identityImage) {
     const owner = record.draft?.owners.find((candidate) => candidate.id === ownerId);

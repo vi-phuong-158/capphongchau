@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 
   const existing = await sheets.spreadsheets.get({
     spreadsheetId,
-    fields: "sheets.properties(title)",
+    fields: "sheets.properties(sheetId,title,gridProperties.columnCount)",
   });
   const existingTitles = new Set(
     (existing.data.sheets ?? [])
@@ -42,7 +42,14 @@ async function main(): Promise<void> {
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
-        requests: missing.map(({ title }) => ({ addSheet: { properties: { title } } })),
+        requests: missing.map(({ title, headers }) => ({
+          addSheet: {
+            properties: {
+              title,
+              gridProperties: { columnCount: Math.max(26, headers.length) },
+            },
+          },
+        })),
       },
     });
 

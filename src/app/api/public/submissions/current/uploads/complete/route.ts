@@ -58,7 +58,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!owner || !requiresCitizenId(owner.ownerType)) {
       return publicError("VALIDATION_FAILED", "Chủ sử dụng của ảnh CCCD không hợp lệ.", requestId);
     }
-    const existing = (await getPublicIntakeRepository().listFiles(record.submissionId)).find(
+    // Kiểm tra thay ảnh phải đọc nguồn thật, không dùng cache có thể bị trễ sau upload trước đó.
+    const currentFiles = await getPublicIntakeRepository().listFiles(record.submissionId);
+    const existing = currentFiles.find(
       (file) => file.ownerId === ownerId && file.documentType === documentType,
     );
     if ((existing && existing.fileId !== replaceFileId) || (!existing && replaceFileId)) {
@@ -84,16 +86,19 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const fileId = randomUUID();
-  await getPublicIntakeRepository().appendFile({
-    fileId,
-    submissionId: record.submissionId,
-    ownerId,
-    documentType,
-    driveFileId: verified.driveFileId,
-    mimeType: verified.mimeType,
-    sizeBytes: verified.sizeBytes,
-    checksum: verified.checksum,
-  });
+  await getPublicIntakeRepository().appendFile(
+    {
+      fileId,
+      submissionId: record.submissionId,
+      ownerId,
+      documentType,
+      driveFileId: verified.driveFileId,
+      mimeType: verified.mimeType,
+      sizeBytes: verified.sizeBytes,
+      checksum: verified.checksum,
+    },
+    record,
+  );
   if (replaceFileId) {
     await getPublicIntakeRepository().markFileReplaced(record.submissionId, replaceFileId);
   }

@@ -27,7 +27,7 @@ const CLOUDFLARE_TESTING_SECRETS: ReadonlySet<string> = new Set([
 
 export const TURNSTILE_HEADER = "x-turnstile-token";
 
-export type TurnstileAction = "create" | "submit";
+export type TurnstileAction = "create" | "recover" | "submit";
 
 export interface TurnstileResult {
   readonly ok: boolean;

@@ -43,6 +43,12 @@ export default async function IntakePage() {
           Dành cho trường hợp thửa đất đã có Giấy chứng nhận. Bạn không cần tài khoản — kê khai xong
           sẽ nhận mã tra cứu.
         </p>
+        <p className="mt-3">
+          Đã có mã tiếp nhận?{" "}
+          <a className="font-semibold underline" href="/tra-cuu">
+            Tra cứu hoặc tiếp tục hồ sơ
+          </a>
+        </p>
         {/* Phạm vi áp dụng nêu ngay đầu trang: người có thửa đất ngoài địa bàn phải biết trước khi
             bỏ công kê khai và tải ảnh, không phải sau khi cán bộ từ chối. */}
         <p

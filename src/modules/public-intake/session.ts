@@ -14,7 +14,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export const PUBLIC_SESSION_COOKIE = "pc_kk_session";
 export const PUBLIC_CSRF_HEADER = "x-public-csrf-token";
 
-const SESSION_VERSION = "v1";
+const SESSION_VERSION = "v2";
 const SLIDING_SECONDS = 2 * 60 * 60;
 const ABSOLUTE_SECONDS = 12 * 60 * 60;
 
@@ -22,6 +22,9 @@ export interface PublicSession {
   readonly submissionId: string;
   /** Thời điểm tạo phiên gốc, dùng cho trần tuyệt đối. */
   readonly issuedAt: number;
+  readonly rowIndex: number;
+  readonly accessVersion: number;
+  readonly tokenVersion: "v1" | "v2";
 }
 
 function sign(secret: string, payload: string): string {
@@ -36,11 +39,11 @@ function safeEquals(a: string, b: string): boolean {
 
 export function createSessionToken(
   secret: string,
-  session: PublicSession,
+  session: Omit<PublicSession, "tokenVersion">,
   now = new Date(),
 ): string {
   const expiresAt = Math.floor(now.getTime() / 1000) + SLIDING_SECONDS;
-  const payload = `${SESSION_VERSION}.${session.submissionId}.${session.issuedAt}.${expiresAt}`;
+  const payload = `${SESSION_VERSION}.${session.submissionId}.${session.rowIndex}.${session.accessVersion}.${session.issuedAt}.${expiresAt}`;
   return `${payload}.${sign(secret, payload)}`;
 }
 
@@ -54,16 +57,27 @@ export function verifySessionToken(
   }
 
   const parts = token.split(".");
-  if (parts.length !== 5) {
+  const version = parts[0];
+  if (version !== "v1" && version !== "v2") return null;
+  if ((version === "v1" && parts.length !== 5) || (version === "v2" && parts.length !== 7)) {
+    return null;
+  }
+  const submissionId = parts[1];
+  const rowIndexRaw = version === "v2" ? parts[2] : "0";
+  const accessVersionRaw = version === "v2" ? parts[3] : "1";
+  const issuedAtRaw = version === "v2" ? parts[4] : parts[2];
+  const expiresAtRaw = version === "v2" ? parts[5] : parts[3];
+  const signature = version === "v2" ? parts[6] : parts[4];
+  if (
+    !/^\d+$/.test(rowIndexRaw) ||
+    !/^\d+$/.test(accessVersionRaw) ||
+    !/^\d+$/.test(issuedAtRaw) ||
+    !/^\d+$/.test(expiresAtRaw)
+  ) {
     return null;
   }
 
-  const [version, submissionId, issuedAtRaw, expiresAtRaw, signature] = parts;
-  if (version !== SESSION_VERSION || !/^\d+$/.test(issuedAtRaw) || !/^\d+$/.test(expiresAtRaw)) {
-    return null;
-  }
-
-  const payload = `${version}.${submissionId}.${issuedAtRaw}.${expiresAtRaw}`;
+  const payload = parts.slice(0, -1).join(".");
   if (!safeEquals(signature, sign(secret, payload))) {
     return null;
   }
@@ -74,7 +88,13 @@ export function verifySessionToken(
     return null;
   }
 
-  return { submissionId, issuedAt };
+  return {
+    submissionId,
+    issuedAt,
+    rowIndex: Number(rowIndexRaw),
+    accessVersion: Number(accessVersionRaw),
+    tokenVersion: version,
+  };
 }
 
 /** CSRF buộc vào phiên công khai thay vì email như đường cán bộ. */

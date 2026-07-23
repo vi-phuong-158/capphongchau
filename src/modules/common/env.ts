@@ -34,6 +34,7 @@ const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
 });
 
 const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
+  DATA_HASH_PEPPER: true,
   PUBLIC_SESSION_SECRET: true,
   PUBLIC_ACCESS_CODE_PEPPER: true,
   MAX_UPLOAD_MB: true,

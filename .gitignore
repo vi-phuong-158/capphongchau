@@ -23,6 +23,10 @@ test-results/
 # Nguồn tài liệu nghiệp vụ cục bộ, không đưa lên GitHub.
 Tai lieu/
 
+# Báo cáo dry-run của script import và cache Python cục bộ.
+reports/
+__pycache__/
+
 # Operating system files
 .DS_Store
 Thumbs.db

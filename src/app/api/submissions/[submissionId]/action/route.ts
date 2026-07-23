@@ -13,6 +13,12 @@ import {
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
 import {
+  newTimelineEvent,
+  publicActorName,
+  SUPPLEMENT_REASON_CODES,
+  type SupplementRequest,
+} from "@/modules/public-intake/workflow";
+import {
   isClaimedBy,
   mayClaim,
   mayReject,
@@ -26,6 +32,30 @@ export const runtime = "nodejs";
 const schema = z.object({
   action: z.enum(["CLAIM", "REQUEST_SUPPLEMENT", "REJECT"]),
   version: z.number().int().positive(),
+  reasonCode: z.enum(SUPPLEMENT_REASON_CODES).optional(),
+  message: z.string().trim().max(1000).optional(),
+  items: z
+    .array(
+      z.object({
+        itemType: z.enum(["FIELD", "FILE"]),
+        targetEntityType: z.enum([
+          "SUBMISSION",
+          "CERTIFICATE",
+          "OWNER",
+          "PARCEL",
+          "LAND_USE",
+          "ASSET",
+        ]),
+        targetEntityId: z.string().trim().max(100).default(""),
+        fieldPath: z.string().trim().max(200).default(""),
+        documentType: z
+          .enum(["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK", "CERTIFICATE"])
+          .or(z.literal("")),
+        instruction: z.string().trim().min(1).max(500),
+      }),
+    )
+    .max(30)
+    .optional(),
 });
 
 function fail(
@@ -105,6 +135,16 @@ export async function POST(
         requestId,
         metadata: { forced: force },
       });
+      await repository.appendTimelineEvent(
+        record.submissionId,
+        newTimelineEvent({
+          eventType: "UNDER_REVIEW",
+          label: "Đang kiểm tra",
+          actorDisplayName: user.displayName,
+        }),
+        user.email,
+        requestId,
+      );
       return NextResponse.json(
         {
           submission: {
@@ -135,6 +175,17 @@ export async function POST(
           user.roles.includes(UserRole.SYSTEM_ADMIN);
     if (!allowed)
       return fail("VALIDATION_FAILED", "Hồ sơ không ở trạng thái có thể xử lý.", requestId, 400);
+    if (
+      body.data.action === "REQUEST_SUPPLEMENT" &&
+      (!body.data.reasonCode || !body.data.message || !body.data.items?.length)
+    ) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Cần nêu lý do, hướng dẫn và ít nhất một trường hoặc tài liệu phải bổ sung.",
+        requestId,
+        400,
+      );
+    }
     const status = body.data.action === "REQUEST_SUPPLEMENT" ? "NEEDS_SUPPLEMENT" : "REJECTED";
     const updated = await repository.transition({
       record,
@@ -150,6 +201,47 @@ export async function POST(
       entityId: record.submissionId,
       requestId,
     });
+    if (body.data.action === "REQUEST_SUPPLEMENT") {
+      const supplementRequestId = randomUUID();
+      const createdAt = new Date().toISOString();
+      const supplementRequest: SupplementRequest = {
+        requestId: supplementRequestId,
+        status: "OPEN",
+        reasonCode: body.data.reasonCode!,
+        message: body.data.message!,
+        requestedByDisplayName: publicActorName(user.displayName),
+        createdAt,
+        resolvedAt: "",
+        items: body.data.items!.map((item) => ({
+          itemId: randomUUID(),
+          requestId: supplementRequestId,
+          itemType: item.itemType,
+          targetEntityType: item.targetEntityType,
+          targetEntityId: item.targetEntityId,
+          fieldPath: item.fieldPath,
+          documentType: item.documentType,
+          reasonCode: body.data.reasonCode!,
+          instruction: item.instruction,
+          status: "OPEN",
+        })),
+      };
+      await repository.createSupplementRequest({
+        submissionId: record.submissionId,
+        request: supplementRequest,
+        actorEmail: user.email,
+      });
+    }
+    await repository.appendTimelineEvent(
+      record.submissionId,
+      newTimelineEvent({
+        eventType: status,
+        label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",
+        actorDisplayName: user.displayName,
+        message: body.data.message,
+      }),
+      user.email,
+      requestId,
+    );
     return NextResponse.json(
       { submission: { status: updated.status, version: updated.version }, requestId },
       { headers: { "cache-control": "no-store" } },

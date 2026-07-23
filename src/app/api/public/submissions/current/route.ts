@@ -8,6 +8,11 @@ import {
 } from "@/modules/public-intake/route-context";
 import type { IntakeDraft } from "@/modules/public-intake/types";
 import { validateDraftForSave } from "@/modules/public-intake/validation";
+import {
+  completionChecklist,
+  PUBLIC_STATUS_LABELS,
+  unauthorizedSupplementChanges,
+} from "@/modules/public-intake/workflow";
 
 export const runtime = "nodejs";
 
@@ -18,11 +23,56 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   const { record } = context;
+  const repository = getPublicIntakeRepository();
+  // Không dùng cache tóm tắt khi khôi phục nháp: nếu cache bị trễ sau upload, người dân sẽ thấy
+  // thiếu giấy tờ dù PUBLIC_FILES đã có đủ. Kho file là nguồn thật.
+  const storedFiles = (await repository.listFiles(record.submissionId, true)).map((file) => ({
+    fileId: file.fileId,
+    ownerId: file.ownerId,
+    documentType: file.documentType,
+    status: file.status,
+    sizeBytes: file.sizeBytes,
+    checksum: file.checksum,
+    createdAt: file.createdAt ?? "",
+    updatedAt: file.updatedAt ?? "",
+  }));
+  const [storedTimeline, supplementRequest] = await Promise.all([
+    repository.listTimeline(record.submissionId),
+    repository.getOpenSupplementRequest(record.submissionId),
+  ]);
+  const timeline = storedTimeline.length
+    ? storedTimeline
+    : [
+        {
+          eventId: `initial-${record.submissionId}`,
+          eventType: record.status,
+          label: PUBLIC_STATUS_LABELS[record.status],
+          actorDisplayName: "Hệ thống",
+          message: "",
+          occurredAt: record.updatedAt || record.createdAt,
+        },
+      ];
   return NextResponse.json({
     receiptCode: record.receiptCode,
     status: record.status,
+    statusLabel: PUBLIC_STATUS_LABELS[record.status],
+    updatedAt: record.updatedAt,
+    officialCaseId: record.officialCaseId || null,
     version: record.version,
     draft: record.draft,
+    files: storedFiles.map((file) => ({
+      fileId: file.fileId,
+      ownerId: file.ownerId,
+      ownerDisplayName:
+        record.draft?.owners.find((owner) => owner.id === file.ownerId)?.fullName || "",
+      documentType: file.documentType,
+      status: file.status,
+      sizeBytes: file.sizeBytes,
+      uploadedAt: file.createdAt,
+    })),
+    checklist: completionChecklist(record.draft, storedFiles),
+    supplementRequest,
+    timeline,
   });
 }
 
@@ -58,6 +108,29 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   const draftError = validateDraftForSave(body.draft as IntakeDraft);
   if (draftError) {
     return publicError("VALIDATION_FAILED", draftError, requestId);
+  }
+
+  if (record.status === "NEEDS_SUPPLEMENT") {
+    const supplement = await getPublicIntakeRepository().getOpenSupplementRequest(
+      record.submissionId,
+    );
+    if (!record.draft || !supplement) {
+      return publicError(
+        "INVALID_STATE",
+        "Chưa có yêu cầu bổ sung hợp lệ. Vui lòng liên hệ cán bộ phường.",
+        requestId,
+      );
+    }
+    if (
+      unauthorizedSupplementChanges(record.draft, body.draft as IntakeDraft, supplement.items)
+        .length
+    ) {
+      return publicError(
+        "ACCESS_DENIED",
+        "Chỉ được sửa các nội dung cán bộ đã yêu cầu bổ sung.",
+        requestId,
+      );
+    }
   }
 
   // `version` chỉ để phát hiện một thiết bị thứ hai đang sửa cùng bản khai. Trong cùng phiên
