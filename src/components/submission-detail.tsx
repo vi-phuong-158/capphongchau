@@ -3,6 +3,21 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
+import { isOwnerIdentityLocked } from "@/modules/submissions/review";
+
+type Owner = {
+  id: string;
+  fullName: string;
+  identityNumber: string;
+  dateOfBirth: string;
+  gender: string;
+  residenceAddress: string;
+  ownerType: string;
+  roleOnCertificate: string;
+  identityStatus: string;
+};
+
 type Submission = {
   submissionId: string;
   receiptCode: string;
@@ -18,15 +33,7 @@ type Submission = {
   canResetAccessSecret: boolean;
   draft: {
     certificate: { issueNumber: string; issueDate: string; registryNumber: string };
-    owners: {
-      fullName: string;
-      identityNumber: string;
-      dateOfBirth: string;
-      gender: string;
-      residenceAddress: string;
-      ownerType: string;
-      roleOnCertificate: string;
-    }[];
+    owners: Owner[];
     parcels: {
       parcelNumber: string;
       mapSheetNumber: string;
@@ -67,6 +74,32 @@ async function csrfToken() {
   return ((await response.json()) as { csrfToken: string }).csrfToken;
 }
 
+async function loadSubmission(id: string): Promise<Submission> {
+  const response = await fetch(`/api/submissions/${id}`, { cache: "no-store" });
+  if (!response.ok) throw new Error();
+  return ((await response.json()) as { submission: Submission }).submission;
+}
+
+type EditableOwner = {
+  id: string;
+  fullName: string;
+  identityNumber: string;
+  dateOfBirth: string;
+  gender: string;
+  residenceAddress: string;
+  roleOnCertificate: string;
+  identityStatus: string;
+};
+
+const EDITABLE_OWNER_FIELDS = [
+  "fullName",
+  "identityNumber",
+  "dateOfBirth",
+  "gender",
+  "residenceAddress",
+  "roleOnCertificate",
+] as const;
+
 export function SubmissionDetail({ submissionId }: { readonly submissionId: string }) {
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -81,15 +114,96 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
   const [supplementInstruction, setSupplementInstruction] = useState("");
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [newAccessSecret, setNewAccessSecret] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editCertificate, setEditCertificate] = useState({
+    issueNumber: "",
+    issueDate: "",
+    registryNumber: "",
+  });
+  const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
   useEffect(() => {
-    fetch(`/api/submissions/${submissionId}`, { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error();
-        return (await response.json()) as { submission: Submission };
-      })
-      .then((data) => setSubmission(data.submission))
+    loadSubmission(submissionId)
+      .then(setSubmission)
       .catch(() => setMessage("Không thể tải hồ sơ."));
   }, [submissionId]);
+  function openEdit() {
+    if (!submission?.draft) return;
+    setEditCertificate({ ...submission.draft.certificate });
+    setEditOwners(
+      submission.draft.owners.map((owner) => ({
+        id: owner.id,
+        fullName: owner.fullName,
+        identityNumber: owner.identityNumber,
+        dateOfBirth: owner.dateOfBirth,
+        gender: owner.gender,
+        residenceAddress: owner.residenceAddress,
+        roleOnCertificate: owner.roleOnCertificate,
+        identityStatus: owner.identityStatus,
+      })),
+    );
+    setEditOpen(true);
+  }
+  async function saveEdit() {
+    if (!submission?.draft) return;
+    const originalDraft = submission.draft;
+    const certificatePatch: Record<string, string> = {};
+    (["issueNumber", "issueDate", "registryNumber"] as const).forEach((field) => {
+      if (editCertificate[field] !== originalDraft.certificate[field]) {
+        certificatePatch[field] = editCertificate[field];
+      }
+    });
+    const ownersPatch = editOwners
+      .map((owner) => {
+        const original = originalDraft.owners.find((candidate) => candidate.id === owner.id);
+        if (!original) return null;
+        const patch: Record<string, string> = { id: owner.id };
+        let changed = false;
+        for (const field of EDITABLE_OWNER_FIELDS) {
+          if (owner[field] !== original[field]) {
+            patch[field] = owner[field];
+            changed = true;
+          }
+        }
+        return changed ? patch : null;
+      })
+      .filter((patch): patch is Record<string, string> => patch !== null);
+    if (Object.keys(certificatePatch).length === 0 && ownersPatch.length === 0) {
+      setMessage("Không có thay đổi nào để lưu.");
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      const token = await csrfToken();
+      const response = await fetch(`/api/submissions/${submission.submissionId}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          version: submission.version,
+          ...(Object.keys(certificatePatch).length ? { certificate: certificatePatch } : {}),
+          ...(ownersPatch.length ? { owners: ownersPatch } : {}),
+        }),
+      });
+      const data = (await response.json()) as {
+        submission?: { version: number };
+        error?: { message: string };
+      };
+      if (!response.ok || !data.submission)
+        throw new Error(data.error?.message ?? "Không thể lưu thay đổi.");
+      const refreshed = await loadSubmission(submission.submissionId);
+      setSubmission(refreshed);
+      setEditOpen(false);
+      setMessage("Đã lưu thông tin chỉnh sửa.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể lưu thay đổi.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function action(action: "CLAIM" | "REQUEST_SUPPLEMENT" | "REJECT") {
     if (!submission) return;
     setBusy(true);
@@ -215,6 +329,14 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
               type="button"
             >
               Nhận xử lý
+            </button>
+            <button
+              className="rounded-lg border border-sky-700 px-4 py-2 font-semibold text-sky-800 disabled:opacity-50"
+              disabled={busy || submission.status !== "UNDER_REVIEW" || !submission.draft}
+              onClick={openEdit}
+              type="button"
+            >
+              Chỉnh sửa thông tin
             </button>
             <button
               className="rounded-lg border border-emerald-800 px-4 py-2 font-semibold text-emerald-900 disabled:opacity-50"
@@ -484,6 +606,180 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
         Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất demo dùng mã từ Thông tư
         08/2024/TT-BTNMT; tiếp nhận chính thức sẽ được mở cùng migration hồ sơ chuẩn hóa. phê duyệt.
       </p>
+      {editOpen && submission.draft ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <h2 className="text-xl font-bold">Chỉnh sửa thông tin hồ sơ</h2>
+              <button
+                className="text-sm font-semibold text-stone-500"
+                onClick={() => setEditOpen(false)}
+                type="button"
+              >
+                Đóng
+              </button>
+            </div>
+            <p className="mt-2 text-sm text-stone-600">
+              Chỉ sửa lỗi gõ nhỏ giúp người dân. Thông tin đã xác thực bằng QR CCCD bị khóa — dùng
+              nút “Yêu cầu bổ sung” nếu cần đổi thông tin đó.
+            </p>
+            <section className="mt-5">
+              <h3 className="font-semibold">Giấy chứng nhận</h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <label>
+                  <span className="pc-field-label">Số phát hành</span>
+                  <input
+                    className="pc-input"
+                    onChange={(event) =>
+                      setEditCertificate((current) => ({
+                        ...current,
+                        issueNumber: event.target.value,
+                      }))
+                    }
+                    value={editCertificate.issueNumber}
+                  />
+                </label>
+                <label>
+                  <span className="pc-field-label">Ngày cấp (YYYY-MM-DD)</span>
+                  <input
+                    className="pc-input"
+                    onChange={(event) =>
+                      setEditCertificate((current) => ({
+                        ...current,
+                        issueDate: event.target.value,
+                      }))
+                    }
+                    value={editCertificate.issueDate}
+                  />
+                </label>
+                <label>
+                  <span className="pc-field-label">Số vào sổ</span>
+                  <input
+                    className="pc-input"
+                    onChange={(event) =>
+                      setEditCertificate((current) => ({
+                        ...current,
+                        registryNumber: event.target.value,
+                      }))
+                    }
+                    value={editCertificate.registryNumber}
+                  />
+                </label>
+              </div>
+            </section>
+            <section className="mt-5 space-y-4">
+              <h3 className="font-semibold">Chủ sử dụng</h3>
+              {editOwners.map((owner, index) => {
+                const locked = isOwnerIdentityLocked(owner.identityStatus);
+                function updateOwner(patch: Partial<EditableOwner>) {
+                  setEditOwners((current) =>
+                    current.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, ...patch } : item,
+                    ),
+                  );
+                }
+                return (
+                  <div className="rounded-lg border border-stone-200 p-4" key={owner.id}>
+                    {locked ? (
+                      <p className="mb-2 text-xs font-semibold text-emerald-700">
+                        Đã xác thực bằng QR CCCD — không sửa được thông tin định danh.
+                      </p>
+                    ) : null}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label>
+                        <span className="pc-field-label">Họ tên</span>
+                        <input
+                          className="pc-input"
+                          disabled={locked}
+                          onChange={(event) => updateOwner({ fullName: event.target.value })}
+                          value={owner.fullName}
+                        />
+                      </label>
+                      <label>
+                        <span className="pc-field-label">CCCD/định danh</span>
+                        <input
+                          className="pc-input"
+                          disabled={locked}
+                          onChange={(event) => updateOwner({ identityNumber: event.target.value })}
+                          value={owner.identityNumber}
+                        />
+                      </label>
+                      <label>
+                        <span className="pc-field-label">Ngày sinh (YYYY-MM-DD)</span>
+                        <input
+                          className="pc-input"
+                          disabled={locked}
+                          onChange={(event) => updateOwner({ dateOfBirth: event.target.value })}
+                          value={owner.dateOfBirth}
+                        />
+                      </label>
+                      <label>
+                        <span className="pc-field-label">Giới tính</span>
+                        <select
+                          className="pc-select"
+                          disabled={locked}
+                          onChange={(event) => updateOwner({ gender: event.target.value })}
+                          value={owner.gender}
+                        >
+                          <option value="">— Chọn —</option>
+                          <option value="NAM">Nam</option>
+                          <option value="NU">Nữ</option>
+                        </select>
+                      </label>
+                      <label className="sm:col-span-2">
+                        <span className="pc-field-label">Thường trú</span>
+                        <input
+                          className="pc-input"
+                          disabled={locked}
+                          onChange={(event) =>
+                            updateOwner({ residenceAddress: event.target.value })
+                          }
+                          value={owner.residenceAddress}
+                        />
+                      </label>
+                      <label className="sm:col-span-2">
+                        <span className="pc-field-label">Vai trò trên Giấy chứng nhận</span>
+                        <select
+                          className="pc-select"
+                          onChange={(event) =>
+                            updateOwner({ roleOnCertificate: event.target.value })
+                          }
+                          value={owner.roleOnCertificate}
+                        >
+                          <option value="">— Chọn —</option>
+                          {CERTIFICATE_ROLE_OPTIONS.map((option) => (
+                            <option key={option.code} value={option.code}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                className="pc-button-quiet"
+                disabled={busy}
+                onClick={() => setEditOpen(false)}
+                type="button"
+              >
+                Hủy
+              </button>
+              <button
+                className="rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void saveEdit()}
+                type="button"
+              >
+                Lưu thay đổi
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

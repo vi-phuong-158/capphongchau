@@ -4,6 +4,50 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24] Cho phép cán bộ sửa trực tiếp `draft_json` — đảo một phần quyết định [2026-07-21]
+
+- **Quyết định:** Thêm `PATCH /api/submissions/:submissionId` cho cán bộ (`REVIEW_OFFICER` /
+  `WARD_ADMIN` / `SYSTEM_ADMIN`) sửa trực tiếp một số trường trong `draft_json` của hồ sơ đang
+  `UNDER_REVIEW` và do chính họ nhận xử lý (hoặc admin), thay vì bắt buộc `[Yêu cầu bổ sung]` cho
+  mọi lỗi. Đây là **đảo một phần** quyết định [2026-07-21] "Hàng chờ cán bộ đọc từ
+  PUBLIC_SUBMISSIONS, không chuyển dữ liệu sớm" (mục *"claim, yêu cầu bổ sung và từ chối... không
+  sửa `draft_json` gốc"*) — chỉ đảo cho thao tác sửa field hẹp, không đảo phần "không chuyển dữ
+  liệu sớm sang CASES".
+- **Phạm vi trường được sửa:** thông tin Giấy chứng nhận (`certificate.issueNumber/issueDate/
+  registryNumber`) và thông tin cá nhân của từng chủ sử dụng (`fullName`, `identityNumber`,
+  `dateOfBirth`, `gender`, `residenceAddress`, `roleOnCertificate`). Không có trường "tổ dân phố"
+  riêng trong schema — bao gồm trong `residenceAddress` (địa chỉ tự do).
+- **Khóa cứng theo QR:** nếu chủ sử dụng có `identityStatus === "QR_CONFIRMED"` (đã đọc từ chip
+  CCCD thật), 5 trường định danh (`fullName`, `identityNumber`, `dateOfBirth`, `gender`,
+  `residenceAddress`) bị khóa — server trả `VALIDATION_FAILED` nếu payload đụng vào, bất kể UI có
+  khóa hay không. Chỉ `roleOnCertificate` và owner nhập tay (`MANUAL`/chưa xác nhận) được sửa đầy
+  đủ. Quy tắc khóa nằm ở một hàm thuần `isOwnerIdentityLocked()`
+  (`src/modules/submissions/review.ts`), dùng chung giữa route và UI để không lệch nhau.
+- **An toàn ghi:** `PATCH` bắt buộc `version` + `x-csrf-token` + `idempotency-key`, đi qua
+  `commitStaffDraftEdit()` mới (cùng khuôn với `commitStaffAction`): advisory lock theo
+  idempotency key, update `draft_json` có điều kiện `version` (không ghi đè full record, không đụng
+  các trường khác của `draft_json` do autosave/upload ghi), audit + timeline + `request_log` trong
+  cùng transaction.
+- **Audit trước/sau:** mỗi trường đổi được ghi vào `audit_logs.metadata` dạng
+  `"path": "trước → sau"`. Riêng `identityNumber` (CCCD) bị che còn 4 số cuối
+  (`maskIdentityNumber()`) trước khi ghi audit — theo quy tắc cứng #6 CLAUDE.md "không ghi CCCD đầy
+  đủ vào log", áp dụng cả cho audit trail nội bộ. Các trường khác (họ tên/ngày sinh/địa chỉ) ghi
+  đầy đủ vì cán bộ xem hồ sơ này đã thấy nguyên văn ở màn hình chi tiết.
+- **Lý do:** Cán bộ thấy lỗi gõ phím nhỏ (sai một chữ, sai ngày cấp, sai địa chỉ) và muốn sửa giúp
+  người dân thay vì bắt trả lại hồ sơ qua `[Yêu cầu bổ sung]` — chậm và gây phiền cho dân. Dữ liệu
+  QR đọc từ chip là chính xác tuyệt đối và đã qua xác thực bằng thẻ thật, nên không có lý do chính
+  đáng để cán bộ sửa — khóa cứng ở đây thay vì chỉ dựa vào UI.
+- **Đánh đổi:** Thêm một đường ghi `draft_json` ngoài luồng autosave của người dân, tăng bề mặt cần
+  audit. Chấp nhận vì phạm vi hẹp (chỉ field liệt kê ở trên, chỉ khi `UNDER_REVIEW`) và có audit
+  trail đầy đủ để truy vết ai sửa gì.
+- **File:** `src/app/api/submissions/[submissionId]/route.ts` (PATCH),
+  `src/modules/public-intake/repository.ts` (`commitStaffDraftEdit`),
+  `src/modules/submissions/review.ts` (`mayStaffEdit`, `isOwnerIdentityLocked`),
+  `src/modules/public-intake/validation.ts` (export `CITIZEN_ID_PATTERN`/`ORGANISATION_ID_PATTERN`/
+  `isValidDate` để tái dùng), `src/components/submission-detail.tsx` (nút + modal chỉnh sửa).
+- **Người quyết định:** Chủ dự án (2026-07-24, "vẫn làm, nhưng ghi decision + audit before/after
+  chặt"); Claude Code thiết kế khóa QR + audit masked.
+
 ## [2026-07-23] Supabase PostgreSQL thay Google Sheets cho toàn bộ dữ liệu cấu trúc
 
 - **Quyết định:** Supabase PostgreSQL tại Singapore là kho dữ liệu cấu trúc duy nhất. Google My Drive

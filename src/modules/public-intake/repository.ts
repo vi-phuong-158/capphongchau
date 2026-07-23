@@ -477,6 +477,76 @@ export class PublicIntakeRepository {
     });
   }
 
+  /**
+   * Cán bộ sửa trực tiếp một số trường trong `draft_json` (lỗi gõ nhỏ của người dân) mà không
+   * đổi trạng thái hồ sơ. Trường định danh đã `QR_CONFIRMED` bị khóa ở tầng route trước khi gọi
+   * hàm này — repository chỉ ghi draft đã được validate.
+   */
+  async commitStaffDraftEdit(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    draft: IntakeDraft;
+    actorEmail: string;
+    auditMetadata: Record<string, string | number | boolean>;
+    timelineEvent: PublicTimelineEvent;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           draft_json = $3::jsonb, version = version + 1, updated_at = now()
+         where submission_id = $1 and version = $2
+         returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.expectedVersion, JSON.stringify(input.draft)],
+      );
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const next = mapSubmission(rows[0]);
+
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_STAFF_EDITED",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: input.auditMetadata,
+      });
+      await this.insertTimeline(
+        transaction,
+        input.record.submissionId,
+        input.timelineEvent,
+        input.actorEmail,
+        input.requestId,
+      );
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'STAFF_DRAFT_EDIT', ${input.mutationHash},
+          ${JSON.stringify({ version: next.version })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
+    });
+  }
+
   async commitAccessSecretReset(input: {
     record: SubmissionRecord;
     accessCodeHash: string;

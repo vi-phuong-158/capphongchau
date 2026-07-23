@@ -1,4 +1,45 @@
 # 06 — AI Working Log
+## [2026-07-24] Cho phép cán bộ sửa trực tiếp thông tin hồ sơ (Phần B), hoãn Saga tiếp nhận (Phần A)
+
+- **Agent:** Claude Code.
+- **Thay đổi:**
+  - Thêm `PATCH /api/submissions/[submissionId]/route.ts`: cán bộ (`REVIEW_OFFICER`/`WARD_ADMIN`/
+    `SYSTEM_ADMIN`) sửa trực tiếp `certificate.{issueNumber,issueDate,registryNumber}` và
+    `owners[].{fullName,identityNumber,dateOfBirth,gender,residenceAddress,roleOnCertificate}` của
+    hồ sơ `UNDER_REVIEW`. Bắt buộc `version` + CSRF + idempotency key; khóa cứng 5 trường định danh
+    khi `owner.identityStatus === "QR_CONFIRMED"`.
+  - Thêm `PublicIntakeRepository.commitStaffDraftEdit()` (cùng khuôn `commitStaffAction`): advisory
+    lock theo idempotency key, update `draft_json` có điều kiện `version`, ghi audit
+    (`SUBMISSION_STAFF_EDITED`, trước→sau từng trường, CCCD che còn 4 số cuối) + timeline
+    (`STAFF_EDITED`) + `request_log` trong cùng transaction.
+  - Thêm `mayStaffEdit()` và `isOwnerIdentityLocked()` vào `src/modules/submissions/review.ts` —
+    dùng chung giữa route (chặn thật) và UI (ẩn/khóa ô nhập), tránh lệch quy tắc khóa QR.
+  - Export `CITIZEN_ID_PATTERN`, `ORGANISATION_ID_PATTERN`, `isValidDate` trong
+    `src/modules/public-intake/validation.ts` để route PATCH tái dùng thay vì viết lại.
+  - `src/components/submission-detail.tsx`: nút "Chỉnh sửa thông tin" (hiện khi `UNDER_REVIEW`) mở
+    modal sửa GCN + từng chủ sử dụng; trường định danh của chủ đã quét QR hiển thị khóa kèm nhãn
+    giải thích; sau khi lưu thành công, gọi lại `GET` để đồng bộ toàn bộ draft mới nhất.
+  - Cập nhật `docs/brain/01-architecture.md` (danh sách API + Code Graph) và
+    `docs/brain/04-current-tasks.md` (đánh dấu Phần B xong, Phần A "Saga tiếp nhận" hoãn tới sau
+    cutover Supabase — hạ tầng di chuyển file Drive + ghi CASES chưa tồn tại).
+- **File đã sửa:** `src/app/api/submissions/[submissionId]/route.ts`,
+  `src/modules/public-intake/repository.ts`, `src/modules/submissions/review.ts`,
+  `src/modules/public-intake/validation.ts`, `src/components/submission-detail.tsx`,
+  `tests/submission-review.test.ts`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md`.
+- **Lý do:** Chủ dự án yêu cầu cán bộ sửa được lỗi gõ nhỏ (số phát hành/ngày cấp GCN, họ tên, địa
+  chỉ...) thay vì bắt người dân nộp lại qua `[Yêu cầu bổ sung]`. Đây là đảo một phần quyết định
+  [2026-07-21] "không sửa `draft_json` gốc" — chủ dự án xác nhận đảo có kiểm soát, kèm audit
+  trước/sau chặt. Phần Saga tiếp nhận chính thức bị hoãn vì runtime hiện vẫn là Sheets legacy trong
+  lúc chờ cutover Supabase; mở saga bây giờ sẽ vắt qua cửa sổ cutover không có transaction phân tán.
+- **Kiểm tra:** `npx tsc --noEmit` sạch; `npx eslint .` sạch; `npx vitest run` 182/182 test xanh
+  (thêm 2 test cho `mayStaffEdit`/`isOwnerIdentityLocked`). Chưa chạy UI thật trên trình duyệt (dự
+  án chưa cấu hình dev server khởi động qua preview trong phiên này) — cần cán bộ thật thao tác thử
+  luồng: Nhận xử lý → Chỉnh sửa thông tin → Lưu, và xác nhận owner đã quét QR bị khóa đúng field
+  trước khi coi là xong.
+
+---
+
 ## [2026-07-23] Supabase schema and real ETL completed
 
 - **Agent:** Codex.

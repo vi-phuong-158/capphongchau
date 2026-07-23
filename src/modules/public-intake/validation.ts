@@ -10,9 +10,9 @@ const OLD_WARD_CODES: readonly string[] = OLD_WARD_OPTIONS.map((option) => optio
  */
 
 const PHONE_PATTERN = /^0\d{9}$/;
-const CITIZEN_ID_PATTERN = /^\d{12}$/;
+export const CITIZEN_ID_PATTERN = /^\d{12}$/;
 /** Mã số thuế 10 số, hoặc 13 số dạng đơn vị trực thuộc (`0123456789-001`). */
-const ORGANISATION_ID_PATTERN = /^\d{10}(-\d{3})?$/;
+export const ORGANISATION_ID_PATTERN = /^\d{10}(-\d{3})?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_CERTIFICATE_FILES = 10;
 const MAX_CERTIFICATE_PAGE_LABEL_LENGTH = 120;
@@ -27,7 +27,7 @@ const MAX_CERTIFICATE_PAGE_LABEL_LENGTH = 120;
  */
 export const LAND_USE_AREA_TOLERANCE_M2 = 0.5;
 
-function isValidDate(value: string): boolean {
+export function isValidDate(value: string): boolean {
   if (!DATE_PATTERN.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));

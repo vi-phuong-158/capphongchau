@@ -34,3 +34,16 @@ export function mayRequestSupplement(record: SubmissionRecord, email: string): b
 export function mayReject(record: SubmissionRecord, email: string): boolean {
   return mayRequestSupplement(record, email);
 }
+
+export function mayStaffEdit(record: SubmissionRecord, email: string): boolean {
+  return isClaimedBy(record, email) && record.status === "UNDER_REVIEW";
+}
+
+/**
+ * Chủ sử dụng đã quét QR CCCD thật (`identityStatus === "QR_CONFIRMED"`) có thông tin định danh
+ * đọc trực tiếp từ chip — cán bộ không được sửa. Chỉ chủ nhập tay (`MANUAL`/chưa xác nhận) mới
+ * cho sửa, đúng phạm vi "sửa lỗi gõ phím" đã chốt.
+ */
+export function isOwnerIdentityLocked(identityStatus: string): boolean {
+  return identityStatus === "QR_CONFIRMED";
+}

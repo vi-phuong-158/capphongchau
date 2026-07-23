@@ -12,6 +12,20 @@
 Schema and data ETL have completed successfully after the Google Sheets backup. Supabase verification found the expected legacy tables and one `LEGACY_SHEETS_IMPORT:*` marker. Do not rerun the import; keep the Sheet read-only during cutover.
 
 
+## [2026-07-24] Chỉnh sửa trực tiếp cho cán bộ (xong) + Saga tiếp nhận chính thức (hoãn)
+
+**Đã làm:** `PATCH /api/submissions/:submissionId` cho cán bộ sửa lỗi gõ nhỏ trực tiếp trong
+`draft_json` (thông tin GCN + thông tin cá nhân, khóa cứng trường định danh của chủ đã
+`QR_CONFIRMED`). Xem quyết định [2026-07-24] trong `03-decisions.md`.
+
+**Hoãn có chủ đích — chưa làm:** Mở khóa Saga "Tiếp nhận chính thức" (`POST
+/api/submissions/:submissionId/accept`, nút vẫn `disabled` ở UI). Cần thêm hạ tầng **chưa tồn
+tại** (tạo thư mục `02_CASES/{TĐP}/{CASE_ID}`, di chuyển file Drive từ `01_INBOX`, ghi
+`CASES/CERTIFICATES/OWNERS`), và **chỉ làm sau khi runbook migration Supabase ở mục dưới hoàn tất
+cutover** — không mở saga ghi CASE trong lúc còn treo giữa Sheets/Supabase, vì di chuyển file +
+ghi record không có transaction phân tán giữa hai hệ thống (xem `03-decisions.md`
+[2026-07-23 Supabase PostgreSQL...] mục "Đánh đổi"). Chủ dự án đã chốt thứ tự này 2026-07-24.
+
 ## Migration Supabase (2026-07-23)
 
 **Code đã hoàn tất, production chưa cutover.** Runtime repository hồ sơ và `USERS` đã chuyển sang

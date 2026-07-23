@@ -67,6 +67,8 @@ src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
     ├── list/listSummaries/findById
     ├── commitStaffAction (transaction)
+    ├── commitStaffDraftEdit (transaction) — PATCH sửa trực tiếp draft_json, khóa field QR_CONFIRMED
+    │   └── mayStaffEdit / isOwnerIdentityLocked (src/modules/submissions/review.ts)
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
@@ -116,6 +118,7 @@ POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
 GET /api/submissions
 GET /api/submissions/:submissionId
+PATCH /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
 POST /api/submissions/:submissionId/reset-access-secret
 POST /api/exports

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
 import {
   isClaimedBy,
+  isOwnerIdentityLocked,
   maskPhone,
   mayClaim,
   mayReject,
   mayRequestSupplement,
+  mayStaffEdit,
 } from "@/modules/submissions/review";
 
 function record(overrides: Partial<SubmissionRecord> = {}): SubmissionRecord {
@@ -54,5 +56,19 @@ describe("submission review helpers", () => {
     expect(mayClaim("RESUBMITTED")).toBe(true);
     expect(mayClaim("UNDER_REVIEW")).toBe(true);
     expect(mayClaim("ACCEPTED")).toBe(false);
+  });
+
+  it("only lets the claimant edit an under-review draft", () => {
+    const current = record();
+    expect(mayStaffEdit(current, "officer@example.com")).toBe(true);
+    expect(mayStaffEdit(current, "other@example.com")).toBe(false);
+    expect(mayStaffEdit(record({ status: "SUBMITTED" }), "officer@example.com")).toBe(false);
+  });
+
+  it("locks owner identity fields only once QR-confirmed", () => {
+    expect(isOwnerIdentityLocked("QR_CONFIRMED")).toBe(true);
+    expect(isOwnerIdentityLocked("MANUAL")).toBe(false);
+    expect(isOwnerIdentityLocked("PENDING_CONFIRMATION")).toBe(false);
+    expect(isOwnerIdentityLocked("")).toBe(false);
   });
 });
