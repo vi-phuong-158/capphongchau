@@ -156,3 +156,9 @@ dừng ở `STARTED`, script fail-closed để quản trị viên kiểm tra d�
 - OAuth app ở trạng thái `Testing` có thể khiến refresh token Drive hết hạn sau 7 ngày — phải chuyển `In production` trước khi dùng dữ liệu thật.
 - Vercel Cron tạo snapshot hằng ngày trong `99_BACKUP` — đây là copy **trong cùng tài khoản**, không bảo vệ khỏi việc tài khoản `anmphongandn@gmail.com` bị khóa/mất quyền truy cập (single point of failure, xem `01-architecture.md` và `03-decisions.md`). Cần thêm export Google Sheets định kỳ ra ngoài tài khoản gốc, và bản backup mã hóa ngoại tuyến hằng tuần phải tách khỏi tài khoản này.
 - Chỉ dùng dữ liệu giả/ẩn danh cho test tự động và môi trường Preview.
+
+## Backfill GCN cũ
+
+1. Chạy python scripts/import_existing_certificates.py --backfill và duyệt báo cáo không PII.
+2. Sao lưu restricted spreadsheet, rồi mới chạy --backfill --apply.
+3. Chạy lại cùng lệnh; phải trả BACKFILL_NOOP. Không chạy --apply import thường cho nguồn đã COMPLETED.

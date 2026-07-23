@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -8,18 +8,11 @@ import { createApiErrorPayload } from "@/modules/common/api-error";
 import { UserRole } from "@/modules/common/domain";
 import { loadServerEnvironment } from "@/modules/common/env";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
-import { hashAccessSecret } from "@/modules/public-intake/session";
+import { deriveResetAccessSecret, hashAccessSecret } from "@/modules/public-intake/session";
 
 export const runtime = "nodejs";
 
 const ADMIN_ROLES = [UserRole.SYSTEM_ADMIN, UserRole.WARD_ADMIN] as const;
-const ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-
-function newSecret(): string {
-  const bytes = randomBytes(16);
-  const raw = [...bytes].map((value) => ALPHABET[value % ALPHABET.length]).join("");
-  return raw.match(/.{1,4}/g)?.join("-") ?? raw;
-}
 
 export async function POST(
   request: NextRequest,
@@ -46,21 +39,51 @@ export async function POST(
     }
     const { submissionId } = await context.params;
     const repository = getPublicIntakeRepository();
+    const scopedIdempotencyKey = `ACCESS_SECRET_RESET:${submissionId}:${idempotencyKey}`;
+    const mutationHash = createHash("sha256")
+      .update(JSON.stringify({ submissionId, actorEmail: user.email, identityVerified: true }))
+      .digest("hex");
+    const replay = await repository.findStoredMutation(scopedIdempotencyKey, "ACCESS_SECRET_RESET");
+    if (replay) {
+      if (replay.mutationHash !== mutationHash) {
+        return fail(
+          "IDEMPOTENCY_CONFLICT",
+          "Khóa chống gửi trùng đã dùng cho thao tác khác.",
+          requestId,
+          409,
+        );
+      }
+      const accessVersion = replay.response.accessVersion;
+      if (typeof accessVersion !== "number") {
+        return fail(
+          "INTERNAL_ERROR",
+          "Không thể khôi phục kết quả thao tác trước.",
+          requestId,
+          500,
+        );
+      }
+      return NextResponse.json({
+        accessSecret: deriveResetAccessSecret(
+          environment.PUBLIC_ACCESS_CODE_PEPPER,
+          scopedIdempotencyKey,
+        ),
+        accessVersion,
+        requestId,
+      });
+    }
     const record = await repository.findById(submissionId);
     if (!record) return fail("NOT_FOUND", "Không tìm thấy bản kê khai.", requestId, 404);
-    const accessSecret = newSecret();
-    const updated = await repository.updateAccessState(record, {
+    const accessSecret = deriveResetAccessSecret(
+      environment.PUBLIC_ACCESS_CODE_PEPPER,
+      scopedIdempotencyKey,
+    );
+    const updated = await repository.commitAccessSecretReset({
+      record,
       accessCodeHash: hashAccessSecret(environment.PUBLIC_ACCESS_CODE_PEPPER, accessSecret),
-      failedAttempts: 0,
-      lockedUntil: "",
-      incrementAccessVersion: true,
-    });
-    await repository.appendAudit({
       actorEmail: user.email,
-      action: "PUBLIC_ACCESS_SECRET_RESET",
-      entityId: record.submissionId,
       requestId,
-      metadata: { accessVersion: updated.accessVersion, identityVerified: true },
+      idempotencyKey: scopedIdempotencyKey,
+      mutationHash,
     });
     return NextResponse.json({ accessSecret, accessVersion: updated.accessVersion, requestId });
   } catch (error) {
@@ -77,7 +100,13 @@ export async function POST(
 }
 
 function fail(
-  code: "ACCESS_DENIED" | "UNAUTHENTICATED" | "VALIDATION_FAILED" | "NOT_FOUND" | "INTERNAL_ERROR",
+  code:
+    | "ACCESS_DENIED"
+    | "UNAUTHENTICATED"
+    | "VALIDATION_FAILED"
+    | "NOT_FOUND"
+    | "IDEMPOTENCY_CONFLICT"
+    | "INTERNAL_ERROR",
   message: string,
   requestId: string,
   status: number,

@@ -883,3 +883,11 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** `npm.cmd run lint`, `npm.cmd run typecheck`, Vitest 22 file/133 test,
   `npm.cmd run build`, kiểm tra cú pháp Python và `git diff --check` đều đạt. Migration tạo 8 tab,
   nối 3 cột; import thật và kiểm tra idempotency đều đạt.
+
+## [2026-07-23] Sửa lỗi dữ liệu và giao dịch của PR #1
+
+- **Agent:** Codex
+- **Thay đổi:** Import GCN cũ không còn loại/lưu ngày sinh; thêm `--backfill` append-only, resumable theo ID ổn định và reader lấy trạng thái GCN cuối. Cập nhật truy cập chỉ ghi cột hẹp. Claim/yêu cầu bổ sung/từ chối cùng audit, timeline và idempotency đi trong một Sheets batch; reset mã bí mật replay được mà không lưu secret rõ.
+- **File đã sửa:** import legacy, public-intake repository/session, staff routes, kiểm thử Python và tài liệu kiến trúc.
+- **Lý do:** Tránh bỏ mất dữ liệu chỉ vì ngày sinh, ghi đè autosave/upload, trạng thái NEEDS_SUPPLEMENT không có yêu cầu mở và reset mã lặp.
+- **Kiểm tra:** dry-run import 7.146/7.916 dòng hợp lệ; Python compile + unit test và TypeScript typecheck đạt trước dry-run backfill thật.

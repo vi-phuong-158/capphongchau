@@ -29,7 +29,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!owner || !hasCompleteExistingRecordLookupIdentity(owner)) {
     return publicError(
       "VALIDATION_FAILED",
-      "Cần xác nhận đủ số CCCD, họ tên và ngày sinh trước khi kiểm tra.",
+      "Cần xác nhận đủ số CCCD, họ tên và quét QR trước khi kiểm tra.",
       context.requestId,
     );
   }

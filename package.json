@@ -13,6 +13,7 @@
     "migrate:public-intake": "tsx scripts/migrate-public-intake.ts",
     "migrate:citizen-id-pairs": "tsx scripts/migrate-citizen-id-pairs.ts",
     "test": "vitest run",
+    "test:python": "python -m unittest discover -s tests -p \"test_*.py\"",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },

@@ -70,6 +70,12 @@ export interface ExistingCertificateMatch {
   readonly registryNumber: string;
 }
 
+export interface StoredSubmissionMutation {
+  readonly kind: string;
+  readonly mutationHash: string;
+  readonly response: Record<string, string | number | null>;
+}
+
 const SUBMISSION_COLUMNS = 21;
 
 function cell(value: string): sheets_v4.Schema$CellData {
@@ -96,6 +102,14 @@ function columnName(index: number): string {
     current = Math.floor(current / 26);
   }
   return result;
+}
+
+function requiredSheetId(ids: ReadonlyMap<string, number>, title: string): number {
+  const id = ids.get(title);
+  if (typeof id !== "number" || id < 0) {
+    throw new Error(`Google Sheets thi?u tab ${title}.`);
+  }
+  return id;
 }
 
 function parseDraft(value: string): IntakeDraft | null {
@@ -142,32 +156,6 @@ function submissionFromRow(found: readonly unknown[], rowIndex: number): Submiss
     fileSummaries: parseFileSummaries(readCell(found, 20)),
     rowIndex,
   };
-}
-
-function submissionValues(record: SubmissionRecord): string[] {
-  return [
-    record.submissionId,
-    record.receiptCode,
-    record.status,
-    record.phone,
-    String(record.version),
-    record.accessCodeHash,
-    String(record.failedAttempts),
-    record.lockedUntil,
-    record.consentVersion,
-    record.consentedAt,
-    record.retentionUntil,
-    record.officialCaseId,
-    record.driveFolderId,
-    record.acceptStep,
-    record.claimedBy,
-    record.claimedAt,
-    record.createdAt,
-    record.updatedAt,
-    JSON.stringify(record.draft),
-    String(record.accessVersion),
-    JSON.stringify(record.fileSummaries),
-  ];
 }
 
 export class PublicIntakeRepository {
@@ -368,22 +356,38 @@ export class PublicIntakeRepository {
       incrementAccessVersion?: boolean;
     },
   ): Promise<SubmissionRecord> {
+    // Kh?ng d?ng snapshot do caller truy?n ?? ghi c? h?ng: autosave/upload c? th? ?? thay ??i
+    // draft, file summary ho?c tr?ng th?i nghi?p v? sau khi caller ??c b?n ghi.
+    const current = await this.findByLocator(record.submissionId, record.rowIndex);
+    if (!current) throw new Error("Kh?ng t?m th?y b?n k? khai khi c?p nh?t truy c?p.");
     const now = new Date().toISOString();
     const next: SubmissionRecord = {
-      ...record,
-      version: record.version + 1,
-      failedAttempts: input.failedAttempts ?? record.failedAttempts,
-      lockedUntil: input.lockedUntil ?? record.lockedUntil,
-      accessCodeHash: input.accessCodeHash ?? record.accessCodeHash,
-      accessVersion: input.incrementAccessVersion ? record.accessVersion + 1 : record.accessVersion,
+      ...current,
+      // version l? optimistic concurrency c?a d? li?u nghi?p v?. Th? sai m? ho?c reset m?
+      // kh?ng ???c l?m ng??i n?p g?p VERSION_CONFLICT khi ?ang autosave.
+      failedAttempts: input.failedAttempts ?? current.failedAttempts,
+      lockedUntil: input.lockedUntil ?? current.lockedUntil,
+      accessCodeHash: input.accessCodeHash ?? current.accessCodeHash,
+      accessVersion: input.incrementAccessVersion
+        ? current.accessVersion + 1
+        : current.accessVersion,
       updatedAt: now,
     };
     const { sheets } = this.workspace();
-    await sheets.spreadsheets.values.update({
+    const sheetRow = current.rowIndex + 1;
+    await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_SUBMISSIONS!A${record.rowIndex + 1}:U${record.rowIndex + 1}`,
-      valueInputOption: "RAW",
-      requestBody: { values: [submissionValues(next)] },
+      requestBody: {
+        valueInputOption: "RAW",
+        data: [
+          {
+            range: `PUBLIC_SUBMISSIONS!F${sheetRow}:H${sheetRow}`,
+            values: [[next.accessCodeHash, String(next.failedAttempts), next.lockedUntil]],
+          },
+          { range: `PUBLIC_SUBMISSIONS!R${sheetRow}`, values: [[next.updatedAt]] },
+          { range: `PUBLIC_SUBMISSIONS!T${sheetRow}`, values: [[String(next.accessVersion)]] },
+        ],
+      },
     });
     return next;
   }
@@ -418,11 +422,15 @@ export class PublicIntakeRepository {
       spreadsheetId: this.spreadsheetId,
       range: "EXISTING_CERTIFICATES!A2:I",
     });
-    return (recordsResponse.data.values ?? [])
-      .filter(
-        (candidate) =>
-          recordIds.has(readCell(candidate, 0)) && readCell(candidate, 5) === "VERIFIED",
-      )
+    // EXISTING_CERTIFICATES l? append-only. Backfill c? th? append b?n hi?u ch?nh c?ng ID;
+    // khi ?? d?ng cu?i c?ng l? tr?ng th?i hi?u l?c.
+    const latest = new Map<string, readonly unknown[]>();
+    for (const candidate of recordsResponse.data.values ?? []) {
+      const recordId = readCell(candidate, 0);
+      if (recordIds.has(recordId)) latest.set(recordId, candidate);
+    }
+    return [...latest.values()]
+      .filter((candidate) => readCell(candidate, 5) === "VERIFIED")
       .map((candidate) => ({
         existingRecordId: readCell(candidate, 0),
         issueNumber: readCell(candidate, 1),
@@ -431,6 +439,357 @@ export class PublicIntakeRepository {
       }));
   }
 
+  async findStoredMutation(
+    idempotencyKey: string,
+    kind: string,
+  ): Promise<StoredSubmissionMutation | null> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: "REQUEST_LOG!A2:E",
+    });
+    for (let index = (response.data.values ?? []).length - 1; index >= 0; index -= 1) {
+      const candidate = response.data.values?.[index] ?? [];
+      if (readCell(candidate, 0) !== idempotencyKey) continue;
+      try {
+        const cached = JSON.parse(readCell(candidate, 2)) as Partial<StoredSubmissionMutation>;
+        if (
+          cached.kind === kind &&
+          typeof cached.mutationHash === "string" &&
+          cached.response &&
+          typeof cached.response === "object" &&
+          !Array.isArray(cached.response)
+        ) {
+          return {
+            kind: cached.kind,
+            mutationHash: cached.mutationHash,
+            response: cached.response as Record<string, string | number | null>,
+          };
+        }
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  async commitStaffAction(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    status: PublicStatus;
+    claimedBy?: string;
+    claimedAt?: string;
+    supplementRequest?: SupplementRequest;
+    actorEmail: string;
+    auditAction: string;
+    auditMetadata?: Record<string, string | number | boolean>;
+    timelineEvent: PublicTimelineEvent;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const current = await this.findByLocator(input.record.submissionId, input.record.rowIndex);
+    if (!current || current.version !== input.expectedVersion)
+      throw new SubmissionVersionConflictError();
+    const now = new Date().toISOString();
+    const next: SubmissionRecord = {
+      ...current,
+      status: input.status,
+      version: current.version + 1,
+      claimedBy: input.claimedBy ?? current.claimedBy,
+      claimedAt: input.claimedAt ?? current.claimedAt,
+      updatedAt: now,
+    };
+    const requiredTabs = [
+      "PUBLIC_SUBMISSIONS",
+      "PUBLIC_SUPPLEMENT_REQUESTS",
+      "PUBLIC_SUPPLEMENT_ITEMS",
+      "PUBLIC_STATUS_EVENTS",
+      "AUDIT_LOGS",
+      "REQUEST_LOG",
+    ];
+    const { sheets, ids } = await this.sheetsWithIds(requiredTabs);
+    const rowIndex = current.rowIndex;
+    const requests: sheets_v4.Schema$Request[] = [
+      {
+        updateCells: {
+          range: {
+            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 2,
+            endColumnIndex: 3,
+          },
+          rows: [row([next.status])],
+          fields: "userEnteredValue",
+        },
+      },
+      {
+        updateCells: {
+          range: {
+            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 4,
+            endColumnIndex: 5,
+          },
+          rows: [row([String(next.version)])],
+          fields: "userEnteredValue",
+        },
+      },
+      {
+        updateCells: {
+          range: {
+            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 17,
+            endColumnIndex: 18,
+          },
+          rows: [row([next.updatedAt])],
+          fields: "userEnteredValue",
+        },
+      },
+    ];
+    if (input.claimedBy !== undefined || input.claimedAt !== undefined) {
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 14,
+            endColumnIndex: 16,
+          },
+          rows: [row([next.claimedBy, next.claimedAt])],
+          fields: "userEnteredValue",
+        },
+      });
+    }
+    if (input.supplementRequest) {
+      requests.push(
+        {
+          appendCells: {
+            sheetId: requiredSheetId(ids, "PUBLIC_SUPPLEMENT_REQUESTS"),
+            rows: [
+              row([
+                input.supplementRequest.requestId,
+                current.submissionId,
+                input.supplementRequest.status,
+                input.supplementRequest.reasonCode,
+                input.supplementRequest.message,
+                input.actorEmail,
+                input.supplementRequest.requestedByDisplayName,
+                input.supplementRequest.createdAt,
+                input.supplementRequest.resolvedAt,
+              ]),
+            ],
+            fields: "userEnteredValue",
+          },
+        },
+        {
+          appendCells: {
+            sheetId: requiredSheetId(ids, "PUBLIC_SUPPLEMENT_ITEMS"),
+            rows: input.supplementRequest.items.map((item) =>
+              row([
+                item.itemId,
+                item.requestId,
+                current.submissionId,
+                item.itemType,
+                item.targetEntityType,
+                item.targetEntityId,
+                item.fieldPath,
+                item.documentType,
+                item.reasonCode,
+                item.instruction,
+                item.status,
+                input.supplementRequest!.createdAt,
+                "",
+              ]),
+            ),
+            fields: "userEnteredValue",
+          },
+        },
+      );
+    }
+    requests.push(
+      {
+        appendCells: {
+          sheetId: requiredSheetId(ids, "AUDIT_LOGS"),
+          rows: [
+            row([
+              randomUUID(),
+              now,
+              input.actorEmail,
+              input.auditAction,
+              "PUBLIC_SUBMISSION",
+              current.submissionId,
+              input.requestId,
+              JSON.stringify(input.auditMetadata ?? {}),
+            ]),
+          ],
+          fields: "userEnteredValue",
+        },
+      },
+      {
+        appendCells: {
+          sheetId: requiredSheetId(ids, "PUBLIC_STATUS_EVENTS"),
+          rows: [
+            row([
+              input.timelineEvent.eventId,
+              current.submissionId,
+              input.timelineEvent.eventType,
+              input.timelineEvent.label,
+              input.actorEmail,
+              input.timelineEvent.actorDisplayName,
+              input.timelineEvent.message,
+              input.timelineEvent.occurredAt,
+              input.requestId,
+            ]),
+          ],
+          fields: "userEnteredValue",
+        },
+      },
+      {
+        appendCells: {
+          sheetId: requiredSheetId(ids, "REQUEST_LOG"),
+          rows: [
+            row([
+              input.idempotencyKey,
+              input.requestId,
+              JSON.stringify({
+                kind: "STAFF_ACTION",
+                mutationHash: input.mutationHash,
+                response: {
+                  status: next.status,
+                  version: next.version,
+                  claimedBy: next.claimedBy || null,
+                },
+              }),
+              now,
+              new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            ]),
+          ],
+          fields: "userEnteredValue",
+        },
+      },
+    );
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: { requests },
+    });
+    return next;
+  }
+
+  async commitAccessSecretReset(input: {
+    record: SubmissionRecord;
+    accessCodeHash: string;
+    actorEmail: string;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const current = await this.findByLocator(input.record.submissionId, input.record.rowIndex);
+    if (!current) throw new Error("Kh?ng t?m th?y b?n k? khai khi ??t l?i m? b? m?t.");
+    const now = new Date().toISOString();
+    const next: SubmissionRecord = {
+      ...current,
+      accessCodeHash: input.accessCodeHash,
+      failedAttempts: 0,
+      lockedUntil: "",
+      accessVersion: current.accessVersion + 1,
+      updatedAt: now,
+    };
+    const { sheets, ids } = await this.sheetsWithIds([
+      "PUBLIC_SUBMISSIONS",
+      "AUDIT_LOGS",
+      "REQUEST_LOG",
+    ]);
+    const rowIndex = current.rowIndex;
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateCells: {
+              range: {
+                sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+                startRowIndex: rowIndex,
+                endRowIndex: rowIndex + 1,
+                startColumnIndex: 5,
+                endColumnIndex: 8,
+              },
+              rows: [row([next.accessCodeHash, "0", ""])],
+              fields: "userEnteredValue",
+            },
+          },
+          {
+            updateCells: {
+              range: {
+                sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+                startRowIndex: rowIndex,
+                endRowIndex: rowIndex + 1,
+                startColumnIndex: 17,
+                endColumnIndex: 18,
+              },
+              rows: [row([next.updatedAt])],
+              fields: "userEnteredValue",
+            },
+          },
+          {
+            updateCells: {
+              range: {
+                sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
+                startRowIndex: rowIndex,
+                endRowIndex: rowIndex + 1,
+                startColumnIndex: 19,
+                endColumnIndex: 20,
+              },
+              rows: [row([String(next.accessVersion)])],
+              fields: "userEnteredValue",
+            },
+          },
+          {
+            appendCells: {
+              sheetId: requiredSheetId(ids, "AUDIT_LOGS"),
+              rows: [
+                row([
+                  randomUUID(),
+                  now,
+                  input.actorEmail,
+                  "PUBLIC_ACCESS_SECRET_RESET",
+                  "PUBLIC_SUBMISSION",
+                  current.submissionId,
+                  input.requestId,
+                  JSON.stringify({ accessVersion: next.accessVersion, identityVerified: true }),
+                ]),
+              ],
+              fields: "userEnteredValue",
+            },
+          },
+          {
+            appendCells: {
+              sheetId: requiredSheetId(ids, "REQUEST_LOG"),
+              rows: [
+                row([
+                  input.idempotencyKey,
+                  input.requestId,
+                  JSON.stringify({
+                    kind: "ACCESS_SECRET_RESET",
+                    mutationHash: input.mutationHash,
+                    response: { accessVersion: next.accessVersion },
+                  }),
+                  now,
+                  new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                ]),
+              ],
+              fields: "userEnteredValue",
+            },
+          },
+        ],
+      },
+    });
+    return next;
+  }
   async appendPendingIdentityIndex(input: {
     record: SubmissionRecord;
     citizenIdHmac: string;
@@ -1291,6 +1650,24 @@ export class PublicIntakeRepository {
     return this.environment.GOOGLE_SHEETS_SPREADSHEET_ID;
   }
 
+  private async sheetsWithIds(titles: readonly string[]): Promise<{
+    sheets: sheets_v4.Sheets;
+    ids: Map<string, number>;
+  }> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId: this.spreadsheetId,
+      fields: "sheets.properties(sheetId,title)",
+    });
+    const ids = new Map(
+      (response.data.sheets ?? []).map((sheet) => [
+        sheet.properties?.title ?? "",
+        sheet.properties?.sheetId ?? -1,
+      ]),
+    );
+    for (const title of titles) requiredSheetId(ids, title);
+    return { sheets, ids };
+  }
   private workspace() {
     return createGoogleWorkspaceClient({
       clientId: this.environment.GOOGLE_DRIVE_CLIENT_ID,

@@ -136,6 +136,15 @@ export function hashAccessSecret(pepper: string, secret: string): string {
   return createHmac("sha256", pepper).update(secret.replace(/-/g, "").toUpperCase()).digest("hex");
 }
 
+/** C?ng idempotency key ph?i sinh ??ng m?t m? ?? retry kh?ng ph?i l?u secret r? trong REQUEST_LOG. */
+export function deriveResetAccessSecret(pepper: string, scopedIdempotencyKey: string): string {
+  const raw = createHmac("sha256", pepper)
+    .update(`public-access-reset:${scopedIdempotencyKey}`)
+    .digest("base64url")
+    .slice(0, 24)
+    .toUpperCase();
+  return raw.match(/.{1,4}/g)?.join("-") ?? raw;
+}
 export function accessSecretMatches(pepper: string, secret: string, storedHash: string): boolean {
   return safeEquals(hashAccessSecret(pepper, secret), storedHash);
 }

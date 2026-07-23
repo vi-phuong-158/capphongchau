@@ -124,10 +124,12 @@ GCN bị xóa chỉ chuyển trạng thái `DELETED`, không hard-delete trên D
   `field_path`/`document_type` đã chỉ định. File summary nằm cùng dòng submission để tải lại trang
   không mất số ảnh và không phải quét toàn bộ `PUBLIC_FILES` ở đường nóng.
 - Dữ liệu GCN cũ được nhập bằng `scripts/import_existing_certificates.py`: dòng sai bị loại và báo
-  cáo riêng, CCCD chỉ xuất hiện dưới dạng HMAC, bản ghi xung đột không được trả công khai. Lookup
-  chỉ đọc một trong 256 bucket HMAC và chỉ hiển thị số phát hành đã che + ngày cấp sau khi khớp đủ
-  CCCD, họ tên, ngày sinh và có cặp ảnh CCCD trong phiên.
+  cáo riêng, CCCD chỉ xuất hiện dưới dạng HMAC, bản ghi xung đột không được trả công khai. Lookup chỉ đọc một trong 256 bucket HMAC và chỉ hiển thị số phát hành đã che + ngày cấp sau khi khớp CCCD. Họ tên và `QR_CONFIRMED` là rào giao diện của luồng nội bộ, không phải bằng chứng mật mã phía server.
 
 ## Hướng nâng cấp
 
 Khi vận hành ổn định, migration sang Shared Drive hoặc kho của cơ quan phải sao chép file, đối chiếu checksum, cập nhật `drive_file_id` và giữ nguyên `file_id`/`case_id`. Sau đó mới xem xét OCR Google Vision, dữ liệu thửa đất đầy đủ, đối soát dân cư và PostgreSQL.
+
+### Sửa lỗi PR #1 (2026-07-23)
+
+Import GCN cũ không lưu hoặc lọc theo ngày sinh. Backfill đối chiếu ID ổn định, chỉ append chủ/GCN/chỉ mục còn thiếu và append bản hiệu chỉnh khi trạng thái GCN đổi; reader lấy dòng cuối cùng. Staff action và reset mã bí mật ghi các thay đổi liên quan cùng batch với REQUEST_LOG.

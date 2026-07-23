@@ -25,9 +25,15 @@ from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATTERN = "*11-11-2025.xlsx"
+BACKFILL_VERSION = "CCCD_ONLY_V1"
 NAMESPACE = uuid.UUID("867331b1-6210-5bfd-9f3c-2bcc2c03a345")
 
 
@@ -39,7 +45,6 @@ class ValidRow:
     issue_date: str
     registry_number: str
     full_name: str
-    date_of_birth: str
     citizen_id: str
     role: str
 
@@ -64,7 +69,7 @@ def normalized_issue(value: Any) -> str:
     return re.sub(r"[^0-9A-Z]", "", normalized_text(value).upper())
 
 
-def iso_date(value: Any, *, birth: bool = False) -> str | None:
+def iso_date(value: Any) -> str | None:
     parsed: date | None = None
     if isinstance(value, datetime):
         parsed = value.date()
@@ -80,8 +85,7 @@ def iso_date(value: Any, *, birth: bool = False) -> str | None:
                 pass
     if parsed is None:
         return None
-    minimum_year = 1900 if birth else 1950
-    if parsed.year < minimum_year or parsed > date.today():
+    if parsed.year < 1950 or parsed > date.today():
         return None
     return parsed.isoformat()
 
@@ -217,7 +221,6 @@ def read_source(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
         issue_date = iso_date(cells[3] if len(cells) > 3 else None)
         registry_number = normalized_text(cells[4] if len(cells) > 4 else "")
         full_name = normalized_text(cells[7] if len(cells) > 7 else "")
-        date_of_birth = iso_date(cells[8] if len(cells) > 8 else None, birth=True)
         citizen_id = re.sub(r"\D", "", normalized_text(cells[10] if len(cells) > 10 else ""))
         role = normalized_text(cells[13] if len(cells) > 13 else "")
         reasons: list[str] = []
@@ -227,8 +230,6 @@ def read_source(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
             reasons.append("INVALID_ISSUE_DATE")
         if not full_name:
             reasons.append("MISSING_OWNER_NAME")
-        if not date_of_birth:
-            reasons.append("INVALID_DATE_OF_BIRTH")
         if not re.fullmatch(r"\d{12}", citizen_id):
             reasons.append("INVALID_CITIZEN_ID")
         if reasons:
@@ -242,7 +243,6 @@ def read_source(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
                 issue_date,
                 registry_number,
                 full_name,
-                date_of_birth,
                 citizen_id,
                 role,
             )
@@ -323,10 +323,172 @@ def build_rows(valid: list[ValidRow], pepper: str, import_id: str) -> tuple[
     return certificates, owners, buckets, duplicate_rows, conflict_rows
 
 
+def latest_rows_by_id(rows: list[list[str]]) -> dict[str, list[str]]:
+    return {row[0]: row for row in rows if row and row[0]}
+
+
+def existing_index_pairs(rows: list[list[str]]) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    for row in rows:
+        for value in row:
+            try:
+                item = json.loads(value)
+                if item.get("kind") == "EXISTING" and item.get("citizenIdHmac") and item.get("existingRecordId"):
+                    pairs.add((item["citizenIdHmac"], item["existingRecordId"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+    return pairs
+
+
+def backfill_rows(
+    certificates: list[list[str]],
+    owners: list[list[str]],
+    existing_certificates: list[list[str]],
+    existing_owners: list[list[str]],
+    existing_pairs: set[tuple[str, str]],
+) -> tuple[list[list[str]], list[list[str]], dict[int, list[list[str]]], int]:
+    latest_certificates = latest_rows_by_id(existing_certificates)
+    # Bản import trước từng dùng identity_match_hmac có ngày sinh; link_id vì vậy không còn
+    # là khóa ổn định sau khi chuyển sang CCCD-đơn. Dedupe backfill theo GCN + HMAC CCCD.
+    existing_owner_keys = {
+        (row[1], row[2])
+        for row in existing_owners
+        if len(row) > 2 and row[1] and row[2]
+    }
+    changed_statuses = {
+        record_id
+        for record_id, certificate in ((row[0], row) for row in certificates)
+        if record_id in latest_certificates and latest_certificates[record_id][5] != certificate[5]
+    }
+    certificate_appends = [
+        certificate
+        for certificate in certificates
+        if certificate[0] not in latest_certificates
+        or latest_certificates[certificate[0]][5] != certificate[5]
+    ]
+    owner_appends = [
+        owner
+        for owner in owners
+        if (owner[1], owner[2]) not in existing_owner_keys or owner[1] in changed_statuses
+    ]
+    buckets: dict[int, list[list[str]]] = defaultdict(list)
+    new_index_entries = 0
+    for owner in owners:
+        citizen_hash, record_id, status = owner[2], owner[1], owner[5]
+        pair = (citizen_hash, record_id)
+        if status != "VERIFIED" or pair in existing_pairs:
+            continue
+        existing_pairs.add(pair)
+        new_index_entries += 1
+        buckets[int(citizen_hash[:2], 16)].append(
+            [
+                json.dumps(
+                    {
+                        "kind": "EXISTING",
+                        "citizenIdHmac": citizen_hash,
+                        "identityMatchHmac": owner[3],
+                        "existingRecordId": record_id,
+                    },
+                    separators=(",", ":"),
+                )
+            ]
+        )
+    return certificate_appends, owner_appends, buckets, new_index_entries
+
+
+def run_backfill(
+    source: Path,
+    source_sha: str,
+    valid: list[ValidRow],
+    invalid: list[dict[str, Any]],
+    pepper: str,
+    apply: bool,
+) -> int:
+    spreadsheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+    if not spreadsheet_id:
+        raise RuntimeError("Thiếu GOOGLE_SHEETS_SPREADSHEET_ID.")
+    token = access_token()
+    source_import_id = str(uuid.uuid5(NAMESPACE, source_sha))
+    backfill_id = str(uuid.uuid5(NAMESPACE, f"BACKFILL:{BACKFILL_VERSION}:{source_sha}"))
+    desired_certificates, desired_owners, _, duplicates, conflicts = build_rows(valid, pepper, backfill_id)
+    previous_runs = get_values(token, spreadsheet_id, "EXISTING_IMPORT_RUNS!A2:L")
+    if not any(row and row[0] == source_import_id and len(row) > 3 and row[3] == "COMPLETED" for row in previous_runs):
+        raise RuntimeError("Không tìm thấy lần import COMPLETED của đúng tệp nguồn; từ chối backfill.")
+    completed = any(row and row[0] == backfill_id and len(row) > 3 and row[3] == "COMPLETED" for row in previous_runs)
+    existing_certificates = get_values(token, spreadsheet_id, "EXISTING_CERTIFICATES!A2:J")
+    existing_owners = get_values(token, spreadsheet_id, "EXISTING_CERTIFICATE_OWNERS!A2:I")
+    existing_index = get_values(token, spreadsheet_id, "PUBLIC_LOOKUP_INDEX!A2:IV")
+    certificate_appends, owner_appends, buckets, new_index_entries = backfill_rows(
+        desired_certificates,
+        desired_owners,
+        existing_certificates,
+        existing_owners,
+        existing_index_pairs(existing_index),
+    )
+    report = {
+        "operation": "BACKFILL",
+        "backfillVersion": BACKFILL_VERSION,
+        "importId": backfill_id,
+        "sourceImportId": source_import_id,
+        "sourceFileName": source.name,
+        "sourceSha256": source_sha,
+        "totalRows": len(valid) + len(invalid),
+        "validRows": len(valid),
+        "invalidRows": len(invalid),
+        "conflictRows": conflicts,
+        "duplicateRows": duplicates,
+        "certificateAppends": len(certificate_appends),
+        "ownerAppends": len(owner_appends),
+        "indexAppends": new_index_entries,
+        "alreadyCompleted": completed,
+        "invalid": invalid,
+    }
+    report_dir = ROOT / "reports"
+    report_dir.mkdir(exist_ok=True)
+    report_path = report_dir / f"existing-backfill-{source_sha[:12]}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({**report, "invalid": f"{len(invalid)} rows", "report": str(report_path)}, ensure_ascii=False, indent=2))
+    if completed:
+        print("BACKFILL_NOOP: lần backfill này đã COMPLETED.")
+        return 0
+    if not apply:
+        print("DRY-RUN: chưa ghi Google Sheets. Dùng --backfill --apply sau khi duyệt báo cáo.")
+        return 0
+    started = [
+        backfill_id,
+        source.name,
+        source_sha,
+        "STARTED",
+        str(report["totalRows"]),
+        str(report["validRows"]),
+        str(report["invalidRows"]),
+        str(conflicts),
+        str(duplicates),
+        report_path.name,
+        datetime.now().astimezone().isoformat(),
+        "",
+    ]
+    if not any(row and row[0] == backfill_id for row in previous_runs):
+        append_values(token, spreadsheet_id, "EXISTING_IMPORT_RUNS!A:L", [started])
+    if certificate_appends:
+        append_values(token, spreadsheet_id, "EXISTING_CERTIFICATES!A:J", certificate_appends)
+    if owner_appends:
+        append_values(token, spreadsheet_id, "EXISTING_CERTIFICATE_OWNERS!A:I", owner_appends)
+    if buckets:
+        append_bucket_values(token, spreadsheet_id, buckets)
+    completed_row = started.copy()
+    completed_row[3] = "COMPLETED"
+    completed_row[11] = datetime.now().astimezone().isoformat()
+    append_values(token, spreadsheet_id, "EXISTING_IMPORT_RUNS!A:L", [completed_row])
+    print("Đã backfill dữ liệu thiếu theo khóa CCCD; có thể chạy lại an toàn để xác nhận no-op.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", nargs="?", type=Path)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--backfill", action="store_true")
     args = parser.parse_args()
     load_dotenv()
     source = args.source
@@ -342,6 +504,8 @@ def main() -> int:
     if len(pepper) < 32:
         raise RuntimeError("DATA_HASH_PEPPER phải có ít nhất 32 ký tự.")
     valid, invalid = read_source(source)
+    if args.backfill:
+        return run_backfill(source, source_sha, valid, invalid, pepper, args.apply)
     certificates, owners, buckets, duplicates, conflicts = build_rows(valid, pepper, import_id)
     report = {
         "importId": import_id,
@@ -364,7 +528,6 @@ def main() -> int:
     if not args.apply:
         print("DRY-RUN: chưa ghi Google Sheets. Dùng --apply sau khi duyệt báo cáo.")
         return 0
-
     spreadsheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
     if not spreadsheet_id:
         raise RuntimeError("Thiếu GOOGLE_SHEETS_SPREADSHEET_ID.")
@@ -375,9 +538,7 @@ def main() -> int:
         print("Nguồn này đã được nhập hoàn tất; không ghi trùng.")
         return 0
     if matching_runs:
-        raise RuntimeError(
-            "Lần nhập cùng nguồn đang ở trạng thái dở dang. Kiểm tra các tab và xử lý thủ công trước khi chạy lại."
-        )
+        raise RuntimeError("Lần nhập cùng nguồn đang ở trạng thái dở dang. Kiểm tra các tab trước khi chạy lại.")
     started_at = datetime.now().astimezone().isoformat()
     run_base = [
         import_id,
@@ -403,7 +564,6 @@ def main() -> int:
     append_values(token, spreadsheet_id, "EXISTING_IMPORT_RUNS!A:L", [completed])
     print("Đã nhập dữ liệu và chỉ mục HMAC vào Google Sheets.")
     return 0
-
 
 if __name__ == "__main__":
     try:

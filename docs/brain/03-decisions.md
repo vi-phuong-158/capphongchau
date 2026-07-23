@@ -4,6 +4,13 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-23] Sửa import GCN cũ, batch staff action và reset mã bí mật
+
+- **Quyết định:** Import/tra cứu GCN cũ chỉ dựa vào CCCD HMAC; ngày sinh không được lưu trong `EXISTING_*` và không loại dòng import. Backfill dùng cùng ID xác định, append-only và reader lấy bản ghi cuối cùng. Các action cán bộ cùng audit/timeline/yêu cầu bổ sung/`REQUEST_LOG` dùng một Sheets batch; reset mã sinh ổn định theo idempotency key nhưng không lưu secret rõ.
+- **Lý do:** Kho cũ có nhiều ngày sinh chỉ ghi năm; code cũ đã bỏ 108 dòng chỉ vì trường này. Ghi status trước yêu cầu bổ sung có thể làm hồ sơ kẹt, còn full-row access update có thể ghi đè autosave/upload.
+- **Đánh đổi:** Không dựng lock/transaction ngoài Sheets; retry đúng key an toàn trong mô hình pilot. `QR_CONFIRMED` vẫn chỉ là rào UI theo quyết định chủ dự án, không được mô tả là chống giả mạo API.
+- **Người quyết định:** Chủ dự án (2026-07-23).
+
 ## [2026-07-23] Khóa tra "hồ sơ đã có" = CCCD, BỎ ngày sinh; tra nhanh bắt buộc QR
 
 - **Quyết định:** Luồng "kiểm tra hồ sơ đã có" (PL3 §5.1) dùng **CCCD** làm khóa khớp, **không**

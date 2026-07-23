@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -65,6 +65,7 @@ function fail(
     | "VALIDATION_FAILED"
     | "NOT_FOUND"
     | "VERSION_CONFLICT"
+    | "IDEMPOTENCY_CONFLICT"
     | "INTERNAL_ERROR",
   message: string,
   requestId: string,
@@ -102,6 +103,53 @@ export async function POST(
     }
     const { submissionId } = await context.params;
     const repository = getPublicIntakeRepository();
+    const scopedIdempotencyKey = `STAFF_ACTION:${submissionId}:${idempotencyKey}`;
+    const mutationHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          submissionId,
+          actorEmail: user.email,
+          action: body.data.action,
+          version: body.data.version,
+          reasonCode: body.data.reasonCode ?? "",
+          message: body.data.message ?? "",
+          items: body.data.items ?? [],
+        }),
+      )
+      .digest("hex");
+    const replay = await repository.findStoredMutation(scopedIdempotencyKey, "STAFF_ACTION");
+    if (replay) {
+      if (replay.mutationHash !== mutationHash) {
+        return fail(
+          "IDEMPOTENCY_CONFLICT",
+          "Khóa chống gửi trùng đã dùng cho thao tác khác.",
+          requestId,
+          409,
+        );
+      }
+      const status = replay.response.status;
+      const version = replay.response.version;
+      if (typeof status !== "string" || typeof version !== "number") {
+        return fail(
+          "INTERNAL_ERROR",
+          "Không thể khôi phục kết quả thao tác trước.",
+          requestId,
+          500,
+        );
+      }
+      return NextResponse.json(
+        {
+          submission: {
+            status,
+            version,
+            claimedBy:
+              typeof replay.response.claimedBy === "string" ? replay.response.claimedBy : "",
+          },
+          requestId,
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
     const record = await repository.findById(submissionId);
     if (!record) return fail("NOT_FOUND", "Không tìm thấy bản kê khai.", requestId, 404);
     if (record.version !== body.data.version) {
@@ -121,30 +169,24 @@ export async function POST(
       if (record.claimedBy && !isClaimedBy(record, user.email) && !force) {
         return fail("ACCESS_DENIED", "Hồ sơ đang do cán bộ khác xử lý.", requestId, 403);
       }
-      const updated = await repository.transition({
+      const updated = await repository.commitStaffAction({
         record,
         expectedVersion: body.data.version,
         status: "UNDER_REVIEW",
         claimedBy: user.email,
         claimedAt: new Date().toISOString(),
-      });
-      await repository.appendAudit({
         actorEmail: user.email,
-        action: "SUBMISSION_CLAIMED",
-        entityId: record.submissionId,
-        requestId,
-        metadata: { forced: force },
-      });
-      await repository.appendTimelineEvent(
-        record.submissionId,
-        newTimelineEvent({
+        auditAction: "SUBMISSION_CLAIMED",
+        auditMetadata: { forced: force },
+        timelineEvent: newTimelineEvent({
           eventType: "UNDER_REVIEW",
           label: "Đang kiểm tra",
           actorDisplayName: user.displayName,
         }),
-        user.email,
         requestId,
-      );
+        idempotencyKey: scopedIdempotencyKey,
+        mutationHash,
+      });
       return NextResponse.json(
         {
           submission: {
@@ -187,24 +229,11 @@ export async function POST(
       );
     }
     const status = body.data.action === "REQUEST_SUPPLEMENT" ? "NEEDS_SUPPLEMENT" : "REJECTED";
-    const updated = await repository.transition({
-      record,
-      expectedVersion: body.data.version,
-      status,
-    });
-    await repository.appendAudit({
-      actorEmail: user.email,
-      action:
-        body.data.action === "REQUEST_SUPPLEMENT"
-          ? "SUBMISSION_NEEDS_SUPPLEMENT"
-          : "SUBMISSION_REJECTED",
-      entityId: record.submissionId,
-      requestId,
-    });
+    let supplementRequest: SupplementRequest | undefined;
     if (body.data.action === "REQUEST_SUPPLEMENT") {
       const supplementRequestId = randomUUID();
       const createdAt = new Date().toISOString();
-      const supplementRequest: SupplementRequest = {
+      supplementRequest = {
         requestId: supplementRequestId,
         status: "OPEN",
         reasonCode: body.data.reasonCode!,
@@ -225,23 +254,27 @@ export async function POST(
           status: "OPEN",
         })),
       };
-      await repository.createSupplementRequest({
-        submissionId: record.submissionId,
-        request: supplementRequest,
-        actorEmail: user.email,
-      });
     }
-    await repository.appendTimelineEvent(
-      record.submissionId,
-      newTimelineEvent({
+    const updated = await repository.commitStaffAction({
+      record,
+      expectedVersion: body.data.version,
+      status,
+      supplementRequest,
+      actorEmail: user.email,
+      auditAction:
+        body.data.action === "REQUEST_SUPPLEMENT"
+          ? "SUBMISSION_NEEDS_SUPPLEMENT"
+          : "SUBMISSION_REJECTED",
+      timelineEvent: newTimelineEvent({
         eventType: status,
         label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",
         actorDisplayName: user.displayName,
         message: body.data.message,
       }),
-      user.email,
       requestId,
-    );
+      idempotencyKey: scopedIdempotencyKey,
+      mutationHash,
+    });
     return NextResponse.json(
       { submission: { status: updated.status, version: updated.version }, requestId },
       { headers: { "cache-control": "no-store" } },

@@ -160,6 +160,9 @@ Không xóa dòng, cột hoặc sheet đã dùng. Nếu thay đổi schema phả
   `PUBLIC_SUBMISSIONS` và dòng `REQUEST_LOG` phải được append trong cùng một Sheets batch để retry
   sau khi mất response không tạo nháp mới.
 - Bản ghi chỉnh sửa có `version`; PATCH yêu cầu version hiện tại và trả `409 VERSION_CONFLICT`. Cửa sổ race nhỏ của optimistic concurrency trên Sheets được chấp nhận ở quy mô pilot, không tự dựng lock.
+- `CLAIM`, `REQUEST_SUPPLEMENT` và `REJECT` phải ghi transition, yêu cầu bổ sung (nếu có), audit, timeline và `REQUEST_LOG` trong cùng một Sheets batch. Lặp cùng key/payload trả lại kết quả đã cache; dùng lại key cho payload khác trả `409 IDEMPOTENCY_CONFLICT`.
+- Đặt lại mã bí mật phải sinh ổn định theo idempotency key, không lưu mã rõ trong `REQUEST_LOG`, và chỉ cập nhật cột truy cập (`access_code_hash`, sai/khóa, `updated_at`, `access_version`) — không ghi đè `draft_json` hay tăng `version` nghiệp vụ.
+- Import GCN cũ chỉ khớp/lưu HMAC CCCD; ngày sinh không là điều kiện hợp lệ và không được chép vào `EXISTING_*`. Backfill dùng append-only, dòng cuối cùng theo `existing_record_id` là trạng thái hiệu lực.
 - Không cập nhật Google Sheets theo từng ô. Gộp bản ghi nghiệp vụ, audit và chỉ mục liên quan trong batch read/write; cache đọc ngắn hạn phải invalidation khi ghi.
 - Xóa ảnh GCN là soft-delete (`DELETED`) và không xóa file Drive. CCCD không được xóa trắng: upload/xác minh ảnh mới trước, sau đó chuyển ảnh cũ sang `REPLACED`.
 

@@ -303,3 +303,8 @@ M1 có `scripts/bootstrap-google.ts`, chạy cục bộ để xin OAuth offline 
 - Xóa GCN chỉ là soft-delete; CCCD chỉ được thay sau khi ảnh mới upload/xác minh thành công, không được xóa trắng.
 - Loại ảnh do trình duyệt khai không đáng tin (`File.type` rỗng hoặc bí danh với ảnh từ Zalo/Messenger). Chuẩn hóa ở `modules/public-intake/image-format.ts`; chốt chặn thật là `mimeType` do Drive nhận dạng từ nội dung trong `verifyUploadedFile`.
 - **Chưa xây — đối chiếu Gemini (đã chốt hướng, xem `03-decisions.md` 2026-07-22):** sau khi hồ sơ chuyển `SUBMITTED`, server đọc ảnh **GCN** (bản preview, không gửi ảnh CCCD) qua Gemini, lưu JSON thô vào `OCR_FIELDS` kèm version model, rồi so từng trường với `draft_json`. Cán bộ chỉ duyệt phần lệch. Không sinh mã trường 12; không tự ghi hồ sơ chính thức.
+
+## Sửa lỗi PR #1 (2026-07-23)
+
+- Legacy GCN: CCCD HMAC là khóa; import/backfill không dùng ngày sinh và các tab EXISTING_* append-only dùng dòng cuối theo ID.
+- Staff action/reset secret: ghi cột hẹp hoặc một Sheets batch kèm audit, timeline và idempotency.
