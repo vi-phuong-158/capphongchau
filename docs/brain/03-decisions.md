@@ -719,6 +719,29 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
   cho phần khó (ngày không tồn tại, năm nhuận, chặn tương lai, khoảng năm).
 - **Người quyết định:** Chủ dự án (2026-07-23, chốt mốc năm 1987 cho GCN).
 
+## [2026-07-24] Xóa cache JSON tra cứu GCN — Postgres đọc trực tiếp, không cần cache tĩnh nữa
+
+- **Quyết định:** Migration Supabase (entry "Supabase PostgreSQL thay Google Sheets...") đổi
+  `findExistingCertificates` sang truy vấn `public.public_lookup_index`/`public.existing_certificates`
+  trực tiếp — cache JSON committed (`existing-certificates-index.json`, dựng theo entry "Tra cứu GCN
+  đã có: chuyển sang cache JSON committed...") không còn được đọc ở đâu nữa. Xóa file JSON, hàm
+  `lookupExistingCertificates`/kiểu `ExistingCertificatesIndex` trong `workflow.ts`, và chế độ
+  `--emit-json`/`compute_index`/`build_index_json` trong `scripts/import_existing_certificates.py` —
+  toàn bộ đường cache đã trở thành code chết sau khi runtime chuyển sang Postgres.
+- **Lý do:** Cache JSON là giải pháp né việc Sheets không có index thật; Postgres có index
+  (`existing_certificates_latest_idx`, `public_lookup_index_hmac_idx`) nên không còn lý do giữ một
+  tầng cache tĩnh song song — giữ lại chỉ gây lệch dữ liệu (cache không tự cập nhật khi Sheets/Postgres
+  đổi) mà không ai đọc.
+- **Đánh đổi:** Không còn cách tra cứu GCN đã có mà không cần kết nối Postgres (trước đây cache JSON
+  cho phép chạy hoàn toàn offline/không cần DB). Chấp nhận vì runtime vốn đã phụ thuộc Postgres cho
+  mọi thao tác khác kể từ migration Supabase.
+- **Ghi chú:** entry "Bỏ điều kiện bắt buộc ngày cấp GCN khi nạp dữ liệu Phụ lục 3" (2026-07-23,
+  nới `INVALID_ISSUE_DATE` để không loại 665 dòng GCN thật thiếu ngày cấp) bị thất lạc khỏi file này
+  trong lúc soạn migration Supabase — thay đổi code vẫn còn nguyên trong `import_existing_certificates.py`
+  (issue_date cho phép rỗng), chỉ mục ghi chú bị mất theo.
+- **Người quyết định:** Claude Code (dọn code chết theo yêu cầu chủ dự án sau khi review commit
+  migration Supabase).
+
 ## Template cho entry mới
 
 ```
