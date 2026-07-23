@@ -26,7 +26,12 @@ function completeDraft() {
     qrParserVersion: "",
     identityStatus: "MANUAL_COMPLETE",
     identityConfirmedAt: "",
-    roleOnCertificate: "CHU_SU_DUNG",
+    roleOnCertificate: "CA_NHAN",
+    hasDistinctCurrentUser: false,
+    currentUserName: "",
+    currentUserCitizenId: "",
+    currentUserAddress: "",
+    changeReason: "",
   };
   draft.parcels[0] = {
     ...draft.parcels[0],
@@ -93,17 +98,113 @@ describe("validateDraftForSubmit", () => {
     expect(validateDraftForSubmit(draft)).toContain("Ngày sinh");
   });
 
-  it("không bắt buộc CCCD với tổ chức", () => {
+  /**
+   * PL3 mẫu có CCCD ở cả ba dòng hộ gia đình (CCCD của chủ hộ). Trước 2026-07-22 chọn "Hộ gia đình"
+   * là bỏ qua toàn bộ phần định danh, nộp được hồ sơ chỉ với một cái tên.
+   */
+  it("bắt buộc CCCD với hộ gia đình — không còn là lối thoát bỏ qua định danh", () => {
     const draft = completeDraft();
     draft.owners[0] = {
       ...draft.owners[0],
+      ownerType: "HO_GIA_DINH",
+      identityNumber: "",
+      roleOnCertificate: "CHU_HO",
+    };
+
+    expect(validateDraftForSubmit(draft)).toContain("12 chữ số");
+  });
+
+  it("bắt buộc CCCD với đồng sử dụng", () => {
+    const draft = completeDraft();
+    draft.owners[0] = {
+      ...draft.owners[0],
+      ownerType: "DONG_SU_DUNG",
+      identityNumber: "",
+      roleOnCertificate: "THANH_VIEN",
+    };
+
+    expect(validateDraftForSubmit(draft)).toContain("12 chữ số");
+  });
+
+  it("tổ chức miễn CCCD nhưng phải có mã số thuế và trụ sở", () => {
+    const base = completeDraft();
+    base.owners[0] = {
+      ...base.owners[0],
       ownerType: "TO_CHUC",
       fullName: "Công ty Demo",
       identityNumber: "",
-      roleOnCertificate: "DAI_DIEN_TO_CHUC",
+      dateOfBirth: "",
+      gender: "",
+      roleOnCertificate: "NGUOI_DAI_DIEN",
     };
+    expect(validateDraftForSubmit(base)).toContain("Mã số thuế");
 
-    expect(validateDraftForSubmit(draft)).toBeNull();
+    const withTaxCode = structuredClone(base);
+    withTaxCode.owners[0].identityNumber = "0123456789";
+    expect(validateDraftForSubmit(withTaxCode)).toBeNull();
+
+    const branch = structuredClone(withTaxCode);
+    branch.owners[0].identityNumber = "0123456789-001";
+    expect(validateDraftForSubmit(branch)).toBeNull();
+
+    const noOffice = structuredClone(withTaxCode);
+    noOffice.owners[0].residenceAddress = "";
+    expect(validateDraftForSubmit(noOffice)).toContain("trụ sở");
+  });
+
+  /**
+   * PL3 cột O, P và trường 14, 15 — người sử dụng hiện tại khi người trên GCN đã mất / đã sang tên.
+   * Khi bật, người trên GCN được miễn CCCD/ảnh, đổi lại phải khai đủ người sử dụng hiện tại.
+   */
+  it("người trên GCN đã mất: miễn CCCD của họ, nhưng bắt khai đủ người sử dụng hiện tại", () => {
+    const draft = completeDraft();
+    draft.owners[0] = {
+      ...draft.owners[0],
+      identityNumber: "",
+      dateOfBirth: "",
+      gender: "",
+      residenceAddress: "",
+      hasDistinctCurrentUser: true,
+    };
+    // Thiếu toàn bộ thông tin người sử dụng hiện tại.
+    expect(validateDraftForSubmit(draft)).toContain("người sử dụng hiện tại");
+
+    const filled = structuredClone(draft);
+    filled.owners[0].currentUserName = "Nguyễn Văn Thừa Kế";
+    filled.owners[0].currentUserCitizenId = "025167000291";
+    filled.owners[0].currentUserAddress = "KDC Phú Cường, phường Phong Châu";
+    filled.owners[0].changeReason = "THUA_KE";
+    expect(validateDraftForSubmit(filled)).toBeNull();
+  });
+
+  it("người sử dụng hiện tại phải có CCCD 12 số và lý do trong danh mục", () => {
+    const base = completeDraft();
+    base.owners[0] = {
+      ...base.owners[0],
+      identityNumber: "",
+      hasDistinctCurrentUser: true,
+      currentUserName: "Người Thừa Kế",
+      currentUserCitizenId: "025167000291",
+      currentUserAddress: "Phong Châu",
+      changeReason: "THUA_KE",
+    };
+    expect(validateDraftForSubmit(base)).toBeNull();
+
+    const badId = structuredClone(base);
+    badId.owners[0].currentUserCitizenId = "123";
+    expect(validateDraftForSubmit(badId)).toContain("người sử dụng hiện tại phải gồm đúng 12");
+
+    const badReason = structuredClone(base);
+    badReason.owners[0].changeReason = "KHONG_BIET";
+    expect(validateDraftForSubmit(badReason)).toContain("lý do thay đổi");
+  });
+
+  /** Bộ mã cũ (`CHU_SU_DUNG`…) không trùng giá trị nào trong dropdown của PL3. */
+  it("từ chối vai trò ngoài danh mục trường 13 của PL3", () => {
+    const draft = completeDraft();
+    draft.owners[0] = { ...draft.owners[0], roleOnCertificate: "CHU_SU_DUNG" };
+
+    expect(validateDraftForSubmit(draft)).toContain("không thuộc danh mục");
   });
 
   it("cho phép số tờ và số thửa để trống theo đúng Phụ lục 8", () => {
@@ -149,5 +250,39 @@ describe("validateDraftForSubmit", () => {
     const exceeding = completeDraft();
     exceeding.parcels[0].landUses[0] = { ...exceeding.parcels[0].landUses[0], area: "300" };
     expect(validateDraftForSubmit(exceeding)).toContain("vượt quá diện tích thửa");
+  });
+
+  /** Dòng 9 của `Tai lieu/PL3.xlsx`: thửa 29,16 m² nhưng loại đất ghi 29,2 m². */
+  it("chấp nhận sai lệch làm tròn có thật trong PL3 mẫu", () => {
+    const draft = completeDraft();
+    draft.parcels[0].area = "29.16";
+    draft.parcels[0].landUses[0] = { ...draft.parcels[0].landUses[0], area: "29.2" };
+
+    expect(validateDraftForSubmit(draft)).toBeNull();
+  });
+
+  it("vẫn bắt lệch vượt biên làm tròn", () => {
+    const draft = completeDraft();
+    draft.parcels[0].area = "29.16";
+    draft.parcels[0].landUses[0] = { ...draft.parcels[0].landUses[0], area: "30" };
+
+    expect(validateDraftForSubmit(draft)).toContain("vượt quá diện tích thửa");
+  });
+
+  /** PL3 chỉ có ba bộ cột loại đất; dòng thứ tư sẽ mất khi xuất nếu không chặn từ đây. */
+  it("giới hạn 3 dòng mục đích sử dụng mỗi thửa", () => {
+    const draft = completeDraft();
+    const template = draft.parcels[0].landUses[0];
+    draft.parcels[0].landUses = [1, 2, 3, 4].map((n) => ({ ...template, id: `use-${n}` }));
+
+    expect(validateDraftForSubmit(draft)).toContain("tối đa 3");
+  });
+
+  it("cho phép đúng 3 dòng mục đích", () => {
+    const draft = completeDraft();
+    const template = draft.parcels[0].landUses[0];
+    draft.parcels[0].landUses = [1, 2, 3].map((n) => ({ ...template, id: `use-${n}` }));
+
+    expect(validateDraftForSubmit(draft)).toBeNull();
   });
 });
