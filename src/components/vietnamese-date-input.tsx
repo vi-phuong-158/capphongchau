@@ -19,6 +19,11 @@ interface VietnameseDateInputProps {
   disabled?: boolean;
   /** Nhãn cho nhóm ba ô (đọc bởi trình đọc màn hình). */
   groupLabel?: string;
+  /** Gắn vào ô Ngày để `htmlFor` của nhãn ngoài trỏ đúng vào một ô thật. */
+  id?: string;
+  /** Tên gốc; ba ô dùng hậu tố `.day` / `.month` / `.year`. */
+  name?: string;
+  "aria-describedby"?: string;
 }
 
 /**
@@ -33,6 +38,9 @@ export function VietnameseDateInput({
   invalid,
   disabled,
   groupLabel,
+  id,
+  name,
+  "aria-describedby": ariaDescribedBy,
 }: VietnameseDateInputProps) {
   const [parts, setParts] = useState<DateParts>(() => splitIsoDate(value));
   const [syncedValue, setSyncedValue] = useState(value);
@@ -78,9 +86,16 @@ export function VietnameseDateInput({
   const boxClass = "pc-input text-center";
 
   return (
-    <div className="flex items-center gap-2" role="group" aria-label={groupLabel}>
+    <div
+      className="flex items-center gap-2"
+      role="group"
+      aria-label={groupLabel}
+      aria-describedby={ariaDescribedBy}
+    >
       <input
         ref={dayRef}
+        id={id}
+        name={name ? `${name}.day` : undefined}
         className={boxClass}
         style={{ width: "3.5rem" }}
         inputMode="numeric"
@@ -99,6 +114,7 @@ export function VietnameseDateInput({
       </span>
       <input
         ref={monthRef}
+        name={name ? `${name}.month` : undefined}
         className={boxClass}
         style={{ width: "3.5rem" }}
         inputMode="numeric"
@@ -117,6 +133,7 @@ export function VietnameseDateInput({
       </span>
       <input
         ref={yearRef}
+        name={name ? `${name}.year` : undefined}
         className={boxClass}
         style={{ width: "5rem" }}
         inputMode="numeric"

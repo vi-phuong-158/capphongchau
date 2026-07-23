@@ -251,26 +251,28 @@ sách cán bộ đối chiếu thủ công thay vì bị gán bừa.
 
 ## 5. Biểu mẫu người dân
 
-- [ ] `VietnameseDateInput` dùng chung: gõ `DD/MM/YYYY` bằng bàn phím số, nhận `15-08-1992`/`15081992`, lịch là tùy chọn, kiểm năm hợp lý và không cho ngày tương lai. Áp cho ngày sinh, ngày cấp GCN, ngày hết hạn
-- [ ] Chuẩn hóa số thập phân kiểu Việt: `123,5` · `123.5` · `1 234,5` (hiện `Number("123,5")` = `NaN`)
-- [ ] Ảnh GCN: xem trước, xóa mềm, thay, sắp xếp, gắn nhãn trang (hiện **chỉ hiện tên file, không có nút xóa**)
-- [ ] Đưa khối **"Ảnh căn cước công dân" lên đầu phần thông tin của từng người**. Trên cùng một màn
+- [x] `VietnameseDateInput` dùng chung: ba ô số Ngày/Tháng/Năm, bàn phím số, kiểm ngày/năm hợp lý
+      và không cho ngày tương lai; áp cho ngày sinh và ngày cấp GCN (ngày hết hạn chưa có nguồn thu)
+- [x] Chuẩn hóa số thập phân kiểu Việt: `123,5` · `123.5` · `1 234,5` (hiện `Number("123,5")` = `NaN`)
+- [x] Ảnh GCN: xem trước, xóa mềm, thay, sắp xếp, gắn nhãn trang; thứ tự/nhãn lưu trong `draft_json`
+      và có `sessionStorage` làm bản đệm trước lần lưu bước
+- [x] Đưa khối **"Ảnh căn cước công dân" lên đầu phần thông tin của từng người**. Trên cùng một màn
       hình cho chọn/chụp luôn đủ hai ô **Mặt trước** và **Mặt sau**, có preview, tiến độ tải và nút thay
       riêng từng mặt; sau đó mới tới các ô họ tên, số CCCD, ngày sinh, giới tính, địa chỉ
-- [ ] Ngay khi có ảnh, trình duyệt tự thử đọc QR từ **cả hai ảnh đã chọn** rồi gợi ý điền thông tin;
+- [x] Ngay khi có ảnh, trình duyệt tự thử đọc QR từ **cả hai ảnh đã chọn** rồi gợi ý điền thông tin;
       dữ liệu QR vẫn phải được người dân kiểm tra/xác nhận và không ghi đè nội dung họ đã sửa tay
-- [ ] **Không yêu cầu chụp/tải thêm ảnh thứ ba chỉ để quét QR.** Nút "Đọc lại QR" phải dùng lại hai
+- [x] **Không yêu cầu chụp/tải thêm ảnh thứ ba chỉ để quét QR.** Nút "Đọc lại QR" phải dùng lại hai
       ảnh CCCD hiện có. Sau khi tải lại trang hoặc đổi thiết bị, ứng dụng lấy preview riêng tư qua API
       rồi thử đọc lại trên thiết bị; chỉ yêu cầu thay ảnh nếu file thực sự hỏng/không đọc được, không bắt
       tải lại cả hai mặt
-- [ ] Khi triển khai, cập nhật quyết định cũ trong `docs/brain/03-decisions.md` đang cho chụp thêm một
+- [x] Khi triển khai, cập nhật quyết định cũ trong `docs/brain/03-decisions.md` đang cho chụp thêm một
       ảnh riêng để quét; yêu cầu mới tại mục này **thay thế** quyết định đó
-- [ ] QR không đọc được không được chặn lưu/gửi; chuyển sang nhập tay và giữ nguyên hai ảnh đã tải
-- [ ] Trang kiểm tra cuối hiển thị **đầy đủ** nội dung + nút "Sửa" từng khối (hiện chỉ đếm số lượng)
-- [ ] Danh mục dài (loại đất **45 mục**) cần **ô tìm kiếm lọc**, không phải `<select>` thuần — 45 dòng chữ dài trên màn hình 375px là không dùng được
-- [ ] Mục "Không tìm thấy — ghi theo bìa" + ô chữ tự do, cho GCN cũ ghi "đất thổ cư", "đất vườn"
-- [ ] Mục "Tôi không chắc — đề nghị cán bộ đối chiếu"
-- [ ] Accessibility: `id`/`htmlFor`, `name`, `autoComplete`, `aria-describedby`, tự chuyển focus tới lỗi đầu tiên. Hiện **toàn repo không có một `htmlFor` nào**
+- [x] QR không đọc được không được chặn lưu/gửi; chuyển sang nhập tay và giữ nguyên hai ảnh đã tải
+- [x] Trang kiểm tra cuối hiển thị **đầy đủ** nội dung + nút "Sửa" từng khối
+- [x] Danh mục dài (loại đất **45 mục**) có **ô tìm kiếm lọc**, không dùng `<select>` thuần
+- [x] Mục "Không tìm thấy — ghi theo bìa" + ô chữ tự do, cho GCN cũ ghi "đất thổ cư", "đất vườn"
+- [x] Mục "Tôi không chắc — đề nghị cán bộ đối chiếu"
+- [x] Accessibility: `id`/`htmlFor`, `name`, `autoComplete`, `aria-describedby`, tự chuyển focus tới lỗi đầu tiên
 
 ### 5.1. Kiểm tra hồ sơ đã có theo CCCD — chỉ yêu cầu nộp phần còn thiếu
 
@@ -407,15 +409,17 @@ trường 12, mã phường, phân loại nhóm 4/5.
 
 ## 7. Báo cáo và xuất dữ liệu
 
-**Chưa làm cho tới khi có danh mục chính thức** — xây export trên mã chưa chốt là làm hai lần.
+**Đã xây (2026-07-23)** — chủ dự án chốt dùng nhãn danh mục sẵn có trong code làm giá trị xuất, gỡ
+rào "chờ danh mục chính thức" (xem `docs/brain/03-decisions.md` cùng ngày). Nếu cơ quan gửi danh mục
+khác thì chỉ sửa `label` trong `reference.ts`, không phải sửa mã hồ sơ.
 
-Làm được ngay: **checklist từng hồ sơ** (cấu trúc độc lập với giá trị mã).
-
-- [ ] `POST /api/exports` (hiện **không tồn tại**)
-- [ ] Xuất XLSX đúng cấu trúc PL3: mỗi dòng = một (GCN × thửa × người)
-- [ ] Sinh PDF theo số phát hành (trường 49)
-- [ ] `EXPORT_JOBS` có checkpoint, ghi vào `03_EXPORTS`, có audit và checksum
-- [ ] Chỉ hồ sơ đã xác nhận vào báo cáo chính thức; còn lại xuất riêng thành danh sách tồn đọng
+- [x] `POST /api/exports` (role REPORT_VIEWER/WARD_ADMIN/SYSTEM_ADMIN + CSRF; nút ở `/profile`)
+- [x] Xuất XLSX đúng cấu trúc PL3: mỗi dòng = một (GCN × thửa × người), 49 cột B..AX + STT
+- [x] `EXPORT_JOBS` ghi checksum SHA-256 + phạm vi + actor; upload `03_EXPORTS` (best-effort); có audit `PL3_EXPORTED`
+- [x] Chỉ hồ sơ `ACCEPTED` vào sheet `PL3`; hồ sơ đang xử lý vào sheet `Ton dong`
+- [ ] **Sinh PDF theo số phát hành (trường 49)** — hiện chỉ ghi tên theo quy ước `{số phát hành}-GCN.pdf; -GT.pdf`, chưa sinh file PDF thật
+- [ ] Nhóm nhà ở/chung cư (41–48) và trường 20 — chưa có nguồn thu, để trống
+- [ ] Checklist từng hồ sơ (cấu trúc độc lập với giá trị mã) — chưa làm
 
 ---
 

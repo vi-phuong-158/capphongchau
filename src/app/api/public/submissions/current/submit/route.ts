@@ -48,7 +48,15 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   let body: { draft?: unknown };
   try {
-    body = (await request.json()) as { draft?: unknown };
+    const text = await request.text();
+    if (new TextEncoder().encode(text).length > environment.MAX_DRAFT_JSON_BYTES) {
+      return publicError(
+        "VALIDATION_FAILED",
+        `Kích thước dữ liệu vượt quá giới hạn (${environment.MAX_DRAFT_JSON_BYTES} bytes).`,
+        requestId,
+      );
+    }
+    body = JSON.parse(text) as { draft?: unknown };
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }
@@ -90,39 +98,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const repository = getPublicIntakeRepository();
   const status = record.status === "NEEDS_SUPPLEMENT" ? "RESUBMITTED" : "SUBMITTED";
-  await repository.submit(record, draft, status);
-  if (status === "RESUBMITTED") {
-    await repository.resolveOpenSupplementRequest(record.submissionId);
-  }
-  if (status === "SUBMITTED") {
-    await Promise.all(
-      identityOwners.map((owner) =>
-        repository.appendPendingIdentityIndex({
-          record,
-          citizenIdHmac: identityHmac(environment.DATA_HASH_PEPPER, owner.identityNumber),
-        }),
-      ),
-    );
-  }
-  await Promise.all([
-    repository.appendTimelineEvent(
-      record.submissionId,
-      newTimelineEvent({
-        eventType: status,
-        label: status === "RESUBMITTED" ? "Đã gửi bổ sung" : "Đã gửi hồ sơ",
-        actorDisplayName: "Người nộp",
-      }),
-      "PUBLIC",
-      requestId,
-    ),
-    repository.appendAudit({
-      actorEmail: "PUBLIC",
-      action:
-        status === "RESUBMITTED" ? "PUBLIC_SUBMISSION_RESUBMITTED" : "PUBLIC_SUBMISSION_SUBMITTED",
-      entityId: record.submissionId,
-      requestId,
+  
+  const pendingIdentityHmacs = status === "SUBMITTED"
+    ? identityOwners.map((owner) => identityHmac(environment.DATA_HASH_PEPPER, owner.identityNumber))
+    : undefined;
+
+  await repository.submit({
+    record,
+    draft,
+    status,
+    timelineEvent: newTimelineEvent({
+      eventType: status,
+      label: status === "RESUBMITTED" ? "Đã gửi bổ sung" : "Đã gửi hồ sơ",
+      actorDisplayName: "Người nộp",
     }),
-  ]);
+    actorEmail: "PUBLIC",
+    requestId,
+    pendingIdentityHmacs,
+  });
 
   return NextResponse.json({ receiptCode: record.receiptCode, status });
 }

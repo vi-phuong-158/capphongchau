@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { loadPublicIntakeEnvironment, type PublicIntakeEnvironment } from "@/modules/common/env";
 import {
   deriveAccessSecret,
-  derivePhoneFingerprint,
+  deriveCreationFingerprint,
   deriveReceiptCode,
   deriveSubmissionId,
   isValidPublicIdempotencyKey,
@@ -33,8 +33,6 @@ import { emptyDraft } from "@/modules/public-intake/types";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-/** Phiên bản thông báo bảo vệ dữ liệu mà người dân đã đồng ý — chờ văn bản chính thức. */
-const CONSENT_VERSION = "draft-2026-07";
 
 interface CreationResult {
   readonly submissionId: string;
@@ -81,13 +79,24 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError("INTERNAL_ERROR", "Hệ thống chưa sẵn sàng nhận kê khai.", requestId);
   }
 
+  if (environment.PUBLIC_INTAKE_MODE === "PAUSED") {
+    return publicError(
+      "SERVICE_UNAVAILABLE",
+      "Hệ thống đang tạm dừng tiếp nhận hồ sơ mới.",
+      requestId,
+    );
+  }
+
   if (!isTrustedEdgeRequest(request.headers, environment.ORIGIN_SHARED_SECRET)) {
     return publicError("ACCESS_DENIED", "Yêu cầu không hợp lệ.", requestId);
   }
 
-  let body: { phone?: unknown };
+  let body: { phone?: unknown; consent?: { accepted?: unknown; version?: unknown } };
   try {
-    body = (await request.json()) as { phone?: unknown };
+    body = (await request.json()) as {
+      phone?: unknown;
+      consent?: { accepted?: unknown; version?: unknown };
+    };
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }
@@ -97,6 +106,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError(
       "VALIDATION_FAILED",
       "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.",
+      requestId,
+    );
+  }
+
+  const consent = body.consent;
+  if (!consent || consent.accepted !== true || consent.version !== environment.CONSENT_NOTICE_VERSION) {
+    return publicError(
+      "VALIDATION_FAILED",
+      "Vui lòng đọc và đồng ý với điều khoản sử dụng và thông báo bảo vệ dữ liệu cá nhân (phiên bản mới nhất).",
       requestId,
     );
   }
@@ -129,7 +147,11 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     const idempotencyKey = publicRequestLogKey(rawIdempotencyKey);
-    const mutationHash = derivePhoneFingerprint(environment.PUBLIC_ACCESS_CODE_PEPPER, phone);
+    const mutationHash = deriveCreationFingerprint(
+      environment.PUBLIC_ACCESS_CODE_PEPPER,
+      phone,
+      environment.CONSENT_NOTICE_VERSION,
+    );
     let activeCreation = inFlightCreations.get(idempotencyKey);
     if (activeCreation && activeCreation.mutationHash !== mutationHash) {
       throw new CreationConflictError();
@@ -145,6 +167,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         sessionSecret: environment.PUBLIC_SESSION_SECRET,
         accessPepper: environment.PUBLIC_ACCESS_CODE_PEPPER,
         replayOnly: turnstile.duplicate,
+        consentVersion: environment.CONSENT_NOTICE_VERSION,
       });
       activeCreation = { mutationHash, operation };
       inFlightCreations.set(idempotencyKey, activeCreation);
@@ -201,6 +224,7 @@ async function createOrRecoverSubmission(input: {
   sessionSecret: string;
   accessPepper: string;
   replayOnly: boolean;
+  consentVersion: string;
 }): Promise<CreationResult> {
   const repository = getPublicIntakeRepository();
   const accessSecret = deriveAccessSecret(input.accessPepper, input.rawIdempotencyKey);
@@ -227,7 +251,6 @@ async function createOrRecoverSubmission(input: {
   const driveFolderId = await getPublicIntakeStorage().createSubmissionFolder(submissionId);
   const draft = emptyDraft(randomUUID(), randomUUID(), randomUUID());
   draft.phone = input.phone;
-  draft.consentAccepted = true;
 
   await repository.create({
     submissionId,
@@ -239,7 +262,7 @@ async function createOrRecoverSubmission(input: {
     phone: input.phone,
     driveFolderId,
     draft,
-    consentVersion: CONSENT_VERSION,
+    consentVersion: input.consentVersion,
   });
 
   return { submissionId, receiptCode, accessSecret, recovered: false };

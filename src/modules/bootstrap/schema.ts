@@ -121,6 +121,11 @@ export const SHEET_DEFINITIONS: readonly SheetDefinition[] = [
     headers: ["idempotency_key", "request_id", "response_json", "created_at", "expires_at"],
   },
   {
+    // 256 cột bucket theo ký tự đầu của idempotency key hash
+    title: "REQUEST_LOG_INDEX",
+    headers: Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0")),
+  },
+  {
     title: "SEARCH_INDEX",
     headers: ["index_id", "case_id", "field", "value_hash", "updated_at"],
   },
@@ -255,6 +260,26 @@ export const PUBLIC_SHEET_DEFINITIONS: readonly SheetDefinition[] = [
       "created_at",
       "updated_at",
       "owner_id",
+      // Trusted Drive name; append-only so the existing 12 columns never move.
+      "file_name",
+    ],
+  },
+  {
+    title: "EXPORT_JOBS",
+    headers: [
+      "export_job_id",
+      "export_type",
+      "status",
+      "drive_file_id",
+      "file_name",
+      "row_count",
+      "submission_count",
+      "warning_count",
+      "checksum_sha256",
+      "actor_email",
+      "scope_json",
+      "created_at",
+      "completed_at",
     ],
   },
   {

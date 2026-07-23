@@ -20,6 +20,8 @@ vi.mock("@/modules/common/env", () => ({
     ORIGIN_SHARED_SECRET: "o".repeat(32),
     TURNSTILE_SECRET_KEY: "turnstile-secret",
     APP_BASE_URL: "http://localhost:3000",
+    CONSENT_NOTICE_VERSION: "v1",
+    PUBLIC_INTAKE_MODE: "LIVE",
   }),
 }));
 
@@ -42,10 +44,10 @@ vi.mock("@/modules/public-intake/storage", () => ({
 }));
 
 import { POST } from "@/app/api/public/submissions/route";
-import { derivePhoneFingerprint } from "@/modules/public-intake/creation-idempotency";
+import { deriveCreationFingerprint } from "@/modules/public-intake/creation-idempotency";
 
 const IDEMPOTENCY_KEY = "123e4567-e89b-42d3-a456-426614174000";
-const PHONE_FINGERPRINT = derivePhoneFingerprint("p".repeat(32), "0912345678");
+const PHONE_FINGERPRINT = deriveCreationFingerprint("p".repeat(32), "0912345678", "v1");
 
 function createRequest(phone = "0912345678", idempotencyKey = IDEMPOTENCY_KEY): Request {
   return new Request("http://localhost/api/public/submissions", {
@@ -55,7 +57,7 @@ function createRequest(phone = "0912345678", idempotencyKey = IDEMPOTENCY_KEY): 
       "idempotency-key": idempotencyKey,
       "x-turnstile-token": "turnstile-token",
     },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, consent: { accepted: true, version: "v1" } }),
   });
 }
 

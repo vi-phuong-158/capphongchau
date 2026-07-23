@@ -3,7 +3,135 @@
 > Nhật ký các lần AI (Claude Code / Codex) sửa code. Mỗi agent PHẢI thêm entry sau mỗi lần
 > chạm vào code. Đọc ngược từ trên xuống để biết gần đây ai đã làm gì và vì sao.
 
+## [2026-07-23] Sửa regression bucket PUBLIC_LOOKUP_INDEX + kiểm 45KB ở submit
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - **Bug thật (regression):** `submit()` trong `repository.ts` ghi chỉ mục PENDING vào `PUBLIC_LOOKUP_INDEX`
+    bằng `appendCells` không có `startColumnIndex` → luôn ghi vào cột A, phá vỡ bucketing theo byte đầu
+    HMAC. `hasPendingIdentityMatch` đọc theo cột bucket nên không tìm thấy → cảnh báo trùng CCCD chờ xử lý
+    mất tác dụng với ~255/256 hồ sơ. Gỡ block appendCells khỏi batch; sau `batchUpdate` gọi lại
+    `appendPendingIdentityIndex()` (ghi đúng cột bucket bằng `values.append`). Việc này cũng hồi sinh
+    `appendPendingIdentityIndex()` vốn thành dead code sau đợt refactor batching.
+  - **Lỗ giới hạn payload:** submit route trước đây không kiểm `MAX_DRAFT_JSON_BYTES` (chỉ route lưu nháp
+    kiểm). Thêm đọc `request.text()` + kiểm 45KB trước khi `JSON.parse`, cùng style với route lưu nháp.
+  - **Scale hàng chờ (20k):** `/api/submissions` trước đây luôn gọi `list()` đọc cả tab kèm `draft_json`
+    (cột nặng nhất, tới 45KB/dòng) rồi mới phân trang trong RAM → mỗi request/"Tải thêm" tải lại toàn bộ
+    draft của 20k hồ sơ. Thêm `listSummaries()` (đọc A:R, bỏ draft) + `getDraftDisplayFields()` (batchGet
+    chỉ cột S của đúng 100 dòng trên trang). Route dùng đường nhẹ khi không tìm kiếm; chỉ khi có `q` (quét
+    số GCN/tên chủ trong draft) mới đọc đầy đủ. Sửa comment lỗi thời của `list()` ("tối đa 500 ở pilot").
+- **File đã sửa:** `src/modules/public-intake/repository.ts`,
+  `src/app/api/public/submissions/current/submit/route.ts`, `src/app/api/submissions/route.ts`.
+- **Lý do:** Khôi phục đúng ngữ nghĩa chống trùng CCCD, chặn payload quá khổ ở điểm ghi nhiều dòng nhất,
+  và cắt chi phí đọc hàng chờ từ O(toàn bộ draft) xuống O(tóm tắt + 1 trang) cho quy mô 20k.
+- **Giới hạn còn lại:** Google Sheets không có truy vấn lọc/phân trang phía máy chủ nên vẫn phải quét toàn
+  bộ tab để lấy cột tóm tắt và sắp xếp; đây là ràng buộc của quyết định "Sheets làm kho" (03-decisions).
+- **Kiểm tra:** `npm run typecheck`, `npm run lint`, `npm test` (26 file, 174/174) đều pass.
+
 ---
+
+## [2026-07-23] Nâng cấp giao diện UI/UX & Tích hợp Biểu trưng Phường Phong Châu (taste-skill + Cherry Gold Civic Glass)
+
+- **Agent:** Antigravity (Gemini 3.6 Flash / Claude 4.6 Opus)
+- **Thay đổi:**
+  - Tích hợp biểu trưng chính thức Phường Phong Châu `asset/Logo_phongchau.png` (Trống đồng Đông Sơn & chữ ФPC) vào `public/logo-phongchau.png`.
+  - Tối ưu nạp ảnh với `next/image`: thuộc tính `priority` trên Trang chủ (`/`) để làm LCP element hiển thị tức thì; hỗ trợ lazy-loading mịn trên `/ke-khai` và `/tra-cuu`.
+  - **Trang chủ (`src/app/page.tsx`)**: Nâng cấp Hero section với biểu trưng trung tâm (96px/80px responsive), viền Vàng Kim 4px cho thẻ "Người dân" (`borderTop: 4px solid var(--gold-500)`), thêm nút lối tắt "Tra cứu hồ sơ đã nộp" dưới CTA chính.
+  - **Trang kê khai (`src/app/ke-khai/page.tsx`)**: Tích hợp logo 48px ở header, loại bỏ em-dash (`—`) theo tiêu chuẩn taste-skill §9.G.
+  - **Trang tra cứu (`src/app/tra-cuu/page.tsx`)**: Tích hợp logo 48px và nút `<Link href="/">` sử dụng client-side routing chuẩn Next.js (sửa lỗi ESLint `@next/next/no-html-link-for-pages`).
+  - **Global CSS (`src/app/globals.css`)**: Bổ sung `.pc-skeleton` + `@keyframes pc-shimmer` cho lazy loading, `.pc-fade-in` cho hiệu ứng nạp mượt, `.pc-card-featured` và `@media (prefers-reduced-transparency)` fallback per DESIGN.md §5.5.
+- **File đã sửa:** `src/app/page.tsx`, `src/app/ke-khai/page.tsx`, `src/app/tra-cuu/page.tsx`, `src/app/globals.css`, `public/logo-phongchau.png` (file mới), `implementation_plan.md` (artifact), `walkthrough.md` (artifact).
+- **Kiểm tra:**
+  - `npx tsc --noEmit -p tsconfig.typecheck.json`: 0 lỗi type.
+  - `npx eslint src/app/page.tsx src/app/ke-khai/page.tsx src/app/tra-cuu/page.tsx`: 0 lỗi lint.
+  - `npm test`: 26 file, 174/174 unit & integration tests PASSED.
+
+---
+
+## [2026-07-23] Codex tiếp nối PLAN2 §5 — hoàn thiện tính bền vững, thay ảnh an toàn và QA
+
+- **Agent:** Codex
+- **Rà soát và hoàn thiện phần Claude Code để dở:**
+  - Thứ tự + nhãn trang ảnh GCN không còn chỉ ở `sessionStorage`: lưu vào `draft_json.certificateFileMetadata`, khôi phục được khi tải lại/đổi thiết bị; `sessionStorage` chỉ là đệm trước lần lưu bước.
+  - Thay ảnh GCN dùng đúng luồng `replaceFileId`: kiểm tra loại/trạng thái file cũ, xác minh file mới trước rồi mới chuyển file cũ sang `REPLACED`; thay ảnh thứ 10 không bị chặn sai bởi giới hạn 10 ảnh.
+  - `DELETE` ảnh GCN yêu cầu `idempotency-key`, lặp lại cùng thao tác trả kết quả `DELETED` ổn định và không ghi audit trùng.
+  - Hoàn thiện `name` cho `SearchableSelect`/`VietnameseDateInput`, focus lỗi bao gồm custom control, `aria-invalid` đúng vai trò; giới hạn nhãn trang 120 ký tự và validate metadata trùng/quá dài.
+  - Sửa nội dung hướng dẫn CCCD để không hứa tra cứu khi chưa đọc/xác nhận được QR.
+- **File chính đã sửa:** `src/app/ke-khai/wizard.tsx`, `src/components/searchable-select.tsx`,
+  `src/components/vietnamese-date-input.tsx`, `src/modules/public-intake/types.ts`,
+  `src/modules/public-intake/validation.ts`, `src/modules/public-intake/repository.ts`, ba route
+  `uploads/initiate`, `uploads/complete`, `files/[fileId]` và `tests/public-intake-validation.test.ts`.
+- **Tài liệu đồng bộ:** `PLAN2.md`, `AGENTS.md`, `docs/architecture.md`,
+  `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`.
+- **Kiểm tra:**
+  - `npm run lint`: sạch.
+  - `tsc --noEmit -p tsconfig.typecheck.json`: đạt TypeScript strict.
+  - `npm run test`: 26 file, 174/174 test đạt.
+  - Prettier check riêng toàn bộ file §5/PL3: đạt. Full-repo `format:check` sau đó phát hiện ba file giao diện mới bị sửa đồng thời (`globals.css`, `ke-khai/page.tsx`, `page.tsx`); Codex giữ nguyên để không ghi đè công việc ngoài phạm vi.
+  - `npm run build`: production build thành công, 16/16 trang tĩnh.
+  - Trình duyệt `/ke-khai` ở viewport 375×812: không tràn ngang (client/scroll width 360), không có form control tự viết thiếu `name`/label; Turnstile localhost báo mã 110200 do cấu hình domain nên không gửi hồ sơ thật.
+- **Giới hạn:** §5.1 tra cứu CCCD là luồng riêng, không thuộc đợt này. Không chạy migration hoặc ghi dữ liệu Google thật; riêng metadata §5 nằm trong `draft_json` nên không cần thêm cột Sheets. Thư mục `asset/` của người dùng được giữ nguyên.
+
+## [2026-07-23] Làm lại biểu mẫu người dân (PLAN2 §5) — a11y, số Việt, loại đất tìm kiếm, quản lý ảnh, review
+
+- **Agent:** Claude Code
+- **Thay đổi:** Hoàn thiện toàn bộ §5 (trừ §5.1 tra cứu CCCD, để riêng vì có rào server):
+  - **Số Việt:** thêm `parseVietnameseDecimal` (`vietnamese-number.ts`); validate diện tích thửa và
+    tổng loại đất nay chấp nhận `123,5`/`1 234,5`. Chuỗi gốc giữ nguyên khi xuất.
+  - **Loại đất tìm kiếm:** thêm `SearchableSelect` (lọc không dấu) thay `<select>` 45 mục; hai lối
+    thoát `GHI_THEO_BIA` (ô chữ tự do) + `CAN_DOI_CHIEU`. Thêm `LandUse.purposeFreeText`; export PL3
+    (`landPurposeLabel`) ghi thẳng chữ tự do / để trống + cảnh báo.
+  - **Accessibility:** `Field` sinh `id` + `htmlFor` + tiêm `aria-describedby`/`name`; `Select`,
+    `VietnameseDateInput` nhận `id`/`aria-describedby`; sai validate tự focus ô lỗi đầu; phone thêm
+    `type=tel`/`autoComplete=tel`.
+  - **Quản lý ảnh:** `FilePreview` (byte qua API `private, no-store`) cho cả CCCD lẫn GCN. Ảnh GCN:
+    xóa mềm (`DELETE .../files/[fileId]` → `markFileDeleted`, chỉ `CERTIFICATE`), thay, sắp xếp,
+    gắn nhãn trang (thứ tự/nhãn lưu `sessionStorage`). Nút **"Đọc lại QR"** dùng lại hai ảnh CCCD
+    (có `file` thì đọc ngay; khôi phục thì lấy byte qua API rồi dựng `File`), không bắt chụp ảnh thứ ba.
+  - **Trang kiểm tra cuối:** hiện đầy đủ nội dung từng khối + nút "Sửa" nhảy đúng bước (`ReviewBlock`).
+- **File đã sửa:** `src/modules/public-intake/vietnamese-number.ts` (mới),
+  `src/components/searchable-select.tsx` (mới), `src/app/ke-khai/wizard.tsx` (Field/Select a11y,
+  combobox loại đất + ô chữ tự do, FilePreview, quản lý ảnh GCN, "Đọc lại QR", review đầy đủ),
+  `src/components/vietnamese-date-input.tsx` (`id`/`aria-describedby`),
+  `src/modules/public-intake/reference.ts` (sentinel loại đất), `src/modules/public-intake/types.ts`
+  (`purposeFreeText`), `src/modules/public-intake/pl3-export.ts` (`landPurposeLabel`),
+  `src/modules/public-intake/repository.ts` (`markFileDeleted`),
+  `src/app/api/public/submissions/current/files/[fileId]/route.ts` (`DELETE`),
+  `tests/vietnamese-number.test.ts` (mới), `tests/pl3-export.test.ts` (+2 test sentinel),
+  `tests/public-intake-validation.test.ts` (fixture `purposeFreeText`).
+- **Lý do:** Biểu mẫu cũ thiếu `htmlFor`, `Number("123,5")=NaN`, danh mục 45 mục khó dùng trên
+  màn 375px, ảnh GCN chỉ hiện tên file không xóa được, review chỉ đếm số lượng — đúng các mục PLAN2
+  §5 yêu cầu. Chủ dự án chốt "làm trọn cả §5".
+- **Kiểm tra:** `npm run typecheck`, `npm run lint` sạch; `npx vitest run` 172/172 xanh (thêm
+  `vietnamese-number` 6 test + 2 test sentinel loại đất). `npm run build` chạy. **Cần chạy
+  `npm run migrate:public-intake` không bắt buộc cho đợt này** (không thêm cột Sheets); xóa mềm ảnh
+  GCN dùng cột `status` sẵn có. Kiểm thử trình duyệt thật cho preview/upload nên chạy trước deploy.
+
+## [2026-07-23] Xuất PL3 (49 trường) — API, EXPORT_JOBS, nút cán bộ và test
+
+- **Agent:** Claude Code
+- **Thay đổi:** Hoàn thiện luồng xuất PL3 mà Codex mới dựng dở trên nhánh `codex/official-pl3-export`.
+  Thêm module thuần `pl3-export.ts` ánh xạ đủ 49 cột (B..AX) + STT, **nổ dòng theo (GCN × thửa ×
+  người)**, dịch mã→chữ **chỉ** bằng `label` của danh mục sẵn có trong `reference.ts`/`types.ts`
+  (chủ dự án chỉ đạo dùng chính nhãn đã build; không tự dịch, mã lạ ghi nguyên văn + cảnh báo).
+  Sheet `PL3` = hồ sơ `ACCEPTED`; sheet `Ton dong` = hồ sơ đang xử lý (PLAN2 §7). Thêm
+  `POST /api/exports` (role REPORT_VIEWER/WARD_ADMIN/SYSTEM_ADMIN + CSRF) dựng workbook bằng exceljs,
+  upload Drive `03_EXPORTS` (best-effort), ghi `EXPORT_JOBS` (checksum SHA-256, phạm vi, actor) + audit
+  `PL3_EXPORTED`, trả file tải về. Nút "Xuất PL3 (XLSX)" ở `/profile`. Cấu trúc 49 cột + trường 49
+  (`{số phát hành}-GCN.pdf; -GT.pdf`) và cột A=STT xác nhận từ ảnh render `PL3.xlsx`.
+  Cột `file_name`/sheet `EXPORT_JOBS` do Codex thêm vào `schema.ts` giữ nguyên; migration đã có sẵn
+  (`npm run migrate:public-intake`) tự tạo tab mới + nối cột — **cần chạy trên Sheet thật trước deploy**.
+- **File đã sửa:** `src/modules/public-intake/pl3-export.ts` (mới), `src/app/api/exports/route.ts`
+  (mới), `src/components/pl3-export-button.tsx` (mới), `tests/pl3-export.test.ts` (mới),
+  `src/modules/public-intake/repository.ts` (`appendExportJob` + `ExportJobRecord`),
+  `src/modules/public-intake/storage.ts` (`uploadExport`), `src/app/profile/page.tsx` (nút).
+- **Lý do:** PL3 là đích xuất cuối cùng (PLAN2 §7). Trước đó §7 hoãn export vì "danh mục mã→chữ chưa
+  cơ quan duyệt"; chủ dự án chốt dùng nhãn danh mục hiện có trong code nên bỏ được rào này. Nhóm
+  nhà ở 41–48, trường 20 chưa có nguồn → để trống đúng như hiện trạng thu thập.
+- **Kiểm tra:** `npm run typecheck`, `npm run lint`, `npm run build` đạt; `npx vitest run` 164/164 xanh,
+  trong đó `tests/pl3-export.test.ts` 19 test (nổ dòng, nhãn 12/13/loại đất/nguồn gốc/tài sản, giới
+  hạn 3 loại đất, tổ chức, người SD hiện tại, trường 19 tra được/mập mờ, mã lạ, phân chính thức/tồn
+  đọng, buffer XLSX). Không kiểm được đầu cuối trên Google/tải file vì phiên này không có credential.
 
 ## [2026-07-23] Cho phép tra cứu GCN đã có không cần tải cặp ảnh CCCD
 

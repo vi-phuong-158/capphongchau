@@ -42,6 +42,7 @@ function completeDraft() {
       {
         id: "use-1",
         purposeCode: "ONT",
+        purposeFreeText: "",
         originCode: "CN_QSD",
         formCode: "RIENG",
         termCode: "LAU_DAI",
@@ -284,5 +285,25 @@ describe("validateDraftForSubmit", () => {
     draft.parcels[0].landUses = [1, 2, 3].map((n) => ({ ...template, id: `use-${n}` }));
 
     expect(validateDraftForSubmit(draft)).toBeNull();
+  });
+
+  it("chấp nhận metadata thứ tự và nhãn trang GCN hợp lệ", () => {
+    const draft = completeDraft();
+    draft.certificateFileMetadata = [
+      { fileId: "file-1", pageLabel: "Trang bìa" },
+      { fileId: "file-2", pageLabel: "Sơ đồ thửa" },
+    ];
+
+    expect(validateDraftForSave(draft)).toBeNull();
+  });
+
+  it("từ chối metadata ảnh GCN trùng file hoặc nhãn quá dài", () => {
+    const draft = completeDraft();
+    draft.certificateFileMetadata = [
+      { fileId: "file-1", pageLabel: "Trang bìa" },
+      { fileId: "file-1", pageLabel: "x".repeat(121) },
+    ];
+
+    expect(validateDraftForSave(draft)).toContain("nhãn trang");
   });
 });

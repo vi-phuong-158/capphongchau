@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
+import logoPhongChau from "@/../public/logo-phongchau.png";
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
 import { COVERAGE_NOTICE } from "@/modules/public-intake/support-contacts";
 
 import { IntakeWizard } from "./wizard";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Kê khai hồ sơ đất đai",
@@ -23,25 +27,25 @@ export default async function IntakePage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
-      {/* Dải cherry ở đầu trang thay cho một khối màu lớn — màu thương hiệu làm điểm neo thị
-          giác, không phủ dày toàn màn hình (DESIGN.md §1.3, §9.1). */}
       <header className="mb-8">
-        <div
-          aria-hidden="true"
-          className="mb-6 h-1 w-16 rounded-full"
-          style={{
-            background: "linear-gradient(90deg, var(--cherry-700), var(--gold-500))",
-          }}
-        />
-        <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
-          PHƯỜNG PHONG CHÂU
-        </p>
+        <div className="mb-6 flex items-center gap-3">
+          <Image
+            src={logoPhongChau}
+            alt="Logo Phường Phong Châu"
+            width={48}
+            height={48}
+            className="h-12 w-12 object-contain"
+          />
+          <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
+            PHƯỜNG PHONG CHÂU
+          </p>
+        </div>
         <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
           Kê khai hồ sơ đất đai
         </h1>
         <p className="mt-3 text-lg" style={{ color: "var(--muted)" }}>
-          Dành cho trường hợp thửa đất đã có Giấy chứng nhận. Bạn không cần tài khoản — kê khai xong
-          sẽ nhận mã tra cứu.
+          Dành cho trường hợp thửa đất đã có Giấy chứng nhận. Bạn không cần tài khoản. Kê khai
+          xong sẽ nhận mã tra cứu.
         </p>
         <p className="mt-3">
           Đã có mã tiếp nhận?{" "}
@@ -62,7 +66,22 @@ export default async function IntakePage() {
         </p>
       </header>
 
-      <IntakeWizard />
+      {environment.PUBLIC_INTAKE_MODE === "PAUSED" ? (
+        <div
+          className="mt-6 rounded-lg border p-6 text-center"
+          style={{
+            background: "var(--surface)",
+            borderColor: "var(--border)",
+          }}
+        >
+          <h2 className="text-xl font-semibold mb-2">Tạm dừng tiếp nhận</h2>
+          <p style={{ color: "var(--muted)" }}>
+            Hệ thống hiện đang tạm dừng tiếp nhận hồ sơ mới để bảo trì hoặc xử lý dữ liệu. Vui lòng quay lại sau.
+          </p>
+        </div>
+      ) : (
+        <IntakeWizard />
+      )}
     </main>
   );
 }

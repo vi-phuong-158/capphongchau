@@ -27,6 +27,7 @@ const validEnvironment: EnvironmentSource = {
   ORIGIN_SHARED_SECRET: "e".repeat(32),
   TURNSTILE_SECRET_KEY: "turnstile-secret-key",
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: "turnstile-site-key",
+  CONSENT_NOTICE_VERSION: "v1",
 };
 
 describe("cấu hình môi trường server", () => {

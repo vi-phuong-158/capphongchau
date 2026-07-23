@@ -43,6 +43,18 @@ export interface SubmissionRecord {
   readonly rowIndex: number;
 }
 
+/** Bản tóm tắt nhẹ cho hàng chờ cán bộ: không kèm `draft_json` (cột nặng nhất, tới 45KB/dòng). */
+export interface SubmissionSummary {
+  readonly submissionId: string;
+  readonly receiptCode: string;
+  readonly status: PublicStatus;
+  readonly phone: string;
+  readonly version: number;
+  readonly claimedBy: string;
+  readonly updatedAt: string;
+  readonly rowIndex: number;
+}
+
 export interface StoredFile {
   readonly fileId: string;
   readonly submissionId: string;
@@ -52,6 +64,7 @@ export interface StoredFile {
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly checksum: string;
+  readonly fileName: string;
   readonly status: "UPLOADED" | "REPLACED" | "DELETED";
   readonly createdAt?: string;
   readonly updatedAt?: string;
@@ -74,6 +87,23 @@ export interface StoredSubmissionMutation {
   readonly kind: string;
   readonly mutationHash: string;
   readonly response: Record<string, string | number | null>;
+}
+
+export interface ExportJobRecord {
+  readonly exportJobId: string;
+  readonly exportType: string;
+  readonly status: "COMPLETED" | "ARCHIVE_FAILED";
+  readonly driveFileId: string;
+  readonly fileName: string;
+  readonly rowCount: number;
+  readonly submissionCount: number;
+  readonly warningCount: number;
+  readonly checksumSha256: string;
+  readonly actorEmail: string;
+  /** JSON mô tả phạm vi xuất (số dòng chính thức/tồn đọng) — không chứa PII. */
+  readonly scopeJson: string;
+  readonly createdAt: string;
+  readonly completedAt: string;
 }
 
 const SUBMISSION_COLUMNS = 21;
@@ -907,7 +937,11 @@ export class PublicIntakeRepository {
     });
   }
 
-  /** Hàng chờ cán bộ. Tối đa 500 bản kê khai ở pilot nên đọc theo lô, không phân trang bằng offset. */
+  /**
+   * Đọc **đầy đủ** mọi bản kê khai (gồm cả `draft_json`). Google Sheets không có truy vấn lọc/phân
+   * trang phía máy chủ nên phải quét toàn bộ tab; chỉ dùng khi thật sự cần draft (xuất PL3, tìm kiếm
+   * theo số GCN/tên chủ). Hàng chờ thông thường dùng {@link listSummaries} để khỏi tải cột nặng nhất.
+   */
   async list(): Promise<SubmissionRecord[]> {
     const { sheets } = this.workspace();
     const response = await sheets.spreadsheets.values.get({
@@ -918,6 +952,55 @@ export class PublicIntakeRepository {
     return (response.data.values ?? []).map((candidate, index) =>
       submissionFromRow(candidate, index + 1),
     );
+  }
+
+  /**
+   * Đọc nhẹ cho hàng chờ: chỉ lấy cột A:R, bỏ hẳn `draft_json` (S) — cột chiếm gần như toàn bộ dung
+   * lượng khi có 20k hồ sơ. Số GCN/tên chủ hiển thị được nạp sau cho đúng trang bằng
+   * {@link getDraftDisplayFields}.
+   */
+  async listSummaries(): Promise<SubmissionSummary[]> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: "PUBLIC_SUBMISSIONS!A2:R",
+    });
+    return (response.data.values ?? []).map((candidate, index) => ({
+      submissionId: readCell(candidate, 0),
+      receiptCode: readCell(candidate, 1),
+      status: (readCell(candidate, 2) || "DRAFT") as PublicStatus,
+      phone: readCell(candidate, 3),
+      version: Number(readCell(candidate, 4)) || 1,
+      claimedBy: readCell(candidate, 14),
+      updatedAt: readCell(candidate, 17),
+      rowIndex: index + 1,
+    }));
+  }
+
+  /**
+   * Nạp số GCN + tên chủ đầu tiên cho đúng các dòng của một trang hàng chờ. Chỉ đọc ô `draft_json`
+   * (cột S) của từng dòng qua `batchGet` nên chi phí tỉ lệ với cỡ trang (100), không phải cả 20k.
+   */
+  async getDraftDisplayFields(
+    rowIndexes: readonly number[],
+  ): Promise<Map<number, { issueNumber: string; ownerName: string }>> {
+    const result = new Map<number, { issueNumber: string; ownerName: string }>();
+    if (!rowIndexes.length) return result;
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId: this.spreadsheetId,
+      ranges: rowIndexes.map((rowIndex) => `PUBLIC_SUBMISSIONS!S${rowIndex + 1}`),
+    });
+    const valueRanges = response.data.valueRanges ?? [];
+    rowIndexes.forEach((rowIndex, position) => {
+      const raw = valueRanges[position]?.values?.[0]?.[0];
+      const draft = typeof raw === "string" ? parseDraft(raw) : null;
+      result.set(rowIndex, {
+        issueNumber: draft?.certificate.issueNumber ?? "",
+        ownerName: draft?.owners[0]?.fullName ?? "",
+      });
+    });
+    return result;
   }
 
   /**
@@ -1237,6 +1320,36 @@ export class PublicIntakeRepository {
     });
   }
 
+  /** Ghi một dòng nhật ký công việc xuất vào `EXPORT_JOBS` (append-only, có checksum + phạm vi). */
+  async appendExportJob(job: ExportJobRecord): Promise<void> {
+    const { sheets } = this.workspace();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: this.spreadsheetId,
+      range: "EXPORT_JOBS!A:M",
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [
+          [
+            job.exportJobId,
+            job.exportType,
+            job.status,
+            job.driveFileId,
+            job.fileName,
+            String(job.rowCount),
+            String(job.submissionCount),
+            String(job.warningCount),
+            job.checksumSha256,
+            job.actorEmail,
+            job.scopeJson,
+            job.createdAt,
+            job.completedAt,
+          ],
+        ],
+      },
+    });
+  }
+
   /** Ghi đè cả dòng: nháp thay đổi liên tục nên cập nhật theo dòng rẻ hơn theo ô. */
   async saveDraft(
     record: SubmissionRecord,
@@ -1305,7 +1418,7 @@ export class PublicIntakeRepository {
     if (!record) {
       await sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
-        range: "PUBLIC_FILES!A:L",
+        range: "PUBLIC_FILES!A:M",
         valueInputOption: "RAW",
         insertDataOption: "INSERT_ROWS",
         requestBody: {
@@ -1323,6 +1436,7 @@ export class PublicIntakeRepository {
               now,
               now,
               file.ownerId,
+              file.fileName,
             ],
           ],
         },
@@ -1385,6 +1499,7 @@ export class PublicIntakeRepository {
                   now,
                   now,
                   file.ownerId,
+                  file.fileName,
                 ]),
               ],
               fields: "userEnteredValue",
@@ -1413,7 +1528,7 @@ export class PublicIntakeRepository {
     const { sheets } = this.workspace();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A2:L",
+      range: "PUBLIC_FILES!A2:M",
     });
 
     return (response.data.values ?? [])
@@ -1431,18 +1546,19 @@ export class PublicIntakeRepository {
         mimeType: readCell(candidate, 5),
         sizeBytes: Number(readCell(candidate, 6)) || 0,
         checksum: readCell(candidate, 7),
+        fileName: readCell(candidate, 12),
         status: readCell(candidate, 8) as StoredFile["status"],
         createdAt: readCell(candidate, 9),
         updatedAt: readCell(candidate, 10),
       }));
   }
 
-  /** CCCD chỉ được thay sau khi ảnh mới đã xác minh và được lưu thành công. */
+  /** Ảnh cũ chỉ được chuyển `REPLACED` sau khi ảnh mới đã xác minh và được lưu thành công. */
   async markFileReplaced(submissionId: string, fileId: string): Promise<void> {
     const { sheets } = this.workspace();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A2:L",
+      range: "PUBLIC_FILES!A2:M",
     });
     const index = (response.data.values ?? []).findIndex(
       (candidate) =>
@@ -1463,34 +1579,63 @@ export class PublicIntakeRepository {
   }
 
   /**
+   * Xóa mềm một ảnh: đổi trạng thái sang `DELETED` để nó không còn được coi là đã nộp và không
+   * trải phẳng khi gửi. Không xóa cứng dòng hay file Drive — giữ vết cho cán bộ đối chiếu.
+   */
+  async markFileDeleted(submissionId: string, fileId: string): Promise<void> {
+    const { sheets } = this.workspace();
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: "PUBLIC_FILES!A2:M",
+    });
+    const index = (response.data.values ?? []).findIndex(
+      (candidate) =>
+        readCell(candidate, 0) === fileId &&
+        readCell(candidate, 1) === submissionId &&
+        readCell(candidate, 8) === "UPLOADED",
+    );
+    if (index < 0) throw new Error("Không tìm thấy ảnh cần xóa.");
+    const existing = response.data.values?.[index] ?? [];
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: `PUBLIC_FILES!I${index + 2}:K${index + 2}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["DELETED", readCell(existing, 9), new Date().toISOString()]],
+      },
+    });
+  }
+
+  /**
    * Chuyển nháp JSON thành các dòng chuẩn hóa và khóa bản khai. Toàn bộ đi trong **một**
    * `batchUpdate` để một thao tác nghiệp vụ chỉ tốn một lần ghi (PLAN_NL §9.1).
    */
-  async submit(
-    record: SubmissionRecord,
-    draft: IntakeDraft,
-    status: "SUBMITTED" | "RESUBMITTED" = "SUBMITTED",
-  ): Promise<void> {
-    const { sheets } = this.workspace();
+  async submit(input: {
+    record: SubmissionRecord;
+    draft: IntakeDraft;
+    status: "SUBMITTED" | "RESUBMITTED";
+    timelineEvent: PublicTimelineEvent;
+    actorEmail: string;
+    requestId: string;
+    pendingIdentityHmacs?: string[];
+  }): Promise<void> {
+    const { ids } = await this.sheetsWithIds([
+      "PUBLIC_SUBMISSIONS",
+      "PUBLIC_CERTIFICATES",
+      "PUBLIC_OWNERS",
+      "PUBLIC_PARCELS",
+      "PUBLIC_LAND_USES",
+      "PUBLIC_ASSETS",
+      "PUBLIC_STATUS_EVENTS",
+      "AUDIT_LOGS",
+      "PUBLIC_LOOKUP_INDEX",
+      "PUBLIC_SUPPLEMENT_REQUESTS",
+      "PUBLIC_SUPPLEMENT_ITEMS"
+    ]);
+    const { record, draft, status, timelineEvent, actorEmail, requestId, pendingIdentityHmacs } = input;
     const now = new Date().toISOString();
 
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-      fields: "sheets.properties(sheetId,title)",
-    });
-    const ids = new Map(
-      (spreadsheet.data.sheets ?? []).map((sheet) => [
-        sheet.properties?.title ?? "",
-        sheet.properties?.sheetId ?? -1,
-      ]),
-    );
-    const sheetId = (title: string): number => {
-      const id = ids.get(title);
-      if (typeof id !== "number" || id < 0) {
-        throw new Error(`Google Sheets thiếu tab ${title}.`);
-      }
-      return id;
-    };
+    const sheetId = (title: string): number => requiredSheetId(ids, title);
 
     const requests: sheets_v4.Schema$Request[] = [
       {
@@ -1640,10 +1785,145 @@ export class PublicIntakeRepository {
       });
     }
 
-    await sheets.spreadsheets.batchUpdate({
+    // Ghi sự kiện trạng thái (Timeline)
+    requests.push({
+      appendCells: {
+        sheetId: sheetId("PUBLIC_STATUS_EVENTS"),
+        rows: [
+          row([
+            timelineEvent.eventId,
+            record.submissionId,
+            timelineEvent.eventType,
+            timelineEvent.label,
+            actorEmail,
+            timelineEvent.actorDisplayName,
+            timelineEvent.message,
+            timelineEvent.occurredAt,
+            requestId,
+          ]),
+        ],
+        fields: "userEnteredValue",
+      },
+    });
+
+    // Ghi Audit
+    requests.push({
+      appendCells: {
+        sheetId: sheetId("AUDIT_LOGS"),
+        rows: [
+          row([
+            randomUUID(),
+            now,
+            actorEmail,
+            status === "RESUBMITTED" ? "PUBLIC_SUBMISSION_RESUBMITTED" : "PUBLIC_SUBMISSION_SUBMITTED",
+            "PUBLIC_SUBMISSION",
+            record.submissionId,
+            requestId,
+            JSON.stringify({}),
+          ]),
+        ],
+        fields: "userEnteredValue",
+      },
+    });
+
+    // Giải quyết yêu cầu bổ sung nếu RESUBMITTED
+    if (status === "RESUBMITTED") {
+      const [requestsResponse, itemsResponse] = await Promise.all([
+        this.workspace().sheets.spreadsheets.values.get({
+          spreadsheetId: this.spreadsheetId,
+          range: "PUBLIC_SUPPLEMENT_REQUESTS!A2:I",
+        }),
+        this.workspace().sheets.spreadsheets.values.get({
+          spreadsheetId: this.spreadsheetId,
+          range: "PUBLIC_SUPPLEMENT_ITEMS!A2:M",
+        }),
+      ]);
+      const requestRows = requestsResponse.data.values ?? [];
+      let requestIndex = -1;
+      for (let index = requestRows.length - 1; index >= 0; index -= 1) {
+        if (
+          readCell(requestRows[index], 1) === record.submissionId &&
+          readCell(requestRows[index], 2) === "OPEN"
+        ) {
+          requestIndex = index;
+          break;
+        }
+      }
+      if (requestIndex >= 0) {
+        const suppRequestId = readCell(requestRows[requestIndex], 0);
+        requests.push({
+          updateCells: {
+            range: {
+              sheetId: sheetId("PUBLIC_SUPPLEMENT_REQUESTS"),
+              startRowIndex: requestIndex + 1, // index là 0-based từ row 2
+              endRowIndex: requestIndex + 2,
+              startColumnIndex: 2,
+              endColumnIndex: 3,
+            },
+            rows: [row(["RESOLVED"])],
+            fields: "userEnteredValue",
+          },
+        });
+        requests.push({
+          updateCells: {
+            range: {
+              sheetId: sheetId("PUBLIC_SUPPLEMENT_REQUESTS"),
+              startRowIndex: requestIndex + 1,
+              endRowIndex: requestIndex + 2,
+              startColumnIndex: 8,
+              endColumnIndex: 9,
+            },
+            rows: [row([now])],
+            fields: "userEnteredValue",
+          },
+        });
+        (itemsResponse.data.values ?? []).forEach((candidate, index) => {
+          if (readCell(candidate, 1) !== suppRequestId || readCell(candidate, 10) !== "OPEN") return;
+          requests.push(
+            {
+              updateCells: {
+                range: {
+                  sheetId: sheetId("PUBLIC_SUPPLEMENT_ITEMS"),
+                  startRowIndex: index + 1,
+                  endRowIndex: index + 2,
+                  startColumnIndex: 10,
+                  endColumnIndex: 11,
+                },
+                rows: [row(["RESOLVED"])],
+                fields: "userEnteredValue",
+              },
+            },
+            {
+              updateCells: {
+                range: {
+                  sheetId: sheetId("PUBLIC_SUPPLEMENT_ITEMS"),
+                  startRowIndex: index + 1,
+                  endRowIndex: index + 2,
+                  startColumnIndex: 12,
+                  endColumnIndex: 13,
+                },
+                rows: [row([now])],
+                fields: "userEnteredValue",
+              },
+            }
+          );
+        });
+      }
+    }
+
+    await this.workspace().sheets.spreadsheets.batchUpdate({
       spreadsheetId: this.spreadsheetId,
       requestBody: { requests },
     });
+
+    // PUBLIC_LOOKUP_INDEX chia bucket theo cột (byte đầu của HMAC) nên không thể gộp vào batch bằng
+    // appendCells — cái đó luôn ghi vào cột A và phá vỡ bucketing. Ghi riêng theo đúng cột bucket để
+    // hasPendingIdentityMatch đọc lại được. Đây là chỉ mục cảnh báo mềm, không cần cùng batch với hồ sơ.
+    if (status === "SUBMITTED" && pendingIdentityHmacs && pendingIdentityHmacs.length > 0) {
+      for (const hmac of pendingIdentityHmacs) {
+        await this.appendPendingIdentityIndex({ record, citizenIdHmac: hmac });
+      }
+    }
   }
 
   private get spreadsheetId(): string {

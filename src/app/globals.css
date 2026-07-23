@@ -296,6 +296,58 @@ h3 {
   }
 }
 
+.pc-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--neutral-soft);
+  border-radius: var(--radius-sm);
+}
+
+.pc-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 100%
+  );
+  animation: pc-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes pc-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.pc-fade-in {
+  animation: pc-fade-in var(--duration-slow) var(--ease-emphasized) both;
+}
+
+@keyframes pc-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pc-glass {
+    background: rgba(255, 255, 255, 0.98) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+.pc-card-featured {
+  border-top: 3px solid var(--cherry-600);
+}
+
 /* Chuyển động ngắn, và tôn trọng lựa chọn giảm chuyển động của người dùng (DESIGN.md §12.4). */
 @media (prefers-reduced-motion: reduce) {
   *,

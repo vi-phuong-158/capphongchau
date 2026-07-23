@@ -4,6 +4,61 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-23] Làm lại biểu mẫu người dân (PLAN2 §5): a11y, số Việt, loại đất tìm kiếm, quản lý ảnh
+
+- **Quyết định:** Hoàn thiện các mục §5 "Biểu mẫu người dân":
+  - **Số thập phân kiểu Việt** (`parseVietnameseDecimal` trong `vietnamese-number.ts`): chấp nhận
+    `123,5` · `123.5` · `1 234,5` · `1.234,5`. Chỉ dùng cho **kiểm tra số học** (diện tích > 0,
+    tổng loại đất ≤ diện tích thửa); chuỗi gốc người dân gõ vẫn giữ nguyên khi xuất (PL3 mẫu ghi
+    dấu phẩy).
+  - **Ô loại đất có tìm kiếm** (`SearchableSelect`): gõ vài chữ (không dấu vẫn khớp) thay cho
+    `<select>` 45 dòng. Thêm hai lối thoát ngoài danh mục: `GHI_THEO_BIA` (ô chữ tự do, xuất PL3
+    ghi thẳng chữ đó) và `CAN_DOI_CHIEU` (xuất để trống + cảnh báo cho cán bộ). Lưu ở
+    `LandUse.purposeFreeText`.
+  - **Accessibility:** `Field` sinh `id`, gắn `htmlFor`, tiêm `aria-describedby`/`name` vào ô con;
+    `Select`/`VietnameseDateInput`/`SearchableSelect` nhận `id`/`aria-describedby`. Sai validate thì
+    tự đưa con trỏ tới ô lỗi đầu tiên. (Trước đây toàn repo không có một `htmlFor` nào.)
+  - **Quản lý ảnh:** cả ảnh CCCD lẫn ảnh GCN có **xem trước** (`FilePreview` lấy byte qua API
+    `private, no-store`). Ảnh GCN thêm **xóa mềm** (endpoint `DELETE .../files/[fileId]` →
+    `markFileDeleted`, chỉ áp cho `CERTIFICATE`), **thay**, **sắp xếp**, **gắn nhãn trang**. Nút
+    **"Đọc lại QR"** dùng lại hai ảnh CCCD đã có, không bắt chụp ảnh thứ ba (thay quyết định
+    [2026-07-22] "chụp một kiểu").
+  - **Trang kiểm tra cuối** hiển thị **đầy đủ** nội dung từng khối + nút "Sửa" nhảy về đúng bước.
+- **Đánh đổi / còn hở:**
+  - Thứ tự + nhãn trang ảnh GCN lưu trong `draft_json.certificateFileMetadata` để theo hồ sơ khi
+    đổi thiết bị; `sessionStorage` chỉ làm bản đệm trước lần lưu bước. Không thêm cột
+    `PUBLIC_FILES`: trạng thái/Drive ID vẫn lấy từ file đã xác minh, metadata nháp chỉ tham chiếu
+    `file_id`. Nhãn tối đa 120 ký tự và được validate ở server.
+  - Thay ảnh GCN dùng cùng cơ chế an toàn với CCCD: upload/xác minh ảnh mới rồi mới chuyển ảnh cũ
+    sang `REPLACED`; xóa mềm yêu cầu CSRF + idempotency key và replay trạng thái `DELETED` an toàn.
+  - `GHI_THEO_BIA`/`CAN_DOI_CHIEU` chảy vào export qua `draft_json` (nguồn thật của export); tab
+    phẳng `PUBLIC_LAND_USES` vẫn chỉ ghi `purpose_code`, chữ tự do không xuống tab phẳng.
+  - **§5.1 (kiểm tra hồ sơ đã có theo CCCD) KHÔNG nằm trong đợt này** — là tính năng tra cứu
+    server-side có rào riêng ("chưa sửa thì đừng bật"), làm tách sau.
+- **Người quyết định:** Chủ dự án (2026-07-23, "làm trọn cả §5"); Claude Code triển khai.
+
+## [2026-07-23] Xây export PL3 ngay, dùng nhãn danh mục sẵn có trong code
+
+- **Quyết định:** Xây luồng xuất PL3 (49 trường) **ngay**, dịch mã→chữ **chỉ** bằng `label` của các
+  danh mục đã có trong `reference.ts`/`types.ts` (`LAND_PURPOSE_OPTIONS`, `LAND_ORIGIN_OPTIONS`,
+  `LAND_USE_FORM_OPTIONS`, `LAND_USE_TERM_OPTIONS`, `ASSET_TYPE_OPTIONS`, `CERTIFICATE_ROLE_OPTIONS`,
+  `OWNER_TYPE_LABELS`, `CHANGE_REASON_OPTIONS`). Mã không có trong danh mục **ghi nguyên văn kèm
+  cảnh báo**, không tự dịch, không đoán.
+- **Lý do:** PLAN2 §7 trước đó hoãn export tới khi "có danh mục chính thức". Chủ dự án chốt
+  (2026-07-23) rằng các nhãn đã build trong code chính là nhãn dùng để xuất — gỡ rào này. Các danh
+  mục 12/13 đã lấy từ dropdown PL3; loại đất theo Thông tư 08/2024. `label` chính là chuỗi phải ghi
+  ra (đã ghi rõ trong comment `reference.ts`/`types.ts`).
+- **Cấu trúc (xác nhận từ ảnh render `PL3.xlsx`):** cột A = STT chạy; B..AX = 49 cột dữ liệu (gồm
+  O, P không đánh số); **mỗi dòng = một (GCN × thửa × người)**; trường 49 = `{số phát hành}-GCN.pdf;
+-GT.pdf`. Sheet `PL3` = hồ sơ `ACCEPTED`; sheet `Ton dong` = hồ sơ đang xử lý (PLAN2 §7 "còn lại
+  xuất riêng thành danh sách tồn đọng").
+- **Đánh đổi / còn hở:** nhóm nhà ở/chung cư (41–48) và trường 20 chưa có nguồn → để trống đúng
+  hiện trạng. Nếu sau này cơ quan gửi danh mục khác nhãn hiện tại thì chỉ cần sửa `label` trong
+  `reference.ts`, không phải sửa mã hồ sơ (mã ổn định, tách khỏi nhãn). Câu (a)/(b) §9 (nguồn gốc
+  ghép hai ý, loại đất theo TT08 hay danh mục tỉnh) vẫn treo — nhãn hiện tại là bản dùng tạm được
+  chủ dự án chấp thuận.
+- **Người quyết định:** Chủ dự án (2026-07-23, "cứ dùng những nhãn đấy đi"); Claude Code triển khai.
+
 ## [2026-07-23] Sửa import GCN cũ, batch staff action và reset mã bí mật
 
 - **Quyết định:** Import/tra cứu GCN cũ chỉ dựa vào CCCD HMAC; ngày sinh không được lưu trong `EXISTING_*` và không loại dòng import. Backfill dùng cùng ID xác định, append-only và reader lấy bản ghi cuối cùng. Các action cán bộ cùng audit/timeline/yêu cầu bổ sung/`REQUEST_LOG` dùng một Sheets batch; reset mã sinh ổn định theo idempotency key nhưng không lưu secret rõ.
@@ -463,6 +518,11 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Người quyết định:** Chủ dự án (2026-07-22) giao áp `DESIGN.md`; Claude Code chọn phạm vi theo mốc.
 
 ## [2026-07-22] Quét QR chủ động bằng chụp một kiểu, không mở luồng video
+
+> **ĐÃ THAY THẾ (2026-07-23, PLAN2 §5):** không còn chụp thêm ảnh thứ ba chỉ để quét QR. Nút
+> **"Đọc lại QR từ ảnh đã tải"** dùng lại đúng hai ảnh CCCD người dân đã nộp (ảnh vừa chọn còn
+> trong bộ nhớ; ảnh khôi phục sau khi tải lại trang lấy byte qua API `private, no-store` rồi giải
+> mã trên thiết bị). Xem entry cùng ngày bên dưới.
 
 - **Quyết định:** Khối thông tin từng chủ sử dụng có nút "Quét QR căn cước" mở camera **chụp một
   kiểu** (`<input type="file" capture="environment">`), giải mã tại chỗ rồi tự điền. **Không** mở

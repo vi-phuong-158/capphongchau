@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { loadGoogleStorageEnvironment, type GoogleStorageEnvironment } from "@/modules/common/env";
 import {
   createGoogleWorkspaceClient,
@@ -23,6 +25,7 @@ export interface UploadSession {
 
 export interface VerifiedFile {
   readonly driveFileId: string;
+  readonly fileName: string;
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly checksum: string;
@@ -107,7 +110,7 @@ export class PublicIntakeStorage {
 
     const response = await drive.files.get({
       fileId: input.driveFileId,
-      fields: "id,parents,mimeType,size,sha256Checksum",
+      fields: "id,name,parents,mimeType,size,sha256Checksum",
     });
     const file = response.data;
 
@@ -132,10 +135,36 @@ export class PublicIntakeStorage {
 
     return {
       driveFileId: file.id,
+      fileName: file.name ?? file.id,
       mimeType,
       sizeBytes,
       checksum: file.sha256Checksum ?? "",
     };
+  }
+
+  /**
+   * Lưu file kết xuất (XLSX) vào `03_EXPORTS`, trả về Drive file ID để ghi `EXPORT_JOBS`. Đây là
+   * upload có nội dung (media), khác luồng resumable của ảnh — file báo cáo nhỏ, đi qua server được.
+   */
+  async uploadExport(input: {
+    fileName: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }): Promise<string> {
+    const { drive } = createGoogleWorkspaceClient(this.credentials);
+    const folderId = await this.findOrCreateFolder(
+      "03_EXPORTS",
+      this.environment.GOOGLE_MY_DRIVE_ROOT_FOLDER_ID,
+    );
+    const created = await drive.files.create({
+      requestBody: { name: input.fileName, parents: [folderId] },
+      media: { mimeType: input.mimeType, body: Readable.from(Buffer.from(input.bytes)) },
+      fields: "id",
+    });
+    if (!created.data.id) {
+      throw new Error("Google Drive không trả file ID cho bản kết xuất.");
+    }
+    return created.data.id;
   }
 
   /** Tệp không đạt xác minh phải rời khỏi Drive ngay, không để tích rác (PLAN_NL §6.3). */

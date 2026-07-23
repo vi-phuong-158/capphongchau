@@ -84,7 +84,16 @@ export async function POST(request: Request): Promise<NextResponse> {
   const files = record.fileSummaries.length
     ? record.fileSummaries.filter((file) => file.status === "UPLOADED")
     : await getPublicIntakeRepository().listFiles(record.submissionId);
-  const usedBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
+  const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
+  const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
+  const replaceTarget = replaceFileId
+    ? files.find((file) => file.fileId === replaceFileId)
+    : undefined;
+  if (replaceFileId && !replaceTarget) {
+    return publicError("VALIDATION_FAILED", "Ảnh cần thay không hợp lệ.", requestId);
+  }
+  const usedBytes =
+    files.reduce((sum, file) => sum + file.sizeBytes, 0) - (replaceTarget?.sizeBytes ?? 0);
   if (usedBytes + sizeBytes > SUBMISSION_BYTE_BUDGET) {
     return publicError(
       "SIZE_BUDGET_EXCEEDED",
@@ -93,8 +102,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
-  const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
   if (record.status === "NEEDS_SUPPLEMENT") {
     const supplement = await getPublicIntakeRepository().getOpenSupplementRequest(
       record.submissionId,
@@ -132,14 +139,24 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!existing && replaceFileId) {
       return publicError("VALIDATION_FAILED", "Ảnh CCCD cần thay không hợp lệ.", requestId);
     }
-  } else if (
-    files.filter((file) => file.documentType === "CERTIFICATE").length >= MAX_CERTIFICATE_PHOTOS
-  ) {
-    return publicError(
-      "INVALID_STATE",
-      `Tối đa ${MAX_CERTIFICATE_PHOTOS} ảnh Giấy chứng nhận.`,
-      requestId,
-    );
+  } else {
+    if (replaceTarget && replaceTarget.documentType !== "CERTIFICATE") {
+      return publicError(
+        "VALIDATION_FAILED",
+        "Ảnh Giấy chứng nhận cần thay không hợp lệ.",
+        requestId,
+      );
+    }
+    if (
+      !replaceFileId &&
+      files.filter((file) => file.documentType === "CERTIFICATE").length >= MAX_CERTIFICATE_PHOTOS
+    ) {
+      return publicError(
+        "INVALID_STATE",
+        `Tối đa ${MAX_CERTIFICATE_PHOTOS} ảnh Giấy chứng nhận.`,
+        requestId,
+      );
+    }
   }
 
   const fileName =

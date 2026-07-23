@@ -1,6 +1,6 @@
 import { CERTIFICATE_ROLE_CODES, CHANGE_REASON_CODES, OLD_WARD_OPTIONS } from "./reference";
 import type { IntakeDraft } from "./types";
-import { MAX_LAND_USES_PER_PARCEL, isOrganisationOwner, requiresCitizenId } from "./types";
+import { MAX_LAND_USES_PER_PARCEL, isOrganisationOwner, requiresCitizenId, OWNER_TYPES } from "./types";
 
 const OLD_WARD_CODES: readonly string[] = OLD_WARD_OPTIONS.map((option) => option.code);
 
@@ -14,6 +14,8 @@ const CITIZEN_ID_PATTERN = /^\d{12}$/;
 /** Mã số thuế 10 số, hoặc 13 số dạng đơn vị trực thuộc (`0123456789-001`). */
 const ORGANISATION_ID_PATTERN = /^\d{10}(-\d{3})?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_CERTIFICATE_FILES = 10;
+const MAX_CERTIFICATE_PAGE_LABEL_LENGTH = 120;
 
 /**
  * Biên sai lệch cho phép giữa tổng diện tích theo mục đích và diện tích thửa, đơn vị m².
@@ -34,14 +36,123 @@ function isValidDate(value: string): boolean {
   );
 }
 
+import { z } from "zod";
 export function isValidPhone(value: string): boolean {
   return PHONE_PATTERN.test(value.trim());
 }
 
+export const draftSchema = z
+  .object({
+    certificate: z.object({
+      issueNumber: z.string(),
+      issueDate: z.string(),
+      registryNumber: z.string(),
+    }).strict(),
+    owners: z.array(
+      z.object({
+        id: z.string(),
+        ownerType: z.enum(OWNER_TYPES as unknown as [string, ...string[]]),
+        fullName: z.string(),
+        identityNumber: z.string(),
+        dateOfBirth: z.string(),
+        gender: z.union([z.literal("NAM"), z.literal("NU"), z.literal("")]),
+        residenceAddress: z.string(),
+        identitySource: z.union([z.literal("QR"), z.literal("MANUAL"), z.literal("")]),
+        qrPayloadHash: z.string(),
+        qrDecoderVersion: z.string(),
+        qrParserVersion: z.string(),
+        identityStatus: z.union([
+          z.literal("PENDING_CONFIRMATION"),
+          z.literal("QR_CONFIRMED"),
+          z.literal("MANUAL_COMPLETE"),
+          z.literal(""),
+        ]),
+        identityConfirmedAt: z.string(),
+        roleOnCertificate: z.string(),
+        hasDistinctCurrentUser: z.boolean(),
+        currentUserName: z.string(),
+        currentUserCitizenId: z.string(),
+        currentUserAddress: z.string(),
+        changeReason: z.string(),
+      }).strict()
+    ),
+    parcels: z.array(
+      z.object({
+        id: z.string(),
+        parcelIdCode: z.string(),
+        mapSheetNumber: z.string(),
+        parcelNumber: z.string(),
+        addressOnCertificate: z.string(),
+        addressTwoLevel: z.string(),
+        oldWard: z.string(),
+        area: z.string(),
+        landUses: z.array(
+          z.object({
+            id: z.string(),
+            purposeCode: z.string(),
+            purposeFreeText: z.string(),
+            originCode: z.string(),
+            formCode: z.string(),
+            termCode: z.string(),
+            area: z.string(),
+          }).strict()
+        ),
+      }).strict()
+    ),
+    assets: z.array(
+      z.object({
+        id: z.string(),
+        assetType: z.string(),
+        description: z.string(),
+      }).strict()
+    ),
+    certificateFileMetadata: z
+      .array(
+        z.object({
+          fileId: z.string(),
+          pageLabel: z.string(),
+        }).strict()
+      )
+      .optional(),
+    phone: z.string(),
+    consentAccepted: z.boolean().optional(),
+  })
+  .strict();
+
 /** Lỗi trả về chỉ nêu tên trường, không lặp lại giá trị người dân nhập (tránh lộ PII qua log). */
 export function validateDraftForSave(draft: IntakeDraft): string | null {
+  try {
+    draftSchema.parse(draft);
+  } catch {
+    return "Cấu trúc dữ liệu không hợp lệ hoặc chứa các trường không cho phép.";
+  }
+
   if (draft.phone && !isValidPhone(draft.phone)) {
     return "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.";
+  }
+  const metadata: unknown = draft.certificateFileMetadata;
+  if (metadata !== undefined) {
+    if (!Array.isArray(metadata) || metadata.length > MAX_CERTIFICATE_FILES) {
+      return "Danh sách nhãn trang Giấy chứng nhận không hợp lệ.";
+    }
+    const fileIds = new Set<string>();
+    for (const item of metadata) {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        !("fileId" in item) ||
+        typeof item.fileId !== "string" ||
+        !item.fileId.trim() ||
+        item.fileId.length > 100 ||
+        !("pageLabel" in item) ||
+        typeof item.pageLabel !== "string" ||
+        item.pageLabel.length > MAX_CERTIFICATE_PAGE_LABEL_LENGTH ||
+        fileIds.has(item.fileId)
+      ) {
+        return "Danh sách nhãn trang Giấy chứng nhận không hợp lệ.";
+      }
+      fileIds.add(item.fileId);
+    }
   }
   return null;
 }

@@ -66,6 +66,12 @@ export function deriveAccessSecret(accessPepper: string, idempotencyKey: string)
   return groups.join("-");
 }
 
-export function derivePhoneFingerprint(accessPepper: string, phone: string): string {
-  return createHmac("sha256", accessPepper).update(`phone:${phone}`).digest("hex");
+export function deriveCreationFingerprint(
+  accessPepper: string,
+  phone: string,
+  consentVersion: string,
+): string {
+  return createHmac("sha256", accessPepper)
+    .update(`phone:${phone}|consentVersion:${consentVersion}`)
+    .digest("hex");
 }

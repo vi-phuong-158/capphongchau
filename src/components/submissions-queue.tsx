@@ -28,9 +28,11 @@ const labels: Record<string, string> = {
 
 export function SubmissionsQueue() {
   const [items, setItems] = useState<readonly Summary[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -40,10 +42,11 @@ export function SubmissionsQueue() {
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Không thể tải hàng chờ.");
-        return (await response.json()) as { submissions: Summary[] };
+        return (await response.json()) as { submissions: Summary[]; nextCursor: string | null };
       })
       .then((data) => {
         setItems(data.submissions);
+        setNextCursor(data.nextCursor);
         setState("ready");
       })
       .catch((error: unknown) => {
@@ -51,6 +54,30 @@ export function SubmissionsQueue() {
       });
     return () => controller.abort();
   }, [status, query]);
+
+  const loadMore = (cursor: string) => {
+    setLoadingMore(true);
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (query.trim()) params.set("q", query.trim());
+    params.set("cursor", cursor);
+    fetch(`/api/submissions?${params.toString()}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Không thể tải thêm hồ sơ.");
+        return (await response.json()) as { submissions: Summary[]; nextCursor: string | null };
+      })
+      .then((data) => {
+        setItems((prev) => [...prev, ...data.submissions]);
+        setNextCursor(data.nextCursor);
+      })
+      .catch((error) => {
+        console.error(error);
+        alert("Có lỗi khi tải thêm hồ sơ.");
+      })
+      .finally(() => {
+        setLoadingMore(false);
+      });
+  };
 
   return (
     <div className="space-y-5">
@@ -130,6 +157,18 @@ export function SubmissionsQueue() {
               ))}
             </tbody>
           </table>
+          {nextCursor ? (
+            <div className="border-t border-stone-200 p-3 text-center">
+              <button
+                type="button"
+                className="pc-button-quiet text-sm"
+                onClick={() => loadMore(nextCursor)}
+                disabled={loadingMore}
+              >
+                {loadingMore ? "Đang tải…" : "Tải thêm hồ sơ"}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

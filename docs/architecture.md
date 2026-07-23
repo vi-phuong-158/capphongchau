@@ -71,9 +71,14 @@ Google Sheets có các tab vận hành chính: `CASES`, `CERTIFICATES`, `OWNERS`
 
 Trong cổng kê khai, `PUBLIC_FILES.owner_id` gắn từng ảnh CCCD với một người; `PUBLIC_OWNERS` lưu ngày sinh, giới tính, thường trú, nguồn nhập và metadata QR đã xác nhận. Migration chỉ thêm cột, không đổi hoặc xóa dữ liệu cũ.
 
+Thứ tự và nhãn trang ảnh GCN nằm trong `PUBLIC_SUBMISSIONS.draft_json` dưới
+`certificateFileMetadata`; trạng thái file/Drive ID vẫn chỉ lấy từ `PUBLIC_FILES`. Cách này khôi
+phục được khi đổi thiết bị mà không thêm cột hoặc ghi đè metadata file đã xác minh.
+
 `file_id` nội bộ không thay đổi. `drive_file_id` là định danh hạ tầng có thể thay đổi khi migration sang Shared Drive sau này. Case ID lấy số thứ tự từ `updatedRange` của lệnh append vào `ID_RESERVATIONS`, tính năm theo `Asia/Ho_Chi_Minh`; không đọc số dòng rồi cộng một.
 
-GCN bị xóa chỉ chuyển trạng thái `DELETED`, không hard-delete trên Drive. CCCD chỉ được thay: ảnh mới phải upload và xác minh thành công trước khi ảnh cũ chuyển `REPLACED`.
+GCN bị xóa chỉ chuyển trạng thái `DELETED`, không hard-delete trên Drive. CCCD/GCN chỉ được thay:
+ảnh mới phải upload và xác minh thành công trước khi ảnh cũ chuyển `REPLACED`.
 
 ## Bảo mật và giới hạn
 

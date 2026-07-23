@@ -92,9 +92,25 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     );
   }
 
+  let environment;
+  try {
+    const { loadPublicIntakeEnvironment } = await import("@/modules/common/env");
+    environment = loadPublicIntakeEnvironment();
+  } catch {
+    return publicError("INTERNAL_ERROR", "Hệ thống chưa sẵn sàng.", requestId);
+  }
+
   let body: { draft?: unknown; version?: unknown };
   try {
-    body = (await request.json()) as { draft?: unknown; version?: unknown };
+    const text = await request.text();
+    if (new TextEncoder().encode(text).length > environment.MAX_DRAFT_JSON_BYTES) {
+      return publicError(
+        "VALIDATION_FAILED",
+        `Kích thước dữ liệu vượt quá giới hạn (${environment.MAX_DRAFT_JSON_BYTES} bytes).`,
+        requestId,
+      );
+    }
+    body = JSON.parse(text) as { draft?: unknown; version?: unknown };
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }

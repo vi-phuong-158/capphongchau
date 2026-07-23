@@ -131,7 +131,9 @@ tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurr
 src/app/tra-cuu/page.tsx → public-lookup.tsx
   ├── POST /api/public/submissions/recover → lockout + cookie v2(row/access_version)
   ├── GET /api/public/submissions/current → file summary + checklist + supplement + timeline
-  └── GET /api/public/submissions/current/files/:fileId → preview no-store + audit
+  └── GET/DELETE /api/public/submissions/current/files/:fileId
+      ├── GET → preview no-store + audit
+      └── DELETE → soft-delete ảnh GCN, CSRF + idempotency + audit
 src/app/ke-khai/wizard.tsx → POST /api/public/submissions/current/existing-records/check
   ├── workflow.ts → HMAC(CCCD)-đơn + che số GCN; bắt buộc identityStatus=QR_CONFIRMED (chống dò,
   │   xem 03-decisions.md 2026-07-23 — ngày sinh KHÔNG còn trong khóa, kho thật 87% ngày sinh chỉ có năm)
@@ -186,6 +188,25 @@ src/app/api/users/route.ts
 src/app/api/security/csrf/route.ts -> authorization + CSRF HMAC
 ```
 
+### Code Graph — xuất PL3
+
+```text
+src/app/profile/page.tsx
+└── src/components/pl3-export-button.tsx (client)
+    └── POST /api/exports (CSRF + idempotency-key, tải file XLSX về)
+
+src/app/api/exports/route.ts (role REPORT_VIEWER/WARD_ADMIN/SYSTEM_ADMIN + CSRF)
+├── src/modules/public-intake/pl3-export.ts
+│   ├── buildPl3Content → nổ dòng (GCN × thửa × người), phân PL3 / Ton dong
+│   ├── dịch mã→label từ reference.ts + types.ts (KHÔNG tự dịch; mã lạ ghi nguyên văn + cảnh báo)
+│   ├── lookupNewMapSheet (map-sheet-reference.ts) → trường 19
+│   └── renderPl3Workbook (exceljs) → buffer XLSX
+├── repository.appendExportJob → Google Sheets EXPORT_JOBS (checksum, phạm vi, actor)
+├── repository.appendAudit → AUDIT_LOGS (PL3_EXPORTED)
+└── storage.uploadExport → Google Drive 03_EXPORTS (best-effort; job ghi ARCHIVE_FAILED nếu lỗi)
+tests/pl3-export.test.ts → logic thuần pl3-export.ts (19 test)
+```
+
 ## Đầu ra cuối cùng: PL3 (49 trường)
 
 `Tai lieu/PL3.xlsx` thay cho bộ 15 trường Phụ lục 8 (đổi 2026-07-22, xem `03-decisions.md`).
@@ -207,7 +228,10 @@ Bảng đối chiếu đầy đủ 49 trường → nguồn dữ liệu: Phụ l
 
 Chi tiết đầy đủ nằm ở `AGENTS.md` §4 (mô hình dữ liệu) và §5 (API). Tóm tắt:
 
-**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), các tab intake hiện có và các tab append-only của Gói A: `PUBLIC_STATUS_EVENTS`, `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`, `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS`, `PUBLIC_LOOKUP_INDEX`. `PUBLIC_LOOKUP_INDEX` chia 256 cột theo byte đầu HMAC để một lần đối chiếu không quét toàn bộ 20.000 hồ sơ.
+**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), các tab intake hiện có và các tab append-only của Gói A: `PUBLIC_STATUS_EVENTS`, `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`, `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS`, `PUBLIC_LOOKUP_INDEX`, `EXPORT_JOBS` (nhật ký xuất PL3, append-only). `PUBLIC_FILES` có thêm cột `file_name` (tên tệp Drive, nối cuối, không dời cột cũ). `PUBLIC_LOOKUP_INDEX` chia 256 cột theo byte đầu HMAC để một lần đối chiếu không quét toàn bộ 20.000 hồ sơ.
+
+`PUBLIC_SUBMISSIONS.draft_json.certificateFileMetadata` giữ thứ tự + nhãn trang ảnh GCN. Nó chỉ
+tham chiếu `file_id`; trạng thái và Drive ID vẫn lấy từ `PUBLIC_FILES`.
 
 **API chính**:
 
@@ -228,7 +252,7 @@ GET        /api/security/csrf
 POST       /api/public/submissions
 POST       /api/public/submissions/recover
 GET/PATCH  /api/public/submissions/current
-GET        /api/public/submissions/current/files/:fileId
+GET/DELETE /api/public/submissions/current/files/:fileId
 POST       /api/public/submissions/current/existing-records/check
 POST       /api/public/submissions/current/existing-records/link
 POST       /api/public/submissions/current/no-action
@@ -237,6 +261,7 @@ POST       /api/public/submissions/current/uploads/complete
 POST       /api/public/submissions/current/submit
 POST       /api/submissions/:submissionId/accept
 POST       /api/submissions/:submissionId/reset-access-secret
+POST       /api/exports
 ```
 
 Google Drive folder layout:

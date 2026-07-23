@@ -165,6 +165,8 @@ Không xóa dòng, cột hoặc sheet đã dùng. Nếu thay đổi schema phả
 - Import GCN cũ chỉ khớp/lưu HMAC CCCD; ngày sinh không là điều kiện hợp lệ và không được chép vào `EXISTING_*`. Backfill dùng append-only, dòng cuối cùng theo `existing_record_id` là trạng thái hiệu lực.
 - Không cập nhật Google Sheets theo từng ô. Gộp bản ghi nghiệp vụ, audit và chỉ mục liên quan trong batch read/write; cache đọc ngắn hạn phải invalidation khi ghi.
 - Xóa ảnh GCN là soft-delete (`DELETED`) và không xóa file Drive. CCCD không được xóa trắng: upload/xác minh ảnh mới trước, sau đó chuyển ảnh cũ sang `REPLACED`.
+- Thứ tự và nhãn trang ảnh GCN của biểu mẫu người dân lưu tại `draft_json.certificateFileMetadata`, tham chiếu bằng `file_id`; trạng thái file và Drive ID chỉ lấy từ `PUBLIC_FILES`.
+- Khi thay ảnh CCCD hoặc GCN, phải xác minh ảnh mới trước rồi mới chuyển ảnh cũ sang `REPLACED`; không xóa vật lý file Drive.
 
 ### 4.3. Trạng thái hồ sơ
 
@@ -233,7 +235,7 @@ GET /api/security/csrf
 POST /api/public/submissions
 POST /api/public/submissions/recover
 GET/PATCH /api/public/submissions/current
-GET /api/public/submissions/current/files/:fileId
+GET/DELETE /api/public/submissions/current/files/:fileId
 POST /api/public/submissions/current/existing-records/check
 POST /api/public/submissions/current/existing-records/link
 POST /api/public/submissions/current/no-action

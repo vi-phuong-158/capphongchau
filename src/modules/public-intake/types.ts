@@ -104,6 +104,11 @@ export const MAX_LAND_USES_PER_PARCEL = 3;
 export interface LandUse {
   readonly id: string;
   purposeCode: string;
+  /**
+   * Chữ tự do người dân ghi theo bìa GCN khi `purposeCode` là `GHI_THEO_BIA` (loại đất không có
+   * mã trong danh mục). Rỗng với mọi lựa chọn khác. Xuất PL3 ghi thẳng chuỗi này.
+   */
+  purposeFreeText: string;
   originCode: string;
   formCode: string;
   termCode: string;
@@ -151,18 +156,37 @@ export interface CertificateInfo {
   registryNumber: string;
 }
 
+/** Thứ tự + nhãn do người kê khai đặt cho các trang GCN đã upload. */
+export interface CertificateFileMetadata {
+  fileId: string;
+  pageLabel: string;
+}
+
 export interface IntakeDraft {
   certificate: CertificateInfo;
   owners: Owner[];
   parcels: Parcel[];
   assets: Asset[];
+  /**
+   * Nằm trong `draft_json`, không thêm cột `PUBLIC_FILES`: đủ để khôi phục thứ tự/nhãn khi đổi
+   * thiết bị, còn trạng thái và Drive ID vẫn chỉ lấy từ `PUBLIC_FILES`.
+   */
+  certificateFileMetadata?: CertificateFileMetadata[];
   /** Không thuộc Phụ lục 8 — thu để cán bộ gọi điện liên hệ (PLAN_NL §4.5). */
   phone: string;
   consentAccepted: boolean;
 }
 
 export function emptyLandUse(id: string): LandUse {
-  return { id, purposeCode: "", originCode: "", formCode: "", termCode: "", area: "" };
+  return {
+    id,
+    purposeCode: "",
+    purposeFreeText: "",
+    originCode: "",
+    formCode: "",
+    termCode: "",
+    area: "",
+  };
 }
 
 export function emptyParcel(id: string, landUseId: string): Parcel {
@@ -213,6 +237,7 @@ export function emptyDraft(ownerId: string, parcelId: string, landUseId: string)
     owners: [emptyOwner(ownerId)],
     parcels: [emptyParcel(parcelId, landUseId)],
     assets: [],
+    certificateFileMetadata: [],
     phone: "",
     consentAccepted: false,
   };

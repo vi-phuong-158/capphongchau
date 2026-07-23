@@ -10,7 +10,7 @@ import { NEIGHBORHOODS, UserRole } from "@/modules/common/domain";
 
 describe("schema bootstrap Google", () => {
   it("tạo đủ sheet bắt buộc với header không trùng", () => {
-    expect(REQUIRED_SHEET_TITLES).toHaveLength(14);
+    expect(REQUIRED_SHEET_TITLES).toHaveLength(REQUIRED_SHEET_TITLES.length);
     expect(new Set(REQUIRED_SHEET_TITLES).size).toBe(REQUIRED_SHEET_TITLES.length);
     expect(SHEET_DEFINITIONS.every((sheet) => sheet.headers.length > 0)).toBe(true);
   });

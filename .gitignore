@@ -15,6 +15,7 @@ test-results/
 .vercel/
 .claude/
 .codex-remote-attachments/
+.codex-tmp/
 .codegraph/
 .bootstrap-state.json
 .bootstrap-secrets.json

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { signOut } from "@/auth";
+import { Pl3ExportButton } from "@/components/pl3-export-button";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { UserRole } from "@/modules/common/domain";
 
@@ -54,6 +55,18 @@ export default async function ProfilePage() {
           >
             Hàng chờ tiếp nhận
           </Link>
+        ) : null}
+        {user.roles.some((role) =>
+          [UserRole.REPORT_VIEWER, UserRole.WARD_ADMIN, UserRole.SYSTEM_ADMIN].includes(role),
+        ) ? (
+          <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+            <h2 className="text-sm font-semibold text-stone-800">Xuất báo cáo PL3</h2>
+            <p className="mt-1 mb-3 text-sm text-stone-600">
+              Kết xuất theo cấu trúc PL3 (mỗi dòng = một GCN × thửa × người). Sheet “PL3” là hồ sơ
+              đã tiếp nhận; sheet “Ton dong” là hồ sơ đang xử lý.
+            </p>
+            <Pl3ExportButton />
+          </div>
         ) : null}
         <form
           action={async () => {

@@ -64,6 +64,32 @@ export const LAND_PURPOSE_OPTIONS: readonly ReferenceOption[] = [
   { code: "NCS", label: "Núi đá không có rừng cây" },
 ];
 
+/**
+ * Hai lối thoát cho loại đất, đặt ngoài danh mục pháp lý ở trên.
+ *
+ * GCN cũ thường ghi loại đất bằng thuật ngữ dân dã ("đất thổ cư", "đất vườn") không có mã trong
+ * Thông tư 08/2024, còn người dân nhiều khi không tự phân loại được. Thiếu hai lối thoát này thì
+ * người dân buộc phải chọn bừa một mã sai, tệ hơn là bỏ dở.
+ *
+ * - `GHI_THEO_BIA` — người dân nhập nguyên văn chữ trên bìa vào ô tự do; khi xuất PL3 ghi thẳng
+ *   chữ đó (đúng tinh thần "ghi theo bìa").
+ * - `CAN_DOI_CHIEU` — người dân không chắc; ô loại đất khi xuất để trống kèm cảnh báo cho cán bộ
+ *   đối chiếu, không đoán bừa.
+ */
+export const LAND_PURPOSE_GHI_THEO_BIA = "GHI_THEO_BIA";
+export const LAND_PURPOSE_CAN_DOI_CHIEU = "CAN_DOI_CHIEU";
+
+export const LAND_PURPOSE_FALLBACK_OPTIONS: readonly ReferenceOption[] = [
+  { code: LAND_PURPOSE_GHI_THEO_BIA, label: "Không tìm thấy — ghi theo bìa Giấy chứng nhận" },
+  { code: LAND_PURPOSE_CAN_DOI_CHIEU, label: "Tôi không chắc — đề nghị cán bộ đối chiếu" },
+];
+
+/** Danh mục đầy đủ hiển thị trong ô chọn loại đất: danh mục pháp lý + hai lối thoát ở cuối. */
+export const LAND_PURPOSE_SELECT_OPTIONS: readonly ReferenceOption[] = [
+  ...LAND_PURPOSE_OPTIONS,
+  ...LAND_PURPOSE_FALLBACK_OPTIONS,
+];
+
 export const LAND_ORIGIN_OPTIONS: readonly ReferenceOption[] = [
   { code: "NHA_NUOC_GIAO_CO_THU", label: "Nhà nước giao đất có thu tiền sử dụng đất" },
   { code: "NHA_NUOC_GIAO_KHONG_THU", label: "Nhà nước giao đất không thu tiền sử dụng đất" },

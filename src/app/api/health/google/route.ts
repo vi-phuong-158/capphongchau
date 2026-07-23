@@ -19,7 +19,7 @@ export async function GET(): Promise<NextResponse> {
       clientSecret: environment.GOOGLE_DRIVE_CLIENT_SECRET,
       refreshToken: environment.GOOGLE_DRIVE_REFRESH_TOKEN,
     });
-    const [rootFolder, spreadsheet] = await Promise.all([
+    const [rootFolder, spreadsheet, about] = await Promise.all([
       drive.files.get({
         fileId: environment.GOOGLE_MY_DRIVE_ROOT_FOLDER_ID,
         fields: "id,mimeType,trashed",
@@ -27,6 +27,9 @@ export async function GET(): Promise<NextResponse> {
       sheets.spreadsheets.get({
         spreadsheetId: environment.GOOGLE_SHEETS_SPREADSHEET_ID,
         fields: "sheets.properties.title",
+      }),
+      drive.about.get({
+        fields: "storageQuota",
       }),
     ]);
     const titles = new Set(
@@ -38,13 +41,26 @@ export async function GET(): Promise<NextResponse> {
     const driveReady =
       rootFolder.data.mimeType === "application/vnd.google-apps.folder" && !rootFolder.data.trashed;
 
-    if (!driveReady || !schemaReady) {
+    let quotaReady = false;
+    if (about.data.storageQuota?.limit && about.data.storageQuota?.usage) {
+      const freeBytes =
+        Number(about.data.storageQuota.limit) - Number(about.data.storageQuota.usage);
+      const freeGb = freeBytes / 1024 ** 3;
+      quotaReady = freeGb >= environment.MIN_DRIVE_FREE_GB;
+    } else {
+      // If limit is not present (e.g. unlimited), assume ready.
+      quotaReady = true;
+    }
+
+    if (!driveReady || !schemaReady || !quotaReady) {
       return NextResponse.json(
         createApiErrorPayload({
           code: "INTERNAL_ERROR",
-          message: "Kho dữ liệu chưa đúng cấu hình.",
+          message: "Kho dữ liệu chưa đúng cấu hình hoặc không đủ dung lượng.",
           requestId,
-          details: { component: driveReady ? "sheets_schema" : "drive_root" },
+          details: {
+            component: !driveReady ? "drive_root" : !schemaReady ? "sheets_schema" : "drive_quota",
+          },
         }),
         { status: 503 },
       );

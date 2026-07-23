@@ -25,7 +25,8 @@ export type PublicErrorCode =
   | "SUBMISSION_LOCKED"
   | "INVALID_STATE"
   | "UPLOAD_INCOMPLETE"
-  | "SIZE_BUDGET_EXCEEDED";
+  | "SIZE_BUDGET_EXCEEDED"
+  | "SERVICE_UNAVAILABLE";
 
 const PUBLIC_ERROR_STATUS: Readonly<Record<string, number>> = {
   ACCESS_DENIED: 403,
@@ -41,6 +42,7 @@ const PUBLIC_ERROR_STATUS: Readonly<Record<string, number>> = {
   INVALID_STATE: 409,
   UPLOAD_INCOMPLETE: 409,
   SIZE_BUDGET_EXCEEDED: 413,
+  SERVICE_UNAVAILABLE: 503,
 };
 
 export function publicError(

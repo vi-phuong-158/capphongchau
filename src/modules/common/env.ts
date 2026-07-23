@@ -23,6 +23,11 @@ const serverEnvironmentSchema = z.object({
   ORIGIN_SHARED_SECRET: z.string().min(32),
   TURNSTILE_SECRET_KEY: z.string().min(1),
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1),
+  // Các cấu hình giới hạn & chế độ vận hành (production handover)
+  CONSENT_NOTICE_VERSION: z.string().min(1),
+  MAX_DRAFT_JSON_BYTES: z.coerce.number().int().positive().default(45000),
+  MIN_DRIVE_FREE_GB: z.coerce.number().int().positive().default(650),
+  PUBLIC_INTAKE_MODE: z.enum(["LIVE", "PAUSED"]).default("LIVE"),
 });
 
 const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
@@ -31,6 +36,7 @@ const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
   GOOGLE_DRIVE_REFRESH_TOKEN: true,
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: true,
   GOOGLE_SHEETS_SPREADSHEET_ID: true,
+  MIN_DRIVE_FREE_GB: true,
 });
 
 const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
@@ -41,6 +47,9 @@ const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
   ORIGIN_SHARED_SECRET: true,
   TURNSTILE_SECRET_KEY: true,
   APP_BASE_URL: true,
+  CONSENT_NOTICE_VERSION: true,
+  MAX_DRAFT_JSON_BYTES: true,
+  PUBLIC_INTAKE_MODE: true,
 });
 
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;

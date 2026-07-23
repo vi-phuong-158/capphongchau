@@ -67,6 +67,22 @@ export async function POST(request: Request): Promise<NextResponse> {
       await storage.discardFile(driveFileId).catch(() => undefined);
       return publicError("INVALID_STATE", "Trạng thái thay ảnh CCCD không còn hợp lệ.", requestId);
     }
+  } else if (replaceFileId) {
+    const currentFiles = await getPublicIntakeRepository().listFiles(record.submissionId);
+    const existing = currentFiles.find(
+      (file) =>
+        file.fileId === replaceFileId &&
+        file.documentType === "CERTIFICATE" &&
+        file.status === "UPLOADED",
+    );
+    if (!existing) {
+      await storage.discardFile(driveFileId).catch(() => undefined);
+      return publicError(
+        "INVALID_STATE",
+        "Ảnh Giấy chứng nhận cần thay không còn hợp lệ.",
+        requestId,
+      );
+    }
   }
 
   let verified;
@@ -96,6 +112,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       mimeType: verified.mimeType,
       sizeBytes: verified.sizeBytes,
       checksum: verified.checksum,
+      fileName: verified.fileName,
     },
     record,
   );
