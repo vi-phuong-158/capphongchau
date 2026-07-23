@@ -62,22 +62,27 @@ Script nay còn nối được cột thiếu vào tab đã tồn tại, không c
 
 ### Chặn trước khi đưa cổng công khai vào dữ liệu thật
 
-Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Tóm tắt theo mức thiệt hại:
+Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự chặn:
 
-1. **Khôi phục hồ sơ bằng mã tiếp nhận + mã bí mật — rủi ro số một.** Phiên chỉ sống 2 giờ trượt /
-   12 giờ trần; tải lại trang hoặc đổi máy là mất bản khai. `accessSecretMatches` vẫn là mã chết,
-   `failedAttempts`/`lockedUntil` không ai ghi. Mã nguồn đang **hứa** với người dân một màn hình
-   chưa được viết (`route-context.ts:88`). Ở 20.000 hồ sơ, 10% gặp cảnh này là 2.000 người gọi lên
-   phường mà cán bộ không giúp được.
-2. **Thông báo bảo vệ dữ liệu vẫn là placeholder** (`wizard.tsx:940`) và server tự ghi
+1. **Thông báo bảo vệ dữ liệu vẫn là placeholder** (`wizard.tsx`) và server tự ghi
    `consentAccepted = true` không kiểm (`submissions/route.ts:230`).
-3. **Lỗ định danh:** chọn "Hộ gia đình"/"Tổ chức" bỏ qua **toàn bộ** số định danh, ngày sinh, giới
-   tính, địa chỉ **và cả hai ảnh CCCD** — nộp được hồ sơ chỉ với một cái tên + một ảnh GCN. PL3 mẫu
-   có CCCD ở cả 6 dòng kể cả hộ gia đình, nên đây chắc chắn là lỗi.
-4. **Lớp biên:** `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` đang **BẬT** trên production; chưa có
+2. **Lớp biên:** `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` đang **BẬT** trên production; chưa có
    security headers; chưa có domain thật sau Cloudflare.
-5. **Quy tắc kiểm diện tích sẽ từ chối chính dữ liệu thật** — PL3 mẫu dòng 9 có thửa 29,16 m² và
-   loại đất 29,2 m², hệ thống báo lỗi "tổng vượt diện tích thửa".
+3. **Tổ chức trong tra cứu GCN đã có chưa khớp được** — hiện chỉ khớp cá nhân bằng HMAC(CCCD); 280
+   dòng tổ chức trong kho (mã dạng `N/A-<mst>`) chưa có đường khớp bằng mã số thuế.
+
+✅ **Đã sửa trong phiên 2026-07-23** (từng là mục 1/3/5 của danh sách này, xem `03-decisions.md` và
+`06-ai-working-log.md` cùng ngày):
+
+- Khôi phục hồ sơ bằng mã tiếp nhận + mã bí mật (`/tra-cuu`, session v2, khóa tạm 5 lần sai).
+- Lỗ định danh Hộ gia đình/Tổ chức bỏ qua CCCD — `requiresCitizenId`/`isOrganisationOwner` sửa lại.
+- Quy tắc kiểm diện tích từ chối chính dữ liệu PL3 mẫu — thêm dung sai 0,5 m².
+- Danh mục trường 12/13 sai theo PL3; giới hạn 3 dòng mục đích/thửa; thu "Người sử dụng hiện tại"
+  (cột O, P) cho ca chủ đã mất; tra cứu GCN đã có theo CCCD-đơn + bắt buộc QR;
+  `VietnameseDateInput` cho ngày sinh/ngày cấp GCN.
+- **Chưa chạy `npm run migrate:public-intake` sau các thay đổi này ở môi trường khác** — nhớ chạy
+  trước deploy môi trường mới (cột `access_version`, `file_summary_json`, 5 cột `PUBLIC_OWNERS`,
+  8 tab Gói A).
 
 ### Chờ cơ quan trả lời — AI không làm thay được
 

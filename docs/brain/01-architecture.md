@@ -133,7 +133,8 @@ src/app/tra-cuu/page.tsx → public-lookup.tsx
   ├── GET /api/public/submissions/current → file summary + checklist + supplement + timeline
   └── GET /api/public/submissions/current/files/:fileId → preview no-store + audit
 src/app/ke-khai/wizard.tsx → POST /api/public/submissions/current/existing-records/check
-  ├── workflow.ts → HMAC( CCCD | họ tên | ngày sinh ) + che số GCN; không cần ảnh CCCD để tra cứu
+  ├── workflow.ts → HMAC(CCCD)-đơn + che số GCN; bắt buộc identityStatus=QR_CONFIRMED (chống dò,
+  │   xem 03-decisions.md 2026-07-23 — ngày sinh KHÔNG còn trong khóa, kho thật 87% ngày sinh chỉ có năm)
   ├── repository.ts → đọc đúng một bucket PUBLIC_LOOKUP_INDEX
   └── POST /api/public/submissions/current/no-action → NO_ACTION_REQUIRED
 scripts/import_existing_certificates.py
@@ -195,6 +196,10 @@ src/app/api/security/csrf/route.ts -> authorization + CSRF HMAC
 - Tối đa **3** dòng mục đích sử dụng mỗi thửa.
 - Mã ĐVHC cấp xã Phường Phong Châu: **`07954`** (trường 1).
 - Trường 19 tự tính được từ `Parcel.oldWard` + `map-sheet-reference.ts`. **Trường 20 chưa có nguồn.**
+- Cột O, P + trường 14, 15 ("Người sử dụng đất hiện tại") đã thu qua `Owner.hasDistinctCurrentUser`
+  — bật khi người trên GCN đã mất/sang tên, miễn ảnh CCCD/QR của người đó (2026-07-23).
+- Ngày sinh và ngày cấp GCN dùng chung `VietnameseDateInput` (ba ô số Ngày/Tháng/Năm), không phải
+  `<input type=date>` hay gõ tự do một chuỗi (2026-07-23).
 
 Bảng đối chiếu đầy đủ 49 trường → nguồn dữ liệu: Phụ lục của [`PLAN2.md`](../../PLAN2.md).
 

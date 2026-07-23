@@ -497,10 +497,6 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
   và đỏ nếu file nào không đi qua chốt chặn.
 - **Người quyết định:** Claude Code, khi triển khai lớp biên (Phase A).
 
-## Template cho entry mới
-
-```
-
 ## [2026-07-22] Gói A dùng mã tiếp nhận + mã bí mật và cho quản trị viên cấp lại mã
 
 - **Quyết định:** Người dân tra cứu/tiếp tục bằng đúng hai mã; sai 5 lần khóa 15 phút. Cookie v2
@@ -511,37 +507,63 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Đánh đổi:** Người dân phải giữ hai mã; trường hợp mất mã cần đến phường xác minh trực tiếp.
 - **Người quyết định:** Chủ dự án và Codex, theo các quyết định đã chốt trong Gói A.
 
-## [2026-07-23] Đối chiếu GCN cũ bằng thông tin định danh, không buộc tải ảnh CCCD
+## [2026-07-23 — ĐÃ SỬA, xem entry đầu file] Đối chiếu GCN cũ bằng thông tin định danh, không buộc tải ảnh CCCD
+
+> ⚠️ **Entry này đã lỗi thời một phần.** Cùng ngày 2026-07-23, khóa khớp mô tả dưới đây (CCCD + họ
+> tên + ngày sinh) bị **thay bằng khóa CCCD-đơn**, và điều kiện "đã xác nhận/nhập đầy đủ" bị thay
+> bằng **bắt buộc `QR_CONFIRMED`**. Lý do và chi tiết code nằm ở entry đầu tiên của file này ("Khóa
+> tra 'hồ sơ đã có' = CCCD, BỎ ngày sinh; tra nhanh bắt buộc QR"). Giữ lại entry này vì phần còn lại
+> (bỏ yêu cầu ảnh CCCD trước khi tra cứu, che số GCN, cảnh báo hồ sơ đang xử lý, `NO_ACTION_REQUIRED`)
+> vẫn đúng.
 
 - **Quyết định:** Bỏ điều kiện phải tải đủ ảnh CCCD mặt trước và mặt sau trước khi kiểm tra, liên
-  kết GCN đã có hoặc kết thúc theo diện không cần nộp lại. Ba thao tác chỉ chạy khi CCCD 12 số, họ
-  tên và ngày sinh đã được người dân xác nhận/nhập đầy đủ; đối chiếu vẫn dùng HMAC của cả ba trường
-  và chỉ trả số GCN đã che + ngày cấp. Hồ sơ đang xử lý chỉ cảnh báo, không tự liên kết. Nếu toàn bộ
-  GCN đã có thì kết thúc `NO_ACTION_REQUIRED`; nếu có GCN mới thì mỗi phiếu kê khai đúng một GCN,
-  1–10 ảnh là các trang của GCN đó.
+  kết GCN đã có hoặc kết thúc theo diện không cần nộp lại. ~~Ba thao tác chỉ chạy khi CCCD 12 số, họ
+  tên và ngày sinh đã được người dân xác nhận/nhập đầy đủ; đối chiếu vẫn dùng HMAC của cả ba
+  trường~~ (thay bằng khóa CCCD-đơn + bắt buộc QR, xem cảnh báo trên) và chỉ trả số GCN đã che +
+  ngày cấp. Hồ sơ đang xử lý chỉ cảnh báo, không tự liên kết. Nếu toàn bộ GCN đã có thì kết thúc
+  `NO_ACTION_REQUIRED`; nếu có GCN mới thì mỗi phiếu kê khai đúng một GCN, 1–10 ảnh là các trang của
+  GCN đó.
 - **Lý do:** Khi kiểm thử thực tế, người dân đã tải đủ hai ảnh nhưng vẫn bị chặn tra cứu. Ảnh CCCD
   phục vụ QR và là tài liệu bắt buộc khi nộp GCN mới, không phải bằng chứng cần thiết để tìm trong
   dữ liệu đã chuẩn hóa.
 - **Đánh đổi:** Không dùng cặp ảnh làm rào cản phụ cho tra cứu. Bù lại, hệ thống vẫn đòi phiên công
-  khai, CSRF, khóa idempotency, định danh ba thành phần và không lộ số GCN đầy đủ; rate limit/WAF ở
-  lớp biên vẫn phải được cấu hình trước khi mở công khai.
+  khai, CSRF, khóa idempotency, và không lộ số GCN đầy đủ; rate limit/WAF ở lớp biên vẫn phải được
+  cấu hình trước khi mở công khai.
 - **Người quyết định:** Chủ dự án (2026-07-23).
 
 ## [2026-07-22] Bỏ lần chụp QR riêng; dùng ảnh CCCD mặt sau đã nộp
 
-- **Quyết định:** Quyết định “Quét QR chủ động bằng chụp một kiểu” ở trên được thay thế. Hai ô tải
+- **Quyết định:** Quyết định "Quét QR chủ động bằng chụp một kiểu" ở trên được thay thế. Hai ô tải
   CCCD mặt trước/mặt sau được đưa lên đầu phần cá nhân; ảnh mặt sau vừa lưu hồ sơ vừa đọc QR trên
   thiết bị, không có lần chụp thứ ba.
 - **Lý do:** Người dân không phải tải/chụp CCCD hai lần và luồng trên điện thoại ngắn hơn.
 - **Đánh đổi:** QR chỉ được đọc sau khi người dùng chọn ảnh mặt sau, nhưng vẫn có nhập tay dự phòng.
 - **Người quyết định:** Chủ dự án.
 
-## [2026-07-22] Ngày cấp GCN cho phép gõ trực tiếp thay vì bắt lùi lịch điện thoại
+## [2026-07-22 — THAY THẾ bởi `VietnameseDateInput` 2026-07-23] Ngày cấp GCN cho phép gõ trực tiếp
 
-- **Quyết định:** Ô ngày cấp nhận `ngày/tháng/năm`, kiểm tra ngày thật rồi chuẩn hóa về ISO để lưu.
-- **Lý do:** GCN có thể cấp từ nhiều năm trước; date picker điện thoại buộc lùi lịch rất lâu.
-- **Đánh đổi:** Phải có parser/validation ngày ở client và server vẫn giữ định dạng ISO chuẩn.
+- **Quyết định (lịch sử):** Ô ngày cấp nhận `ngày/tháng/năm` gõ tự do một ô, kiểm tra ngày thật rồi
+  chuẩn hóa về ISO để lưu.
+- **Thay thế:** Xem entry `VietnameseDateInput` bên dưới — ba ô số riêng Ngày/Tháng/Năm, dùng chung
+  cho cả ngày sinh và ngày cấp GCN, chặn thêm khoảng năm hợp lý và ngày tương lai.
 - **Người quyết định:** Chủ dự án.
+
+## [2026-07-23] `VietnameseDateInput` — ba ô số Ngày/Tháng/Năm, năm cấp GCN từ 1987
+
+- **Quyết định:** Thay `<input type=date>` (ngày sinh) và ô gõ tự do một chuỗi (ngày cấp GCN, xem
+  entry lịch sử trên) bằng một component dùng chung: ba ô số riêng Ngày/Tháng/Năm, bàn phím số,
+  không mở lịch. Năm sinh cho phép từ **1900**; năm cấp GCN cho phép từ **1987**. Cả hai chặn ngày
+  không tồn tại (31/2, năm nhuận) và không cho ngày trong tương lai.
+- **Lý do:** Gõ tự do dễ sai định dạng — PL3 mẫu có `9/10/1017` (năm 1017, lỗi gõ của 2017) lọt vào
+  file mẫu chính thức. Lịch gốc (`type=date`) trên điện thoại bắt cuộn ngược hàng chục năm cho ngày
+  sinh, rất khó dùng. Ba ô số lấy được cả tốc độ bàn phím số lẫn chuẩn hóa `YYYY-MM-DD`.
+- **Đánh đổi:** Không có — cùng logic thuần (`vietnamese-date.ts`) dùng cho cả hai ô, có test riêng
+  cho phần khó (ngày không tồn tại, năm nhuận, chặn tương lai, khoảng năm).
+- **Người quyết định:** Chủ dự án (2026-07-23, chốt mốc năm 1987 cho GCN).
+
+## Template cho entry mới
+
+```
 ## [YYYY-MM-DD] Tiêu đề quyết định
 
 - **Quyết định:** <mô tả>
