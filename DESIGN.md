@@ -220,13 +220,13 @@ Quy tắc:
 
 ### 4.4. Typography
 
-Ưu tiên font hệ thống để tải nhanh và hiển thị tiếng Việt ổn định:
+Sử dụng **Be Vietnam Pro** làm font mặc định cho toàn hệ thống để hiển thị tiếng Việt mượt mà, chuẩn sắc thái hành chính công hiện đại. Font được tích hợp bằng `next/font/google` (self-host khi build, không gọi CDN ngoài ở runtime để tối ưu tốc độ và hỗ trợ PWA offline):
 
 ```css
-font-family: Inter, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+font-family: var(--font-be-vietnam), "Be Vietnam Pro", Inter, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
 ```
 
-Nếu dự án không có Inter, dùng system stack; không tải font từ CDN ở runtime.
+Nếu môi trường không tải được font biến môi trường, tự động trôi về system font stack.
 
 Thang chữ:
 

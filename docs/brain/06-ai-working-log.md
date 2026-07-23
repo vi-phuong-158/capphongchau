@@ -1171,3 +1171,13 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** import legacy, public-intake repository/session, staff routes, kiểm thử Python và tài liệu kiến trúc.
 - **Lý do:** Tránh bỏ mất dữ liệu chỉ vì ngày sinh, ghi đè autosave/upload, trạng thái NEEDS_SUPPLEMENT không có yêu cầu mở và reset mã lặp.
 - **Kiểm tra:** dry-run import 7.146/7.916 dòng hợp lệ; Python compile + unit test và TypeScript typecheck đạt trước dry-run backfill thật.
+
+---
+
+## [2026-07-24] Tích hợp font Be Vietnam Pro toàn hệ thống qua next/font/google
+
+- **Agent:** Gemini (Antigravity)
+- **Thay đổi:** Nâng cấp font mặc định cho toàn bộ ứng dụng sang `Be Vietnam Pro` thông qua `next/font/google` với subsets `['vietnamese', 'latin']`, hỗ trợ self-host tự động khi build, không gọi CDN runtime (đạt chuẩn PWA offline và security rule). Cập nhật fallback font stack trong `globals.css` và tài liệu typography `DESIGN.md`.
+- **File đã sửa:** `src/app/layout.tsx`, `src/app/globals.css`, `DESIGN.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Giúp giao diện kê khai & toàn ứng dụng hiển thị tiếng Việt cân đối, sắc nét, đúng phong cách hành chính công hiện đại và bớt đơn điệu.
+- **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅ (181/181 tests passed).

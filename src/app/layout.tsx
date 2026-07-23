@@ -1,7 +1,15 @@
 import type { Metadata } from "next";
+import { Be_Vietnam_Pro } from "next/font/google";
 import { PwaRegister } from "@/components/pwa-register";
 import { appMetadata } from "@/lib/app-metadata";
 import "./globals.css";
+
+const beVietnamPro = Be_Vietnam_Pro({
+  subsets: ["vietnamese", "latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-be-vietnam",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -15,8 +23,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="vi">
-      <body>
+    <html lang="vi" className={beVietnamPro.variable}>
+      <body className={beVietnamPro.className}>
         <PwaRegister />
         {children}
       </body>
