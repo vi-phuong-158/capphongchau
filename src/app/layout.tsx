@@ -18,6 +18,14 @@ export const metadata: Metadata = {
   },
   description: appMetadata.description,
   applicationName: appMetadata.shortName,
+  icons: {
+    icon: [
+      { url: "/logo-phongchau.png", type: "image/png" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/logo-phongchau.png",
+    apple: "/apple-touch-icon.png",
+  },
   manifest: "/manifest.webmanifest",
 };
 

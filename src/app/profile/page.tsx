@@ -1,6 +1,8 @@
-import { redirect } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
+import logoPhongChau from "@/../public/logo-phongchau.png";
 import { signOut } from "@/auth";
 import { Pl3ExportButton } from "@/components/pl3-export-button";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
@@ -22,9 +24,18 @@ export default async function ProfilePage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl items-center px-6 py-16">
       <section className="w-full space-y-6 rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
-        <p className="text-sm font-semibold tracking-[0.16em] text-emerald-800">
-          PHƯỜNG PHONG CHÂU
-        </p>
+        <div className="flex items-center gap-3">
+          <Image
+            src={logoPhongChau}
+            alt="Logo Phường Phong Châu"
+            width={40}
+            height={40}
+            className="h-10 w-10 object-contain"
+          />
+          <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
+            PHƯỜNG PHONG CHÂU
+          </p>
+        </div>
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-stone-950">Hồ sơ cá nhân</h1>
           <p className="mt-2 text-stone-700">{user.displayName || user.email}</p>

@@ -1191,3 +1191,13 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** `src/app/page.tsx`, `docs/brain/06-ai-working-log.md`.
 - **Lý do:** Tăng tính cân đối, thẩm mỹ giao diện di động và loại bỏ thông báo thử nghiệm thừa.
 - **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅.
+
+---
+
+## [2026-07-24] Thêm Logo Phường Phong Châu làm logo và favicon hệ thống
+
+- **Agent:** Gemini (Antigravity)
+- **Thay đổi:** Cấu hình logo Phường Phong Châu (`/logo-phongchau.png`) làm icon chính thức của trang web trong `layout.tsx` (metadata `icons` gồm favicon, shortcut icon và apple-touch-icon) và PWA `manifest.ts`; tạo các file icon tương thích (`icon.png`, `apple-touch-icon.png`); bổ sung logo hiển thị ở đầu trang Hồ sơ cá nhân (`/profile`).
+- **File đã sửa:** `src/app/layout.tsx`, `src/app/manifest.ts`, `src/app/profile/page.tsx`, `public/icon.png`, `public/apple-touch-icon.png`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Đảm bảo nhận diện thương hiệu hành chính công Phường Phong Châu đồng bộ trên tab trình duyệt, shortcut mobile, PWA app icon và giao diện.
+- **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅.
