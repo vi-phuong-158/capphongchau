@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   EnvironmentValidationError,
   loadGoogleStorageEnvironment,
+  loadLegacyGoogleSheetsEnvironment,
   loadPublicIntakeEnvironment,
   loadServerEnvironment,
+  loadSupabaseEnvironment,
   type EnvironmentSource,
 } from "@/modules/common/env";
 
@@ -18,6 +20,8 @@ const validEnvironment: EnvironmentSource = {
   GOOGLE_DRIVE_REFRESH_TOKEN: "drive-refresh-token",
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: "drive-root-folder-id",
   GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
+  SUPABASE_DATABASE_URL:
+    "postgresql://postgres.example:secret@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres",
   SYSTEM_ADMIN_EMAIL: "anmphongandn@gmail.com",
   DATA_HASH_PEPPER: "b".repeat(32),
   MAX_UPLOAD_MB: "30",
@@ -64,10 +68,18 @@ describe("cấu hình môi trường server", () => {
   it("health check Google chỉ cần cấu hình kho Google của M1", () => {
     expect(loadGoogleStorageEnvironment(validEnvironment)).toMatchObject({
       GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: "drive-root-folder-id",
-      GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
     });
   });
 
+  it("tách cấu hình Supabase runtime khỏi Google Sheets legacy", () => {
+    expect(loadSupabaseEnvironment(validEnvironment)).toEqual({
+      SUPABASE_DATABASE_URL:
+        "postgresql://postgres.example:secret@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres",
+    });
+    expect(loadLegacyGoogleSheetsEnvironment(validEnvironment)).toMatchObject({
+      GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
+    });
+  });
   it("cổng công khai cần secret phiên, pepper, giới hạn upload và cấu hình lớp biên", () => {
     expect(loadPublicIntakeEnvironment(validEnvironment)).toMatchObject({
       PUBLIC_SESSION_SECRET: "c".repeat(32),

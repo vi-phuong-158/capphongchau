@@ -7,6 +7,30 @@
 > tiên và mục tiêu dữ liệu đã thay đổi. Khi ba tài liệu mâu thuẫn, **`PLAN2.md` thắng**.
 
 ---
+### ETL status update (2026-07-23)
+
+Schema and data ETL have completed successfully after the Google Sheets backup. Supabase verification found the expected legacy tables and one `LEGACY_SHEETS_IMPORT:*` marker. Do not rerun the import; keep the Sheet read-only during cutover.
+
+
+## Migration Supabase (2026-07-23)
+
+**Code đã hoàn tất, production chưa cutover.** Runtime repository hồ sơ và `USERS` đã chuyển sang
+Supabase PostgreSQL; schema SQL, health endpoint và ETL Sheets→Supabase đã có. Google Drive vẫn lưu file.
+
+Việc quản trị còn phải làm trước deploy:
+
+1. Tạo Supabase project Singapore và áp dụng `supabase/migrations/*`.
+2. Đặt `SUPABASE_DATABASE_URL` Supavisor transaction pooler trong Vercel/local.
+3. Backup + tạm dừng ghi vào production, chạy ETL dry-run rồi chạy thật một lần.
+4. Đối chiếu row count/mẫu hồ sơ, file, user, audit, lookup; kiểm tra `/api/health/database` và
+   `/api/health/google`.
+5. Deploy, theo dõi lỗi/latency và giữ spreadsheet restricted/read-only trong cửa sổ rollback.
+6. Thiết lập backup/PITR và `pg_dump` mã hóa ra nơi độc lập.
+
+Quyết định “giữ Sheets, không PostgreSQL” trong `PLAN2.md` và mục “Đã chốt” bên dưới là lịch sử,
+đã bị yêu cầu mới của chủ dự án thay thế.
+
+---
 
 ## Thay đổi lớn về mục tiêu (2026-07-22)
 
@@ -34,8 +58,7 @@ nhận có tác dụng: `/ke-khai` từ 404 chuyển sang 200 sau khi bật + re
 
 M2 đã hoàn thành và được kiểm tra build.
 
-**Cổng kê khai công khai `/ke-khai` đã chạy thật**: tạo nháp, autosave, upload trực tiếp lên
-Drive và gửi hồ sơ đều ghi vào Google Sheets + Google Drive thật. Các tab intake ban đầu đã được tạo;
+**Cổng kê khai công khai `/ke-khai` đang chạy bản legacy**: tạo nháp, autosave và upload thật. Code Supabase đã sẵn sàng nhưng production chưa cutover; không deploy repository mới trước khi hoàn thành runbook migration ở trên. Các tab intake ban đầu đã được tạo;
 Gói A bổ sung timeline, yêu cầu bổ sung, dữ liệu GCN cũ và chỉ mục HMAC qua migration append-only
 bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab hoặc nối header ở cuối — **không**
 đụng cột của `CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN2.md` và entry log
@@ -103,13 +126,13 @@ Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự c
 
 ### Đã chốt — đừng đề xuất lại
 
-- **Kho dữ liệu:** giữ Google Sheets + Drive của tài khoản dùng chung. Ghi chú kỹ thuật: mã nguồn
+- **[SUPERSEDED 2026-07-23] Kho dữ liệu:** trước đây giữ Google Sheets + Drive; hiện dữ liệu cấu trúc chuyển sang Supabase, Drive vẫn giữ file. Ghi chú kỹ thuật: mã nguồn
   **không hỗ trợ Shared Drive** (không có `supportsAllDrives` ở bất kỳ lời gọi Drive API nào) —
   muốn chuyển sau này phải sửa toàn bộ lời gọi, không chỉ đổi folder ID.
 - **Nhân sự duyệt:** chủ dự án xác nhận có đủ. Không cần phân tích lại năng lực duyệt.
 - **10 tổ dân phố** trong `NEIGHBORHOOD_HINTS` là đúng — danh bạ chỉ có 8 đầu mối vì một cán bộ phụ
   trách nhiều tổ. **Không rút xuống 8.**
-- **Không sharding, không PostgreSQL** cho tới khi spike đo tải chứng minh là cần.
+- **[SUPERSEDED 2026-07-23]** Quyết định không dùng PostgreSQL đã bị chủ dự án thay thế bằng Supabase.
 - **Danh mục trường 12 và 13** đã lấy từ dropdown PL3 — xem `03-decisions.md`.
 
 ---
@@ -165,7 +188,7 @@ Theo thứ tự mốc trong `PLAN.md`:
   _(Ngoại lệ đã chốt 2026-07-22: **ảnh GCN** được gửi Gemini để **đối chiếu** với bản người dân
   khai — xem `03-decisions.md`. Không sinh mã trường 12, không tự ghi vào hồ sơ chính thức.)_
 - Google Cloud Vision — không dùng; đã chọn Gemini.
-- PostgreSQL, Vercel Blob, Shared Drive, service account — kiến trúc đã chốt dùng My Drive + Sheets + Vercel.
+- Vercel Blob, Shared Drive, service account — ngoài kiến trúc Supabase PostgreSQL + My Drive + Vercel hiện tại.
 - Đối soát dân cư tự động — cần thẩm quyền pháp lý riêng, chưa có kênh kỹ thuật chính thức.
 - Cung cấp dữ liệu công khai hoặc link Drive công khai — vi phạm nguyên tắc bảo mật của dự án.
 

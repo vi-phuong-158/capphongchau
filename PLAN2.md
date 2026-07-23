@@ -1,3 +1,8 @@
+> **Cập nhật kiến trúc 2026-07-23:** quyết định “giữ Google Sheets, không PostgreSQL” trong kế hoạch
+> này đã bị chủ dự án thay thế bằng Supabase PostgreSQL. Các mục nghiệp vụ/UX vẫn là bối cảnh hữu ích;
+> các mục về database, quota Sheets, sharding và benchmark chọn database không còn có hiệu lực.
+> Kiến trúc hiện hành nằm ở `docs/architecture.md`.
+
 # Kế hoạch triển khai — bản cập nhật 2026-07-22
 
 > Thay thế bản kế hoạch "vận hành 20.000 hồ sơ bằng Google Sheets và My Drive" ngày 22/7.

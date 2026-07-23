@@ -497,6 +497,7 @@ export function IntakeWizard() {
   const [uploadPercent, setUploadPercent] = useState(0);
   const uploadAbort = useRef<AbortController | null>(null);
   const createIdempotencyKey = useRef<string | null>(null);
+  const submitIdempotencyKey = useRef<string | null>(null);
   const serverErrorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1392,12 +1393,14 @@ export function IntakeWizard() {
     setBusy(true);
     setServerError("");
     try {
+      if (!submitIdempotencyKey.current) submitIdempotencyKey.current = crypto.randomUUID();
       const response = await fetchApi("/api/public/submissions/current/submit", {
         method: "POST",
         headers: {
           "content-type": "application/json",
           "x-public-csrf-token": csrfToken,
           "x-turnstile-token": challengeToken,
+          "idempotency-key": submitIdempotencyKey.current,
         },
         body: JSON.stringify({
           draft: withCertificateMetadata(draft, certificatePhotos),
@@ -1405,11 +1408,13 @@ export function IntakeWizard() {
       });
 
       if (!response.ok) {
+        submitIdempotencyKey.current = null;
         refreshChallenge();
         setServerError(await readErrorMessage(response, "Chưa gửi được bản kê khai."));
         return;
       }
 
+      submitIdempotencyKey.current = null;
       setSubmitted(true);
     } finally {
       setBusy(false);

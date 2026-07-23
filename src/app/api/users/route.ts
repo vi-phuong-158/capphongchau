@@ -9,7 +9,7 @@ import { createApiErrorPayload } from "@/modules/common/api-error";
 import { UserRole } from "@/modules/common/domain";
 import { loadServerEnvironment } from "@/modules/common/env";
 import {
-  getGoogleSheetsUserRepository,
+  getUserRepository,
   IdempotencyConflictError,
   type ManagedUser,
   UserAlreadyExistsError,
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestIdValue = requestId(request);
   try {
     await requireActiveUser([UserRole.SYSTEM_ADMIN]);
-    const users = await getGoogleSheetsUserRepository().list();
+    const users = await getUserRepository().list();
     return NextResponse.json(
       { users: users.map(publicUser), requestId: requestIdValue },
       { headers: { "cache-control": "no-store" } },
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
     const email = input.data.email.trim().toLowerCase();
-    const repository = getGoogleSheetsUserRepository();
+    const repository = getUserRepository();
     const created = await repository.mutate({
       ...input.data,
       mode: "CREATE",
@@ -150,7 +150,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       );
     }
     const email = input.data.email.trim().toLowerCase();
-    const repository = getGoogleSheetsUserRepository();
+    const repository = getUserRepository();
     const current = (await repository.list()).find((candidate) => candidate.email === email);
     if (!current) {
       return errorResponse(

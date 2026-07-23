@@ -1,7 +1,37 @@
 # 06 — AI Working Log
+## [2026-07-23] Supabase schema and real ETL completed
 
+- **Agent:** Codex.
+- **Result:** Applied Supabase schema and imported the backed-up Google Sheets workbook in one transaction.
+- **Verified counts:** `existing_certificates` 6729; `existing_certificate_owners` 8798; `existing_import_runs` 6; `public_lookup_index` 8782 (8781 EXISTING, 1 PENDING); import marker 1.
+- **Legacy compatibility:** normalized legacy phone values, allowed empty phone only for historical rows, gave `existing_import_runs` a row identity key, and changed ETL to 400-row batch inserts.
+- **Security:** no PII or secrets printed; RLS still blocks anon/authenticated; files remain in Google Drive.
+
+---
 > Nhật ký các lần AI (Claude Code / Codex) sửa code. Mỗi agent PHẢI thêm entry sau mỗi lần
 > chạm vào code. Đọc ngược từ trên xuống để biết gần đây ai đã làm gì và vì sao.
+
+## [2026-07-23] Chuyển database runtime từ Google Sheets sang Supabase PostgreSQL
+
+- **Agent:** Codex.
+- **Thay đổi:** thêm schema Supabase/RLS/constraint; PostgreSQL client qua Supavisor; thay
+  `PublicIntakeRepository` và user repository bằng implementation Supabase; chuyển create/submit,
+  staff action, reset secret, audit và idempotency sang PostgreSQL transaction; thêm health database;
+  health Google chỉ còn Drive; giữ Google Sheets ở loader/script legacy.
+- **Migration:** thêm `scripts/migrate-sheets-to-supabase.ts`, đọc các tab legacy, đổi kiểu/tên cột,
+  giữ `legacy_row_index`, dựng lại chỉ mục GCN từ owners, nhập fail-closed trong một transaction và
+  ghi marker chống chạy lặp. Thêm `npm run migrate:sheets-to-supabase` và dry-run.
+- **Bảo mật/vận hành:** RLS bật, thu hồi quyền `anon`/`authenticated`, không dùng Data API/client key;
+  connection string chỉ server. Google Drive vẫn lưu file; Supabase cần backup/PITR + `pg_dump` độc lập.
+- **File chính:** `supabase/migrations/202607230001_supabase_schema.sql`,
+  `src/modules/supabase/database.ts`, `src/modules/public-intake/repository.ts`,
+  `src/modules/users/supabase-user-repository.ts`, route health/submit/users, wizard, env/config,
+  ETL, README, `AGENTS.md`, `docs/architecture.md` và tài liệu brain.
+- **Kiểm tra:** `npm run typecheck` pass; `npm run lint` pass; `npm test -- --run` pass 27 file,
+  181/181 test; `npm run build` pass.
+- **Chưa làm thay người quản trị:** project/JWKS đã phản hồi nhưng `public_submissions` chưa có (Data API 404), `SUPABASE_SECRET_KEY` hiện bị Data API từ chối (401) và chưa có `SUPABASE_DATABASE_URL`. Vì vậy chưa áp dụng SQL, chưa chạy ETL dữ liệu thật và chưa đổi biến Vercel. Production vẫn phải freeze/backup/cutover theo `docs/brain/05-testing-and-deploy.md`.
+
+---
 
 ## [2026-07-23] Chuyển tra cứu GCN sang cache JSON committed + thêm nguồn Phụ lục 3
 
@@ -1141,22 +1171,3 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** import legacy, public-intake repository/session, staff routes, kiểm thử Python và tài liệu kiến trúc.
 - **Lý do:** Tránh bỏ mất dữ liệu chỉ vì ngày sinh, ghi đè autosave/upload, trạng thái NEEDS_SUPPLEMENT không có yêu cầu mở và reset mã lặp.
 - **Kiểm tra:** dry-run import 7.146/7.916 dòng hợp lệ; Python compile + unit test và TypeScript typecheck đạt trước dry-run backfill thật.
-
-## [2026-07-23] Nới quy tắc ngày cấp GCN, nạp thật dữ liệu Phụ lục 3
-
-- **Agent:** Claude Code
-- **Thay đổi:** Bỏ điều kiện bắt buộc ngày cấp GCN (`INVALID_ISSUE_DATE`) trong cả `read_source()`
-  và `read_source_pl3()` — ô ngày cấp trống không còn loại dòng, `issue_date` cho phép chuỗi rỗng.
-  Thêm fallback "chưa rõ" khi hiển thị ngày cấp trống ở `certificate-lookup.tsx`. Sau đó chạy thật
-  `--backfill --apply --format pl3` cho `Tai lieu/24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx`
-  lên Google Sheets sản xuất, rồi `--emit-json` để cập nhật cache tra cứu committed.
-- **File đã sửa:** `scripts/import_existing_certificates.py`, `src/components/certificate-lookup.tsx`,
-  `src/modules/public-intake/existing-certificates-index.json`, `docs/brain/03-decisions.md`.
-- **Lý do:** Dry-run ban đầu cho thấy 665 dòng có CCCD + số GCN + tên chủ hợp lệ nhưng bị loại chỉ
-  vì ô ngày cấp trống trong file nguồn — xác nhận qua đọc trực tiếp ô Excel (không phải lỗi đọc lệch
-  cột). Chủ dự án chốt nới quy tắc để không bỏ sót GCN có thật.
-- **Kiểm tra:** Dry-run sau khi nới quy tắc: hợp lệ tăng 3.684 → 4.349 dòng. Áp dụng thật:
-  `certificateAppends: 2849`, `ownerAppends: 4196`, chạy lại xác nhận no-op
-  (`alreadyCompleted: true`, `certificateAppends: 0`). `--emit-json`: 6.894 khóa CCCD, 6.632 chứng
-  nhận `VERIFIED`. `python -m unittest discover` 4/4, `npx vitest run` 181/181, `npx tsc --noEmit`
-  sạch (trên các file thuộc phạm vi thay đổi này).

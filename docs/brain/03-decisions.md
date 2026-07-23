@@ -4,6 +4,31 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-23] Supabase PostgreSQL thay Google Sheets cho toàn bộ dữ liệu cấu trúc
+
+- **Quyết định:** Supabase PostgreSQL tại Singapore là kho dữ liệu cấu trúc duy nhất. Google My Drive
+  tiếp tục lưu ảnh/file export; không chuyển storage trong cùng đợt. Runtime không đọc/ghi Google
+  Sheets. Sheet cũ chỉ được đọc bởi ETL một lần và các script legacy.
+- **Kết nối:** Vercel dùng URI Supavisor transaction pooler port `6543`, `prepare: false`, tối đa một
+  connection mỗi instance. Không dùng Supabase Data API/Auth ở client, không có biến
+  `NEXT_PUBLIC_SUPABASE_*`; RLS bật nhưng không cấp policy/quyền cho `anon`/`authenticated`.
+- **Tính đúng đắn:** `request_log` có primary key, cùng idempotency key được tuần tự hóa bằng advisory
+  transaction lock. Mutation nghiệp vụ, audit, timeline/index và kết quả idempotency nằm trong cùng
+  PostgreSQL transaction. Version update nguyên tử; unique/check/foreign-key constraint thay các
+  kiểm tra race-prone của Sheets.
+- **Migration:** `scripts/migrate-sheets-to-supabase.ts` đọc toàn bộ nguồn trước, nhập trong một
+  transaction, giữ `legacy_row_index` cho cookie v2, dựng chỉ mục GCN từ bảng owner và ghi marker
+  chống chạy lặp. Không chạy ETL khi production còn ghi; phải backup/freeze/đối chiếu rồi mới cutover.
+- **Hệ quả:** `existing-certificates-index.json` không còn là nguồn tra cứu runtime; dữ liệu
+  `EXISTING_*` trong Supabase là nguồn thật. File có thể được giữ tạm vì lịch sử/import tooling nhưng
+  không được nối lại vào request path.
+- **Đánh đổi:** Loại bỏ quota/cell limit và cửa sổ race của Sheets, nhưng phát sinh vận hành database,
+  database password, pooling và backup/PITR. PostgreSQL và Drive vẫn không có distributed transaction;
+  saga/checkpoint cho thao tác di chuyển file vẫn bắt buộc.
+- **Thay thế:** Quyết định “Google Sheets thay vì PostgreSQL” ngày 2026-07-21 và các dòng tương ứng
+  trong `PLAN.md`/`PLAN2.md` không còn hiệu lực.
+- **Người quyết định:** Chủ dự án (yêu cầu đổi sang Supabase) + Codex (thiết kế/triển khai).
+
 ## [2026-07-23] Tra cứu GCN đã có: chuyển sang cache JSON committed + thêm nguồn Phụ lục 3
 
 - **Quyết định:** `PublicIntakeRepository.findExistingCertificates()` không còn gọi Google Sheets.
@@ -21,7 +46,7 @@
   `.gitignore` đúng vì chứa dữ liệu công dân (tên, CCCD gốc, địa chỉ...). File JSON committed lần
   này **chỉ chứa HMAC(CCCD) — không đảo ngược được nếu không có `DATA_HASH_PEPPER` — và số GCN thật
   (không tên, không CCCD gốc)**, tức nhạy cảm hơn dữ liệu tĩnh khác đã committed (`map-sheet-
-  reference.ts`) nhưng nhẹ hơn nhiều so với nguồn thô. Đã hỏi rõ trước khi làm: người dùng **chọn
+reference.ts`) nhưng nhẹ hơn nhiều so với nguồn thô. Đã hỏi rõ trước khi làm: người dùng **chọn
   commit thẳng vào repo** để tốc độ tối đa, biết rõ đánh đổi (repo hiện tại là private, nhưng dữ
   liệu này vào git thì nằm trong lịch sử vĩnh viễn, khác Sheets có ACL riêng). Nếu sau này repo đổi
   sang public hoặc chính sách đổi, phải dời file này ra khỏi git (ví dụ đọc từ Drive + cache bộ nhớ
@@ -356,7 +381,7 @@
 - **Đánh đổi:** Đây là ngoại lệ có chủ đích, không phải kiến trúc vận hành lâu dài — phụ thuộc vào một tài khoản cá nhân, giới hạn quy mô ~500 hồ sơ, cần migration riêng khi mở rộng (xem mục "Nâng cấp" dưới).
 - **Người quyết định:** Chủ dự án (ghi trong tài liệu gốc trước khi có AI brain).
 
-## [2026-07-21] Google Sheets thay vì PostgreSQL
+## [2026-07-21, SUPERSEDED 2026-07-23] Google Sheets thay vì PostgreSQL
 
 - **Quyết định:** Dùng Google Sheets làm kho dữ liệu có cấu trúc duy nhất (các tab `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, v.v.), không dùng PostgreSQL hay DB khác ở bản thử nghiệm.
 - **Lý do:** Giảm hạ tầng cần vận hành, dễ audit thủ công, phù hợp quy mô ≤500 hồ sơ.
@@ -693,25 +718,6 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Đánh đổi:** Không có — cùng logic thuần (`vietnamese-date.ts`) dùng cho cả hai ô, có test riêng
   cho phần khó (ngày không tồn tại, năm nhuận, chặn tương lai, khoảng năm).
 - **Người quyết định:** Chủ dự án (2026-07-23, chốt mốc năm 1987 cho GCN).
-
-## [2026-07-23] Bỏ điều kiện bắt buộc ngày cấp GCN khi nạp dữ liệu Phụ lục 3
-
-- **Quyết định:** `read_source()`/`read_source_pl3()` không còn loại dòng chỉ vì ô ngày cấp GCN
-  trống — `issue_date` cho phép chuỗi rỗng thay vì bắt buộc `INVALID_ISSUE_DATE`. Áp dụng cho cả
-  hai định dạng (`legacy`/`pl3`) vì đây là quy tắc chung, không riêng gì nguồn mới. UI hiển thị
-  "chưa rõ" khi ngày cấp rỗng (`certificate-lookup.tsx`; `wizard.tsx` đã có sẵn fallback này).
-- **Lý do:** Soát dry-run thật trên `24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx` phát hiện 665
-  dòng có CCCD + số GCN + tên chủ đầy đủ nhưng bị loại chỉ vì thiếu ngày cấp — GCN có thật, không
-  nên bỏ qua chỉ vì thiếu một trường phụ. Đã xác nhận bằng cách đọc trực tiếp ô Excel (không phải
-  lỗi đọc lệch cột).
-- **Đánh đổi:** GCN cùng số nhưng một bản ghi có ngày, bản ghi kia trống ngày giờ được xử lý như hai
-  biến thể khác nhau của cùng `issue_normalized`, có thể bị đánh dấu `CONFLICT` (tăng từ 33 lên 44
-  dòng xung đột trên dữ liệu Phụ lục 3) thay vì bị loại âm thầm trước đây — chấp nhận vì minh bạch
-  hơn là loại bỏ.
-- **Kết quả áp dụng (Phụ lục 3, `--backfill --apply` đã chạy thật):** hợp lệ tăng từ 3.684 lên
-  4.349 dòng; thêm 2.849 chứng nhận, 4.196 owner mới. Cache `existing-certificates-index.json` đã
-  `--emit-json` lại: 6.894 khóa CCCD, 6.632 chứng nhận `VERIFIED`.
-- **Người quyết định:** Chủ dự án (2026-07-23, "nới quy tắc cho phép GCN không có ngày cấp").
 
 ## Template cho entry mới
 

@@ -1,16 +1,16 @@
 import type { UserRole } from "@/modules/common/domain";
 
 export {
-  getGoogleSheetsUserRepository,
-  GoogleSheetsUserRepository,
+  getUserRepository,
+  SupabaseUserRepository,
   IdempotencyConflictError,
   UserAlreadyExistsError,
   type ActiveUser,
   type ManagedUser,
   type UserMutation,
-} from "./google-sheets-user-repository";
+} from "./supabase-user-repository";
 
-/** Bản ghi allowlist tối thiểu của sheet USERS. */
+/** Bản ghi allowlist tối thiểu của bảng users trong Supabase. */
 export interface UserReference {
   readonly email: string;
   readonly roles: readonly UserRole[];

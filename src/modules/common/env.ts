@@ -9,7 +9,8 @@ const serverEnvironmentSchema = z.object({
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().min(1),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().min(1),
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: z.string().min(1),
-  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1),
+  SUPABASE_DATABASE_URL: z.string().min(1),
+  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1).optional(),
   SYSTEM_ADMIN_EMAIL: z.email(),
   DATA_HASH_PEPPER: z.string().min(32),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().max(30),
@@ -37,10 +38,21 @@ const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
   GOOGLE_DRIVE_CLIENT_SECRET: true,
   GOOGLE_DRIVE_REFRESH_TOKEN: true,
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: true,
-  GOOGLE_SHEETS_SPREADSHEET_ID: true,
   MIN_DRIVE_FREE_GB: true,
 });
 
+const supabaseEnvironmentSchema = serverEnvironmentSchema.pick({
+  SUPABASE_DATABASE_URL: true,
+});
+
+const legacyGoogleSheetsEnvironmentSchema = serverEnvironmentSchema
+  .pick({
+    GOOGLE_DRIVE_CLIENT_ID: true,
+    GOOGLE_DRIVE_CLIENT_SECRET: true,
+    GOOGLE_DRIVE_REFRESH_TOKEN: true,
+    GOOGLE_SHEETS_SPREADSHEET_ID: true,
+  })
+  .required({ GOOGLE_SHEETS_SPREADSHEET_ID: true });
 const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
   DATA_HASH_PEPPER: true,
   PUBLIC_SESSION_SECRET: true,
@@ -56,6 +68,8 @@ const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
 
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;
 export type GoogleStorageEnvironment = z.output<typeof googleStorageEnvironmentSchema>;
+export type SupabaseEnvironment = z.output<typeof supabaseEnvironmentSchema>;
+export type LegacyGoogleSheetsEnvironment = z.output<typeof legacyGoogleSheetsEnvironmentSchema>;
 export type PublicIntakeEnvironment = z.output<typeof publicIntakeEnvironmentSchema>;
 
 export type EnvironmentSource = Readonly<Record<string, string | undefined>>;
@@ -82,6 +96,18 @@ export function loadGoogleStorageEnvironment(
   return parseEnvironment(googleStorageEnvironmentSchema, source);
 }
 
+export function loadSupabaseEnvironment(
+  source: EnvironmentSource = process.env,
+): SupabaseEnvironment {
+  return parseEnvironment(supabaseEnvironmentSchema, source);
+}
+
+/** Chỉ dành cho bootstrap/import dữ liệu cũ từ Google Sheets, không dùng ở request runtime. */
+export function loadLegacyGoogleSheetsEnvironment(
+  source: EnvironmentSource = process.env,
+): LegacyGoogleSheetsEnvironment {
+  return parseEnvironment(legacyGoogleSheetsEnvironmentSchema, source);
+}
 /** Cổng công khai chỉ cần secret phiên/pepper và giới hạn upload, không cần OAuth đăng nhập. */
 export function loadPublicIntakeEnvironment(
   source: EnvironmentSource = process.env,

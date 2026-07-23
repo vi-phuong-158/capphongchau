@@ -21,15 +21,14 @@ Mã nội bộ dự án: `land-ocr-180`.
 ### Trong scope (bản thử nghiệm)
 
 - Web app/PWA dùng trên máy tính, Android và iPhone, phạm vi Phường Phong Châu (10 tổ dân phố).
-- Google Sign-In, allowlist người dùng (sheet `USERS`) và phân quyền theo vai trò.
+- Google Sign-In, allowlist người dùng (bảng `users`) và phân quyền theo vai trò.
 - Tạo hồ sơ, lưu nháp, tiếp nhận và kiểm tra thủ công.
 - Cặp ảnh CCCD mặt trước/mặt sau cho từng cá nhân (tối đa 10 người) và 1–10 ảnh GCN/bìa đỏ cho mỗi hồ sơ.
 - Đọc QR CCCD trên thiết bị (client-side) để gợi ý nhập liệu; QR thất bại thì nhập tay.
 - Nhập thủ công thông tin GCN cơ bản: số phát hành, ngày cấp, số vào sổ, chủ sử dụng, ghi chú.
-- Lưu ảnh trong Google My Drive cá nhân của tài khoản quản trị; lưu dữ liệu cấu trúc trong Google Sheets.
+- Lưu ảnh trong Google My Drive cá nhân của tài khoản quản trị; lưu dữ liệu cấu trúc trong Supabase PostgreSQL.
 - Tra cứu, dashboard theo tổ dân phố, xuất báo cáo và audit log append-only.
-- **Quy mô mục tiêu: 20.000 hồ sơ** (nâng từ 500 vào 2026-07-22). Phương án đã chốt: giữ **một**
-  spreadsheet, không sharding, sửa ba chỗ ở tầng truy cập dữ liệu — xem `03-decisions.md`.
+- **Quy mô mục tiêu: 20.000 hồ sơ** (nâng từ 500 vào 2026-07-22). Supabase PostgreSQL thay Google Sheets để đáp ứng transaction, constraint và truy vấn ở quy mô này — xem `03-decisions.md`.
 
 ### Đầu ra cuối cùng
 
@@ -46,7 +45,7 @@ Mã ĐVHC cấp xã của Phường Phong Châu: **`07954`**.
   đâu, chỉ đọc QR trên máy người dân.)_
 - Ảnh CCCD mặt sau.
 - Đối soát dân cư tự động hoặc kết nối CSDL đất đai quốc gia.
-- PostgreSQL, Vercel Blob, Google Shared Drive, service account.
+- Vercel Blob, Google Shared Drive, service account.
 - Cung cấp dữ liệu cho người dân hoặc link Drive công khai.
 
 ## Điểm khác biệt / giá trị cốt lõi
@@ -56,9 +55,9 @@ Mã ĐVHC cấp xã của Phường Phong Châu: **`07954`**.
 ## Trạng thái dự án (2026-07-22)
 
 **M0–M2 xong; cổng kê khai công khai `/ke-khai` đã chạy thật trên production.** Tạo nháp, autosave,
-upload thẳng lên Drive và gửi hồ sơ đều ghi vào Google Sheets/Drive thật.
+upload thẳng lên Drive và gửi hồ sơ ghi metadata vào Supabase PostgreSQL, file vào Google Drive.
 
-**Kế hoạch đang có hiệu lực là [`PLAN2.md`](../../PLAN2.md)** — khi nó mâu thuẫn với `PLAN.md`
+**Kế hoạch nghiệp vụ tham chiếu là [`PLAN2.md`](../../PLAN2.md)**; quyết định “giữ Sheets” trong kế hoạch đã bị thay thế ngày 2026-07-23 — khi nó mâu thuẫn với `PLAN.md`
 (M0–M5) hay `PLAN_NL.md`, `PLAN2.md` thắng. Trạng thái chi tiết và danh sách chặn ở
 [`04-current-tasks.md`](04-current-tasks.md).
 

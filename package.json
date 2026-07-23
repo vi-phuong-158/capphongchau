@@ -12,6 +12,7 @@
     "bootstrap:google": "tsx scripts/bootstrap-google.ts",
     "migrate:public-intake": "tsx scripts/migrate-public-intake.ts",
     "migrate:citizen-id-pairs": "tsx scripts/migrate-citizen-id-pairs.ts",
+    "migrate:sheets-to-supabase": "tsx scripts/migrate-sheets-to-supabase.ts",
     "test": "vitest run",
     "test:python": "python -m unittest discover -s tests -p \"test_*.py\"",
     "test:watch": "vitest",
@@ -25,6 +26,7 @@
     "heic2any": "^0.0.4",
     "next": "^16.2.10",
     "next-auth": "^5.0.0-beta.32",
+    "postgres": "^3.4.7",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3"
