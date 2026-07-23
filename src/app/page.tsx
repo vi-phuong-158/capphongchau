@@ -25,10 +25,10 @@ export default function HomePage() {
         </div>
 
         <div className="flex flex-col items-center space-y-3">
-          <h1 className="max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl">
-            {appMetadata.name}
+          <h1 className="max-w-2xl text-3xl font-bold tracking-tight sm:text-5xl leading-tight">
+            CSDL đất đai <span className="inline-block">Phường Phong Châu</span>
           </h1>
-          <p className="max-w-xl text-lg" style={{ color: "var(--muted)" }}>
+          <p className="max-w-xl text-base sm:text-lg" style={{ color: "var(--muted)" }}>
             {appMetadata.description}
           </p>
         </div>
@@ -93,13 +93,6 @@ export default function HomePage() {
         <div className="text-left">
           <CertificateLookup />
         </div>
-
-        <p
-          className="pc-card text-sm text-center sm:text-left"
-          style={{ background: "var(--warning-surface)", borderColor: "var(--warning-border)" }}
-        >
-          Bản thử nghiệm chỉ hoạt động khi có kết nối mạng.
-        </p>
       </section>
     </main>
   );

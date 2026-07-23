@@ -1181,3 +1181,13 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** `src/app/layout.tsx`, `src/app/globals.css`, `DESIGN.md`, `docs/brain/06-ai-working-log.md`.
 - **Lý do:** Giúp giao diện kê khai & toàn ứng dụng hiển thị tiếng Việt cân đối, sắc nét, đúng phong cách hành chính công hiện đại và bớt đơn điệu.
 - **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅ (181/181 tests passed).
+
+---
+
+## [2026-07-24] Tối ưu ngắt dòng tiêu đề mobile và loại bỏ banner thử nghiệm
+
+- **Agent:** Gemini (Antigravity)
+- **Thay đổi:** Thêm `inline-block` bọc cụm từ "Phường Phong Châu" ở tiêu đề chính (`h1`) trang chủ để tránh ngắt dòng lẻ loi thành "Phường / Phong Châu" trên màn hình di động; xóa bỏ ô thông báo banner "Bản thử nghiệm chỉ hoạt động khi có kết nối mạng" ở cuối trang chủ theo yêu cầu của chủ dự án.
+- **File đã sửa:** `src/app/page.tsx`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Tăng tính cân đối, thẩm mỹ giao diện di động và loại bỏ thông báo thử nghiệm thừa.
+- **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅.
