@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import type { sheets_v4 } from "googleapis";
+import type { Sql } from "postgres";
 
-import { loadGoogleStorageEnvironment, type GoogleStorageEnvironment } from "@/modules/common/env";
-import { createGoogleWorkspaceClient } from "@/modules/google/workspace-client";
+import { getDatabase } from "@/modules/supabase/database";
 
 import type { IntakeDraft } from "./types";
 import {
@@ -39,11 +38,10 @@ export interface SubmissionRecord {
   readonly draft: IntakeDraft | null;
   readonly accessVersion: number;
   readonly fileSummaries: readonly PublicFileSummary[];
-  /** Số dòng trong sheet (1-based, bỏ header) — chỉ dùng nội bộ để ghi đè. */
+  /** Locator ổn định, giữ tên cũ để cookie phiên v2 tiếp tục tương thích sau migration. */
   readonly rowIndex: number;
 }
 
-/** Bản tóm tắt nhẹ cho hàng chờ cán bộ: không kèm `draft_json` (cột nặng nhất, tới 45KB/dòng). */
 export interface SubmissionSummary {
   readonly submissionId: string;
   readonly receiptCode: string;
@@ -100,98 +98,118 @@ export interface ExportJobRecord {
   readonly warningCount: number;
   readonly checksumSha256: string;
   readonly actorEmail: string;
-  /** JSON mô tả phạm vi xuất (số dòng chính thức/tồn đọng) — không chứa PII. */
   readonly scopeJson: string;
   readonly createdAt: string;
   readonly completedAt: string;
 }
 
-const SUBMISSION_COLUMNS = 21;
-
-function cell(value: string): sheets_v4.Schema$CellData {
-  return { userEnteredValue: { stringValue: value } };
+interface SubmissionRow {
+  readonly submission_id: string;
+  readonly receipt_code: string;
+  readonly status: PublicStatus;
+  readonly phone: string;
+  readonly version: number;
+  readonly access_code_hash: string;
+  readonly failed_attempts: number;
+  readonly locked_until: Date | null;
+  readonly consent_version: string;
+  readonly consented_at: Date;
+  readonly retention_until: Date | null;
+  readonly official_case_id: string | null;
+  readonly drive_folder_id: string;
+  readonly accept_step: string | null;
+  readonly claimed_by: string | null;
+  readonly claimed_at: Date | null;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+  readonly draft_json: IntakeDraft | null;
+  readonly access_version: number;
+  readonly file_summary_json: PublicFileSummary[] | null;
+  readonly legacy_row_index: string | number;
 }
 
-function row(values: readonly string[]): sheets_v4.Schema$RowData {
-  return { values: values.map(cell) };
+interface FileRow {
+  readonly file_id: string;
+  readonly submission_id: string;
+  readonly owner_id: string;
+  readonly document_type: StoredFile["documentType"];
+  readonly drive_file_id: string;
+  readonly mime_type: string;
+  readonly size_bytes: string | number;
+  readonly checksum_sha256: string;
+  readonly file_name: string;
+  readonly status: StoredFile["status"];
+  readonly created_at: Date;
+  readonly updated_at: Date;
 }
 
-function readCell(source: readonly unknown[], column: number): string {
-  const value = source[column];
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-    ? String(value)
-    : "";
+const SUBMISSION_SELECT = `
+  submission_id, receipt_code::text, status, phone, version, access_code_hash,
+  failed_attempts, locked_until, consent_version, consented_at, retention_until,
+  official_case_id, drive_folder_id, accept_step, claimed_by, claimed_at,
+  created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index
+`;
+
+function asIso(value: Date | null): string {
+  return value ? value.toISOString() : "";
 }
 
-function columnName(index: number): string {
-  let current = index;
-  let result = "";
-  while (current > 0) {
-    current -= 1;
-    result = String.fromCharCode(65 + (current % 26)) + result;
-    current = Math.floor(current / 26);
-  }
-  return result;
-}
-
-function requiredSheetId(ids: ReadonlyMap<string, number>, title: string): number {
-  const id = ids.get(title);
-  if (typeof id !== "number" || id < 0) {
-    throw new Error(`Google Sheets thi?u tab ${title}.`);
-  }
-  return id;
-}
-
-function parseDraft(value: string): IntakeDraft | null {
-  if (!value) return null;
-  try {
-    return JSON.parse(value) as IntakeDraft;
-  } catch {
-    return null;
-  }
-}
-
-function parseFileSummaries(value: string): PublicFileSummary[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as PublicFileSummary[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function submissionFromRow(found: readonly unknown[], rowIndex: number): SubmissionRecord {
+function mapSubmission(row: SubmissionRow): SubmissionRecord {
   return {
-    submissionId: readCell(found, 0),
-    receiptCode: readCell(found, 1),
-    status: (readCell(found, 2) || "DRAFT") as PublicStatus,
-    phone: readCell(found, 3),
-    version: Number(readCell(found, 4)) || 1,
-    accessCodeHash: readCell(found, 5),
-    failedAttempts: Number(readCell(found, 6)) || 0,
-    lockedUntil: readCell(found, 7),
-    consentVersion: readCell(found, 8),
-    consentedAt: readCell(found, 9),
-    retentionUntil: readCell(found, 10),
-    officialCaseId: readCell(found, 11),
-    driveFolderId: readCell(found, 12),
-    acceptStep: readCell(found, 13),
-    claimedBy: readCell(found, 14),
-    claimedAt: readCell(found, 15),
-    createdAt: readCell(found, 16),
-    updatedAt: readCell(found, 17),
-    draft: parseDraft(readCell(found, 18)),
-    accessVersion: Number(readCell(found, 19)) || 1,
-    fileSummaries: parseFileSummaries(readCell(found, 20)),
-    rowIndex,
+    submissionId: row.submission_id,
+    receiptCode: row.receipt_code,
+    status: row.status,
+    phone: row.phone,
+    version: row.version,
+    accessCodeHash: row.access_code_hash,
+    failedAttempts: row.failed_attempts,
+    lockedUntil: asIso(row.locked_until),
+    consentVersion: row.consent_version,
+    consentedAt: asIso(row.consented_at),
+    retentionUntil: asIso(row.retention_until),
+    driveFolderId: row.drive_folder_id,
+    officialCaseId: row.official_case_id ?? "",
+    acceptStep: row.accept_step ?? "",
+    claimedBy: row.claimed_by ?? "",
+    claimedAt: asIso(row.claimed_at),
+    createdAt: asIso(row.created_at),
+    updatedAt: asIso(row.updated_at),
+    draft: row.draft_json,
+    accessVersion: row.access_version,
+    fileSummaries: Array.isArray(row.file_summary_json) ? row.file_summary_json : [],
+    rowIndex: Number(row.legacy_row_index),
   };
 }
 
+function mapFile(row: FileRow): StoredFile {
+  return {
+    fileId: row.file_id,
+    submissionId: row.submission_id,
+    ownerId: row.owner_id,
+    documentType: row.document_type,
+    driveFileId: row.drive_file_id,
+    mimeType: row.mime_type,
+    sizeBytes: Number(row.size_bytes),
+    checksum: row.checksum_sha256,
+    fileName: row.file_name,
+    status: row.status,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function safeResponse(value: unknown): Record<string, string | number | null> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string | number | null] =>
+        entry[1] === null || typeof entry[1] === "string" || typeof entry[1] === "number",
+    ),
+  );
+}
+
 export class PublicIntakeRepository {
-  constructor(
-    private readonly environment: GoogleStorageEnvironment = loadGoogleStorageEnvironment(),
-  ) {}
+  readonly provider = "supabase-postgres" as const;
 
   async create(input: {
     submissionId: string;
@@ -205,176 +223,93 @@ export class PublicIntakeRepository {
     draft: IntakeDraft;
     consentVersion: string;
   }): Promise<void> {
-    const { sheets } = this.workspace();
-    const now = new Date().toISOString();
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-      fields: "sheets.properties(sheetId,title)",
-    });
-    const ids = new Map(
-      (spreadsheet.data.sheets ?? []).map((sheet) => [
-        sheet.properties?.title ?? "",
-        sheet.properties?.sheetId ?? -1,
-      ]),
-    );
-    const submissionsSheetId = ids.get("PUBLIC_SUBMISSIONS");
-    const requestLogSheetId = ids.get("REQUEST_LOG");
-    if (
-      typeof submissionsSheetId !== "number" ||
-      submissionsSheetId < 0 ||
-      typeof requestLogSheetId !== "number" ||
-      requestLogSheetId < 0
-    ) {
-      throw new Error("Google Sheets thiếu tab tạo bản kê khai hoặc idempotency.");
-    }
-
-    // Hai dòng phải cùng một batch: không được có nháp mà thiếu dấu vết idempotency sau khi
-    // response bị đứt, vì retry khi đó sẽ tạo hồ sơ trùng.
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            appendCells: {
-              sheetId: submissionsSheetId,
-              rows: [
-                row([
-                  input.submissionId,
-                  input.receiptCode,
-                  "DRAFT",
-                  input.phone,
-                  "1",
-                  input.accessCodeHash,
-                  "0",
-                  "",
-                  input.consentVersion,
-                  now,
-                  "",
-                  "",
-                  input.driveFolderId,
-                  "",
-                  "",
-                  "",
-                  now,
-                  now,
-                  JSON.stringify(input.draft),
-                  "1",
-                  "[]",
-                ]),
-              ],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            appendCells: {
-              sheetId: requestLogSheetId,
-              rows: [
-                row([
-                  input.idempotencyKey,
-                  input.requestId,
-                  JSON.stringify({
-                    kind: "PUBLIC_CREATE",
-                    submissionId: input.submissionId,
-                    receiptCode: input.receiptCode,
-                    mutationHash: input.mutationHash,
-                  }),
-                  now,
-                  new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                ]),
-              ],
-              fields: "userEnteredValue",
-            },
-          },
-        ],
-      },
+    const database = getDatabase();
+    await database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return;
+      }
+      await transaction`
+        insert into public.public_submissions (
+          submission_id, receipt_code, phone, access_code_hash, consent_version,
+          drive_folder_id, draft_json
+        ) values (
+          ${input.submissionId}, ${input.receiptCode}, ${input.phone}, ${input.accessCodeHash},
+          ${input.consentVersion}, ${input.driveFolderId}, ${JSON.stringify(input.draft)}::jsonb
+        )
+      `;
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, request_id, kind, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, ${input.requestId}, 'PUBLIC_CREATE', ${input.mutationHash},
+          ${JSON.stringify({ submissionId: input.submissionId, receiptCode: input.receiptCode })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
     });
   }
 
   async findCreationByIdempotencyKey(
     idempotencyKey: string,
   ): Promise<StoredCreationRequest | null> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "REQUEST_LOG!A2:E",
-    });
-
-    const rows = response.data.values ?? [];
-    for (let index = rows.length - 1; index >= 0; index -= 1) {
-      const candidate = rows[index];
-      if (readCell(candidate, 0) !== idempotencyKey) continue;
-      try {
-        const cached = JSON.parse(readCell(candidate, 2)) as Partial<StoredCreationRequest> & {
-          kind?: string;
-        };
-        if (
-          cached.kind === "PUBLIC_CREATE" &&
-          typeof cached.submissionId === "string" &&
-          typeof cached.receiptCode === "string" &&
-          typeof cached.mutationHash === "string"
-        ) {
-          return {
-            submissionId: cached.submissionId,
-            receiptCode: cached.receiptCode,
-            mutationHash: cached.mutationHash,
-          };
-        }
-      } catch {
-        return null;
-      }
-    }
-    return null;
+    const database = getDatabase();
+    const rows = await database<
+      {
+        mutation_hash: string;
+        response_json: { submissionId?: unknown; receiptCode?: unknown };
+      }[]
+    >`
+      select mutation_hash, response_json from public.request_log
+      where idempotency_key = ${idempotencyKey} and kind = 'PUBLIC_CREATE'
+    `;
+    const row = rows[0];
+    if (
+      !row ||
+      typeof row.response_json.submissionId !== "string" ||
+      typeof row.response_json.receiptCode !== "string"
+    )
+      return null;
+    return {
+      submissionId: row.response_json.submissionId,
+      receiptCode: row.response_json.receiptCode,
+      mutationHash: row.mutation_hash,
+    };
   }
 
   async findById(submissionId: string): Promise<SubmissionRecord | null> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_SUBMISSIONS!A2:U",
-    });
-
-    const rows = response.data.values ?? [];
-    const index = rows.findIndex((candidate) => readCell(candidate, 0) === submissionId);
-    if (index < 0) {
-      return null;
-    }
-
-    return submissionFromRow(rows[index], index + 1);
+    const database = getDatabase();
+    const rows = await database.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+      [submissionId],
+    );
+    return rows[0] ? mapSubmission(rows[0]) : null;
   }
 
   async findByLocator(submissionId: string, rowIndex: number): Promise<SubmissionRecord | null> {
     if (!Number.isInteger(rowIndex) || rowIndex < 1) return this.findById(submissionId);
-    const { sheets } = this.workspace();
-    const sheetRow = rowIndex + 1;
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_SUBMISSIONS!A${sheetRow}:U${sheetRow}`,
-    });
-    const found = response.data.values?.[0] ?? [];
-    if (readCell(found, 0) !== submissionId) return this.findById(submissionId);
-    return submissionFromRow(found, rowIndex);
+    const database = getDatabase();
+    const rows = await database.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions
+       where submission_id = $1 and legacy_row_index = $2`,
+      [submissionId, rowIndex],
+    );
+    return rows[0] ? mapSubmission(rows[0]) : this.findById(submissionId);
   }
 
   async findByReceiptCode(receiptCode: string): Promise<SubmissionRecord | null> {
-    const normalized = receiptCode.trim().toUpperCase();
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_SUBMISSIONS!B2:B",
-    });
-    const index = (response.data.values ?? []).findIndex(
-      (candidate) => readCell(candidate, 0).trim().toUpperCase() === normalized,
+    const database = getDatabase();
+    const rows = await database.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions where receipt_code = $1 limit 1`,
+      [receiptCode.trim()],
     );
-    if (index < 0) return null;
-    const sheetRow = index + 2;
-    const rowResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_SUBMISSIONS!A${sheetRow}:U${sheetRow}`,
-    });
-    const values = rowResponse.data.values?.[0] ?? [];
-    return readCell(values, 1).trim().toUpperCase() === normalized
-      ? submissionFromRow(values, index + 1)
-      : null;
+    return rows[0] ? mapSubmission(rows[0]) : null;
   }
 
   async updateAccessState(
@@ -386,121 +321,76 @@ export class PublicIntakeRepository {
       incrementAccessVersion?: boolean;
     },
   ): Promise<SubmissionRecord> {
-    // Kh?ng d?ng snapshot do caller truy?n ?? ghi c? h?ng: autosave/upload c? th? ?? thay ??i
-    // draft, file summary ho?c tr?ng th?i nghi?p v? sau khi caller ??c b?n ghi.
-    const current = await this.findByLocator(record.submissionId, record.rowIndex);
-    if (!current) throw new Error("Kh?ng t?m th?y b?n k? khai khi c?p nh?t truy c?p.");
-    const now = new Date().toISOString();
-    const next: SubmissionRecord = {
-      ...current,
-      // version l? optimistic concurrency c?a d? li?u nghi?p v?. Th? sai m? ho?c reset m?
-      // kh?ng ???c l?m ng??i n?p g?p VERSION_CONFLICT khi ?ang autosave.
-      failedAttempts: input.failedAttempts ?? current.failedAttempts,
-      lockedUntil: input.lockedUntil ?? current.lockedUntil,
-      accessCodeHash: input.accessCodeHash ?? current.accessCodeHash,
-      accessVersion: input.incrementAccessVersion
-        ? current.accessVersion + 1
-        : current.accessVersion,
-      updatedAt: now,
-    };
-    const { sheets } = this.workspace();
-    const sheetRow = current.rowIndex + 1;
-    await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: {
-        valueInputOption: "RAW",
-        data: [
-          {
-            range: `PUBLIC_SUBMISSIONS!F${sheetRow}:H${sheetRow}`,
-            values: [[next.accessCodeHash, String(next.failedAttempts), next.lockedUntil]],
-          },
-          { range: `PUBLIC_SUBMISSIONS!R${sheetRow}`, values: [[next.updatedAt]] },
-          { range: `PUBLIC_SUBMISSIONS!T${sheetRow}`, values: [[String(next.accessVersion)]] },
-        ],
-      },
-    });
-    return next;
+    const database = getDatabase();
+    const rows = await database.unsafe<SubmissionRow[]>(
+      `update public.public_submissions set
+         failed_attempts = coalesce($2, failed_attempts),
+         locked_until = case when $6 then $3::timestamptz else locked_until end,
+         access_code_hash = coalesce($4, access_code_hash),
+         access_version = access_version + case when $5 then 1 else 0 end,
+         updated_at = now()
+       where submission_id = $1
+       returning ${SUBMISSION_SELECT}`,
+      [
+        record.submissionId,
+        input.failedAttempts ?? null,
+        input.lockedUntil || null,
+        input.accessCodeHash ?? null,
+        input.incrementAccessVersion ?? false,
+        input.lockedUntil !== undefined,
+      ],
+    );
+    if (!rows[0]) throw new Error("Không tìm thấy bản kê khai khi cập nhật truy cập.");
+    return mapSubmission(rows[0]);
   }
 
   async findExistingCertificates(citizenIdHmac: string): Promise<ExistingCertificateMatch[]> {
-    const bucket = Number.parseInt(citizenIdHmac.slice(0, 2), 16);
-    if (!Number.isInteger(bucket) || bucket < 0 || bucket > 255) return [];
-    const column = columnName(bucket + 1);
-    const { sheets } = this.workspace();
-    const indexResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_LOOKUP_INDEX!${column}2:${column}`,
-    });
-    const recordIds = new Set<string>();
-    for (const candidate of indexResponse.data.values ?? []) {
-      try {
-        const item = JSON.parse(readCell(candidate, 0)) as {
-          citizenIdHmac?: string;
-          existingRecordId?: string;
-        };
-        // Khớp chỉ theo HMAC của CCCD — ngày sinh/họ tên không đưa vào khóa (xem workflow.ts).
-        if (item.citizenIdHmac === citizenIdHmac && item.existingRecordId) {
-          recordIds.add(item.existingRecordId);
-        }
-      } catch {
-        // Bỏ qua ô chỉ mục hỏng; health check/import report sẽ cảnh báo riêng.
-      }
-    }
-    if (!recordIds.size) return [];
-
-    const recordsResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "EXISTING_CERTIFICATES!A2:I",
-    });
-    // EXISTING_CERTIFICATES l? append-only. Backfill c? th? append b?n hi?u ch?nh c?ng ID;
-    // khi ?? d?ng cu?i c?ng l? tr?ng th?i hi?u l?c.
-    const latest = new Map<string, readonly unknown[]>();
-    for (const candidate of recordsResponse.data.values ?? []) {
-      const recordId = readCell(candidate, 0);
-      if (recordIds.has(recordId)) latest.set(recordId, candidate);
-    }
-    return [...latest.values()]
-      .filter((candidate) => readCell(candidate, 5) === "VERIFIED")
-      .map((candidate) => ({
-        existingRecordId: readCell(candidate, 0),
-        issueNumber: readCell(candidate, 1),
-        issueDate: readCell(candidate, 3),
-        registryNumber: readCell(candidate, 4),
-      }));
+    const database = getDatabase();
+    const rows = await database<
+      {
+        existing_record_id: string;
+        issue_number: string;
+        issue_date: string;
+        registry_number: string;
+      }[]
+    >`
+      select latest.existing_record_id, latest.issue_number, latest.issue_date, latest.registry_number
+      from public.public_lookup_index lookup
+      join lateral (
+        select existing_record_id, issue_number, issue_date, registry_number, status
+        from public.existing_certificates
+        where existing_record_id = lookup.existing_record_id
+        order by row_version desc limit 1
+      ) latest on true
+      where lookup.kind = 'EXISTING'
+        and lookup.citizen_id_hmac = ${citizenIdHmac}
+        and latest.status = 'VERIFIED'
+      order by latest.existing_record_id
+    `;
+    return rows.map((row) => ({
+      existingRecordId: row.existing_record_id,
+      issueNumber: row.issue_number,
+      issueDate: row.issue_date,
+      registryNumber: row.registry_number,
+    }));
   }
 
   async findStoredMutation(
     idempotencyKey: string,
     kind: string,
   ): Promise<StoredSubmissionMutation | null> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "REQUEST_LOG!A2:E",
-    });
-    for (let index = (response.data.values ?? []).length - 1; index >= 0; index -= 1) {
-      const candidate = response.data.values?.[index] ?? [];
-      if (readCell(candidate, 0) !== idempotencyKey) continue;
-      try {
-        const cached = JSON.parse(readCell(candidate, 2)) as Partial<StoredSubmissionMutation>;
-        if (
-          cached.kind === kind &&
-          typeof cached.mutationHash === "string" &&
-          cached.response &&
-          typeof cached.response === "object" &&
-          !Array.isArray(cached.response)
-        ) {
-          return {
-            kind: cached.kind,
-            mutationHash: cached.mutationHash,
-            response: cached.response as Record<string, string | number | null>,
-          };
+    const database = getDatabase();
+    const rows = await database<{ kind: string; mutation_hash: string; response_json: unknown }[]>`
+      select kind, mutation_hash, response_json from public.request_log
+      where idempotency_key = ${idempotencyKey} and kind = ${kind}
+    `;
+    return rows[0]
+      ? {
+          kind: rows[0].kind,
+          mutationHash: rows[0].mutation_hash,
+          response: safeResponse(rows[0].response_json),
         }
-      } catch {
-        return null;
-      }
-    }
-    return null;
+      : null;
   }
   async commitStaffAction(input: {
     record: SubmissionRecord;
@@ -517,197 +407,74 @@ export class PublicIntakeRepository {
     idempotencyKey: string;
     mutationHash: string;
   }): Promise<SubmissionRecord> {
-    const current = await this.findByLocator(input.record.submissionId, input.record.rowIndex);
-    if (!current || current.version !== input.expectedVersion)
-      throw new SubmissionVersionConflictError();
-    const now = new Date().toISOString();
-    const next: SubmissionRecord = {
-      ...current,
-      status: input.status,
-      version: current.version + 1,
-      claimedBy: input.claimedBy ?? current.claimedBy,
-      claimedAt: input.claimedAt ?? current.claimedAt,
-      updatedAt: now,
-    };
-    const requiredTabs = [
-      "PUBLIC_SUBMISSIONS",
-      "PUBLIC_SUPPLEMENT_REQUESTS",
-      "PUBLIC_SUPPLEMENT_ITEMS",
-      "PUBLIC_STATUS_EVENTS",
-      "AUDIT_LOGS",
-      "REQUEST_LOG",
-    ];
-    const { sheets, ids } = await this.sheetsWithIds(requiredTabs);
-    const rowIndex = current.rowIndex;
-    const requests: sheets_v4.Schema$Request[] = [
-      {
-        updateCells: {
-          range: {
-            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-            startRowIndex: rowIndex,
-            endRowIndex: rowIndex + 1,
-            startColumnIndex: 2,
-            endColumnIndex: 3,
-          },
-          rows: [row([next.status])],
-          fields: "userEnteredValue",
-        },
-      },
-      {
-        updateCells: {
-          range: {
-            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-            startRowIndex: rowIndex,
-            endRowIndex: rowIndex + 1,
-            startColumnIndex: 4,
-            endColumnIndex: 5,
-          },
-          rows: [row([String(next.version)])],
-          fields: "userEnteredValue",
-        },
-      },
-      {
-        updateCells: {
-          range: {
-            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-            startRowIndex: rowIndex,
-            endRowIndex: rowIndex + 1,
-            startColumnIndex: 17,
-            endColumnIndex: 18,
-          },
-          rows: [row([next.updatedAt])],
-          fields: "userEnteredValue",
-        },
-      },
-    ];
-    if (input.claimedBy !== undefined || input.claimedAt !== undefined) {
-      requests.push({
-        updateCells: {
-          range: {
-            sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-            startRowIndex: rowIndex,
-            endRowIndex: rowIndex + 1,
-            startColumnIndex: 14,
-            endColumnIndex: 16,
-          },
-          rows: [row([next.claimedBy, next.claimedAt])],
-          fields: "userEnteredValue",
-        },
-      });
-    }
-    if (input.supplementRequest) {
-      requests.push(
-        {
-          appendCells: {
-            sheetId: requiredSheetId(ids, "PUBLIC_SUPPLEMENT_REQUESTS"),
-            rows: [
-              row([
-                input.supplementRequest.requestId,
-                current.submissionId,
-                input.supplementRequest.status,
-                input.supplementRequest.reasonCode,
-                input.supplementRequest.message,
-                input.actorEmail,
-                input.supplementRequest.requestedByDisplayName,
-                input.supplementRequest.createdAt,
-                input.supplementRequest.resolvedAt,
-              ]),
-            ],
-            fields: "userEnteredValue",
-          },
-        },
-        {
-          appendCells: {
-            sheetId: requiredSheetId(ids, "PUBLIC_SUPPLEMENT_ITEMS"),
-            rows: input.supplementRequest.items.map((item) =>
-              row([
-                item.itemId,
-                item.requestId,
-                current.submissionId,
-                item.itemType,
-                item.targetEntityType,
-                item.targetEntityId,
-                item.fieldPath,
-                item.documentType,
-                item.reasonCode,
-                item.instruction,
-                item.status,
-                input.supplementRequest!.createdAt,
-                "",
-              ]),
-            ),
-            fields: "userEnteredValue",
-          },
-        },
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           status = $3, version = version + 1,
+           claimed_by = coalesce($4, claimed_by),
+           claimed_at = coalesce($5::timestamptz, claimed_at), updated_at = now()
+         where submission_id = $1 and version = $2
+         returning ${SUBMISSION_SELECT}`,
+        [
+          input.record.submissionId,
+          input.expectedVersion,
+          input.status,
+          input.claimedBy ?? null,
+          input.claimedAt || null,
+        ],
       );
-    }
-    requests.push(
-      {
-        appendCells: {
-          sheetId: requiredSheetId(ids, "AUDIT_LOGS"),
-          rows: [
-            row([
-              randomUUID(),
-              now,
-              input.actorEmail,
-              input.auditAction,
-              "PUBLIC_SUBMISSION",
-              current.submissionId,
-              input.requestId,
-              JSON.stringify(input.auditMetadata ?? {}),
-            ]),
-          ],
-          fields: "userEnteredValue",
-        },
-      },
-      {
-        appendCells: {
-          sheetId: requiredSheetId(ids, "PUBLIC_STATUS_EVENTS"),
-          rows: [
-            row([
-              input.timelineEvent.eventId,
-              current.submissionId,
-              input.timelineEvent.eventType,
-              input.timelineEvent.label,
-              input.actorEmail,
-              input.timelineEvent.actorDisplayName,
-              input.timelineEvent.message,
-              input.timelineEvent.occurredAt,
-              input.requestId,
-            ]),
-          ],
-          fields: "userEnteredValue",
-        },
-      },
-      {
-        appendCells: {
-          sheetId: requiredSheetId(ids, "REQUEST_LOG"),
-          rows: [
-            row([
-              input.idempotencyKey,
-              input.requestId,
-              JSON.stringify({
-                kind: "STAFF_ACTION",
-                mutationHash: input.mutationHash,
-                response: {
-                  status: next.status,
-                  version: next.version,
-                  claimedBy: next.claimedBy || null,
-                },
-              }),
-              now,
-              new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-            ]),
-          ],
-          fields: "userEnteredValue",
-        },
-      },
-    );
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: { requests },
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const next = mapSubmission(rows[0]);
+
+      if (input.supplementRequest) {
+        await this.insertSupplementRequest(
+          transaction,
+          input.record.submissionId,
+          input.supplementRequest,
+          input.actorEmail,
+        );
+      }
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: input.auditAction,
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: input.auditMetadata,
+      });
+      await this.insertTimeline(
+        transaction,
+        input.record.submissionId,
+        input.timelineEvent,
+        input.actorEmail,
+        input.requestId,
+      );
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'STAFF_ACTION', ${input.mutationHash},
+          ${JSON.stringify({ status: next.status, version: next.version, claimedBy: next.claimedBy || null })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
     });
-    return next;
   }
 
   async commitAccessSecretReset(input: {
@@ -718,176 +485,78 @@ export class PublicIntakeRepository {
     idempotencyKey: string;
     mutationHash: string;
   }): Promise<SubmissionRecord> {
-    const current = await this.findByLocator(input.record.submissionId, input.record.rowIndex);
-    if (!current) throw new Error("Kh?ng t?m th?y b?n k? khai khi ??t l?i m? b? m?t.");
-    const now = new Date().toISOString();
-    const next: SubmissionRecord = {
-      ...current,
-      accessCodeHash: input.accessCodeHash,
-      failedAttempts: 0,
-      lockedUntil: "",
-      accessVersion: current.accessVersion + 1,
-      updatedAt: now,
-    };
-    const { sheets, ids } = await this.sheetsWithIds([
-      "PUBLIC_SUBMISSIONS",
-      "AUDIT_LOGS",
-      "REQUEST_LOG",
-    ]);
-    const rowIndex = current.rowIndex;
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            updateCells: {
-              range: {
-                sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-                startRowIndex: rowIndex,
-                endRowIndex: rowIndex + 1,
-                startColumnIndex: 5,
-                endColumnIndex: 8,
-              },
-              rows: [row([next.accessCodeHash, "0", ""])],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            updateCells: {
-              range: {
-                sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-                startRowIndex: rowIndex,
-                endRowIndex: rowIndex + 1,
-                startColumnIndex: 17,
-                endColumnIndex: 18,
-              },
-              rows: [row([next.updatedAt])],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            updateCells: {
-              range: {
-                sheetId: requiredSheetId(ids, "PUBLIC_SUBMISSIONS"),
-                startRowIndex: rowIndex,
-                endRowIndex: rowIndex + 1,
-                startColumnIndex: 19,
-                endColumnIndex: 20,
-              },
-              rows: [row([String(next.accessVersion)])],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            appendCells: {
-              sheetId: requiredSheetId(ids, "AUDIT_LOGS"),
-              rows: [
-                row([
-                  randomUUID(),
-                  now,
-                  input.actorEmail,
-                  "PUBLIC_ACCESS_SECRET_RESET",
-                  "PUBLIC_SUBMISSION",
-                  current.submissionId,
-                  input.requestId,
-                  JSON.stringify({ accessVersion: next.accessVersion, identityVerified: true }),
-                ]),
-              ],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            appendCells: {
-              sheetId: requiredSheetId(ids, "REQUEST_LOG"),
-              rows: [
-                row([
-                  input.idempotencyKey,
-                  input.requestId,
-                  JSON.stringify({
-                    kind: "ACCESS_SECRET_RESET",
-                    mutationHash: input.mutationHash,
-                    response: { accessVersion: next.accessVersion },
-                  }),
-                  now,
-                  new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                ]),
-              ],
-              fields: "userEnteredValue",
-            },
-          },
-        ],
-      },
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           access_code_hash = $2, failed_attempts = 0, locked_until = null,
+           access_version = access_version + 1, updated_at = now()
+         where submission_id = $1 returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.accessCodeHash],
+      );
+      if (!rows[0]) throw new Error("Không tìm thấy bản kê khai khi đặt lại mã bí mật.");
+      const next = mapSubmission(rows[0]);
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "PUBLIC_ACCESS_SECRET_RESET",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: { accessVersion: next.accessVersion, identityVerified: true },
+      });
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'ACCESS_SECRET_RESET', ${input.mutationHash},
+          ${JSON.stringify({ accessVersion: next.accessVersion })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
     });
-    return next;
   }
+
   async appendPendingIdentityIndex(input: {
     record: SubmissionRecord;
     citizenIdHmac: string;
   }): Promise<void> {
-    const bucket = Number.parseInt(input.citizenIdHmac.slice(0, 2), 16);
-    const column = columnName(bucket + 1);
-    const { sheets } = this.workspace();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_LOOKUP_INDEX!${column}:${column}`,
-      valueInputOption: "RAW",
-      insertDataOption: "OVERWRITE",
-      requestBody: {
-        values: [
-          [
-            JSON.stringify({
-              kind: "PENDING",
-              citizenIdHmac: input.citizenIdHmac,
-              submissionId: input.record.submissionId,
-              rowIndex: input.record.rowIndex,
-            }),
-          ],
-        ],
-      },
-    });
+    const database = getDatabase();
+    await database`
+      insert into public.public_lookup_index (kind, citizen_id_hmac, submission_id)
+      values ('PENDING', ${input.citizenIdHmac}, ${input.record.submissionId})
+      on conflict do nothing
+    `;
   }
 
   async hasPendingIdentityMatch(
     citizenIdHmac: string,
     excludeSubmissionId: string,
   ): Promise<boolean> {
-    const bucket = Number.parseInt(citizenIdHmac.slice(0, 2), 16);
-    if (!Number.isInteger(bucket) || bucket < 0 || bucket > 255) return false;
-    const column = columnName(bucket + 1);
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_LOOKUP_INDEX!${column}2:${column}`,
-    });
-    for (const candidate of response.data.values ?? []) {
-      try {
-        const item = JSON.parse(readCell(candidate, 0)) as {
-          kind?: string;
-          citizenIdHmac?: string;
-          submissionId?: string;
-          rowIndex?: number;
-        };
-        // Cảnh báo khi cùng một CCCD đang có hồ sơ khác chờ xử lý — khớp theo CCCD, không theo tên/ngày sinh.
-        if (
-          item.kind !== "PENDING" ||
-          item.citizenIdHmac !== citizenIdHmac ||
-          !item.submissionId ||
-          item.submissionId === excludeSubmissionId
-        )
-          continue;
-        const record = await this.findByLocator(item.submissionId, Number(item.rowIndex) || 0);
-        if (
-          record &&
-          ["SUBMITTED", "UNDER_REVIEW", "NEEDS_SUPPLEMENT", "RESUBMITTED", "ACCEPTING"].includes(
-            record.status,
-          )
-        )
-          return true;
-      } catch {
-        // Bỏ qua mục chỉ mục hỏng.
-      }
-    }
-    return false;
+    const database = getDatabase();
+    const rows = await database<{ found: boolean }[]>`
+      select exists (
+        select 1 from public.public_lookup_index lookup
+        join public.public_submissions submission on submission.submission_id = lookup.submission_id
+        where lookup.kind = 'PENDING' and lookup.citizen_id_hmac = ${citizenIdHmac}
+          and lookup.submission_id <> ${excludeSubmissionId}
+          and submission.status in ('SUBMITTED','UNDER_REVIEW','NEEDS_SUPPLEMENT','RESUBMITTED','ACCEPTING')
+      ) as found
+    `;
+    return rows[0]?.found ?? false;
   }
 
   async linkExistingCertificates(input: {
@@ -897,116 +566,91 @@ export class PublicIntakeRepository {
     outcome: "MATCHED_VERIFIED" | "WARN_PENDING";
   }): Promise<void> {
     if (!input.existingRecordIds.length) return;
-    const { sheets } = this.workspace();
-    const existingResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_EXISTING_RECORD_LINKS!A2:H",
-    });
-    const alreadyLinked = new Set(
-      (existingResponse.data.values ?? [])
-        .filter(
-          (candidate) =>
-            readCell(candidate, 1) === input.submissionId &&
-            readCell(candidate, 2) === input.ownerId &&
-            readCell(candidate, 5) === "ACTIVE",
-        )
-        .map((candidate) => readCell(candidate, 3)),
-    );
-    const pendingIds = [...new Set(input.existingRecordIds)].filter(
-      (recordId) => !alreadyLinked.has(recordId),
-    );
-    if (!pendingIds.length) return;
-    const now = new Date().toISOString();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_EXISTING_RECORD_LINKS!A:H",
-      valueInputOption: "RAW",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: {
-        values: pendingIds.map((existingRecordId) => [
-          randomUUID(),
-          input.submissionId,
-          input.ownerId,
-          existingRecordId,
-          input.outcome,
-          "ACTIVE",
-          now,
-          now,
-        ]),
-      },
+    const database = getDatabase();
+    await database.begin(async (transaction) => {
+      for (const existingRecordId of new Set(input.existingRecordIds)) {
+        await transaction`
+          insert into public.public_existing_record_links
+            (submission_id, owner_id, existing_record_id, outcome)
+          values (${input.submissionId}, ${input.ownerId}, ${existingRecordId}, ${input.outcome})
+          on conflict (submission_id, owner_id, existing_record_id, status) do nothing
+        `;
+      }
     });
   }
 
-  /**
-   * Đọc **đầy đủ** mọi bản kê khai (gồm cả `draft_json`). Google Sheets không có truy vấn lọc/phân
-   * trang phía máy chủ nên phải quét toàn bộ tab; chỉ dùng khi thật sự cần draft (xuất PL3, tìm kiếm
-   * theo số GCN/tên chủ). Hàng chờ thông thường dùng {@link listSummaries} để khỏi tải cột nặng nhất.
-   */
   async list(): Promise<SubmissionRecord[]> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_SUBMISSIONS!A2:U",
-    });
-
-    return (response.data.values ?? []).map((candidate, index) =>
-      submissionFromRow(candidate, index + 1),
+    const database = getDatabase();
+    const rows = await database.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions order by legacy_row_index`,
     );
+    return rows.map(mapSubmission);
   }
 
-  /**
-   * Đọc nhẹ cho hàng chờ: chỉ lấy cột A:R, bỏ hẳn `draft_json` (S) — cột chiếm gần như toàn bộ dung
-   * lượng khi có 20k hồ sơ. Số GCN/tên chủ hiển thị được nạp sau cho đúng trang bằng
-   * {@link getDraftDisplayFields}.
-   */
   async listSummaries(): Promise<SubmissionSummary[]> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_SUBMISSIONS!A2:R",
-    });
-    return (response.data.values ?? []).map((candidate, index) => ({
-      submissionId: readCell(candidate, 0),
-      receiptCode: readCell(candidate, 1),
-      status: (readCell(candidate, 2) || "DRAFT") as PublicStatus,
-      phone: readCell(candidate, 3),
-      version: Number(readCell(candidate, 4)) || 1,
-      claimedBy: readCell(candidate, 14),
-      updatedAt: readCell(candidate, 17),
-      rowIndex: index + 1,
+    const database = getDatabase();
+    const rows = await database<
+      {
+        submission_id: string;
+        receipt_code: string;
+        status: PublicStatus;
+        phone: string;
+        version: number;
+        claimed_by: string | null;
+        updated_at: Date;
+        legacy_row_index: string | number;
+      }[]
+    >`
+      select submission_id, receipt_code::text, status, phone, version, claimed_by,
+        updated_at, legacy_row_index
+      from public.public_submissions order by legacy_row_index
+    `;
+    return rows.map((row) => ({
+      submissionId: row.submission_id,
+      receiptCode: row.receipt_code,
+      status: row.status,
+      phone: row.phone,
+      version: row.version,
+      claimedBy: row.claimed_by ?? "",
+      updatedAt: row.updated_at.toISOString(),
+      rowIndex: Number(row.legacy_row_index),
     }));
   }
 
-  /**
-   * Nạp số GCN + tên chủ đầu tiên cho đúng các dòng của một trang hàng chờ. Chỉ đọc ô `draft_json`
-   * (cột S) của từng dòng qua `batchGet` nên chi phí tỉ lệ với cỡ trang (100), không phải cả 20k.
-   */
-  async getDraftDisplayFields(
-    rowIndexes: readonly number[],
-  ): Promise<Map<number, { issueNumber: string; ownerName: string }>> {
+  async getDraftDisplayFields(rowIndexes: readonly number[]): Promise<
+    Map<
+      number,
+      {
+        issueNumber: string;
+        ownerName: string;
+      }
+    >
+  > {
     const result = new Map<number, { issueNumber: string; ownerName: string }>();
     if (!rowIndexes.length) return result;
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.batchGet({
-      spreadsheetId: this.spreadsheetId,
-      ranges: rowIndexes.map((rowIndex) => `PUBLIC_SUBMISSIONS!S${rowIndex + 1}`),
-    });
-    const valueRanges = response.data.valueRanges ?? [];
-    rowIndexes.forEach((rowIndex, position) => {
-      const raw = valueRanges[position]?.values?.[0]?.[0];
-      const draft = typeof raw === "string" ? parseDraft(raw) : null;
-      result.set(rowIndex, {
-        issueNumber: draft?.certificate.issueNumber ?? "",
-        ownerName: draft?.owners[0]?.fullName ?? "",
+    const database = getDatabase();
+    const rows = await database<
+      {
+        legacy_row_index: string | number;
+        issue_number: string;
+        owner_name: string;
+      }[]
+    >`
+      select legacy_row_index,
+        coalesce(draft_json #>> '{certificate,issueNumber}', '') as issue_number,
+        coalesce(draft_json #>> '{owners,0,fullName}', '') as owner_name
+      from public.public_submissions
+      where legacy_row_index = any(${database.array([...rowIndexes], 20)})
+    `;
+    for (const row of rows) {
+      result.set(Number(row.legacy_row_index), {
+        issueNumber: row.issue_number,
+        ownerName: row.owner_name,
       });
-    });
+    }
     return result;
   }
 
-  /**
-   * Cập nhật một transition của hàng chờ, giữ nguyên bản khai gốc. Sheets không có CAS thật;
-   * caller phải gửi version đã đọc và mọi hành động đều được audit riêng ở tầng route.
-   */
   async transition(input: {
     record: SubmissionRecord;
     expectedVersion: number;
@@ -1016,105 +660,60 @@ export class PublicIntakeRepository {
     officialCaseId?: string;
     acceptStep?: string;
   }): Promise<SubmissionRecord> {
-    if (input.record.version !== input.expectedVersion) {
-      throw new SubmissionVersionConflictError();
-    }
-    const { sheets } = this.workspace();
-    const now = new Date().toISOString();
-    const nextVersion = input.record.version + 1;
-    const next = {
-      ...input.record,
-      status: input.status,
-      version: nextVersion,
-      claimedBy: input.claimedBy ?? input.record.claimedBy,
-      claimedAt: input.claimedAt ?? input.record.claimedAt,
-      officialCaseId: input.officialCaseId ?? input.record.officialCaseId,
-      acceptStep: input.acceptStep ?? input.record.acceptStep,
-      updatedAt: now,
-    };
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_SUBMISSIONS!A${input.record.rowIndex + 1}:U${input.record.rowIndex + 1}`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [
-          [
-            next.submissionId,
-            next.receiptCode,
-            next.status,
-            next.phone,
-            String(next.version),
-            next.accessCodeHash,
-            String(next.failedAttempts),
-            next.lockedUntil,
-            next.consentVersion,
-            next.consentedAt,
-            next.retentionUntil,
-            next.officialCaseId,
-            next.driveFolderId,
-            next.acceptStep,
-            next.claimedBy,
-            next.claimedAt,
-            next.createdAt,
-            next.updatedAt,
-            JSON.stringify(next.draft),
-            String(next.accessVersion),
-            JSON.stringify(next.fileSummaries),
-          ],
-        ],
-      },
-    });
-    return next;
+    const database = getDatabase();
+    const rows = await database.unsafe<SubmissionRow[]>(
+      `update public.public_submissions set
+         status = $3, version = version + 1,
+         claimed_by = coalesce($4, claimed_by), claimed_at = coalesce($5::timestamptz, claimed_at),
+         official_case_id = coalesce($6, official_case_id), accept_step = coalesce($7, accept_step),
+         updated_at = now()
+       where submission_id = $1 and version = $2 returning ${SUBMISSION_SELECT}`,
+      [
+        input.record.submissionId,
+        input.expectedVersion,
+        input.status,
+        input.claimedBy ?? null,
+        input.claimedAt || null,
+        input.officialCaseId ?? null,
+        input.acceptStep ?? null,
+      ],
+    );
+    if (!rows[0]) throw new SubmissionVersionConflictError();
+    return mapSubmission(rows[0]);
   }
-
   async appendTimelineEvent(
     submissionId: string,
     event: PublicTimelineEvent,
     actorEmail: string,
     requestId: string,
   ): Promise<void> {
-    const { sheets } = this.workspace();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_STATUS_EVENTS!A:I",
-      valueInputOption: "RAW",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: {
-        values: [
-          [
-            event.eventId,
-            submissionId,
-            event.eventType,
-            event.label,
-            actorEmail,
-            event.actorDisplayName,
-            event.message,
-            event.occurredAt,
-            requestId,
-          ],
-        ],
-      },
-    });
+    await this.insertTimeline(getDatabase(), submissionId, event, actorEmail, requestId);
   }
 
   async listTimeline(submissionId: string): Promise<PublicTimelineEvent[]> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_STATUS_EVENTS!A2:I",
-    });
-    return (response.data.values ?? [])
-      .filter((candidate) => readCell(candidate, 1) === submissionId)
-      .map((candidate) => ({
-        eventId: readCell(candidate, 0),
-        eventType: readCell(candidate, 2),
-        label: readCell(candidate, 3),
-        actorDisplayName: readCell(candidate, 5) || "Cán bộ phường",
-        message: readCell(candidate, 6),
-        occurredAt: readCell(candidate, 7),
-      }))
-      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+    const database = getDatabase();
+    const rows = await database<
+      {
+        event_id: string;
+        event_type: string;
+        label: string;
+        actor_display_name: string;
+        message: string;
+        occurred_at: Date;
+      }[]
+    >`
+      select event_id, event_type, label, actor_display_name, message, occurred_at
+      from public.public_status_events where submission_id = ${submissionId}
+      order by occurred_at
+    `;
+    return rows.map((row) => ({
+      eventId: row.event_id,
+      eventType: row.event_type,
+      label: row.label,
+      actorDisplayName: row.actor_display_name || "Cán bộ phường",
+      message: row.message,
+      occurredAt: row.occurred_at.toISOString(),
+    }));
   }
 
   async createSupplementRequest(input: {
@@ -1122,171 +721,95 @@ export class PublicIntakeRepository {
     request: SupplementRequest;
     actorEmail: string;
   }): Promise<void> {
-    const { sheets } = this.workspace();
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-      fields: "sheets.properties(sheetId,title)",
-    });
-    const ids = new Map(
-      (spreadsheet.data.sheets ?? []).map((sheet) => [
-        sheet.properties?.title ?? "",
-        sheet.properties?.sheetId ?? -1,
-      ]),
+    const database = getDatabase();
+    await database.begin((transaction) =>
+      this.insertSupplementRequest(
+        transaction,
+        input.submissionId,
+        input.request,
+        input.actorEmail,
+      ),
     );
-    const requestSheetId = ids.get("PUBLIC_SUPPLEMENT_REQUESTS");
-    const itemSheetId = ids.get("PUBLIC_SUPPLEMENT_ITEMS");
-    if (
-      typeof requestSheetId !== "number" ||
-      requestSheetId < 0 ||
-      typeof itemSheetId !== "number" ||
-      itemSheetId < 0
-    ) {
-      throw new Error("Google Sheets thiếu tab yêu cầu bổ sung.");
-    }
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            appendCells: {
-              sheetId: requestSheetId,
-              rows: [
-                row([
-                  input.request.requestId,
-                  input.submissionId,
-                  input.request.status,
-                  input.request.reasonCode,
-                  input.request.message,
-                  input.actorEmail,
-                  input.request.requestedByDisplayName,
-                  input.request.createdAt,
-                  input.request.resolvedAt,
-                ]),
-              ],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            appendCells: {
-              sheetId: itemSheetId,
-              rows: input.request.items.map((item) =>
-                row([
-                  item.itemId,
-                  item.requestId,
-                  input.submissionId,
-                  item.itemType,
-                  item.targetEntityType,
-                  item.targetEntityId,
-                  item.fieldPath,
-                  item.documentType,
-                  item.reasonCode,
-                  item.instruction,
-                  item.status,
-                  input.request.createdAt,
-                  "",
-                ]),
-              ),
-              fields: "userEnteredValue",
-            },
-          },
-        ],
-      },
-    });
   }
 
   async getOpenSupplementRequest(submissionId: string): Promise<SupplementRequest | null> {
-    const { sheets } = this.workspace();
-    const [requestsResponse, itemsResponse] = await Promise.all([
-      sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: "PUBLIC_SUPPLEMENT_REQUESTS!A2:I",
-      }),
-      sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: "PUBLIC_SUPPLEMENT_ITEMS!A2:M",
-      }),
-    ]);
-    const requestRow = [...(requestsResponse.data.values ?? [])]
-      .reverse()
-      .find(
-        (candidate) => readCell(candidate, 1) === submissionId && readCell(candidate, 2) === "OPEN",
-      );
-    if (!requestRow) return null;
-    const requestId = readCell(requestRow, 0);
-    const items: SupplementItem[] = (itemsResponse.data.values ?? [])
-      .filter(
-        (candidate) => readCell(candidate, 1) === requestId && readCell(candidate, 10) === "OPEN",
-      )
-      .map((candidate) => ({
-        itemId: readCell(candidate, 0),
-        requestId,
-        itemType: readCell(candidate, 3) as SupplementItem["itemType"],
-        targetEntityType: readCell(candidate, 4) as SupplementItem["targetEntityType"],
-        targetEntityId: readCell(candidate, 5),
-        fieldPath: readCell(candidate, 6),
-        documentType: readCell(candidate, 7) as SupplementItem["documentType"],
-        reasonCode: readCell(candidate, 8) as SupplementItem["reasonCode"],
-        instruction: readCell(candidate, 9),
-        status: "OPEN",
-      }));
+    const database = getDatabase();
+    const requests = await database<
+      {
+        supplement_request_id: string;
+        reason_code: SupplementRequest["reasonCode"];
+        message: string;
+        requested_by_display_name: string;
+        created_at: Date;
+        resolved_at: Date | null;
+      }[]
+    >`
+      select supplement_request_id, reason_code, message, requested_by_display_name,
+        created_at, resolved_at
+      from public.public_supplement_requests
+      where submission_id = ${submissionId} and status = 'OPEN'
+      order by created_at desc limit 1
+    `;
+    const request = requests[0];
+    if (!request) return null;
+    const items = await database<
+      {
+        item_id: string;
+        item_type: SupplementItem["itemType"];
+        target_entity_type: SupplementItem["targetEntityType"];
+        target_entity_id: string;
+        field_path: string;
+        document_type: SupplementItem["documentType"];
+        reason_code: SupplementItem["reasonCode"];
+        instruction: string;
+      }[]
+    >`
+      select item_id, item_type, target_entity_type, target_entity_id, field_path,
+        document_type, reason_code, instruction
+      from public.public_supplement_items
+      where supplement_request_id = ${request.supplement_request_id} and status = 'OPEN'
+      order by created_at, item_id
+    `;
     return {
-      requestId,
+      requestId: request.supplement_request_id,
       status: "OPEN",
-      reasonCode: readCell(requestRow, 3) as SupplementRequest["reasonCode"],
-      message: readCell(requestRow, 4),
-      requestedByDisplayName: readCell(requestRow, 6) || "Cán bộ phường",
-      createdAt: readCell(requestRow, 7),
-      resolvedAt: readCell(requestRow, 8),
-      items,
+      reasonCode: request.reason_code,
+      message: request.message,
+      requestedByDisplayName: request.requested_by_display_name || "Cán bộ phường",
+      createdAt: request.created_at.toISOString(),
+      resolvedAt: asIso(request.resolved_at),
+      items: items.map((item) => ({
+        itemId: item.item_id,
+        requestId: request.supplement_request_id,
+        itemType: item.item_type,
+        targetEntityType: item.target_entity_type,
+        targetEntityId: item.target_entity_id,
+        fieldPath: item.field_path,
+        documentType: item.document_type,
+        reasonCode: item.reason_code,
+        instruction: item.instruction,
+        status: "OPEN",
+      })),
     };
   }
 
   async resolveOpenSupplementRequest(submissionId: string): Promise<void> {
-    const { sheets } = this.workspace();
-    const [requestsResponse, itemsResponse] = await Promise.all([
-      sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: "PUBLIC_SUPPLEMENT_REQUESTS!A2:I",
-      }),
-      sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range: "PUBLIC_SUPPLEMENT_ITEMS!A2:M",
-      }),
-    ]);
-    const requestRows = requestsResponse.data.values ?? [];
-    let requestIndex = -1;
-    for (let index = requestRows.length - 1; index >= 0; index -= 1) {
-      if (
-        readCell(requestRows[index], 1) === submissionId &&
-        readCell(requestRows[index], 2) === "OPEN"
-      ) {
-        requestIndex = index;
-        break;
+    const database = getDatabase();
+    await database.begin(async (transaction) => {
+      const requests = await transaction<{ supplement_request_id: string }[]>`
+        update public.public_supplement_requests set status = 'RESOLVED', resolved_at = now()
+        where supplement_request_id = (
+          select supplement_request_id from public.public_supplement_requests
+          where submission_id = ${submissionId} and status = 'OPEN'
+          order by created_at desc limit 1 for update
+        ) returning supplement_request_id
+      `;
+      if (requests[0]) {
+        await transaction`
+          update public.public_supplement_items set status = 'RESOLVED', resolved_at = now()
+          where supplement_request_id = ${requests[0].supplement_request_id} and status = 'OPEN'
+        `;
       }
-    }
-    if (requestIndex < 0) return;
-    const requestId = readCell(requestRows[requestIndex], 0);
-    const now = new Date().toISOString();
-    const data: sheets_v4.Schema$ValueRange[] = [
-      {
-        range: `PUBLIC_SUPPLEMENT_REQUESTS!C${requestIndex + 2}:C${requestIndex + 2}`,
-        values: [["RESOLVED"]],
-      },
-      {
-        range: `PUBLIC_SUPPLEMENT_REQUESTS!I${requestIndex + 2}:I${requestIndex + 2}`,
-        values: [[now]],
-      },
-    ];
-    (itemsResponse.data.values ?? []).forEach((candidate, index) => {
-      if (readCell(candidate, 1) !== requestId || readCell(candidate, 10) !== "OPEN") return;
-      data.push(
-        { range: `PUBLIC_SUPPLEMENT_ITEMS!K${index + 2}:K${index + 2}`, values: [["RESOLVED"]] },
-        { range: `PUBLIC_SUPPLEMENT_ITEMS!M${index + 2}:M${index + 2}`, values: [[now]] },
-      );
-    });
-    await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: { valueInputOption: "RAW", data },
     });
   }
 
@@ -1297,319 +820,90 @@ export class PublicIntakeRepository {
     requestId: string;
     metadata?: Record<string, string | number | boolean>;
   }): Promise<void> {
-    const { sheets } = this.workspace();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range: "AUDIT_LOGS!A:H",
-      valueInputOption: "RAW",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: {
-        values: [
-          [
-            randomUUID(),
-            new Date().toISOString(),
-            input.actorEmail,
-            input.action,
-            "PUBLIC_SUBMISSION",
-            input.entityId,
-            input.requestId,
-            JSON.stringify(input.metadata ?? {}),
-          ],
-        ],
-      },
-    });
+    await this.insertAudit(getDatabase(), input);
   }
 
-  /** Ghi một dòng nhật ký công việc xuất vào `EXPORT_JOBS` (append-only, có checksum + phạm vi). */
   async appendExportJob(job: ExportJobRecord): Promise<void> {
-    const { sheets } = this.workspace();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range: "EXPORT_JOBS!A:M",
-      valueInputOption: "RAW",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: {
-        values: [
-          [
-            job.exportJobId,
-            job.exportType,
-            job.status,
-            job.driveFileId,
-            job.fileName,
-            String(job.rowCount),
-            String(job.submissionCount),
-            String(job.warningCount),
-            job.checksumSha256,
-            job.actorEmail,
-            job.scopeJson,
-            job.createdAt,
-            job.completedAt,
-          ],
-        ],
-      },
-    });
+    const database = getDatabase();
+    await database`
+      insert into public.export_jobs (
+        export_job_id, export_type, status, drive_file_id, file_name, row_count,
+        submission_count, warning_count, checksum_sha256, actor_email, scope_json,
+        created_at, completed_at
+      ) values (
+        ${job.exportJobId}, ${job.exportType}, ${job.status}, ${job.driveFileId}, ${job.fileName},
+        ${job.rowCount}, ${job.submissionCount}, ${job.warningCount}, ${job.checksumSha256},
+        ${job.actorEmail}, ${job.scopeJson}::jsonb, ${job.createdAt}, ${job.completedAt}
+      )
+    `;
   }
 
-  /** Ghi đè cả dòng: nháp thay đổi liên tục nên cập nhật theo dòng rẻ hơn theo ô. */
   async saveDraft(
     record: SubmissionRecord,
     draft: IntakeDraft,
     status: PublicStatus,
   ): Promise<number> {
-    const { sheets } = this.workspace();
-    const now = new Date().toISOString();
-    const nextVersion = record.version + 1;
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_SUBMISSIONS!A${record.rowIndex + 1}:U${record.rowIndex + 1}`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [
-          [
-            record.submissionId,
-            record.receiptCode,
-            status,
-            draft.phone || record.phone,
-            String(nextVersion),
-            record.accessCodeHash,
-            String(record.failedAttempts),
-            record.lockedUntil,
-            record.consentVersion,
-            record.consentedAt,
-            record.retentionUntil,
-            record.officialCaseId,
-            record.driveFolderId,
-            "",
-            "",
-            "",
-            record.createdAt,
-            now,
-            JSON.stringify(draft),
-            String(record.accessVersion),
-            JSON.stringify(record.fileSummaries),
-          ],
-        ],
-      },
-    });
-
-    return nextVersion;
+    const database = getDatabase();
+    const rows = await database<{ version: number }[]>`
+      update public.public_submissions set
+        draft_json = ${JSON.stringify(draft)}::jsonb,
+        phone = ${draft.phone || record.phone}, status = ${status}, version = version + 1,
+        updated_at = now()
+      where submission_id = ${record.submissionId} and version = ${record.version}
+      returning version
+    `;
+    if (!rows[0]) throw new SubmissionVersionConflictError();
+    return rows[0].version;
   }
 
   async appendFile(
     file: Omit<StoredFile, "status">,
     record?: SubmissionRecord,
   ): Promise<PublicFileSummary> {
-    const { sheets } = this.workspace();
-    const now = new Date().toISOString();
-    const summary: PublicFileSummary = {
-      fileId: file.fileId,
-      ownerId: file.ownerId,
-      documentType: file.documentType,
-      status: "UPLOADED",
-      sizeBytes: file.sizeBytes,
-      checksum: file.checksum,
-      createdAt: now,
-      updatedAt: now,
-      driveFileId: file.driveFileId,
-      mimeType: file.mimeType,
-    };
-
-    if (!record) {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: this.spreadsheetId,
-        range: "PUBLIC_FILES!A:M",
-        valueInputOption: "RAW",
-        insertDataOption: "INSERT_ROWS",
-        requestBody: {
-          values: [
-            [
-              file.fileId,
-              file.submissionId,
-              file.documentType,
-              "ORIGINAL",
-              file.driveFileId,
-              file.mimeType,
-              String(file.sizeBytes),
-              file.checksum,
-              "UPLOADED",
-              now,
-              now,
-              file.ownerId,
-              file.fileName,
-            ],
-          ],
-        },
-      });
-      return summary;
-    }
-
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-      fields: "sheets.properties(sheetId,title)",
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      if (file.documentType !== "CERTIFICATE") {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${file.submissionId} and owner_id = ${file.ownerId}
+            and document_type = ${file.documentType} and status = 'UPLOADED'
+        `;
+      }
+      const rows = await transaction<FileRow[]>`
+        insert into public.public_files (
+          file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name
+        ) values (
+          ${file.fileId}, ${file.submissionId}, ${file.ownerId}, ${file.documentType},
+          ${file.driveFileId}, ${file.mimeType}, ${file.sizeBytes}, ${file.checksum}, ${file.fileName}
+        ) returning file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      `;
+      if (record) await this.refreshFileSummaries(transaction, file.submissionId);
+      return this.fileSummary(mapFile(rows[0]));
     });
-    const ids = new Map(
-      (spreadsheet.data.sheets ?? []).map((sheet) => [
-        sheet.properties?.title ?? "",
-        sheet.properties?.sheetId ?? -1,
-      ]),
-    );
-    const filesSheetId = ids.get("PUBLIC_FILES");
-    const submissionsSheetId = ids.get("PUBLIC_SUBMISSIONS");
-    if (
-      typeof filesSheetId !== "number" ||
-      filesSheetId < 0 ||
-      typeof submissionsSheetId !== "number" ||
-      submissionsSheetId < 0
-    ) {
-      throw new Error("Google Sheets thiếu tab file hoặc bản kê khai.");
-    }
-    // Bản tóm tắt là cache. Luôn dựng lại từ PUBLIC_FILES trước khi ghi để lượt upload sau không
-    // vô tình ghi đè một file vừa hoàn tất nhưng record trong request đã được đọc từ trước đó.
-    const storedFiles = await this.listFiles(file.submissionId, true);
-    const nextSummaries = [
-      ...storedFiles.map((candidate) =>
-        candidate.status === "UPLOADED" &&
-        candidate.ownerId === file.ownerId &&
-        candidate.documentType === file.documentType &&
-        file.documentType !== "CERTIFICATE"
-          ? { ...candidate, status: "REPLACED" as const, updatedAt: now }
-          : candidate,
-      ),
-      summary,
-    ];
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            appendCells: {
-              sheetId: filesSheetId,
-              rows: [
-                row([
-                  file.fileId,
-                  file.submissionId,
-                  file.documentType,
-                  "ORIGINAL",
-                  file.driveFileId,
-                  file.mimeType,
-                  String(file.sizeBytes),
-                  file.checksum,
-                  "UPLOADED",
-                  now,
-                  now,
-                  file.ownerId,
-                  file.fileName,
-                ]),
-              ],
-              fields: "userEnteredValue",
-            },
-          },
-          {
-            updateCells: {
-              range: {
-                sheetId: submissionsSheetId,
-                startRowIndex: record.rowIndex,
-                endRowIndex: record.rowIndex + 1,
-                startColumnIndex: 20,
-                endColumnIndex: 21,
-              },
-              rows: [row([JSON.stringify(nextSummaries)])],
-              fields: "userEnteredValue",
-            },
-          },
-        ],
-      },
-    });
-    return summary;
   }
 
   async listFiles(submissionId: string, includeInactive = false): Promise<StoredFile[]> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A2:M",
-    });
-
-    return (response.data.values ?? [])
-      .filter(
-        (candidate) =>
-          readCell(candidate, 1) === submissionId &&
-          (includeInactive || readCell(candidate, 8) === "UPLOADED"),
-      )
-      .map((candidate) => ({
-        fileId: readCell(candidate, 0),
-        submissionId: readCell(candidate, 1),
-        ownerId: readCell(candidate, 11),
-        documentType: readCell(candidate, 2) as StoredFile["documentType"],
-        driveFileId: readCell(candidate, 4),
-        mimeType: readCell(candidate, 5),
-        sizeBytes: Number(readCell(candidate, 6)) || 0,
-        checksum: readCell(candidate, 7),
-        fileName: readCell(candidate, 12),
-        status: readCell(candidate, 8) as StoredFile["status"],
-        createdAt: readCell(candidate, 9),
-        updatedAt: readCell(candidate, 10),
-      }));
+    const database = getDatabase();
+    const rows = await database<FileRow[]>`
+      select file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+        size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      from public.public_files
+      where submission_id = ${submissionId}
+        and (${includeInactive} or status = 'UPLOADED')
+      order by created_at, file_id
+    `;
+    return rows.map(mapFile);
   }
 
-  /** Ảnh cũ chỉ được chuyển `REPLACED` sau khi ảnh mới đã xác minh và được lưu thành công. */
   async markFileReplaced(submissionId: string, fileId: string): Promise<void> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A2:M",
-    });
-    const index = (response.data.values ?? []).findIndex(
-      (candidate) =>
-        readCell(candidate, 0) === fileId &&
-        readCell(candidate, 1) === submissionId &&
-        readCell(candidate, 8) === "UPLOADED",
-    );
-    if (index < 0) throw new Error("Không tìm thấy ảnh CCCD cần thay.");
-    const existing = response.data.values?.[index] ?? [];
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_FILES!I${index + 2}:K${index + 2}`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [["REPLACED", readCell(existing, 9), new Date().toISOString()]],
-      },
-    });
+    await this.markFileStatus(submissionId, fileId, "REPLACED");
   }
 
-  /**
-   * Xóa mềm một ảnh: đổi trạng thái sang `DELETED` để nó không còn được coi là đã nộp và không
-   * trải phẳng khi gửi. Không xóa cứng dòng hay file Drive — giữ vết cho cán bộ đối chiếu.
-   */
   async markFileDeleted(submissionId: string, fileId: string): Promise<void> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "PUBLIC_FILES!A2:M",
-    });
-    const index = (response.data.values ?? []).findIndex(
-      (candidate) =>
-        readCell(candidate, 0) === fileId &&
-        readCell(candidate, 1) === submissionId &&
-        readCell(candidate, 8) === "UPLOADED",
-    );
-    if (index < 0) throw new Error("Không tìm thấy ảnh cần xóa.");
-    const existing = response.data.values?.[index] ?? [];
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_FILES!I${index + 2}:K${index + 2}`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [["DELETED", readCell(existing, 9), new Date().toISOString()]],
-      },
-    });
+    await this.markFileStatus(submissionId, fileId, "DELETED");
   }
-
-  /**
-   * Chuyển nháp JSON thành các dòng chuẩn hóa và khóa bản khai. Toàn bộ đi trong **một**
-   * `batchUpdate` để một thao tác nghiệp vụ chỉ tốn một lần ghi (PLAN_NL §9.1).
-   */
   async submit(input: {
     record: SubmissionRecord;
     draft: IntakeDraft;
@@ -1617,343 +911,263 @@ export class PublicIntakeRepository {
     timelineEvent: PublicTimelineEvent;
     actorEmail: string;
     requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
     pendingIdentityHmacs?: string[];
   }): Promise<void> {
-    const { ids } = await this.sheetsWithIds([
-      "PUBLIC_SUBMISSIONS",
-      "PUBLIC_CERTIFICATES",
-      "PUBLIC_OWNERS",
-      "PUBLIC_PARCELS",
-      "PUBLIC_LAND_USES",
-      "PUBLIC_ASSETS",
-      "PUBLIC_STATUS_EVENTS",
-      "AUDIT_LOGS",
-      "PUBLIC_LOOKUP_INDEX",
-      "PUBLIC_SUPPLEMENT_REQUESTS",
-      "PUBLIC_SUPPLEMENT_ITEMS"
-    ]);
-    const { record, draft, status, timelineEvent, actorEmail, requestId, pendingIdentityHmacs } = input;
-    const now = new Date().toISOString();
+    const database = getDatabase();
+    await database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        return;
+      }
 
-    const sheetId = (title: string): number => requiredSheetId(ids, title);
+      const updated = await transaction<{ version: number }[]>`
+        update public.public_submissions set
+          status = ${input.status}, phone = ${input.draft.phone || input.record.phone},
+          version = version + 1, draft_json = ${JSON.stringify(input.draft)}::jsonb,
+          accept_step = null, claimed_by = null, claimed_at = null, updated_at = now()
+        where submission_id = ${input.record.submissionId} and version = ${input.record.version}
+        returning version
+      `;
+      if (!updated[0]) throw new SubmissionVersionConflictError();
 
-    const requests: sheets_v4.Schema$Request[] = [
-      {
-        updateCells: {
-          range: {
-            sheetId: sheetId("PUBLIC_SUBMISSIONS"),
-            startRowIndex: record.rowIndex,
-            endRowIndex: record.rowIndex + 1,
-            startColumnIndex: 0,
-            endColumnIndex: SUBMISSION_COLUMNS,
-          },
-          rows: [
-            row([
-              record.submissionId,
-              record.receiptCode,
-              status,
-              draft.phone || record.phone,
-              String(record.version + 1),
-              record.accessCodeHash,
-              String(record.failedAttempts),
-              record.lockedUntil,
-              record.consentVersion,
-              record.consentedAt,
-              record.retentionUntil,
-              record.officialCaseId,
-              record.driveFolderId,
-              "",
-              "",
-              "",
-              record.createdAt,
-              now,
-              JSON.stringify(draft),
-              String(record.accessVersion),
-              JSON.stringify(record.fileSummaries),
-            ]),
-          ],
-          fields: "userEnteredValue",
-        },
-      },
-    ];
-
-    // Các tab con chỉ được tạo ở lần nộp đầu. Khi bổ sung, draft_json mới là ảnh chụp đầy đủ và
-    // là nguồn mà cán bộ/saga đọc; không append lại các dòng con vì sẽ tạo owner/thửa/GCN trùng.
-    // Migration chuẩn hóa khi tiếp nhận chính thức sẽ lấy phiên bản draft mới nhất.
-    if (status === "SUBMITTED") {
-      requests.push(
-        {
-          appendCells: {
-            sheetId: sheetId("PUBLIC_CERTIFICATES"),
-            rows: [
-              row([
-                randomUUID(),
-                record.submissionId,
-                draft.certificate.issueNumber,
-                draft.certificate.issueDate,
-                draft.certificate.registryNumber,
-                now,
-              ]),
-            ],
-            fields: "userEnteredValue",
-          },
-        },
-        {
-          appendCells: {
-            sheetId: sheetId("PUBLIC_OWNERS"),
-            rows: draft.owners.map((owner) =>
-              row([
-                owner.id,
-                record.submissionId,
-                owner.ownerType,
-                owner.fullName,
-                owner.identityNumber,
-                owner.roleOnCertificate,
-                now,
-                owner.dateOfBirth,
-                owner.gender,
-                owner.residenceAddress,
-                owner.identitySource,
-                owner.qrPayloadHash,
-                owner.qrDecoderVersion,
-                owner.qrParserVersion,
-                owner.identityStatus,
-                owner.identityConfirmedAt,
-                owner.hasDistinctCurrentUser ? "TRUE" : "FALSE",
-                owner.currentUserName,
-                owner.currentUserCitizenId,
-                owner.currentUserAddress,
-                owner.changeReason,
-              ]),
-            ),
-            fields: "userEnteredValue",
-          },
-        },
-        {
-          appendCells: {
-            sheetId: sheetId("PUBLIC_PARCELS"),
-            rows: draft.parcels.map((parcel) =>
-              row([
-                parcel.id,
-                record.submissionId,
-                parcel.parcelIdCode,
-                parcel.mapSheetNumber,
-                parcel.parcelNumber,
-                parcel.addressOnCertificate,
-                parcel.addressTwoLevel,
-                parcel.area,
-                now,
-                parcel.oldWard,
-              ]),
-            ),
-            fields: "userEnteredValue",
-          },
-        },
-        {
-          appendCells: {
-            sheetId: sheetId("PUBLIC_LAND_USES"),
-            rows: draft.parcels.flatMap((parcel) =>
-              parcel.landUses.map((landUse) =>
-                row([
-                  landUse.id,
-                  record.submissionId,
-                  parcel.id,
-                  landUse.purposeCode,
-                  landUse.originCode,
-                  landUse.formCode,
-                  landUse.termCode,
-                  landUse.area,
-                  now,
-                ]),
-              ),
-            ),
-            fields: "userEnteredValue",
-          },
-        },
-      );
-    }
-
-    if (status === "SUBMITTED" && draft.assets.length > 0) {
-      requests.push({
-        appendCells: {
-          sheetId: sheetId("PUBLIC_ASSETS"),
-          rows: draft.assets.map((asset) =>
-            row([asset.id, record.submissionId, asset.assetType, asset.description, now]),
-          ),
-          fields: "userEnteredValue",
-        },
-      });
-    }
-
-    // Ghi sự kiện trạng thái (Timeline)
-    requests.push({
-      appendCells: {
-        sheetId: sheetId("PUBLIC_STATUS_EVENTS"),
-        rows: [
-          row([
-            timelineEvent.eventId,
-            record.submissionId,
-            timelineEvent.eventType,
-            timelineEvent.label,
-            actorEmail,
-            timelineEvent.actorDisplayName,
-            timelineEvent.message,
-            timelineEvent.occurredAt,
-            requestId,
-          ]),
-        ],
-        fields: "userEnteredValue",
-      },
-    });
-
-    // Ghi Audit
-    requests.push({
-      appendCells: {
-        sheetId: sheetId("AUDIT_LOGS"),
-        rows: [
-          row([
-            randomUUID(),
-            now,
-            actorEmail,
-            status === "RESUBMITTED" ? "PUBLIC_SUBMISSION_RESUBMITTED" : "PUBLIC_SUBMISSION_SUBMITTED",
-            "PUBLIC_SUBMISSION",
-            record.submissionId,
-            requestId,
-            JSON.stringify({}),
-          ]),
-        ],
-        fields: "userEnteredValue",
-      },
-    });
-
-    // Giải quyết yêu cầu bổ sung nếu RESUBMITTED
-    if (status === "RESUBMITTED") {
-      const [requestsResponse, itemsResponse] = await Promise.all([
-        this.workspace().sheets.spreadsheets.values.get({
-          spreadsheetId: this.spreadsheetId,
-          range: "PUBLIC_SUPPLEMENT_REQUESTS!A2:I",
-        }),
-        this.workspace().sheets.spreadsheets.values.get({
-          spreadsheetId: this.spreadsheetId,
-          range: "PUBLIC_SUPPLEMENT_ITEMS!A2:M",
-        }),
-      ]);
-      const requestRows = requestsResponse.data.values ?? [];
-      let requestIndex = -1;
-      for (let index = requestRows.length - 1; index >= 0; index -= 1) {
-        if (
-          readCell(requestRows[index], 1) === record.submissionId &&
-          readCell(requestRows[index], 2) === "OPEN"
-        ) {
-          requestIndex = index;
-          break;
+      if (input.status === "SUBMITTED") {
+        await transaction`
+          insert into public.public_certificates
+            (certificate_id, submission_id, issue_number, issue_date, registry_number)
+          values (${randomUUID()}, ${input.record.submissionId}, ${input.draft.certificate.issueNumber},
+            ${input.draft.certificate.issueDate}, ${input.draft.certificate.registryNumber})
+        `;
+        for (const owner of input.draft.owners) {
+          await transaction`
+            insert into public.public_owners (
+              owner_id, submission_id, owner_type, full_name, identity_number, role_on_certificate,
+              date_of_birth, gender, residence_address, identity_source, qr_payload_hash,
+              qr_decoder_version, qr_parser_version, identity_status, identity_confirmed_at,
+              has_distinct_current_user, current_user_name, current_user_citizen_id,
+              current_user_address, change_reason
+            ) values (
+              ${owner.id}, ${input.record.submissionId}, ${owner.ownerType}, ${owner.fullName},
+              ${owner.identityNumber}, ${owner.roleOnCertificate}, ${owner.dateOfBirth},
+              ${owner.gender}, ${owner.residenceAddress}, ${owner.identitySource},
+              ${owner.qrPayloadHash}, ${owner.qrDecoderVersion}, ${owner.qrParserVersion},
+              ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.hasDistinctCurrentUser},
+              ${owner.currentUserName}, ${owner.currentUserCitizenId}, ${owner.currentUserAddress},
+              ${owner.changeReason}
+            )
+          `;
         }
+        for (const parcel of input.draft.parcels) {
+          await transaction`
+            insert into public.public_parcels (
+              parcel_id, submission_id, parcel_id_code, map_sheet_number, parcel_number,
+              address_on_certificate, address_two_level, area, old_ward
+            ) values (
+              ${parcel.id}, ${input.record.submissionId}, ${parcel.parcelIdCode},
+              ${parcel.mapSheetNumber}, ${parcel.parcelNumber}, ${parcel.addressOnCertificate},
+              ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard}
+            )
+          `;
+          for (const landUse of parcel.landUses) {
+            await transaction`
+              insert into public.public_land_uses (
+                land_use_id, submission_id, parcel_id, purpose_code, purpose_free_text,
+                origin_code, form_code, term_code, area
+              ) values (
+                ${landUse.id}, ${input.record.submissionId}, ${parcel.id}, ${landUse.purposeCode},
+                ${landUse.purposeFreeText ?? ""}, ${landUse.originCode}, ${landUse.formCode},
+                ${landUse.termCode}, ${landUse.area}
+              )
+            `;
+          }
+        }
+        for (const asset of input.draft.assets) {
+          await transaction`
+            insert into public.public_assets (asset_id, submission_id, asset_type, description)
+            values (${asset.id}, ${input.record.submissionId}, ${asset.assetType}, ${asset.description})
+          `;
+        }
+        for (const hmac of input.pendingIdentityHmacs ?? []) {
+          await transaction`
+            insert into public.public_lookup_index (kind, citizen_id_hmac, submission_id)
+            values ('PENDING', ${hmac}, ${input.record.submissionId}) on conflict do nothing
+          `;
+        }
+      } else {
+        await this.resolveOpenSupplementRequestWithSql(transaction, input.record.submissionId);
       }
-      if (requestIndex >= 0) {
-        const suppRequestId = readCell(requestRows[requestIndex], 0);
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId: sheetId("PUBLIC_SUPPLEMENT_REQUESTS"),
-              startRowIndex: requestIndex + 1, // index là 0-based từ row 2
-              endRowIndex: requestIndex + 2,
-              startColumnIndex: 2,
-              endColumnIndex: 3,
-            },
-            rows: [row(["RESOLVED"])],
-            fields: "userEnteredValue",
-          },
-        });
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId: sheetId("PUBLIC_SUPPLEMENT_REQUESTS"),
-              startRowIndex: requestIndex + 1,
-              endRowIndex: requestIndex + 2,
-              startColumnIndex: 8,
-              endColumnIndex: 9,
-            },
-            rows: [row([now])],
-            fields: "userEnteredValue",
-          },
-        });
-        (itemsResponse.data.values ?? []).forEach((candidate, index) => {
-          if (readCell(candidate, 1) !== suppRequestId || readCell(candidate, 10) !== "OPEN") return;
-          requests.push(
-            {
-              updateCells: {
-                range: {
-                  sheetId: sheetId("PUBLIC_SUPPLEMENT_ITEMS"),
-                  startRowIndex: index + 1,
-                  endRowIndex: index + 2,
-                  startColumnIndex: 10,
-                  endColumnIndex: 11,
-                },
-                rows: [row(["RESOLVED"])],
-                fields: "userEnteredValue",
-              },
-            },
-            {
-              updateCells: {
-                range: {
-                  sheetId: sheetId("PUBLIC_SUPPLEMENT_ITEMS"),
-                  startRowIndex: index + 1,
-                  endRowIndex: index + 2,
-                  startColumnIndex: 12,
-                  endColumnIndex: 13,
-                },
-                rows: [row([now])],
-                fields: "userEnteredValue",
-              },
-            }
-          );
-        });
-      }
+
+      await this.insertTimeline(
+        transaction,
+        input.record.submissionId,
+        input.timelineEvent,
+        input.actorEmail,
+        input.requestId,
+      );
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action:
+          input.status === "RESUBMITTED"
+            ? "PUBLIC_SUBMISSION_RESUBMITTED"
+            : "PUBLIC_SUBMISSION_SUBMITTED",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+      });
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'PUBLIC_SUBMIT', ${input.mutationHash},
+          ${JSON.stringify({ status: input.status, version: updated[0].version })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+    });
+  }
+
+  private async insertAudit(
+    sql: Sql,
+    input: {
+      actorEmail: string;
+      action: string;
+      entityId: string;
+      requestId: string;
+      metadata?: Record<string, string | number | boolean>;
+    },
+  ): Promise<void> {
+    await sql`
+      insert into public.audit_logs
+        (audit_id, actor_email, action, entity_type, entity_id, request_id, metadata)
+      values (
+        ${randomUUID()}, ${input.actorEmail}, ${input.action}, 'PUBLIC_SUBMISSION',
+        ${input.entityId}, ${input.requestId}, ${JSON.stringify(input.metadata ?? {})}::jsonb
+      )
+    `;
+  }
+
+  private async insertTimeline(
+    sql: Sql,
+    submissionId: string,
+    event: PublicTimelineEvent,
+    actorEmail: string,
+    requestId: string,
+  ): Promise<void> {
+    await sql`
+      insert into public.public_status_events (
+        event_id, submission_id, event_type, label, actor_email, actor_display_name,
+        message, occurred_at, request_id
+      ) values (
+        ${event.eventId}, ${submissionId}, ${event.eventType}, ${event.label}, ${actorEmail},
+        ${event.actorDisplayName}, ${event.message}, ${event.occurredAt}, ${requestId}
+      ) on conflict (event_id) do nothing
+    `;
+  }
+
+  private async insertSupplementRequest(
+    sql: Sql,
+    submissionId: string,
+    request: SupplementRequest,
+    actorEmail: string,
+  ): Promise<void> {
+    await sql`
+      insert into public.public_supplement_requests (
+        supplement_request_id, submission_id, status, reason_code, message,
+        requested_by_email, requested_by_display_name, created_at, resolved_at
+      ) values (
+        ${request.requestId}, ${submissionId}, ${request.status}, ${request.reasonCode},
+        ${request.message}, ${actorEmail}, ${request.requestedByDisplayName},
+        ${request.createdAt}, ${request.resolvedAt || null}
+      )
+    `;
+    for (const item of request.items) {
+      await sql`
+        insert into public.public_supplement_items (
+          item_id, supplement_request_id, submission_id, item_type, target_entity_type,
+          target_entity_id, field_path, document_type, reason_code, instruction, status, created_at
+        ) values (
+          ${item.itemId}, ${item.requestId}, ${submissionId}, ${item.itemType},
+          ${item.targetEntityType}, ${item.targetEntityId}, ${item.fieldPath},
+          ${item.documentType}, ${item.reasonCode}, ${item.instruction}, ${item.status},
+          ${request.createdAt}
+        )
+      `;
     }
+  }
 
-    await this.workspace().sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.spreadsheetId,
-      requestBody: { requests },
-    });
-
-    // PUBLIC_LOOKUP_INDEX chia bucket theo cột (byte đầu của HMAC) nên không thể gộp vào batch bằng
-    // appendCells — cái đó luôn ghi vào cột A và phá vỡ bucketing. Ghi riêng theo đúng cột bucket để
-    // hasPendingIdentityMatch đọc lại được. Đây là chỉ mục cảnh báo mềm, không cần cùng batch với hồ sơ.
-    if (status === "SUBMITTED" && pendingIdentityHmacs && pendingIdentityHmacs.length > 0) {
-      for (const hmac of pendingIdentityHmacs) {
-        await this.appendPendingIdentityIndex({ record, citizenIdHmac: hmac });
-      }
+  private async resolveOpenSupplementRequestWithSql(sql: Sql, submissionId: string): Promise<void> {
+    const requests = await sql<{ supplement_request_id: string }[]>`
+      update public.public_supplement_requests set status = 'RESOLVED', resolved_at = now()
+      where supplement_request_id = (
+        select supplement_request_id from public.public_supplement_requests
+        where submission_id = ${submissionId} and status = 'OPEN'
+        order by created_at desc limit 1 for update
+      ) returning supplement_request_id
+    `;
+    if (requests[0]) {
+      await sql`
+        update public.public_supplement_items set status = 'RESOLVED', resolved_at = now()
+        where supplement_request_id = ${requests[0].supplement_request_id} and status = 'OPEN'
+      `;
     }
   }
 
-  private get spreadsheetId(): string {
-    return this.environment.GOOGLE_SHEETS_SPREADSHEET_ID;
+  private async markFileStatus(
+    submissionId: string,
+    fileId: string,
+    status: "REPLACED" | "DELETED",
+  ): Promise<void> {
+    const database = getDatabase();
+    await database.begin(async (transaction) => {
+      const current = await transaction<{ status: StoredFile["status"] }[]>`
+        select status from public.public_files
+        where submission_id = ${submissionId} and file_id = ${fileId} for update
+      `;
+      if (!current[0]) throw new Error("Không tìm thấy ảnh cần cập nhật.");
+      if (current[0].status !== status) {
+        if (current[0].status !== "UPLOADED") throw new Error("Ảnh không còn hiệu lực.");
+        await transaction`
+          update public.public_files set status = ${status}, updated_at = now()
+          where submission_id = ${submissionId} and file_id = ${fileId}
+        `;
+      }
+      await this.refreshFileSummaries(transaction, submissionId);
+    });
   }
 
-  private async sheetsWithIds(titles: readonly string[]): Promise<{
-    sheets: sheets_v4.Sheets;
-    ids: Map<string, number>;
-  }> {
-    const { sheets } = this.workspace();
-    const response = await sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-      fields: "sheets.properties(sheetId,title)",
-    });
-    const ids = new Map(
-      (response.data.sheets ?? []).map((sheet) => [
-        sheet.properties?.title ?? "",
-        sheet.properties?.sheetId ?? -1,
-      ]),
-    );
-    for (const title of titles) requiredSheetId(ids, title);
-    return { sheets, ids };
+  private async refreshFileSummaries(sql: Sql, submissionId: string): Promise<void> {
+    const rows = await sql<FileRow[]>`
+      select file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+        size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      from public.public_files where submission_id = ${submissionId}
+      order by created_at, file_id
+    `;
+    const summaries = rows.map((row) => this.fileSummary(mapFile(row)));
+    await sql`
+      update public.public_submissions
+      set file_summary_json = ${JSON.stringify(summaries)}::jsonb, updated_at = now()
+      where submission_id = ${submissionId}
+    `;
   }
-  private workspace() {
-    return createGoogleWorkspaceClient({
-      clientId: this.environment.GOOGLE_DRIVE_CLIENT_ID,
-      clientSecret: this.environment.GOOGLE_DRIVE_CLIENT_SECRET,
-      refreshToken: this.environment.GOOGLE_DRIVE_REFRESH_TOKEN,
-    });
+
+  private fileSummary(file: StoredFile): PublicFileSummary {
+    return {
+      fileId: file.fileId,
+      ownerId: file.ownerId,
+      documentType: file.documentType,
+      status: file.status,
+      sizeBytes: file.sizeBytes,
+      checksum: file.checksum,
+      createdAt: file.createdAt ?? "",
+      updatedAt: file.updatedAt ?? "",
+      driveFileId: file.driveFileId,
+      mimeType: file.mimeType,
+    };
   }
 }
 
@@ -1965,5 +1179,12 @@ export class SubmissionVersionConflictError extends Error {
   constructor() {
     super("Bản kê khai đã được thay đổi bởi cán bộ khác.");
     this.name = "SubmissionVersionConflictError";
+  }
+}
+
+export class SubmissionIdempotencyConflictError extends Error {
+  constructor() {
+    super("Idempotency key đã được dùng cho một thao tác khác.");
+    this.name = "SubmissionIdempotencyConflictError";
   }
 }

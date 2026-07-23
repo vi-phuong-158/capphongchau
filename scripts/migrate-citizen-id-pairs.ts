@@ -4,7 +4,7 @@
  */
 import { loadEnvConfig } from "@next/env";
 
-import { loadGoogleStorageEnvironment } from "@/modules/common/env";
+import { loadLegacyGoogleSheetsEnvironment } from "@/modules/common/env";
 import { createGoogleWorkspaceClient } from "@/modules/google/workspace-client";
 
 const COLUMNS: Record<string, readonly string[]> = {
@@ -36,7 +36,7 @@ function columnName(index: number): string {
 
 async function main(): Promise<void> {
   loadEnvConfig(process.cwd());
-  const environment = loadGoogleStorageEnvironment();
+  const environment = loadLegacyGoogleSheetsEnvironment();
   const { sheets } = createGoogleWorkspaceClient({
     clientId: environment.GOOGLE_DRIVE_CLIENT_ID,
     clientSecret: environment.GOOGLE_DRIVE_CLIENT_SECRET,

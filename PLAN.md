@@ -1,3 +1,8 @@
+> **Cập nhật kiến trúc 2026-07-23:** các phần bên dưới nói Google Sheets là kho dữ liệu duy nhất
+> là bối cảnh lịch sử và đã bị thay thế. Runtime hiện dùng Supabase PostgreSQL; Google My Drive
+> vẫn lưu file; Google Sheets chỉ còn là nguồn ETL legacy. Xem `docs/architecture.md` và quyết định
+> mới nhất trong `docs/brain/03-decisions.md`.
+
 # Kế hoạch thử nghiệm Phường Phong Châu — My Drive cá nhân + Vercel
 
 ## 1. Mục tiêu và phạm vi

@@ -188,6 +188,43 @@ export function hasCompleteExistingRecordLookupIdentity(input: {
   );
 }
 
+export interface ExistingCertificateMatch {
+  readonly existingRecordId: string;
+  readonly issueNumber: string;
+  readonly issueDate: string;
+  readonly registryNumber: string;
+}
+
+/** Hình dạng của `existing-certificates-index.json` — cache tra cứu committed, sinh bởi
+ * `scripts/import_existing_certificates.py --emit-json` từ EXISTING_CERTIFICATES/
+ * EXISTING_CERTIFICATE_OWNERS. Chỉ chứa chứng nhận đã VERIFIED. */
+export interface ExistingCertificatesIndex {
+  readonly index: Readonly<Record<string, readonly string[]>>;
+  readonly records: Readonly<
+    Record<string, { readonly issueNumber: string; readonly issueDate: string; readonly registryNumber: string }>
+  >;
+}
+
+/**
+ * Tra cứu thuần trên cache tĩnh — không gọi Sheets. Dữ liệu gần như bất biến (chỉ đổi khi có đợt
+ * import mới, xem `03-decisions.md` 2026-07-23 "Chuyển nguồn tra cứu GCN sang JSON committed"),
+ * nên tách khỏi `PublicIntakeRepository` để test được với fixture nhỏ, không cần mock Google.
+ */
+export function lookupExistingCertificates(
+  index: ExistingCertificatesIndex,
+  citizenIdHmac: string,
+): ExistingCertificateMatch[] {
+  const recordIds = index.index[citizenIdHmac] ?? [];
+  const seen = new Set(recordIds);
+  const matches: ExistingCertificateMatch[] = [];
+  for (const existingRecordId of seen) {
+    const record = index.records[existingRecordId];
+    if (!record) continue;
+    matches.push({ existingRecordId, ...record });
+  }
+  return matches;
+}
+
 export function maskCertificateNumber(value: string): string {
   const compact = value.trim();
   if (compact.length <= 4) return `••••${compact}`;

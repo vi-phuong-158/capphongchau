@@ -9,8 +9,10 @@ import {
 import { emptyDraft } from "@/modules/public-intake/types";
 import {
   hasCompleteExistingRecordLookupIdentity,
+  lookupExistingCertificates,
   maskCertificateNumber,
   unauthorizedSupplementChanges,
+  type ExistingCertificatesIndex,
   type SupplementItem,
 } from "@/modules/public-intake/workflow";
 
@@ -73,6 +75,24 @@ describe("existing record privacy and supplement locks", () => {
   it("che số phát hành GCN chỉ để lộ 4 số cuối", () => {
     expect(maskCertificateNumber("AĐ 266864")).toMatch(/6864$/);
     expect(maskCertificateNumber("AĐ 266864")).not.toContain("266864");
+  });
+
+  it("tra cứu GCN đã có trên cache tĩnh — thuần, không cần Sheets", () => {
+    const fixture: ExistingCertificatesIndex = {
+      index: {
+        "hash-1": ["record-1", "record-1"], // trùng lặp không được nhân đôi kết quả
+        "hash-2": ["record-missing"], // record không tồn tại trong `records` phải bị bỏ qua
+      },
+      records: {
+        "record-1": { issueNumber: "AB 123", issueDate: "2020-01-01", registryNumber: "S-01" },
+      },
+    };
+
+    expect(lookupExistingCertificates(fixture, "hash-1")).toEqual([
+      { existingRecordId: "record-1", issueNumber: "AB 123", issueDate: "2020-01-01", registryNumber: "S-01" },
+    ]);
+    expect(lookupExistingCertificates(fixture, "hash-2")).toEqual([]);
+    expect(lookupExistingCertificates(fixture, "hash-not-in-index")).toEqual([]);
   });
 
   it("only permits fields explicitly requested by the officer", () => {

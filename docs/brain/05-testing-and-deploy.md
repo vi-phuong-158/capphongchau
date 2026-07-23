@@ -1,164 +1,170 @@
 # 05 — Testing & Deploy
 
-> Mọi lệnh để dựng môi trường, chạy, test, build, deploy. Agent đọc đây thay vì đoán lệnh.
+> Runbook hiện hành cho kiến trúc Supabase PostgreSQL + Google My Drive.
 >
-> **Trạng thái hiện tại (2026-07-22): M0–M2 xong, cổng kê khai công khai M3.5 đã chạy thật.**
-> Kho Google đã bootstrap; `npm run dev`, `build`, `lint`, `test` đều chạy được. Phần code của lớp
-> biên (Turnstile + chốt chặn Cloudflare) đã có; phần cấu hình dashboard Cloudflare/Vercel chưa làm.
+> **Trạng thái 2026-07-23:** code migration đã hoàn tất; Supabase production, SQL migration, ETL dữ
+> liệu thật và biến Vercel chưa được cấu hình. Không deploy repository mới trước khi hoàn tất cutover.
 
-## Cài đặt môi trường local
+## Cài đặt local
 
 ```powershell
 npm install
 ```
 
-Trong PowerShell có execution policy chặn `npm.ps1`, dùng `npm.cmd` thay cho `npm`.
+Sao chép `.env.example` thành `.env.local`, thay placeholder bằng secret/ID thật và không commit file.
+Trên PowerShell chặn `npm.ps1`, dùng `npm.cmd`.
 
-Sao chép `.env.example` thành `.env.local` và thay toàn bộ placeholder bằng secret/ID thật. Không commit `.env.local`. Next.js và bootstrap CLI đều tự nạp `.env.local`. Validation server (`loadServerEnvironment`) từ chối cấu hình thiếu/sai và chỉ nêu tên biến lỗi, không in secret.
+Biến runtime chính:
 
-Biến môi trường cần thiết (xem đầy đủ trong `01-architecture.md`):
-
-```
+```text
 APP_BASE_URL, AUTH_SECRET, AUTH_GOOGLE_CLIENT_ID, AUTH_GOOGLE_CLIENT_SECRET,
+SUPABASE_DATABASE_URL,
 GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN,
-GOOGLE_MY_DRIVE_ROOT_FOLDER_ID, GOOGLE_SHEETS_SPREADSHEET_ID,
+GOOGLE_MY_DRIVE_ROOT_FOLDER_ID,
 SYSTEM_ADMIN_EMAIL, DATA_HASH_PEPPER, MAX_UPLOAD_MB, VERCEL_REGION,
 PUBLIC_SESSION_SECRET, PUBLIC_ACCESS_CODE_PEPPER,
 ORIGIN_SHARED_SECRET, NEXT_PUBLIC_TURNSTILE_SITE_KEY, TURNSTILE_SECRET_KEY
 ```
 
-Ở máy local, dùng đúng cặp khóa thử nghiệm chính thức của Cloudflare cho Turnstile
-(`1x00000000000000000000AA` và `1x0000000000000000000000000000000AA`) — chúng luôn pass nên mã
-nguồn không cần bất kỳ nhánh bypass nào cho dev. `ORIGIN_SHARED_SECRET` chỉ được kiểm khi
-`NODE_ENV=production`, nhưng vẫn phải có giá trị hợp lệ, nếu không `build` sẽ dừng.
+`GOOGLE_SHEETS_SPREADSHEET_ID` chỉ cần trên máy chạy ETL legacy, không cần ở request runtime sau
+cutover. `SUPABASE_DATABASE_URL` là secret server; không dùng tiền tố `NEXT_PUBLIC_`.
 
-## Bootstrap My Drive và Google Sheets (chạy một lần)
+Ở local dùng bộ khóa test chính thức của Cloudflare Turnstile trong `.env.example`. Không tạo nhánh
+bypass trong code.
 
-1. Trong `.env.local`, đặt `GOOGLE_DRIVE_CLIENT_ID` và `GOOGLE_DRIVE_CLIENT_SECRET` của OAuth client **Desktop bootstrap**; giữ `SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com`. Có thể để trống refresh token và hai ID kho dữ liệu ở lần chạy đầu.
-2. Chạy `npm run bootstrap:google`. Trình duyệt sẽ mở trang Google OAuth; đăng nhập đúng tài khoản quản trị và chấp thuận scope `drive.file`.
-3. Script tạo hoặc dùng lại cây `CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM`, spreadsheet cùng 14 tab, seed 10 tổ dân phố và `SYSTEM_ADMIN`. Không tạo thủ công các file/folder này trong Drive UI.
-4. Sao chép `rootFolderId` và `spreadsheetId` từ `.bootstrap-state.json` sang `GOOGLE_MY_DRIVE_ROOT_FOLDER_ID` và `GOOGLE_SHEETS_SPREADSHEET_ID`; chuyển refresh token từ `.bootstrap-secrets.json` sang `GOOGLE_DRIVE_REFRESH_TOKEN`, rồi xóa `.bootstrap-secrets.json` khỏi máy. Không gửi hay commit các giá trị này.
-5. Khởi động `npm run dev`, gọi `GET http://localhost:3000/api/health/google`; kết quả `status: "ok"` xác nhận OAuth, Drive và schema Sheets. Endpoint này chỉ cần năm biến `GOOGLE_*` của kho dữ liệu, nên có thể chạy trước M2.
+## Tạo Supabase
 
-`.bootstrap-state.json` và `.bootstrap-secrets.json` đã bị `.gitignore`; tệp thứ hai chứa refresh token và chỉ được dùng tạm trong bước bootstrap.
+1. Tạo project ở Singapore gần Vercel `sin1`.
+2. Lấy URI **Supavisor transaction pooler**, port `6543`. Runtime đặt `prepare: false`; không dùng URI
+   session/direct cho Vercel serverless nếu chưa có lý do vận hành riêng.
+3. Áp dụng theo thứ tự các file trong `supabase/migrations/`. Với Supabase CLI:
 
-## Chạy local (dev)
+```powershell
+supabase link --project-ref <project-ref>
+supabase db push
+```
+
+Có thể dùng SQL Editor theo quy trình quản trị, nhưng production schema phải luôn được phản ánh lại
+trong migration file — không sửa tay rồi bỏ quên source.
+
+4. Đặt `SUPABASE_DATABASE_URL` vào `.env.local` và Vercel Production/Preview phù hợp.
+5. Gọi `GET /api/health/database`; kết quả `status: "ok"` xác nhận kết nối và schema tối thiểu.
+
+RLS đã bật và quyền `anon`/`authenticated` đã bị thu hồi. App không dùng Supabase Data API/Auth cho
+client; không tạo policy mở bảng chỉ để health hoặc debug.
+
+## Bootstrap Google Drive
+
+Google Drive vẫn là kho file. Với môi trường mới, chạy `npm run bootstrap:google` bằng OAuth Desktop
+client để tạo cây Drive bằng đúng production OAuth client/scope `drive.file`. Script cũ còn tạo
+spreadsheet vì mục đích tương thích/migration; sau cutover runtime chỉ cần `rootFolderId` và refresh
+token. `GET /api/health/google` kiểm tra OAuth Drive, root folder và quota, không còn kiểm tra Sheets.
+
+`.bootstrap-state.json` và `.bootstrap-secrets.json` bị Git bỏ qua. Xóa file secret tạm sau khi chuyển
+refresh token vào secret store.
+
+## Cutover Google Sheets → Supabase
+
+### Trước cửa sổ bảo trì
+
+- [ ] Tạo backup restricted của spreadsheet và ghi checksum/thời điểm.
+- [ ] Áp dụng SQL migration trên Supabase đích.
+- [ ] Xác nhận `GET /api/health/database` và quyền RLS/revoke.
+- [ ] Đặt đủ env Google legacy trên máy ETL; không đặt log verbose chứa dữ liệu hàng.
+- [ ] Chạy dry-run:
+
+```powershell
+npm run migrate:sheets-to-supabase -- --dry-run
+```
+
+Dry-run chỉ đọc Sheets, kiểm tra parse và báo số dòng theo tab; không ghi PostgreSQL.
+
+### Trong cửa sổ bảo trì
+
+1. Tạm dừng cổng ghi/autosave và xác nhận không còn request đang chạy.
+2. Chạy ETL thật đúng một lần:
+
+```powershell
+npm run migrate:sheets-to-supabase
+```
+
+ETL nạp dữ liệu và marker trong một PostgreSQL transaction. Dòng trùng, khóa ngoại sai hoặc kiểu dữ
+liệu hỏng làm rollback toàn bộ. Sau thành công, cùng spreadsheet bị từ chối nhập lại.
+
+3. Đối chiếu tối thiểu:
+
+- số dòng `public_submissions`, `public_files`, `users`, `audit_logs`;
+- 10 hồ sơ mẫu ở nhiều trạng thái, gồm draft, submitted, supplement và accepted;
+- cặp ảnh CCCD/GCN, Drive ID nội bộ và checksum;
+- `EXISTING_*`/lookup HMAC, request log, timeline và supplement;
+- user allowlist/roles/active;
+- `legacy_row_index` của submission khớp locator phiên v2 cũ.
+
+4. Gọi `/api/health/database` và `/api/health/google`, rồi deploy code Supabase.
+5. Smoke test tạo nháp, autosave, upload, submit, tra cứu, staff action, reset secret, export và khóa user.
+6. Giữ spreadsheet restricted/read-only trong cửa sổ rollback đã phê duyệt. Không xóa nguồn ngay.
+
+Nếu ETL lỗi, sửa mapping/schema bằng migration mới rồi chạy lại; transaction đã rollback nên chưa có
+trạng thái nửa vời. Nếu đã deploy nhưng phát hiện lỗi dữ liệu, đóng cổng ghi trước khi quyết định
+rollback; không chạy đồng thời hai nguồn thật.
+
+## Chạy ứng dụng và kiểm tra
 
 ```powershell
 npm run dev
-```
-
-Truy cập: `http://localhost:3000`
-
-## Build (production)
-
-```powershell
-npm run build
-```
-
-## Test
-
-```powershell
+npm run typecheck
 npm run lint
 npm run format:check
-npm run test
+npm test
+npm run test:python
+npm run build
 npm run test:e2e
 ```
 
-Vitest đã có test scaffold. Playwright có smoke test trang khởi tạo; môi trường Windows hiện tại đã chạy assertion thành công nhưng runner không tự dừng Next dev server trước giới hạn lệnh, cần kiểm tra lại khi chạy ngoài môi trường agent/CI.
+Checklist trước deploy:
 
-Checklist thủ công trước khi commit/push (theo `AGENTS.md` §7.2 — Definition of Done):
+- [ ] TypeScript strict, lint, unit test và build pass.
+- [ ] Migration SQL áp dụng thành công trên môi trường đích sạch và bản nâng cấp thử nghiệm.
+- [ ] API write có auth/allowlist, CSRF, idempotency, transaction và audit phù hợp.
+- [ ] Không log connection string, PII, QR raw, CCCD đầy đủ, token hoặc Drive link/ID.
+- [ ] Unique constraint chặn hai ảnh CCCD cùng mặt active; replace xác minh file mới trước.
+- [ ] Response bị mất rồi retry create/submit/staff action không tạo bản ghi trùng.
+- [ ] Email ngoài `users` bị từ chối dù Google Sign-In thành công.
+- [ ] QR thất bại không làm mất draft.
+- [ ] Ảnh gốc không đi qua body Vercel Function.
 
-- [ ] TypeScript strict, có validation và xử lý lỗi.
-- [ ] Có kiểm tra quyền và audit log cho thao tác write/nhạy cảm.
-- [ ] Không lộ PII, token, QR raw hoặc link Drive trong log.
-- [ ] Không tạo case/file trùng khi upload hoặc gửi lại request (idempotency).
-- [ ] Không thể tải trùng một mặt CCCD của cùng người nếu chưa thực hiện thao tác thay ảnh; thay ảnh chỉ chuyển ảnh cũ sang `REPLACED` sau khi ảnh mới xác minh thành công.
-- [ ] Ảnh gốc không đi qua body của Vercel Function.
-- [ ] Email ngoài `USERS` bị từ chối dù đăng nhập Google thành công.
-- [ ] QR thất bại không làm mất hồ sơ.
+## Deploy Vercel và Cloudflare
 
-## Deploy
+- Vercel ưu tiên region `sin1`; đặt `SUPABASE_DATABASE_URL` pooler cho đúng môi trường.
+- OAuth consent screen Google phải `In production` trước dữ liệu thật.
+- Cloudflare proxy dùng SSL Full (strict), Transform Rule gắn `X-Origin-Auth`, bypass cache cho
+  `/api/*` và `/ke-khai*`, Turnstile/rate limit theo `PLAN2.md`.
+- Xóa `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` trước dữ liệu thật; URL `*.vercel.app` gọi thẳng API public
+  phải bị từ chối.
+- Preview chỉ dùng dữ liệu giả/ẩn danh và database project/schema tách phù hợp.
 
-Kế hoạch (M5 trong `PLAN.md`): Deploy Preview trên Vercel bằng dữ liệu giả trước, sau đó Production tại region `sin1`. OAuth consent screen phải chuyển sang `In production` trước khi dùng dữ liệu thật. Thí điểm tuần tự: 20 hồ sơ giả/ẩn danh → 100 hồ sơ thật → tối đa 500 hồ sơ.
+Nghiệm thu lớp biên:
 
-### Cấu hình Cloudflare (làm trong dashboard, trước khi deploy code lớp biên)
+- gọi thẳng Vercel public API → 403;
+- qua domain thật → hoạt động;
+- `/api/*` và `/ke-khai*` không cache;
+- Turnstile rỗng/replay/siteverify lỗi → fail-closed;
+- trang cán bộ và Google Sign-In vẫn hoạt động.
 
-Thứ tự quan trọng: cấu hình Cloudflare **trước**, deploy code **sau**. Làm ngược thì trong khoảng
-giữa cổng công khai trả 404/403 cho mọi người.
+## Backup và phục hồi
 
-1. Turnstile → tạo widget chế độ **Managed**, lấy site key + secret key.
-2. DNS trỏ domain về Vercel, bật **proxy** (mây cam). SSL/TLS đặt **Full (strict)** — chế độ
-   Flexible gây vòng lặp chuyển hướng với Vercel.
-3. **Transform Rule** (Modify Request Header): thêm `X-Origin-Auth` mang giá trị
-   `ORIGIN_SHARED_SECRET` vào mọi request. Thiếu bước này thì origin từ chối toàn bộ cổng công khai.
-4. **Cache Rule**: bypass cache cho `/api/*` và `/ke-khai*`. Không bật "Cache Everything" hay
-   Automatic Platform Optimization — một trang nháp bị cache là lộ PII sang người khác.
-5. **Rate limiting** theo bảng `PLAN2.md` (`/api/public/*` 120 req/10 phút/IP;
-   `/api/public/submissions/recover` 10 req/10 phút/IP; POST tạo nháp 5 req/giờ/IP). Bật chế độ
-   **Log** trước, quan sát rồi mới chuyển Block. Kiểm số rule gói hiện tại cho phép trước khi
-   thiết kế — gói Free thường chỉ được một rule.
-6. Vercel: đặt `ORIGIN_SHARED_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
-   cho **cả Production lẫn Preview**; bật Deployment Protection cho Preview.
+- Bật backup hằng ngày/PITR theo gói Supabase phù hợp yêu cầu RPO/RTO.
+- Định kỳ chạy `pg_dump` và lưu bản mã hóa ở nơi độc lập với Supabase và Gmail; kiểm checksum.
+- Diễn tập restore vào project/database tách biệt và ghi thời gian phục hồi thực tế.
+- Snapshot Drive trong `99_BACKUP` vẫn nằm cùng Gmail, không bảo vệ khi tài khoản gốc bị khóa. Phải có
+  bản sao file mã hóa ngoài tài khoản này.
+- Không coi spreadsheet read-only sau cutover là backup lâu dài duy nhất; nó chỉ là nguồn rollback
+  theo thời hạn đã chốt.
 
-Nghiệm thu bắt buộc (`PLAN_NL` §11):
+## Công cụ legacy
 
-- [ ] `curl -X POST https://<project>.vercel.app/api/public/submissions` → **403**.
-- [ ] Cùng request qua domain thật → chạy bình thường.
-- [ ] `curl -I https://<domain>/ke-khai` → `CF-Cache-Status` không bao giờ là `HIT`.
-- [ ] Turnstile: token rỗng → 403; token gửi lại lần hai → 403; chặn mạng tới siteverify → 403.
-- [ ] Cán bộ vẫn đăng nhập được và `/ke-khai` không bị đá về trang chủ.
-
-## Môi trường
-
-| Môi trường | Branch           | URL                                    |
-| ---------- | ---------------- | -------------------------------------- |
-| Production | `main` (dự kiến) | _(cần bổ sung sau khi deploy lần đầu)_ |
-| Local      | —                | _(cần bổ sung sau M0)_                 |
-
-## Migration schema (chạy trước mỗi lần deploy có cột mới)
-
-```powershell
-npm run migrate:public-intake
-```
-
-Idempotent: tạo tab `PUBLIC_*` còn thiếu, **và nối cột còn thiếu vào cuối hàng header của tab đã
-tồn tại**. Chỉ nối thêm — không đổi tên, không chèn giữa, không xóa, vì mã định vị dữ liệu theo
-**chỉ số cột** nên dịch cột là hỏng toàn bộ dữ liệu đã ghi.
-
-⚠️ Bản hiện tại có cột mới `old_ward` trong `PUBLIC_PARCELS` — **phải chạy lệnh trên trước khi
-deploy**, nếu không dữ liệu đơn vị hành chính cũ ghi vào một cột không có tiêu đề.
-
-### Nhập dữ liệu GCN cũ cho Gói A
-
-Chạy theo đúng thứ tự, dùng Python 3.11+ và không dùng pepper giả ở môi trường thật:
-
-```powershell
-python -m pip install -r requirements-import.txt
-npm run migrate:public-intake
-python scripts/import_existing_certificates.py
-# Duyệt reports/existing-import-*.json, backup Sheet, rồi mới:
-python scripts/import_existing_certificates.py --apply
-```
-
-Dry-run không ghi Sheets và báo cáo chỉ chứa số dòng nguồn + mã lỗi, không chứa CCCD/họ tên. `--apply`
-ghi `EXISTING_*` và chỉ mục HMAC; cùng SHA-256 nguồn đã `COMPLETED` sẽ không nhập lại. Nếu lần trước
-dừng ở `STARTED`, script fail-closed để quản trị viên kiểm tra dữ liệu trước khi chạy tiếp.
-
-## Lưu ý
-
-- **Quy mô mục tiêu: 20.000 hồ sơ** (nâng từ 500 vào 2026-07-22). Không sharding — xem
-  `03-decisions.md`. Trước khi mở rộng thật phải chạy spike đo tải, đo **cả đọc lẫn ghi** (quota
-  đọc cũng 60/phút/người dùng và trước đây bị bỏ sót trong mọi tính toán).
-- Dung lượng ước tính: 20.000 hồ sơ × ~7 ảnh × ~3 MB ≈ **420 GB**, cộng preview ≈ **500–600 GB**.
-  Tài khoản Google miễn phí chỉ có 15 GB — phải mua dung lượng trước khi mở chiến dịch.
-- Upload file gốc giới hạn 30 MB/file (`MAX_UPLOAD_MB`), preview tối đa 2.5 MB.
-- OAuth app ở trạng thái `Testing` có thể khiến refresh token Drive hết hạn sau 7 ngày — phải chuyển `In production` trước khi dùng dữ liệu thật.
-- Vercel Cron tạo snapshot hằng ngày trong `99_BACKUP` — đây là copy **trong cùng tài khoản**, không bảo vệ khỏi việc tài khoản `anmphongandn@gmail.com` bị khóa/mất quyền truy cập (single point of failure, xem `01-architecture.md` và `03-decisions.md`). Cần thêm export Google Sheets định kỳ ra ngoài tài khoản gốc, và bản backup mã hóa ngoại tuyến hằng tuần phải tách khỏi tài khoản này.
-- Chỉ dùng dữ liệu giả/ẩn danh cho test tự động và môi trường Preview.
-
-## Backfill GCN cũ
-
-1. Chạy python scripts/import_existing_certificates.py --backfill và duyệt báo cáo không PII.
-2. Sao lưu restricted spreadsheet, rồi mới chạy --backfill --apply.
-3. Chạy lại cùng lệnh; phải trả BACKFILL_NOOP. Không chạy --apply import thường cho nguồn đã COMPLETED.
+`npm run migrate:public-intake`, `npm run migrate:citizen-id-pairs` và
+`scripts/import_existing_certificates.py` thao tác schema/dữ liệu Google Sheets cũ. Chỉ dùng trước
+cutover hoặc cho phục hồi nguồn legacy có kiểm soát; không chạy như migration runtime sau khi
+Supabase là nguồn thật. Import GCN mới sau cutover phải được chuyển sang repository/Supabase, không
+ghi Sheet rồi chờ đồng bộ tự động (không có đồng bộ hai chiều).

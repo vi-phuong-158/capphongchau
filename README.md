@@ -1,56 +1,77 @@
 # CSDL đất đai Phường Phong Châu — Bản thử nghiệm
 
-Web app hỗ trợ tiếp nhận, kiểm tra và theo dõi hồ sơ đất đai trong đợt 180 ngày tại Phường Phong Châu.
+Web app/PWA hỗ trợ tiếp nhận, kiểm tra và theo dõi hồ sơ đất đai trong chiến dịch 180 ngày tại Phường Phong Châu. Hệ thống là công cụ thu thập và chuẩn hóa trung gian; không thay thế CSDL đất đai chuyên ngành và không tự xác nhận giá trị pháp lý của hồ sơ.
 
-> Đây là hệ thống thu thập và chuẩn hóa trung gian; không thay thế cơ sở dữ liệu đất đai chuyên ngành và không tự xác nhận giá trị pháp lý của hồ sơ.
-
-## Trạng thái
-
-M1 đang hoàn thiện: nền Next.js/PWA, module boundary, validation môi trường, bootstrap Google My Drive/Sheets và health check đã sẵn sàng. Cần chạy bootstrap với OAuth client secret được giữ cục bộ trước khi kho dữ liệu thật được tạo; luồng nghiệp vụ sẽ triển khai theo các mốc tiếp theo trong [PLAN.md](PLAN.md).
-
-## Phạm vi bản thử nghiệm
-
-- Dùng tại Phường Phong Châu, gồm 10 tổ dân phố.
-- Một ảnh CCCD mặt trước và từ 1–10 ảnh GCN/bìa đỏ cho mỗi hồ sơ.
-- Đọc QR CCCD ngay trên thiết bị; cán bộ xác nhận hoặc nhập tay kết quả.
-- Chuyển HEIC/HEIF sang JPEG ngay trên thiết bị khi cần; PWA hoạt động online-only.
-- Lưu ảnh trong Google My Drive của tài khoản quản trị.
-- Lưu dữ liệu có cấu trúc, người dùng và audit log trong Google Sheets.
-- Frontend và API cùng chạy trên Vercel, ưu tiên region Singapore (`sin1`).
-- Chưa có OCR CCCD/GCN, Google Vision, đối soát dân cư hoặc PostgreSQL.
-
-## Kiến trúc
+## Kiến trúc hiện tại
 
 ```mermaid
 flowchart LR
-    U[Cán bộ] --> W[Next.js PWA trên Vercel]
-    W --> A[Google Sign-In + USERS]
-    W --> S[Google Sheets]
+    U[Người dân / cán bộ] --> W[Next.js trên Vercel sin1]
+    W --> A[Google Sign-In + allowlist USERS]
+    W --> P[Supabase PostgreSQL]
     W --> D[Google My Drive]
-    U --> Q[QR CCCD tại thiết bị]
+    U --> Q[Đọc QR CCCD trên thiết bị]
     Q --> W
 ```
 
-Tài khoản `anmphongandn@gmail.com` sở hữu My Drive, spreadsheet, Google Cloud Project và là `SYSTEM_ADMIN` đầu tiên. Ứng dụng dùng OAuth với quyền `drive.file`; không dùng service account hoặc mật khẩu Google. Cây thư mục Drive phải được bootstrap bằng cùng OAuth client với ứng dụng, không tạo thủ công qua Drive UI.
+- Supabase PostgreSQL là kho dữ liệu cấu trúc duy nhất: hồ sơ, người dùng, idempotency, audit, timeline, chỉ mục và dữ liệu xuất.
+- Google My Drive tiếp tục lưu ảnh gốc/preview và file export. Ảnh gốc upload trực tiếp từ trình duyệt bằng resumable session, không đi qua body của Vercel Function.
+- Runtime không đọc/ghi Google Sheets. Spreadsheet cũ chỉ còn là nguồn migration một lần.
+- `PublicIntakeRepository` và `SupabaseUserRepository` dùng PostgreSQL transaction, unique/check constraint và optimistic version update.
+- Data API Supabase không được mở cho trình duyệt. Server dùng connection string bí mật; RLS bật nhưng không cấp policy cho `anon`/`authenticated`.
+
+## Khởi tạo Supabase và chuyển dữ liệu
+
+1. Tạo Supabase project ở Singapore và lấy URI của Supavisor transaction pooler, port `6543`.
+2. Áp dụng migration trong [`supabase/migrations`](supabase/migrations). Có thể dùng Supabase CLI `supabase db push` hoặc chạy SQL qua quy trình quản trị đã phê duyệt.
+3. Đặt `SUPABASE_DATABASE_URL` ở `.env.local` và Vercel. Không đặt biến này dưới tiền tố `NEXT_PUBLIC_`.
+4. Sao lưu spreadsheet cũ. Giữ tạm `GOOGLE_SHEETS_SPREADSHEET_ID` chỉ trên máy chạy ETL.
+5. Kiểm tra nguồn không ghi đích:
+
+```powershell
+npm run migrate:sheets-to-supabase -- --dry-run
+```
+
+6. Tạm dừng ghi trên production, chạy migration thật một lần:
+
+```powershell
+npm run migrate:sheets-to-supabase
+```
+
+7. So sánh số lượng/kiểm tra mẫu, gọi `GET /api/health/database` và `GET /api/health/google`, rồi mới deploy code dùng Supabase. ETL ghi toàn bộ dữ liệu trong một PostgreSQL transaction và tạo marker chống chạy lặp.
+
+## Phát triển local
+
+```powershell
+npm install
+npm run dev
+```
+
+Sao chép [`.env.example`](.env.example) thành `.env.local` và thay placeholder bằng secret thật. Trên PowerShell bị chặn `npm.ps1`, dùng `npm.cmd`.
+
+Các kiểm tra chính:
+
+```powershell
+npm run typecheck
+npm run lint
+npm test
+npm run build
+```
+
+## Phạm vi và bảo mật
+
+- Phạm vi Phường Phong Châu, 10 tổ dân phố; web/PWA online-only.
+- Mỗi cá nhân có cặp ảnh CCCD trước/sau; mỗi hồ sơ có 1–10 ảnh GCN.
+- QR CCCD chỉ gợi ý dữ liệu, không lưu payload thô và không ghi đè sửa tay.
+- Không commit `.env`, token, ảnh CCCD/GCN thật hoặc fixture chứa PII.
+- Không tạo link Drive công khai; file ở chế độ `Restricted`.
+- Mọi API write kiểm tra session/allowlist, CSRF, idempotency và quyền ở server; thao tác nhạy cảm ghi audit append-only.
+- Backup Supabase phải tách khỏi Google Drive: dùng backup/PITR phù hợp gói dịch vụ và định kỳ `pg_dump` mã hóa sang nơi độc lập.
 
 ## Tài liệu
 
-- [Kế hoạch triển khai](PLAN.md)
 - [Kiến trúc chi tiết](docs/architecture.md)
-- [Chỉ dẫn cho coding agent](AGENTS.md)
-
-## Nguyên tắc bảo mật
-
-- Không commit `.env`, token OAuth, ảnh CCCD/GCN thật hoặc fixture chứa dữ liệu thật.
-- Không tạo link Drive công khai; Drive ở chế độ `Restricted`.
-- Không ghi CCCD đầy đủ, payload QR, URL upload hoặc token vào log.
-- Bản thử nghiệm tối đa 500 hồ sơ. Trước khi mở rộng cần đánh giá migration sang Shared Drive/kho lưu trữ của cơ quan.
-- Backup Drive trong cùng Gmail không đủ: cần export Sheets định kỳ ra nơi tách biệt và backup mã hóa ngoại tuyến.
-
-## Khởi tạo sau khi có mã nguồn
-
-1. Đã tạo Google Cloud Project, bật Google Drive API/Google Sheets API và khai báo scope `drive.file`.
-2. Đặt OAuth client secret Desktop bootstrap trong `.env.local` (không commit), rồi chạy `npm run bootstrap:google` để tạo cấu trúc My Drive, spreadsheet, `REQUEST_LOG` và dữ liệu danh mục.
-3. Sao chép các ID và refresh token do bootstrap tạo vào `.env.local`; gọi `GET /api/health/google` để xác minh.
-4. Khi deploy, thêm redirect URI Vercel và các biến môi trường tương ứng; chuyển OAuth consent screen sang `In production` trước khi dùng dữ liệu thật.
-5. Thử nghiệm bằng dữ liệu giả trước; trước pilot dữ liệu thật, chốt cơ sở pháp lý, thời hạn lưu trữ và quy trình xử lý yêu cầu dữ liệu cá nhân.
+- [Runbook test/deploy](docs/brain/05-testing-and-deploy.md)
+- [Quyết định kỹ thuật](docs/brain/03-decisions.md)
+- [Chỉ dẫn coding agent](AGENTS.md)
+- [`PLAN2.md`](PLAN2.md) là bối cảnh kế hoạch nghiệp vụ; quyết định dữ liệu “giữ Google Sheets” trong bản kế hoạch đó đã bị thay thế ngày 2026-07-23 bởi kiến trúc Supabase.

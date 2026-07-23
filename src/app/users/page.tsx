@@ -3,14 +3,14 @@ import { redirect } from "next/navigation";
 import { UsersManagement } from "@/components/users-management";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { UserRole } from "@/modules/common/domain";
-import { getGoogleSheetsUserRepository } from "@/modules/users";
+import { getUserRepository } from "@/modules/users";
 
 export const dynamic = "force-dynamic";
 
 async function loadUsers() {
   try {
     await requireActiveUser([UserRole.SYSTEM_ADMIN]);
-    return await getGoogleSheetsUserRepository().list();
+    return await getUserRepository().list();
   } catch (error) {
     if (error instanceof AuthorizationError) redirect("/");
     throw error;

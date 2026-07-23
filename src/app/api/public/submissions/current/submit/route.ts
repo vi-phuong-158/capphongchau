@@ -1,7 +1,14 @@
+import { createHash } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
-import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
+import { isValidPublicIdempotencyKey } from "@/modules/public-intake/creation-idempotency";
+import {
+  getPublicIntakeRepository,
+  SubmissionIdempotencyConflictError,
+  SubmissionVersionConflictError,
+} from "@/modules/public-intake/repository";
 import {
   isEditable,
   publicError,
@@ -20,32 +27,15 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request): Promise<NextResponse> {
   const context = await resolvePublicRequest(request, { requireCsrf: true });
-  if (context instanceof NextResponse) {
-    return context;
-  }
+  if (context instanceof NextResponse) return context;
 
   const { record, requestId } = context;
-  if (!isEditable(record)) {
-    return publicError("INVALID_STATE", "Bản kê khai này đã được gửi.", requestId);
+  const rawIdempotencyKey = request.headers.get("idempotency-key");
+  if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {
+    return publicError("VALIDATION_FAILED", "Thiếu hoặc sai khóa chống gửi trùng.", requestId);
   }
 
-  // Gửi chính thức cần token Turnstile mới, không dùng lại token của bước tạo nháp: đây là hành
-  // động sinh ra nhiều dòng Sheets nhất trong toàn luồng công khai.
   const environment = loadPublicIntakeEnvironment();
-  const turnstile = await verifyTurnstileToken({
-    token: request.headers.get(TURNSTILE_HEADER),
-    action: "submit",
-    secretKey: environment.TURNSTILE_SECRET_KEY,
-    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
-  });
-  if (!turnstile.ok) {
-    return publicError(
-      "ACCESS_DENIED",
-      "Chưa xác minh được thao tác này do người thật thực hiện. Tải lại trang và gửi lại.",
-      requestId,
-    );
-  }
-
   let body: { draft?: unknown };
   try {
     const text = await request.text();
@@ -62,22 +52,57 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const draft = (body.draft ?? record.draft) as IntakeDraft | null;
-  if (!draft) {
-    return publicError("VALIDATION_FAILED", "Chưa có dữ liệu kê khai.", requestId);
+  if (!draft) return publicError("VALIDATION_FAILED", "Chưa có dữ liệu kê khai.", requestId);
+
+  const status: "SUBMITTED" | "RESUBMITTED" =
+    record.status === "NEEDS_SUPPLEMENT" || record.status === "RESUBMITTED"
+      ? "RESUBMITTED"
+      : "SUBMITTED";
+  const idempotencyKey = `PUBLIC_SUBMIT:${record.submissionId}:${rawIdempotencyKey.toLowerCase()}`;
+  const mutationHash = createHash("sha256")
+    .update(JSON.stringify({ submissionId: record.submissionId, status, draft }))
+    .digest("hex");
+  const repository = getPublicIntakeRepository();
+
+  // Nếu lần gửi trước đã commit nhưng response bị mất, trả lại đúng kết quả mà không yêu cầu Turnstile mới.
+  const replay = await repository.findStoredMutation(idempotencyKey, "PUBLIC_SUBMIT");
+  if (replay) {
+    if (replay.mutationHash !== mutationHash) {
+      return publicError(
+        "IDEMPOTENCY_CONFLICT",
+        "Khóa chống gửi trùng đã được dùng cho nội dung khác.",
+        requestId,
+      );
+    }
+    const replayStatus = replay.response.status;
+    return NextResponse.json({
+      receiptCode: record.receiptCode,
+      status: replayStatus === "RESUBMITTED" ? "RESUBMITTED" : "SUBMITTED",
+    });
   }
 
-  // Gửi chính thức là điểm dữ liệu rời khỏi tay người dân — kiểm đủ 15 trường Phụ lục 8 ở đây,
-  // không tin việc trình duyệt đã kiểm theo từng bước.
+  if (!isEditable(record)) {
+    return publicError("INVALID_STATE", "Bản kê khai này đã được gửi.", requestId);
+  }
+
+  const turnstile = await verifyTurnstileToken({
+    token: request.headers.get(TURNSTILE_HEADER),
+    action: "submit",
+    secretKey: environment.TURNSTILE_SECRET_KEY,
+    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
+  });
+  if (!turnstile.ok) {
+    return publicError(
+      "ACCESS_DENIED",
+      "Chưa xác minh được thao tác này do người thật thực hiện. Tải lại trang và gửi lại.",
+      requestId,
+    );
+  }
+
   const draftError = validateDraftForSubmit(draft);
-  if (draftError) {
-    return publicError("VALIDATION_FAILED", draftError, requestId);
-  }
+  if (draftError) return publicError("VALIDATION_FAILED", draftError, requestId);
 
-  // `file_summary_json` chỉ là cache phục vụ giao diện và có thể chậm một nhịp khi nhiều lượt
-  // upload hoàn tất gần nhau. Chỉ PUBLIC_FILES là nguồn thật để quyết định có được nộp hay không.
-  const files = await getPublicIntakeRepository().listFiles(record.submissionId);
-  // Người trên GCN đã mất / đã sang tên (hasDistinctCurrentUser) được miễn ảnh CCCD; chỉ những chủ
-  // còn phải tự chứng minh danh tính mới cần đủ cặp ảnh.
+  const files = await repository.listFiles(record.submissionId);
   const identityOwners = draft.owners.filter(
     (owner) => requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser,
   );
@@ -87,7 +112,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     ),
   );
   const certificateCount = files.filter((file) => file.documentType === "CERTIFICATE").length;
-
   if (!hasEveryCitizenIdPair || certificateCount < 1) {
     return publicError(
       "UPLOAD_INCOMPLETE",
@@ -96,26 +120,46 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const repository = getPublicIntakeRepository();
-  const status = record.status === "NEEDS_SUPPLEMENT" ? "RESUBMITTED" : "SUBMITTED";
-  
-  const pendingIdentityHmacs = status === "SUBMITTED"
-    ? identityOwners.map((owner) => identityHmac(environment.DATA_HASH_PEPPER, owner.identityNumber))
-    : undefined;
+  const pendingIdentityHmacs =
+    status === "SUBMITTED"
+      ? identityOwners.map((owner) =>
+          identityHmac(environment.DATA_HASH_PEPPER, owner.identityNumber),
+        )
+      : undefined;
 
-  await repository.submit({
-    record,
-    draft,
-    status,
-    timelineEvent: newTimelineEvent({
-      eventType: status,
-      label: status === "RESUBMITTED" ? "Đã gửi bổ sung" : "Đã gửi hồ sơ",
-      actorDisplayName: "Người nộp",
-    }),
-    actorEmail: "PUBLIC",
-    requestId,
-    pendingIdentityHmacs,
-  });
+  try {
+    await repository.submit({
+      record,
+      draft,
+      status,
+      timelineEvent: newTimelineEvent({
+        eventType: status,
+        label: status === "RESUBMITTED" ? "Đã gửi bổ sung" : "Đã gửi hồ sơ",
+        actorDisplayName: "Người nộp",
+      }),
+      actorEmail: "PUBLIC",
+      requestId,
+      idempotencyKey,
+      mutationHash,
+      pendingIdentityHmacs,
+    });
+  } catch (error) {
+    if (error instanceof SubmissionIdempotencyConflictError) {
+      return publicError(
+        "IDEMPOTENCY_CONFLICT",
+        "Khóa chống gửi trùng đã được dùng cho nội dung khác.",
+        requestId,
+      );
+    }
+    if (error instanceof SubmissionVersionConflictError) {
+      return publicError(
+        "VERSION_CONFLICT",
+        "Bản kê khai đã thay đổi ở một phiên khác. Vui lòng tải lại trước khi gửi.",
+        requestId,
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ receiptCode: record.receiptCode, status });
 }

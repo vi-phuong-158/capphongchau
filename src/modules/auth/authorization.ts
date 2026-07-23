@@ -1,9 +1,6 @@
 import { auth } from "@/auth";
 import type { UserRole } from "@/modules/common/domain";
-import {
-  getGoogleSheetsUserRepository,
-  type ActiveUser,
-} from "@/modules/users/google-sheets-user-repository";
+import { getUserRepository, type ActiveUser } from "@/modules/users/supabase-user-repository";
 
 export class AuthorizationError extends Error {
   constructor(readonly kind: "UNAUTHENTICATED" | "ACCESS_DENIED") {
@@ -23,7 +20,7 @@ export interface AuthorizedUser {
 }
 
 export async function resolveActiveUser(email: string): Promise<ActiveUser | null> {
-  return getGoogleSheetsUserRepository().findActiveByEmail(email);
+  return getUserRepository().findActiveByEmail(email);
 }
 
 export async function requireActiveUser(
@@ -50,8 +47,8 @@ export async function requireActiveUser(
 
 export async function recordDeniedSignIn(email: string): Promise<void> {
   try {
-    await getGoogleSheetsUserRepository().appendDeniedSignInAudit(email);
+    await getUserRepository().appendDeniedSignInAudit(email);
   } catch {
-    // Quyền vẫn bị từ chối khi audit tạm thời không ghi được. Không lộ chi tiết lỗi OAuth/Sheets.
+    // Quyền vẫn bị từ chối khi audit tạm thời không ghi được. Không lộ chi tiết lỗi Supabase.
   }
 }
