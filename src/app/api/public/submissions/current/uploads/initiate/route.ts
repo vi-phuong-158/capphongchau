@@ -122,7 +122,18 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
   if (identityImage) {
-    const owner = record.draft?.owners.find((candidate) => candidate.id === ownerId);
+    // Một số nháp legacy đã được nhập trước khi schema có cặp CCCD theo từng chủ. Không để
+    // dữ liệu cũ thiếu `owners` biến thành lỗi 500; migration sẽ bổ sung nháp đó, còn request
+    // đang dùng phiên cũ nhận lỗi có thể hiểu và tải lại trang.
+    const owners = record.draft?.owners;
+    if (!Array.isArray(owners)) {
+      return publicError(
+        "INVALID_STATE",
+        "Dữ liệu bản kê khai chưa đầy đủ. Tải lại trang và thử lại.",
+        requestId,
+      );
+    }
+    const owner = owners.find((candidate) => candidate.id === ownerId);
     if (!owner || !requiresCitizenId(owner.ownerType)) {
       return publicError("VALIDATION_FAILED", "Chủ sử dụng của ảnh CCCD không hợp lệ.", requestId);
     }

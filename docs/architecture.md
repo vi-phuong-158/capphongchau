@@ -81,7 +81,7 @@ Mỗi API write kiểm tra CSRF và quyền ở server. Turnstile/Cloudflare fai
 2. Backup spreadsheet và chặn ghi trong cửa sổ cutover.
 3. Chạy `npm run migrate:sheets-to-supabase -- --dry-run`.
 4. Chạy ETL thật. Script đọc trước toàn bộ tab, sau đó insert trong một PostgreSQL transaction; lỗi bất kỳ làm rollback toàn bộ.
-5. ETL đổi kiểu/đổi tên cột, giữ `legacy_row_index`, dựng lại chỉ mục GCN từ `EXISTING_CERTIFICATE_OWNERS`, và ghi marker `LEGACY_SHEETS_IMPORT:*` chống nhập lặp.
+5. ETL đổi kiểu/đổi tên cột, giữ `legacy_row_index`, đồng bộ identity sequence sau khi chèn giá trị legacy, dựng lại chỉ mục GCN từ `EXISTING_CERTIFICATE_OWNERS`, và ghi marker `LEGACY_SHEETS_IMPORT:*` chống nhập lặp.
 6. Đối chiếu row count và mẫu hồ sơ/file/audit; gọi hai health endpoint; deploy code; giữ Sheet ở chế độ chỉ đọc trong thời gian rollback đã chốt.
 
 Không chạy ETL khi production còn ghi. Không xóa spreadsheet sau cutover; giữ bản restricted theo chính sách lưu trữ/rollback.

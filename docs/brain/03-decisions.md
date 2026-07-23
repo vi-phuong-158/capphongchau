@@ -4,17 +4,24 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24] Phục hồi cutover Supabase: identity sequence và nháp legacy
+
+- **Quyết định:** Sau ETL, luôn đồng bộ sequence của `public_submissions.legacy_row_index` với giá trị lớn nhất đã chèn trong cùng transaction. Dùng migration idempotent cùng script `repair:public-submissions -- --apply` để phục hồi production đã cutover trước khi có quy tắc này. Nháp JSON legacy thiếu mảng `owners` được bổ sung một chủ sử dụng trống, tăng `version` và ghi audit; không suy diễn hoặc tự điền dữ liệu cá nhân.
+- **Lý do:** ETL đã chèn `legacy_row_index` từ số dòng Google Sheets. PostgreSQL không tự cập nhật sequence cho giá trị được chèn tường minh, làm các bản nháp tạo mới va chạm unique key. Một nháp legacy thiếu `owners` khiến endpoint upload gọi `.find()` trên `undefined` và trả 500 trước khi gọi Google Drive.
+- **An toàn/đánh đổi:** Chỉ sửa object `draft_json` thiếu hẳn hoặc sai kiểu `owners`, giữ nguyên các trường còn lại và có `AUDIT_LOGS`. Endpoint upload chặn shape bất thường bằng `409 INVALID_STATE`; người dân cần tải lại trang sau khi nháp được phục hồi. Không trả Drive ID, token hoặc dữ liệu nhận dạng trong lỗi/log.
+- **File:** `supabase/migrations/202607240001_repair_public_submission_identity_and_drafts.sql`, `scripts/repair-public-submissions.ts`, `scripts/migrate-sheets-to-supabase.ts`, hai route upload CCCD và test hồi quy.
+
 ## [2026-07-24] Cho phép cán bộ sửa trực tiếp `draft_json` — đảo một phần quyết định [2026-07-21]
 
 - **Quyết định:** Thêm `PATCH /api/submissions/:submissionId` cho cán bộ (`REVIEW_OFFICER` /
   `WARD_ADMIN` / `SYSTEM_ADMIN`) sửa trực tiếp một số trường trong `draft_json` của hồ sơ đang
   `UNDER_REVIEW` và do chính họ nhận xử lý (hoặc admin), thay vì bắt buộc `[Yêu cầu bổ sung]` cho
   mọi lỗi. Đây là **đảo một phần** quyết định [2026-07-21] "Hàng chờ cán bộ đọc từ
-  PUBLIC_SUBMISSIONS, không chuyển dữ liệu sớm" (mục *"claim, yêu cầu bổ sung và từ chối... không
-  sửa `draft_json` gốc"*) — chỉ đảo cho thao tác sửa field hẹp, không đảo phần "không chuyển dữ
+  PUBLIC_SUBMISSIONS, không chuyển dữ liệu sớm" (mục _"claim, yêu cầu bổ sung và từ chối... không
+  sửa `draft_json` gốc"_) — chỉ đảo cho thao tác sửa field hẹp, không đảo phần "không chuyển dữ
   liệu sớm sang CASES".
 - **Phạm vi trường được sửa:** thông tin Giấy chứng nhận (`certificate.issueNumber/issueDate/
-  registryNumber`) và thông tin cá nhân của từng chủ sử dụng (`fullName`, `identityNumber`,
+registryNumber`) và thông tin cá nhân của từng chủ sử dụng (`fullName`, `identityNumber`,
   `dateOfBirth`, `gender`, `residenceAddress`, `roleOnCertificate`). Không có trường "tổ dân phố"
   riêng trong schema — bao gồm trong `residenceAddress` (địa chỉ tự do).
 - **Khóa cứng theo QR:** nếu chủ sử dụng có `identityStatus === "QR_CONFIRMED"` (đã đọc từ chip

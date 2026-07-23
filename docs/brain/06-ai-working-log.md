@@ -1,4 +1,13 @@
 # 06 — AI Working Log
+
+## [2026-07-24] Khắc phục lỗi tạo nháp và phiên tải ảnh CCCD trên production
+
+- **Agent:** Codex.
+- **Thay đổi:** Đồng bộ `legacy_row_index` sequence sau ETL; thêm SQL migration và script `repair:public-submissions` có chế độ chỉ đọc/`--apply`. Script production đã chạy, đưa sequence lên sau giá trị legacy lớn nhất; thời điểm chạy không còn nháp thiếu `owners` để phải sửa. Hai route initiate/complete upload kiểm tra shape `owners` và trả `409 INVALID_STATE` thay vì 500; bước complete dọn file vừa tải nếu gặp nháp sai shape.
+- **File đã sửa:** `scripts/migrate-sheets-to-supabase.ts`, `scripts/repair-public-submissions.ts`, `supabase/migrations/202607240001_repair_public_submission_identity_and_drafts.sql`, route upload, `tests/public-upload-legacy-draft.test.ts`, tài liệu kiến trúc.
+- **Lý do:** ETL đã nhập explicit identity value nhưng sequence PostgreSQL chưa nhảy theo; đồng thời một nháp legacy từng thiếu `owners`, khiến `.find()` gây lỗi server trước khi tạo phiên Drive.
+- **Kiểm tra:** `npm.cmd run typecheck`; `npm.cmd run test` — 28 file/184 test; `npm.cmd run lint`; Prettier cho các file TypeScript/JSON; chạy `npm.cmd run repair:public-submissions -- --apply` thành công, không in PII.
+
 ## [2026-07-24] Cho phép cán bộ sửa trực tiếp thông tin hồ sơ (Phần B), hoãn Saga tiếp nhận (Phần A)
 
 - **Agent:** Claude Code.
@@ -49,6 +58,7 @@
 - **Security:** no PII or secrets printed; RLS still blocks anon/authenticated; files remain in Google Drive.
 
 ---
+
 > Nhật ký các lần AI (Claude Code / Codex) sửa code. Mỗi agent PHẢI thêm entry sau mỗi lần
 > chạm vào code. Đọc ngược từ trên xuống để biết gần đây ai đã làm gì và vì sao.
 

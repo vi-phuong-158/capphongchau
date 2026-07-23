@@ -54,7 +54,16 @@ export async function POST(request: Request): Promise<NextResponse> {
   const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
   const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
   if (identityImage) {
-    const owner = record.draft?.owners.find((candidate) => candidate.id === ownerId);
+    const owners = record.draft?.owners;
+    if (!Array.isArray(owners)) {
+      await storage.discardFile(driveFileId).catch(() => undefined);
+      return publicError(
+        "INVALID_STATE",
+        "Dữ liệu bản kê khai chưa đầy đủ. Tải lại trang và thử lại.",
+        requestId,
+      );
+    }
+    const owner = owners.find((candidate) => candidate.id === ownerId);
     if (!owner || !requiresCitizenId(owner.ownerType)) {
       return publicError("VALIDATION_FAILED", "Chủ sử dụng của ảnh CCCD không hợp lệ.", requestId);
     }

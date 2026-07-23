@@ -633,6 +633,30 @@ async function insertRows(
     );
   }
 }
+
+/**
+ * ETL giữ `legacy_row_index` của Google Sheets để cookie phiên v2 còn truy được hồ sơ cũ.
+ * Vì giá trị này được chèn tường minh vào cột identity, PostgreSQL không tự nhảy sequence.
+ * Đồng bộ trong cùng transaction để bản kê khai tạo sau cutover không va chạm khóa unique.
+ */
+async function alignPublicSubmissionIdentitySequence(database: Sql): Promise<void> {
+  const sequences = await database<{ sequence_name: string | null }[]>`
+    select pg_get_serial_sequence('public.public_submissions', 'legacy_row_index') as sequence_name
+  `;
+  const sequenceName = sequences[0]?.sequence_name;
+  if (!sequenceName) throw new Error("Không tìm thấy sequence legacy_row_index.");
+
+  const maximums = await database<{ maximum: string | null }[]>`
+    select max(legacy_row_index)::text as maximum from public.public_submissions
+  `;
+  const maximum = maximums[0]?.maximum;
+  await database.unsafe("select setval($1::regclass, $2::bigint, $3)", [
+    sequenceName,
+    maximum ?? "1",
+    maximum !== null,
+  ]);
+}
+
 async function readLookupIndex(
   sheets: sheets_v4.Sheets,
   spreadsheetId: string,
@@ -737,6 +761,7 @@ async function main(): Promise<void> {
       on conflict do nothing
     `;
     await insertRows(transaction, "public_lookup_index", lookupRows, true);
+    await alignPublicSubmissionIdentitySequence(transaction);
 
     await transaction`
       insert into public.request_log
