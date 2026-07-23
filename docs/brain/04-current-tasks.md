@@ -35,9 +35,10 @@ nhận có tác dụng: `/ke-khai` từ 404 chuyển sang 200 sau khi bật + re
 M2 đã hoàn thành và được kiểm tra build.
 
 **Cổng kê khai công khai `/ke-khai` đã chạy thật**: tạo nháp, autosave, upload trực tiếp lên
-Drive và gửi hồ sơ đều ghi vào Google Sheets + Google Drive thật. 7 tab `PUBLIC_*` đã được tạo
-bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab mới — **chưa** đụng cột của
-`CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN_NL.md` (kế hoạch đầy đủ M3.5) và entry log
+Drive và gửi hồ sơ đều ghi vào Google Sheets + Google Drive thật. Các tab intake ban đầu đã được tạo;
+Gói A bổ sung timeline, yêu cầu bổ sung, dữ liệu GCN cũ và chỉ mục HMAC qua migration append-only
+bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab hoặc nối header ở cuối — **không**
+đụng cột của `CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN2.md` và entry log
 [2026-07-21] trong `06-ai-working-log.md`.
 
 **Lớp biên — phần code đã xong (2026-07-22, nhánh `feat/edge-protection`):** Turnstile fail-closed
@@ -54,7 +55,9 @@ Chưa xong các mục đó thì chốt chặn ở origin **chưa bảo vệ đư
 - Danh bạ cán bộ hỗ trợ theo tổ dân phố + câu phạm vi áp dụng ở đầu `/ke-khai`.
 - Bảng tham chiếu tờ bản đồ cũ → mới (164 dòng) và trường `Parcel.oldWard`.
 
-⚠️ **Phải chạy `npm run migrate:public-intake` trước khi deploy** — cột `old_ward` là cột mới.
+✅ Đã chạy `npm run migrate:public-intake` trên Google Sheet đang cấu hình ngày 2026-07-22 — thêm
+8 tab Gói A và nối `access_version`, `file_summary_json`, `old_ward`. Môi trường Google Sheet khác
+vẫn phải chạy migration trước deploy.
 Script nay còn nối được cột thiếu vào tab đã tồn tại, không chỉ tạo tab mới.
 
 ### Chặn trước khi đưa cổng công khai vào dữ liệu thật

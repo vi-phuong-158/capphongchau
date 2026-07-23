@@ -63,8 +63,8 @@ src/modules/files/index.ts ─────→ kiểu file nội bộ (file_id t�
 src/modules/qr/index.ts ────────→ quy ước giải mã QR phía client
 src/modules/public-intake/citizen-id-qr* → parser QR bảo thủ + ZXing/HEIC chỉ chạy client
   ├── bắt buộc hint TRY_HARDER (mặc định trượt thất thường — tests/citizen-id-qr-decoding.test.ts)
-  ├── đọc ngầm khi tải ảnh CCCD, và nút "Quét QR" chụp một kiểu (ảnh quét không tải lên)
-  └── wizard.tsx: applyQrResult dùng chung hai đường, cờ force phân biệt ghi đè
+  ├── đọc từ chính ảnh CCCD mặt sau đã tải; không còn nút/chụp QR riêng
+  └── wizard.tsx: kết quả chỉ gợi ý, người nộp vẫn phải xác nhận hoặc nhập tay
 src/modules/audit/index.ts ─────→ kiểu tham chiếu audit append-only
 src/modules/sheets/index.ts ────→ src/modules/sheets/data-repository.ts
 src/modules/drive/index.ts ─────→ src/modules/drive/storage-repository.ts
@@ -128,6 +128,16 @@ src/app/ke-khai/wizard.tsx
     ├── src/modules/public-intake/storage.ts ─→ Google Drive 01_INBOX
     └── src/modules/public-intake/session.ts ─→ cookie + CSRF phiên công khai
 tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurrent retry, lỗi Google
+src/app/tra-cuu/page.tsx → public-lookup.tsx
+  ├── POST /api/public/submissions/recover → lockout + cookie v2(row/access_version)
+  ├── GET /api/public/submissions/current → file summary + checklist + supplement + timeline
+  └── GET /api/public/submissions/current/files/:fileId → preview no-store + audit
+src/app/ke-khai/wizard.tsx → POST /api/public/submissions/current/existing-records/check
+  ├── workflow.ts → HMAC( CCCD | họ tên | ngày sinh ) + che số GCN; không cần ảnh CCCD để tra cứu
+  ├── repository.ts → đọc đúng một bucket PUBLIC_LOOKUP_INDEX
+  └── POST /api/public/submissions/current/no-action → NO_ACTION_REQUIRED
+scripts/import_existing_certificates.py
+  └── Excel đã xác minh → validate/report → EXISTING_* + PUBLIC_LOOKUP_INDEX
 src/app/submissions/page.tsx ─→ src/components/submissions-queue.tsx
   └── GET /api/submissions ─→ PublicIntakeRepository (Google Sheets)
 src/app/submissions/[submissionId]/page.tsx ─→ src/components/submission-detail.tsx
@@ -192,7 +202,7 @@ Bảng đối chiếu đầy đủ 49 trường → nguồn dữ liệu: Phụ l
 
 Chi tiết đầy đủ nằm ở `AGENTS.md` §4 (mô hình dữ liệu) và §5 (API). Tóm tắt:
 
-**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), cùng bảy tab `PUBLIC_*` của cổng kê khai. `REQUEST_LOG` giữ idempotency key và kết quả đã cache tối thiểu 24 giờ; tạo nháp công khai ghi `PUBLIC_SUBMISSIONS` + `REQUEST_LOG` trong cùng batch và không cache mã bí mật rõ.
+**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), các tab intake hiện có và các tab append-only của Gói A: `PUBLIC_STATUS_EVENTS`, `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`, `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS`, `PUBLIC_LOOKUP_INDEX`. `PUBLIC_LOOKUP_INDEX` chia 256 cột theo byte đầu HMAC để một lần đối chiếu không quét toàn bộ 20.000 hồ sơ.
 
 **API chính**:
 
@@ -211,11 +221,17 @@ GET/POST/PATCH /api/users
 GET        /api/health/google
 GET        /api/security/csrf
 POST       /api/public/submissions
+POST       /api/public/submissions/recover
 GET/PATCH  /api/public/submissions/current
+GET        /api/public/submissions/current/files/:fileId
+POST       /api/public/submissions/current/existing-records/check
+POST       /api/public/submissions/current/existing-records/link
+POST       /api/public/submissions/current/no-action
 POST       /api/public/submissions/current/uploads/initiate
 POST       /api/public/submissions/current/uploads/complete
 POST       /api/public/submissions/current/submit
 POST       /api/submissions/:submissionId/accept
+POST       /api/submissions/:submissionId/reset-access-secret
 ```
 
 Google Drive folder layout:

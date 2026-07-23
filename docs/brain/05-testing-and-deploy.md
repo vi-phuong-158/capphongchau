@@ -94,8 +94,8 @@ giữa cổng công khai trả 404/403 cho mọi người.
    `ORIGIN_SHARED_SECRET` vào mọi request. Thiếu bước này thì origin từ chối toàn bộ cổng công khai.
 4. **Cache Rule**: bypass cache cho `/api/*` và `/ke-khai*`. Không bật "Cache Everything" hay
    Automatic Platform Optimization — một trang nháp bị cache là lộ PII sang người khác.
-5. **Rate limiting** theo bảng `PLAN_NL` §10.2 (`/api/public/*` 120 req/10 phút/IP;
-   `/api/public/submissions/access` 10 req/10 phút/IP; POST tạo nháp 5 req/giờ/IP). Bật chế độ
+5. **Rate limiting** theo bảng `PLAN2.md` (`/api/public/*` 120 req/10 phút/IP;
+   `/api/public/submissions/recover` 10 req/10 phút/IP; POST tạo nháp 5 req/giờ/IP). Bật chế độ
    **Log** trước, quan sát rồi mới chuyển Block. Kiểm số rule gói hiện tại cho phép trước khi
    thiết kế — gói Free thường chỉ được một rule.
 6. Vercel: đặt `ORIGIN_SHARED_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
@@ -128,6 +128,22 @@ tồn tại**. Chỉ nối thêm — không đổi tên, không chèn giữa, kh
 
 ⚠️ Bản hiện tại có cột mới `old_ward` trong `PUBLIC_PARCELS` — **phải chạy lệnh trên trước khi
 deploy**, nếu không dữ liệu đơn vị hành chính cũ ghi vào một cột không có tiêu đề.
+
+### Nhập dữ liệu GCN cũ cho Gói A
+
+Chạy theo đúng thứ tự, dùng Python 3.11+ và không dùng pepper giả ở môi trường thật:
+
+```powershell
+python -m pip install -r requirements-import.txt
+npm run migrate:public-intake
+python scripts/import_existing_certificates.py
+# Duyệt reports/existing-import-*.json, backup Sheet, rồi mới:
+python scripts/import_existing_certificates.py --apply
+```
+
+Dry-run không ghi Sheets và báo cáo chỉ chứa số dòng nguồn + mã lỗi, không chứa CCCD/họ tên. `--apply`
+ghi `EXISTING_*` và chỉ mục HMAC; cùng SHA-256 nguồn đã `COMPLETED` sẽ không nhập lại. Nếu lần trước
+dừng ở `STARTED`, script fail-closed để quản trị viên kiểm tra dữ liệu trước khi chạy tiếp.
 
 ## Lưu ý
 

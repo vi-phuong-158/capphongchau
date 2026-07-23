@@ -122,6 +122,8 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 ### 3.4. QR CCCD
 
 - Dùng `@zxing/browser` hoàn toàn phía client; đọc từ ảnh CCCD đã tải và thử xoay 0/90/180/270 độ.
+- Hai ô tải CCCD mặt trước/mặt sau nằm đầu phần thông tin cá nhân; ảnh mặt sau đồng thời dùng để
+  đọc QR. Không yêu cầu người dân chụp/tải CCCD lần thứ hai chỉ để quét QR.
 - Chỉ chấp nhận CCCD gồm 12 chữ số và ngày hợp lệ.
 - QR chỉ là dữ liệu gợi ý. Cán bộ phải xem/xác nhận; QR không được ghi đè dữ liệu đã sửa thủ công.
 - Không lưu payload QR thô. Chỉ lưu dữ liệu đã tách, hash payload, phiên bản decoder/parser, trạng thái và người xác nhận.
@@ -139,6 +141,10 @@ Tạo các tab sau:
 - `FILES`: `file_id`, `case_id`, `owner_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
 - `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, `owner_id`, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
 - `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX`.
+- Khu vực tra cứu/đối chiếu bổ sung các tab append-only: `PUBLIC_STATUS_EVENTS`,
+  `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`,
+  `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS` và
+  `PUBLIC_LOOKUP_INDEX` (256 bucket HMAC).
 - Tạo sẵn `PARCELS`, `ASSETS`, `OCR_FIELDS` để tương thích nâng cấp nhưng không đưa vào quy trình hiện tại.
 
 Không xóa dòng, cột hoặc sheet đã dùng. Nếu thay đổi schema phải có migration, cập nhật tài liệu và bảo toàn dữ liệu cũ.
@@ -166,6 +172,10 @@ DRAFT → UPLOADED → PENDING_REVIEW → VERIFIED
                      └→ NEEDS_MORE_DOCUMENTS → UPLOADED
 VERIFIED → ARCHIVED (SYSTEM_ADMIN hoặc WARD_ADMIN)
 ```
+
+Khu vực công khai còn có `SUBMITTED`, `UNDER_REVIEW`, `NEEDS_SUPPLEMENT`, `RESUBMITTED`,
+`ACCEPTING`, `ACCEPTED`, `NO_ACTION_REQUIRED`, `REJECTED`, `EXPIRED`. `NO_ACTION_REQUIRED` chỉ dùng
+khi định danh khớp bản ghi GCN đã xác minh và người nộp xác nhận không còn GCN mới.
 
 - `DRAFT`: đã tạo nhưng chưa đủ ảnh bắt buộc.
 - `UPLOADED`: có đủ hai mặt CCCD cho từng cá nhân và ít nhất một ảnh GCN.
@@ -218,13 +228,19 @@ GET/POST/PATCH /api/users
 GET /api/health/google
 GET /api/security/csrf
 POST /api/public/submissions
+POST /api/public/submissions/recover
 GET/PATCH /api/public/submissions/current
+GET /api/public/submissions/current/files/:fileId
+POST /api/public/submissions/current/existing-records/check
+POST /api/public/submissions/current/existing-records/link
+POST /api/public/submissions/current/no-action
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
 POST /api/public/submissions/current/submit
 GET /api/submissions
 GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
+POST /api/submissions/:submissionId/reset-access-secret
 GET /api/submissions/:submissionId/files/:fileId
 ```
 

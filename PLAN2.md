@@ -33,7 +33,8 @@ Phần lớn khoản tiết kiệm đến từ việc bỏ sharding và `CONTROL
 | Bảng tham chiếu tờ bản đồ cũ → mới (164 dòng, trường 19 của PL3)            | `4f32e27`            |
 | Trường "đơn vị hành chính cũ" của thửa đất                                  | `177fa8e`            |
 
-**Cần chạy trước khi deploy:** `npm run migrate:public-intake` (cột `old_ward` mới).
+**Đã chạy 2026-07-22 trên Google Sheet đang cấu hình:** `npm run migrate:public-intake` (cột
+`old_ward` và schema Gói A). Google Sheet của môi trường khác vẫn phải chạy trước deploy.
 
 ---
 
@@ -53,13 +54,43 @@ Nặng hơn: mã nguồn đang **hứa** với người dân _"Nhập lại mã 
 Ở 20.000 hồ sơ, chỉ 10% gặp cảnh này là **2.000 người dân gọi lên phường** mà cán bộ không có cách
 nào giúp.
 
-- [ ] Trang "Tra cứu / tiếp tục hồ sơ": mã tiếp nhận + mã bí mật + Turnstile
+- [ ] Trang "Tra cứu / tiếp tục hồ sơ": mã tiếp nhận + mã bí mật + Turnstile; dùng được cho cả
+      **nháp chưa gửi** và **hồ sơ đã gửi**
 - [ ] Đếm sai, khóa tạm — dùng `failedAttempts`/`lockedUntil` đã có sẵn cột
 - [ ] Cấp lại session + CSRF, trả về nháp, **danh sách ảnh đã tải**, trạng thái, yêu cầu bổ sung
 - [ ] `GET /api/public/submissions/current` phải trả file summary (hiện chỉ trả `draft`)
 - [ ] Sửa `certificatePhotos` đang là state client thuần — tải lại trang là về 0 dù ảnh đã ở Drive
 
-**Ước 2–3 ngày.**
+#### Tra cứu sau khi đã nộp — người dân phải tự trả lời được ba câu hỏi
+
+1. **Tôi đã nộp chưa?** Hiện mã tiếp nhận, trạng thái bằng tiếng Việt, thời điểm gửi/cập nhật gần
+   nhất và mã hồ sơ chính thức nếu đã tiếp nhận. Ánh xạ trạng thái tối thiểu:
+   `DRAFT` → Chưa gửi; `SUBMITTED`/`RESUBMITTED` → Đã gửi; `UNDER_REVIEW` → Đang kiểm tra;
+   `NEEDS_SUPPLEMENT` → Cần bổ sung; `ACCEPTING` → Đang tiếp nhận; `ACCEPTED` → Đã tiếp nhận;
+   `REJECTED` → Không tiếp nhận; `EXPIRED` → Hết thời hạn lưu nháp.
+2. **Tôi đã nộp những gì?** Hiện checklist theo từng người và từng GCN: CCCD mặt trước, CCCD mặt
+   sau, số ảnh GCN, tên/nhãn tài liệu, thời điểm hệ thống xác nhận upload và trạng thái
+   `Đã nhận`/`Đã thay`/`Không còn hiệu lực`. Dữ liệu phải lấy từ `PUBLIC_FILES` đã xác minh, không
+   lấy từ state trình duyệt hoặc chỉ dựa vào tên file.
+3. **Tôi còn thiếu gì?** Hệ thống tự tính các mục bắt buộc chưa đủ theo schema hiện hành và gộp với
+   yêu cầu bổ sung của cán bộ. Mỗi mục cần có: người/GCN liên quan, trường hoặc ảnh còn thiếu, lý do,
+   hướng dẫn bổ sung và thời hạn nếu cơ quan có quy định. Khi đủ phải hiện rõ **"Hồ sơ hiện không
+   còn nội dung cần bổ sung"**.
+
+- [ ] API tra cứu trả DTO tối thiểu: `status`, `statusLabel`, `updatedAt`, `officialCaseId` đã che khi
+      cần, `fileSummary`, `completionChecklist`, `missingItems` và `supplementRequest`; không trả Drive ID,
+      link Drive, QR raw, CCCD đầy đủ hoặc `draft_json` ngoài phiên đã xác thực
+- [ ] Màn tra cứu có timeline trạng thái, nút "Bổ sung hồ sơ" chỉ mở khi `NEEDS_SUPPLEMENT`, và nút
+      "Tiếp tục bản nháp" chỉ mở khi `DRAFT`
+- [ ] Việc xem danh sách tài liệu/ảnh nhạy cảm phải qua mã tiếp nhận + mã bí mật, rate limit,
+      `private, no-store`; xem ảnh phải ghi audit. Không mở trang tra cứu công khai chỉ bằng CCCD hoặc
+      số điện thoại; việc đối chiếu CCCD trước khi nộp chỉ thực hiện trong phiên kê khai có kiểm soát
+      theo mục 5.1
+- [ ] Yêu cầu bổ sung phải lưu cấu trúc theo mục cần sửa/ảnh cần thay, không chỉ một đoạn ghi chú;
+      gửi lại phải giữ lịch sử lần nộp trước để người dân và cán bộ cùng đối chiếu
+
+**Ước 3–4 ngày** cho khôi phục nháp + tra cứu sau nộp + checklist thiếu/đủ; chưa gồm luồng cán bộ
+soạn yêu cầu bổ sung có cấu trúc ở mục 6.1.
 
 ### 2.2. Đồng ý và thông báo bảo vệ dữ liệu
 
@@ -168,12 +199,20 @@ Hệ thống hiện **sai cả hai**: `OWNER_TYPES` thiếu _Đồng sử dụng
 
 ### 4.2. Bốn lỗi sửa được ngay, không phụ thuộc câu trả lời của cơ quan
 
-- [ ] **(c)** Sửa giá trị trường 12/13 theo dropdown PL3
-- [ ] **(d)** Dung sai diện tích — quy tắc hiện tại **từ chối chính dữ liệu PL3 mẫu** (dòng 9: thửa `29,16` m², loại đất `29,2` m² → báo lỗi "tổng vượt diện tích thửa")
-- [ ] **(e)** Bịt lỗ Hộ gia đình / Tổ chức (xem 2.3)
-- [ ] **(f)** Giới hạn **3** dòng mục đích mỗi thửa cho khớp PL3 (hiện không giới hạn → thửa có 4 mục đích sẽ mất dữ liệu khi xuất)
+- [x] **(c)** Sửa giá trị trường 12/13 theo dropdown PL3
+- [x] **(d)** Dung sai diện tích — quy tắc hiện tại **từ chối chính dữ liệu PL3 mẫu** (dòng 9: thửa `29,16` m², loại đất `29,2` m² → báo lỗi "tổng vượt diện tích thửa")
+- [x] **(e)** Bịt lỗ Hộ gia đình / Tổ chức (xem 2.3)
+- [x] **(f)** Giới hạn **3** dòng mục đích mỗi thửa cho khớp PL3 (hiện không giới hạn → thửa có 4 mục đích sẽ mất dữ liệu khi xuất)
 
-**Ước 1 ngày cho cả bốn.**
+**Xong ngày 2026-07-22.** Chi tiết ở `docs/brain/06-ai-working-log.md`. Ba điểm cần biết:
+
+- Bốn mã vai trò cũ (`CHU_SU_DUNG`/`DONG_SU_DUNG`/`DAI_DIEN_HO`/`DAI_DIEN_TO_CHUC`) đã có ánh xạ
+  sang giá trị PL3, tự đổi khi tải nháp cũ. `DONG_SU_DUNG` → `Thành viên` là **suy đoán gần nhất**
+  (PL3 xếp "Đồng sử dụng" vào trường 12 chứ không phải 13) — hồ sơ cũ mang mã này cần cán bộ xem lại.
+- Dung sai diện tích chốt **0,5 m²**, đủ che sai số làm tròn 0,1 m² trên tối đa ba dòng.
+- **Còn hở:** hồ sơ toàn chủ thể là tổ chức vẫn nộp được mà không có ảnh CCCD nào. Đã nâng rào bằng
+  mã số thuế đúng định dạng + địa chỉ trụ sở, nhưng bịt hẳn thì phải thu CCCD **người đại diện** —
+  việc này gộp vào đợt làm trường 14/15 (người sử dụng hiện tại).
 
 ### 4.3. Trường 19 — đã tự tính được
 
@@ -194,17 +233,17 @@ sách cán bộ đối chiếu thủ công thay vì bị gán bừa.
 
 ### 4.4. Còn thiếu so với PL3
 
-| Nhóm                             | Trường            | Trạng thái                                                                               |
-| -------------------------------- | ----------------- | ---------------------------------------------------------------------------------------- |
-| Nhà ở / chung cư                 | 40–48 (9 trường)  | ❌ Chưa thu. `Asset` hiện chỉ có loại + mô tả                                            |
-| Người sử dụng hiện tại           | cột O, P + 14, 15 | ❌ Chưa thu. Gồm **lý do thay đổi** (thừa kế/tặng cho/chuyển nhượng)                     |
-| Số thứ tự thửa trên BĐ địa chính | 20                | ❌ **Không có nguồn nào** — bảng tham chiếu chỉ quy đổi số _tờ_, không quy đổi số _thửa_ |
-| Tên file quét                    | 49                | ❌ Cần sinh PDF đặt tên `{số phát hành}-GCN.pdf` và `-GT.pdf`                            |
-| Mã ĐVHC cấp xã                   | 1                 | ✅ Đã biết: **`07954`**                                                                  |
+| Nhóm                             | Trường            | Trạng thái                                                                                                                                                                      |
+| -------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nhà ở / chung cư                 | 40–48 (9 trường)  | ❌ Chưa thu. `Asset` hiện chỉ có loại + mô tả                                                                                                                                   |
+| Người sử dụng hiện tại           | cột O, P + 14, 15 | ✅ **Đã thu** (2026-07-23). Bật khi người trên GCN đã mất/sang tên; miễn ảnh CCCD người trên GCN, khai Tên + CCCD + Địa chỉ 2 cấp + Lý do (thừa kế/tặng cho/chuyển nhượng/khác) |
+| Số thứ tự thửa trên BĐ địa chính | 20                | ❌ **Không có nguồn nào** — bảng tham chiếu chỉ quy đổi số _tờ_, không quy đổi số _thửa_                                                                                        |
+| Tên file quét                    | 49                | ❌ Cần sinh PDF đặt tên `{số phát hành}-GCN.pdf` và `-GT.pdf`                                                                                                                   |
+| Mã ĐVHC cấp xã                   | 1                 | ✅ Đã biết: **`07954`**                                                                                                                                                         |
 
 ### 4.5. Bẫy chất lượng dữ liệu nằm ngay trong PL3 mẫu
 
-- `D6 = '9/10/1017'` — **năm 1017**, lỗi gõ của 2017, lọt vào file mẫu chính thức. Củng cố nhu cầu `VietnameseDateInput` có kiểm năm hợp lý
+- `D6 = '9/10/1017'` — **năm 1017**, lỗi gõ của 2017, lọt vào file mẫu chính thức. ✅ **Đã làm** (2026-07-23) `VietnameseDateInput` (ba ô số Ngày/Tháng/Năm): kiểm ngày hợp lệ, chặn ngày tương lai, năm sinh ≥ 1900, năm cấp GCN ≥ 1987 → chặn đúng lỗi `1017`. Dùng cho cả ngày sinh và ngày cấp GCN
 - Cột ngày **trộn hai kiểu**: `D5` là chuỗi `'20/02/2006'`, `D7` là datetime thật. Export phải chuẩn hóa
 - Diện tích thửa `29,16` vs diện tích loại đất `29,2` (xem 4.2 mục d)
 
@@ -215,12 +254,103 @@ sách cán bộ đối chiếu thủ công thay vì bị gán bừa.
 - [ ] `VietnameseDateInput` dùng chung: gõ `DD/MM/YYYY` bằng bàn phím số, nhận `15-08-1992`/`15081992`, lịch là tùy chọn, kiểm năm hợp lý và không cho ngày tương lai. Áp cho ngày sinh, ngày cấp GCN, ngày hết hạn
 - [ ] Chuẩn hóa số thập phân kiểu Việt: `123,5` · `123.5` · `1 234,5` (hiện `Number("123,5")` = `NaN`)
 - [ ] Ảnh GCN: xem trước, xóa mềm, thay, sắp xếp, gắn nhãn trang (hiện **chỉ hiện tên file, không có nút xóa**)
-- [ ] Đổi thứ tự CCCD: mặt trước → mặt sau → tự đọc QR (hiện là mặt sau → mặt trước)
+- [ ] Đưa khối **"Ảnh căn cước công dân" lên đầu phần thông tin của từng người**. Trên cùng một màn
+      hình cho chọn/chụp luôn đủ hai ô **Mặt trước** và **Mặt sau**, có preview, tiến độ tải và nút thay
+      riêng từng mặt; sau đó mới tới các ô họ tên, số CCCD, ngày sinh, giới tính, địa chỉ
+- [ ] Ngay khi có ảnh, trình duyệt tự thử đọc QR từ **cả hai ảnh đã chọn** rồi gợi ý điền thông tin;
+      dữ liệu QR vẫn phải được người dân kiểm tra/xác nhận và không ghi đè nội dung họ đã sửa tay
+- [ ] **Không yêu cầu chụp/tải thêm ảnh thứ ba chỉ để quét QR.** Nút "Đọc lại QR" phải dùng lại hai
+      ảnh CCCD hiện có. Sau khi tải lại trang hoặc đổi thiết bị, ứng dụng lấy preview riêng tư qua API
+      rồi thử đọc lại trên thiết bị; chỉ yêu cầu thay ảnh nếu file thực sự hỏng/không đọc được, không bắt
+      tải lại cả hai mặt
+- [ ] Khi triển khai, cập nhật quyết định cũ trong `docs/brain/03-decisions.md` đang cho chụp thêm một
+      ảnh riêng để quét; yêu cầu mới tại mục này **thay thế** quyết định đó
+- [ ] QR không đọc được không được chặn lưu/gửi; chuyển sang nhập tay và giữ nguyên hai ảnh đã tải
 - [ ] Trang kiểm tra cuối hiển thị **đầy đủ** nội dung + nút "Sửa" từng khối (hiện chỉ đếm số lượng)
 - [ ] Danh mục dài (loại đất **45 mục**) cần **ô tìm kiếm lọc**, không phải `<select>` thuần — 45 dòng chữ dài trên màn hình 375px là không dùng được
 - [ ] Mục "Không tìm thấy — ghi theo bìa" + ô chữ tự do, cho GCN cũ ghi "đất thổ cư", "đất vườn"
 - [ ] Mục "Tôi không chắc — đề nghị cán bộ đối chiếu"
 - [ ] Accessibility: `id`/`htmlFor`, `name`, `autoComplete`, `aria-describedby`, tự chuyển focus tới lỗi đầu tiên. Hiện **toàn repo không có một `htmlFor` nào**
+
+### 5.1. Kiểm tra hồ sơ đã có theo CCCD — chỉ yêu cầu nộp phần còn thiếu
+
+Mục tiêu của luồng này là tận dụng dữ liệu phường đã có, không bắt người dân nộp lại cùng một GCN.
+Đây **không phải** trang tìm hồ sơ đất đai công khai bằng số CCCD.
+
+**Chốt sau khi soi kho thật `24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx` (2026-07-23):**
+
+- **Khóa tra = CCCD.** Kho có 5.041 dòng; **99% cá nhân có CCCD 12 số** (3.492 CCCD phân biệt).
+  Số phát hành GCN chỉ phủ 90% và định dạng bẩn (`AĐ 266864`, `W 654083`) → không dùng làm khóa
+  chính. Số GCN chỉ là **lối phụ** cho 218 dòng có GCN mà thiếu CCCD.
+- **BỎ ngày sinh khỏi khóa khớp.** Kho có **87% ngày sinh chỉ ghi mỗi năm** (`1989`), phần còn lại
+  định dạng Mỹ `mm/dd/yyyy`. HMAC hiện gồm `CCCD+tên+ngày sinh` (cả `workflow.ts` lẫn script import)
+  sẽ **trượt ~87%** vì app gửi ngày sinh đầy đủ. Phải đổi khóa về **CCCD** (tên chỉ để người dân
+  nhìn xác nhận, không băm vào khóa). **Đây là lỗi chặn — chưa sửa thì đừng bật tính năng.**
+- **Chống dò: bắt buộc quét QR** (phương án chủ dự án chốt 2026-07-23). Vì đã bỏ ngày sinh, khóa chỉ
+  còn CCCD; ô tra nhanh chỉ mở khi có QR CCCD hợp lệ trong phiên (đang cầm thẻ thật), không cho gõ
+  tay số CCCD rồi dò. Thay cho yêu cầu "đủ hai ảnh CCCD" ở bản trước.
+- **Tổ chức (280 dòng, 0 có CCCD):** khớp bằng mã số thuế; kho ghi dạng `N/A-796300046` → bóc tiền
+  tố `N/A-` lấy 10 số. **92 dòng** không CCCD lẫn GCN → cán bộ thủ công.
+- Đối chiếu chuẩn hóa **Python (import) vs TS (app)** phải có vector test chung: `toLocaleUpperCase("vi-VN")`
+  (TS) vs `.upper()` (Python) có thể lệch, lệch là trượt âm thầm.
+
+Hai file kia: `24.7.2026 PhuongPhongChau (hiện trạng dữ liệu).xlsx` là **bảng phân loại chất
+lượng/trạng thái theo thửa** (đã xuất sổ, đồng bộ 3 khối, đang vận hành) — nguồn để gắn cờ
+`REUSABLE`, không phải nguồn định danh. `PL3.xlsx` là dữ liệu thô (bộ 49 trường, đích xuất).
+
+**Hai điểm kích hoạt trên cùng khối thông tin CCCD:**
+
+1. QR đọc thành công → người dân kiểm tra và bấm **"Xác nhận thông tin"** → hệ thống tự chạy kiểm
+   tra hồ sơ đã có.
+2. QR không đọc được → người dân nhập CCCD 12 số → bấm **"Kiểm tra hồ sơ đã có"**. Nút chỉ bật khi
+   CCCD hợp lệ; muốn chọn tái sử dụng GCN phải hoàn thành thêm họ tên/ngày sinh và có đủ hai ảnh CCCD
+   trong phiên, tránh người khác chỉ biết một số CCCD là xem được hồ sơ.
+
+**Kết quả phải trả lời rõ:**
+
+- `CHƯA CÓ`: "Chưa tìm thấy hồ sơ đã nộp" → tiếp tục tải ảnh GCN như bình thường.
+- `ĐÃ CÓ VÀ ĐƯỢC TÁI SỬ DỤNG`: hiện các GCN ở dạng che một phần số phát hành, ngày cấp và trạng thái
+  `Đã có trong hệ thống — không cần nộp lại`; người dân xác nhận đúng/sai và vẫn có nút **"Tôi có
+  thêm GCN khác"**.
+- `ĐÃ CÓ DỮ LIỆU NHƯNG CHƯA ĐỦ MINH CHỨNG`: thông báo hệ thống đã có thông tin, chỉ yêu cầu đúng ảnh
+  hoặc trường còn thiếu; không bắt khai lại toàn bộ.
+- `CÓ DỮ LIỆU MÂU THUẪN/TRÙNG`: không hiển thị thông tin của chủ thể khác, không tự liên kết; chuyển
+  cán bộ kiểm tra và vẫn cho người dân tiếp tục kê khai.
+
+**Điều kiện để bỏ qua việc nộp lại:**
+
+- Bản ghi cũ phải được chuẩn hóa thành quan hệ **CCCD HMAC ↔ chủ thể ↔ GCN**, có nguồn dữ liệu và
+  trạng thái `REUSABLE` do cơ quan xác nhận. Không đánh dấu toàn bộ dữ liệu Excel cũ là tái sử dụng
+  một cách tự động.
+- Nếu bản ghi cũ chỉ có dữ liệu hàng/cột mà chưa có file quét, cơ quan phải quyết định loại hồ sơ nào
+  được coi là đủ. Checklist của người dân chỉ đánh dấu `Đã đủ` khi quy tắc này cho phép.
+- Khi người dân chọn một GCN đã có, hệ thống lưu **liên kết tới bản ghi hiện có**, không sao chép dòng
+  hoặc file. Cán bộ vẫn xác nhận liên kết trước khi tiếp nhận chính thức.
+
+**Kỹ thuật và bảo mật:**
+
+- [ ] Import/chuẩn hóa bộ dữ liệu hiện có (tệp tổng hợp đang có 7.916 dòng, khoảng 4.351 số phát hành)
+      và phân loại `REUSABLE`/`DATA_ONLY`/`CONFLICT` trước khi bật tính năng
+- [ ] Tạo chỉ mục tra cứu bằng HMAC CCCD phía server (Codex đã dựng `PUBLIC_LOOKUP_INDEX` 256 cột
+      theo byte đầu HMAC); không quét toàn bộ `OWNERS`/`PUBLIC_OWNERS`, không lưu CCCD rõ trong chỉ
+      mục hoặc technical log
+- [x] **Đổi khóa khớp về CCCD** (2026-07-23): khớp chỉ theo HMAC của CCCD. Bỏ `identityMatchHmac`
+      khỏi cả hai điều kiện khớp (`findExistingCertificates`, `hasPendingIdentityMatch`); bỏ ngày
+      sinh khỏi `identity_hashes` của script import Python. Ngày sinh + họ tên không còn trong khóa.
+- [x] **Bắt buộc quét QR cho ô tra nhanh** (2026-07-23): `hasCompleteExistingRecordLookupIdentity`
+      giờ chỉ chấp nhận `QR_CONFIRMED`. Nút "Kiểm tra GCN đã có" đường gõ tay đã gỡ khỏi wizard.
+- [ ] `POST /api/public/submissions/current/existing-records/check`: chỉ chạy trong draft session đã
+      đồng ý thông báo dữ liệu, có CSRF + Turnstile/rate limit; không truyền CCCD trong URL; phản hồi
+      chỉ chứa kết quả đã che và không có Drive ID/link Drive, địa chỉ thửa hoặc thông tin người khác
+- [ ] `POST /api/public/submissions/current/existing-records/link`: lưu `existing_record_id`,
+      `owner_id`, loại khớp, nguồn và trạng thái cán bộ xác nhận; có idempotency, version và audit
+- [ ] `completionChecklist` và `missingItems` phải tính cả GCN đã liên kết: hồ sơ đã có đủ thì không
+      yêu cầu tải lại; chỉ thiếu phần nào mới mở đúng ô tải/nhập của phần đó
+- [ ] Mọi lần kiểm tra CCCD, xem kết quả, xác nhận đúng/sai và liên kết GCN đều ghi audit nhưng chỉ ghi
+      HMAC/mã nội bộ; thông báo `có`/`không có` phải chống dò hàng loạt và không tiết lộ PII
+
+**Ước 3–4 ngày** sau khi dữ liệu cũ đã được chuẩn hóa và cơ quan chốt tiêu chí `REUSABLE`; công làm
+sạch/import dữ liệu cũ tính riêng.
 
 ---
 
@@ -294,6 +424,15 @@ Làm được ngay: **checklist từng hồ sơ** (cấu trúc độc lập vớ
 - Unit: ngày Việt, số thập phân, tra tờ bản đồ, trạng thái, idempotency, danh mục, checklist
 - Integration: retry/quota, thay ảnh, khóa mã truy cập, gửi lại không trùng dòng, saga resume
 - E2E: Android Chrome, iPhone Safari; tải lại trang, **đổi thiết bị**, 4G yếu, mất mạng giữa chừng
+- E2E tra cứu sau nộp: nhập mã tiếp nhận + mã bí mật, xem đúng trạng thái, danh sách đã nộp và phần
+  còn thiếu; sai mã bị giới hạn thử; không lộ Drive ID/CCCD đầy đủ; bổ sung xong checklist trở về đủ
+- E2E CCCD/QR: tải mặt trước + mặt sau ngay đầu biểu mẫu, tự đọc QR từ ảnh đã chọn, tải lại/đổi máy
+  vẫn nhận ra hai ảnh đã có và **không yêu cầu chụp hoặc tải lần thứ ba**
+- E2E đối chiếu hồ sơ đã có: QR xác nhận thì tự kiểm tra; nhập tay CCCD thì nút kiểm tra trả đúng
+  GCN đã che; GCN `REUSABLE` không bị yêu cầu tải lại; vẫn thêm được GCN mới; dữ liệu mâu thuẫn
+  chuyển cán bộ và không lộ chủ thể khác
+- Security: không gọi API kiểm tra nếu thiếu draft session/CSRF/consent; rate limit chống dò CCCD;
+  CCCD không xuất hiện trong URL, response lỗi, audit metadata hoặc technical log
 - Ảnh HEIC, ảnh 20–30 MB, **ảnh từ Zalo** (ca lỗi đã gặp thật)
 - Ngày sinh/ngày cấp cũ 20–30 năm; font scaling 200%
 

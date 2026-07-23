@@ -117,6 +117,16 @@ GCN bị xóa chỉ chuyển trạng thái `DELETED`, không hard-delete trên D
   không lộ stack, PII, Drive ID hoặc token.
 - Route tạo nháp có `maxDuration=30`; client chờ tối đa 35 giây vì cold request phải đọc Sheets,
   tạo cây thư mục Drive và batch ghi Google trước khi trả cookie phiên.
+- `/tra-cuu` khôi phục phiên bằng mã tiếp nhận + mã bí mật, khóa 15 phút sau 5 lần sai và cấp lại
+  cookie v2 chứa định vị dòng + `access_version`. Khi quản trị viên cấp lại mã sau đối chiếu trực
+  tiếp, `access_version` tăng nên mọi cookie cũ mất hiệu lực.
+- Timeline và yêu cầu bổ sung được lưu thành dòng append-only; yêu cầu bổ sung chỉ mở đúng
+  `field_path`/`document_type` đã chỉ định. File summary nằm cùng dòng submission để tải lại trang
+  không mất số ảnh và không phải quét toàn bộ `PUBLIC_FILES` ở đường nóng.
+- Dữ liệu GCN cũ được nhập bằng `scripts/import_existing_certificates.py`: dòng sai bị loại và báo
+  cáo riêng, CCCD chỉ xuất hiện dưới dạng HMAC, bản ghi xung đột không được trả công khai. Lookup
+  chỉ đọc một trong 256 bucket HMAC và chỉ hiển thị số phát hành đã che + ngày cấp sau khi khớp đủ
+  CCCD, họ tên, ngày sinh và có cặp ảnh CCCD trong phiên.
 
 ## Hướng nâng cấp
 
