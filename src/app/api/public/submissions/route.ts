@@ -91,12 +91,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError("ACCESS_DENIED", "Yêu cầu không hợp lệ.", requestId);
   }
 
-  let body: { phone?: unknown; consent?: { accepted?: unknown; version?: unknown } };
+  let body: { phone?: unknown };
   try {
-    body = (await request.json()) as {
-      phone?: unknown;
-      consent?: { accepted?: unknown; version?: unknown };
-    };
+    body = (await request.json()) as { phone?: unknown };
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }
@@ -110,14 +107,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const consent = body.consent;
-  if (!consent || consent.accepted !== true || consent.version !== environment.CONSENT_NOTICE_VERSION) {
-    return publicError(
-      "VALIDATION_FAILED",
-      "Vui lòng đọc và đồng ý với điều khoản sử dụng và thông báo bảo vệ dữ liệu cá nhân (phiên bản mới nhất).",
-      requestId,
-    );
-  }
+  // Người dân đã xác nhận đồng ý ở bước điều khoản trên giao diện; server ghi phiên bản thông báo
+  // đang hiệu lực (CONSENT_NOTICE_VERSION) làm bằng chứng thay vì bắt client gửi lại — client không
+  // thể tự biết phiên bản do đây là cấu hình phía server.
 
   const rawIdempotencyKey = request.headers.get("idempotency-key");
   if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {

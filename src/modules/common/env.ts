@@ -24,7 +24,9 @@ const serverEnvironmentSchema = z.object({
   TURNSTILE_SECRET_KEY: z.string().min(1),
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1),
   // Các cấu hình giới hạn & chế độ vận hành (production handover)
-  CONSENT_NOTICE_VERSION: z.string().min(1),
+  // Phiên bản thông báo điều khoản/bảo vệ dữ liệu được ghi kèm mỗi hồ sơ. Có default để thiếu cấu
+  // hình không đánh sập cả cổng công khai; nên đặt tường minh trên môi trường triển khai.
+  CONSENT_NOTICE_VERSION: z.string().min(1).default("v1"),
   MAX_DRAFT_JSON_BYTES: z.coerce.number().int().positive().default(45000),
   MIN_DRIVE_FREE_GB: z.coerce.number().int().positive().default(650),
   PUBLIC_INTAKE_MODE: z.enum(["LIVE", "PAUSED"]).default("LIVE"),

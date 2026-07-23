@@ -3,6 +3,29 @@
 > Nhật ký các lần AI (Claude Code / Codex) sửa code. Mỗi agent PHẢI thêm entry sau mỗi lần
 > chạm vào code. Đọc ngược từ trên xuống để biết gần đây ai đã làm gì và vì sao.
 
+## [2026-07-23] Hotfix: cổng công khai sập sau deploy 20k (consent + env)
+
+- **Agent:** Claude Code
+- **Sự cố:** Sau khi push bản 20k lên main, `*.vercel.app/ke-khai` báo "This page couldn't load / A
+  server error occurred" (500 SSR).
+- **Nguyên nhân (regression kép do đợt 20k):**
+  1. `CONSENT_NOTICE_VERSION` được thêm là biến **bắt buộc, không default**; chưa đặt trên Vercel nên
+     `loadPublicIntakeEnvironment()` ném lỗi → trang kê khai + toàn bộ API công khai trả 500.
+  2. Route create mới **bắt buộc** client gửi `consent.accepted` + `consent.version` khớp env var,
+     nhưng client (`wizard.tsx`) chỉ gửi `{ phone }` và không thể biết phiên bản (đây là cấu hình
+     server). Kể cả đặt được env var, tạo hồ sơ vẫn luôn trả VALIDATION_FAILED. Bản cũ (69de1ca) ghi
+     version từ hằng số phía server, không bắt client echo — nên chạy tốt.
+- **Sửa:**
+  - `env.ts`: `CONSENT_NOTICE_VERSION` có `.default("v1")` — thiếu cấu hình không còn đánh sập cổng.
+  - `api/public/submissions/route.ts`: bỏ yêu cầu client gửi `consent`; server tiếp tục ghi
+    `consentVersion` từ env (khôi phục hành vi cũ đã chạy tốt). Giao diện vẫn có bước tick đồng ý.
+- **File đã sửa:** `src/modules/common/env.ts`, `src/app/api/public/submissions/route.ts`.
+- **Kiểm tra:** `npm run typecheck`, `npm run lint`, `npm test` (26 file, 174/174) đều pass.
+- **Khuyến nghị vận hành:** vẫn nên đặt `CONSENT_NOTICE_VERSION` tường minh trên Vercel (Production +
+  Preview) thay vì dựa vào default.
+
+---
+
 ## [2026-07-23] Sửa regression bucket PUBLIC_LOOKUP_INDEX + kiểm 45KB ở submit
 
 - **Agent:** Claude Code
