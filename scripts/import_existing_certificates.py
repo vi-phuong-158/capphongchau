@@ -176,7 +176,10 @@ def read_source(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
     for row_number, cells in enumerate(sheet.iter_rows(min_row=5, values_only=True), start=5):
         issue_number = normalized_text(cells[2] if len(cells) > 2 else "")
         issue_normalized = normalized_issue(issue_number)
-        issue_date = iso_date(cells[3] if len(cells) > 3 else None)
+        # Ngày cấp GCN không bắt buộc — nhiều GCN thật trong kho đối soát không ghi ngày cấp (ô
+        # trống), nhưng số GCN + CCCD vẫn xác định được một chứng nhận thật. Trống thì lưu chuỗi
+        # rỗng, hiển thị "chưa rõ" ở phía UI thay vì loại cả dòng.
+        issue_date = iso_date(cells[3] if len(cells) > 3 else None) or ""
         registry_number = normalized_text(cells[4] if len(cells) > 4 else "")
         full_name = normalized_text(cells[7] if len(cells) > 7 else "")
         citizen_id = re.sub(r"\D", "", normalized_text(cells[10] if len(cells) > 10 else ""))
@@ -184,8 +187,6 @@ def read_source(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
         reasons: list[str] = []
         if not issue_normalized:
             reasons.append("MISSING_ISSUE_NUMBER")
-        if not issue_date:
-            reasons.append("INVALID_ISSUE_DATE")
         if not full_name:
             reasons.append("MISSING_OWNER_NAME")
         if not re.fullmatch(r"\d{12}", citizen_id):
@@ -227,7 +228,8 @@ def read_source_pl3(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
             continue
         issue_number = normalized_text(cells[3] if len(cells) > 3 else "")
         issue_normalized = normalized_issue(issue_number)
-        issue_date = iso_date(cells[4] if len(cells) > 4 else None)
+        # Xem chú thích trong read_source(): ngày cấp trống không loại dòng.
+        issue_date = iso_date(cells[4] if len(cells) > 4 else None) or ""
         registry_number = normalized_text(cells[5] if len(cells) > 5 else "")
         # Chủ tổ chức ghi tên ở cột 6 (không có CCCD cá nhân); cá nhân ghi tên ở cột 8. Ưu tiên tên
         # cá nhân — nếu trống mới lấy tên tổ chức, để lý do invalid đúng bản chất
@@ -239,8 +241,6 @@ def read_source_pl3(path: Path) -> tuple[list[ValidRow], list[dict[str, Any]]]:
         reasons: list[str] = []
         if not issue_normalized:
             reasons.append("MISSING_ISSUE_NUMBER")
-        if not issue_date:
-            reasons.append("INVALID_ISSUE_DATE")
         if not full_name:
             reasons.append("MISSING_OWNER_NAME")
         if not re.fullmatch(r"\d{12}", citizen_id):

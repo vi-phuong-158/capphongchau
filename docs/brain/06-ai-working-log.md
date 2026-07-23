@@ -1141,3 +1141,22 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** import legacy, public-intake repository/session, staff routes, kiểm thử Python và tài liệu kiến trúc.
 - **Lý do:** Tránh bỏ mất dữ liệu chỉ vì ngày sinh, ghi đè autosave/upload, trạng thái NEEDS_SUPPLEMENT không có yêu cầu mở và reset mã lặp.
 - **Kiểm tra:** dry-run import 7.146/7.916 dòng hợp lệ; Python compile + unit test và TypeScript typecheck đạt trước dry-run backfill thật.
+
+## [2026-07-23] Nới quy tắc ngày cấp GCN, nạp thật dữ liệu Phụ lục 3
+
+- **Agent:** Claude Code
+- **Thay đổi:** Bỏ điều kiện bắt buộc ngày cấp GCN (`INVALID_ISSUE_DATE`) trong cả `read_source()`
+  và `read_source_pl3()` — ô ngày cấp trống không còn loại dòng, `issue_date` cho phép chuỗi rỗng.
+  Thêm fallback "chưa rõ" khi hiển thị ngày cấp trống ở `certificate-lookup.tsx`. Sau đó chạy thật
+  `--backfill --apply --format pl3` cho `Tai lieu/24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx`
+  lên Google Sheets sản xuất, rồi `--emit-json` để cập nhật cache tra cứu committed.
+- **File đã sửa:** `scripts/import_existing_certificates.py`, `src/components/certificate-lookup.tsx`,
+  `src/modules/public-intake/existing-certificates-index.json`, `docs/brain/03-decisions.md`.
+- **Lý do:** Dry-run ban đầu cho thấy 665 dòng có CCCD + số GCN + tên chủ hợp lệ nhưng bị loại chỉ
+  vì ô ngày cấp trống trong file nguồn — xác nhận qua đọc trực tiếp ô Excel (không phải lỗi đọc lệch
+  cột). Chủ dự án chốt nới quy tắc để không bỏ sót GCN có thật.
+- **Kiểm tra:** Dry-run sau khi nới quy tắc: hợp lệ tăng 3.684 → 4.349 dòng. Áp dụng thật:
+  `certificateAppends: 2849`, `ownerAppends: 4196`, chạy lại xác nhận no-op
+  (`alreadyCompleted: true`, `certificateAppends: 0`). `--emit-json`: 6.894 khóa CCCD, 6.632 chứng
+  nhận `VERIFIED`. `python -m unittest discover` 4/4, `npx vitest run` 181/181, `npx tsc --noEmit`
+  sạch (trên các file thuộc phạm vi thay đổi này).

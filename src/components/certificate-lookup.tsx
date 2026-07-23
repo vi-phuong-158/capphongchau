@@ -177,7 +177,7 @@ export function CertificateLookup() {
                 {scan.result.certificates.map((cert, index) => (
                   <li key={`${cert.issueNumberMasked}-${index}`}>
                     Số GCN: <span className="font-mono">{cert.issueNumberMasked}</span> — cấp ngày{" "}
-                    {cert.issueDate}
+                    {cert.issueDate || "chưa rõ"}
                   </li>
                 ))}
               </ul>

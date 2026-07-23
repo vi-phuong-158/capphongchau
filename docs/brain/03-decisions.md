@@ -694,6 +694,25 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
   cho phần khó (ngày không tồn tại, năm nhuận, chặn tương lai, khoảng năm).
 - **Người quyết định:** Chủ dự án (2026-07-23, chốt mốc năm 1987 cho GCN).
 
+## [2026-07-23] Bỏ điều kiện bắt buộc ngày cấp GCN khi nạp dữ liệu Phụ lục 3
+
+- **Quyết định:** `read_source()`/`read_source_pl3()` không còn loại dòng chỉ vì ô ngày cấp GCN
+  trống — `issue_date` cho phép chuỗi rỗng thay vì bắt buộc `INVALID_ISSUE_DATE`. Áp dụng cho cả
+  hai định dạng (`legacy`/`pl3`) vì đây là quy tắc chung, không riêng gì nguồn mới. UI hiển thị
+  "chưa rõ" khi ngày cấp rỗng (`certificate-lookup.tsx`; `wizard.tsx` đã có sẵn fallback này).
+- **Lý do:** Soát dry-run thật trên `24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx` phát hiện 665
+  dòng có CCCD + số GCN + tên chủ đầy đủ nhưng bị loại chỉ vì thiếu ngày cấp — GCN có thật, không
+  nên bỏ qua chỉ vì thiếu một trường phụ. Đã xác nhận bằng cách đọc trực tiếp ô Excel (không phải
+  lỗi đọc lệch cột).
+- **Đánh đổi:** GCN cùng số nhưng một bản ghi có ngày, bản ghi kia trống ngày giờ được xử lý như hai
+  biến thể khác nhau của cùng `issue_normalized`, có thể bị đánh dấu `CONFLICT` (tăng từ 33 lên 44
+  dòng xung đột trên dữ liệu Phụ lục 3) thay vì bị loại âm thầm trước đây — chấp nhận vì minh bạch
+  hơn là loại bỏ.
+- **Kết quả áp dụng (Phụ lục 3, `--backfill --apply` đã chạy thật):** hợp lệ tăng từ 3.684 lên
+  4.349 dòng; thêm 2.849 chứng nhận, 4.196 owner mới. Cache `existing-certificates-index.json` đã
+  `--emit-json` lại: 6.894 khóa CCCD, 6.632 chứng nhận `VERIFIED`.
+- **Người quyết định:** Chủ dự án (2026-07-23, "nới quy tắc cho phép GCN không có ngày cấp").
+
 ## Template cho entry mới
 
 ```
