@@ -725,11 +725,12 @@ export function IntakeWizard() {
         return false;
       }
       const body = (await response.json()) as {
-        draft: IntakeDraft | null;
+        draft: (IntakeDraft & { owners?: unknown }) | null;
         files?: ServerFileSummary[];
       };
       let restoredDraft: IntakeDraft | null = null;
       if (body.draft) {
+        if (!Array.isArray(body.draft.owners)) return false;
         // Nháp lưu trước 2026-07-22 mang mã vai trò cũ, không còn trong danh mục PL3. Đổi ngay lúc
         // tải về, nếu không ô "Vai trò trên GCN" hiện trống và người dân không hiểu vì sao.
         restoredDraft = {
@@ -738,7 +739,7 @@ export function IntakeWizard() {
             ...owner,
             roleOnCertificate: normalizeCertificateRole(owner.roleOnCertificate),
           })),
-        };
+        } as IntakeDraft;
         setDraft(restoredDraft);
       }
       const restoredIdentity: IdentityPhotos = {};

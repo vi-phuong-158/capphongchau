@@ -122,7 +122,7 @@ interface SubmissionRow {
   readonly claimed_at: Date | null;
   readonly created_at: Date;
   readonly updated_at: Date;
-  readonly draft_json: IntakeDraft | null;
+  readonly draft_json: unknown;
   readonly access_version: number;
   readonly file_summary_json: PublicFileSummary[] | null;
   readonly legacy_row_index: string | number;
@@ -154,6 +154,24 @@ function asIso(value: Date | null): string {
   return value ? value.toISOString() : "";
 }
 
+/**
+ * Một số dòng legacy từng lưu `draft_json` hai lần nên PostgreSQL trả về chuỗi JSON thay vì object.
+ * Đọc tương thích để người dân không bị chặn trước khi migration chuẩn hóa dữ liệu; dữ liệu hỏng
+ * thực sự vẫn được trả `null` để các route từ chối an toàn.
+ */
+export function decodeSubmissionDraft(value: unknown): IntakeDraft | null {
+  let draft = value;
+  if (typeof draft === "string") {
+    try {
+      draft = JSON.parse(draft) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) return null;
+  return draft as IntakeDraft;
+}
+
 function mapSubmission(row: SubmissionRow): SubmissionRecord {
   return {
     submissionId: row.submission_id,
@@ -174,7 +192,7 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     claimedAt: asIso(row.claimed_at),
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
-    draft: row.draft_json,
+    draft: decodeSubmissionDraft(row.draft_json),
     accessVersion: row.access_version,
     fileSummaries: Array.isArray(row.file_summary_json) ? row.file_summary_json : [],
     rowIndex: Number(row.legacy_row_index),

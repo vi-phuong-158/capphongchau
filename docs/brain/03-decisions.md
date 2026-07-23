@@ -4,6 +4,13 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24] Chuẩn hóa `draft_json` legacy bị lưu hai lần
+
+- **Quyết định:** Dữ liệu `jsonb` dạng chuỗi nhưng nội dung là object nháp được chuẩn hóa một lần bằng migration/script có audit, tăng `version` và không chỉnh từng trường PII. Repository giải mã tương thích chuỗi JSON khi đọc trong thời gian chuyển đổi; UI chỉ nhận nháp có mảng `owners`.
+- **Lý do:** Ba nháp legacy còn bị bọc hai lần khiến PostgreSQL trả string thay vì object; upload CCCD sau quét QR không tìm được `owners` và bị chặn dù nội dung bên trong hoàn chỉnh.
+- **An toàn/đánh đổi:** Chỉ chuyển string JSON hợp lệ sang object JSON, không tạo/suy diễn chủ sử dụng; script mặc định chỉ đọc và cần `--apply` để ghi. Mỗi bản ghi được audit `PUBLIC_SUBMISSION_DRAFT_JSON_NORMALIZED`.
+- **File:** `supabase/migrations/202607240002_normalize_legacy_public_draft_json.sql`, `scripts/normalize-legacy-public-drafts.ts`, `repository.ts`, `wizard.tsx` và test hồi quy.
+
 ## [2026-07-24] Phục hồi cutover Supabase: identity sequence và nháp legacy
 
 - **Quyết định:** Sau ETL, luôn đồng bộ sequence của `public_submissions.legacy_row_index` với giá trị lớn nhất đã chèn trong cùng transaction. Dùng migration idempotent cùng script `repair:public-submissions -- --apply` để phục hồi production đã cutover trước khi có quy tắc này. Nháp JSON legacy thiếu mảng `owners` được bổ sung một chủ sử dụng trống, tăng `version` và ghi audit; không suy diễn hoặc tự điền dữ liệu cá nhân.

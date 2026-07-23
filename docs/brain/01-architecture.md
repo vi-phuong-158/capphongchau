@@ -101,7 +101,7 @@ Bất biến quan trọng:
 - Update version có điều kiện; không khớp → `409 VERSION_CONFLICT`.
 - Partial unique index chặn hai ảnh CCCD cùng mặt active.
 - `legacy_row_index` chỉ giữ tương thích cookie session v2 trong giai đoạn migration. ETL chèn giá trị legacy phải đồng bộ identity sequence trong cùng transaction để bản ghi mới không va chạm khóa unique.
-- Nháp legacy thiếu `owners` được phục hồi có audit; route upload luôn kiểm shape dữ liệu trước khi gọi Drive và trả `409 INVALID_STATE` thay vì lỗi 500.
+- Nháp legacy thiếu `owners` hoặc bị lưu JSON lồng được phục hồi/chuẩn hóa có audit; repository giải mã tương thích trong thời gian chuyển đổi, còn route upload luôn kiểm shape dữ liệu trước khi gọi Drive và trả `409 INVALID_STATE` thay vì lỗi 500.
 - GCN cũ append-only; bản mới nhất theo `row_version` có hiệu lực.
 - RLS bật, không có policy/quyền cho `anon` và `authenticated`; browser không nhận database secret.
 

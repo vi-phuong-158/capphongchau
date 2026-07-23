@@ -14,6 +14,7 @@
     "migrate:citizen-id-pairs": "tsx scripts/migrate-citizen-id-pairs.ts",
     "migrate:sheets-to-supabase": "tsx scripts/migrate-sheets-to-supabase.ts",
     "repair:public-submissions": "tsx scripts/repair-public-submissions.ts",
+    "normalize:legacy-public-drafts": "tsx scripts/normalize-legacy-public-drafts.ts",
     "test": "vitest run",
     "test:python": "python -m unittest discover -s tests -p \"test_*.py\"",
     "test:watch": "vitest",

@@ -1,5 +1,13 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Khắc phục lỗi QR/upload do `draft_json` legacy lồng chuỗi
+
+- **Agent:** Codex.
+- **Thay đổi:** Xác định 3 nháp `DRAFT` trong production là JSONB string chứa object draft đầy đủ. Chạy `normalize:legacy-public-drafts -- --apply`: chuyển cả 3 về object JSON, tăng version và ghi audit; kiểm tra lại còn 0. Repository nay giải mã tương thích chuỗi JSON, UI kiểm mảng `owners` trước khi nhận nháp, và có migration SQL tương ứng cho môi trường khác.
+- **File đã sửa:** `src/modules/public-intake/repository.ts`, `src/app/ke-khai/wizard.tsx`, `scripts/normalize-legacy-public-drafts.ts`, `supabase/migrations/202607240002_normalize_legacy_public_draft_json.sql`, test và tài liệu kiến trúc.
+- **Lý do:** Chuỗi JSON lồng làm server không thấy `owners`, nên sau ảnh CCCD/QR endpoint upload trả lỗi dữ liệu chưa đầy đủ.
+- **Kiểm tra:** truy vấn chỉ đọc trước/sau xác nhận 3 → 0; `npm.cmd run typecheck`; test hồi quy repository/upload.
+
 ## [2026-07-24] Khắc phục lỗi tạo nháp và phiên tải ảnh CCCD trên production
 
 - **Agent:** Codex.
