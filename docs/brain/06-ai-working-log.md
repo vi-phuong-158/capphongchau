@@ -5,6 +5,277 @@
 
 ---
 
+## [2026-07-23] Cho phép tra cứu GCN đã có không cần tải cặp ảnh CCCD
+
+- **Agent:** Codex
+- **Thay đổi:** Bỏ chốt `UPLOAD_INCOMPLETE` ở API kiểm tra/liên kết/kết thúc hồ sơ đã có và nút
+  giao diện. Người dân chỉ cần xác nhận CCCD 12 số, họ tên và ngày sinh để tra cứu; ảnh CCCD vẫn
+  bắt buộc ở bước nộp GCN mới và vẫn được dùng để đọc QR.
+- **Kiểm tra:** Bổ sung unit test điều kiện định danh tra cứu; đã chạy typecheck, lint, test và
+  build trước khi bàn giao.
+
+---
+
+## [2026-07-23] Sửa bản tóm tắt file bị trễ làm chặn gửi hồ sơ đủ ảnh
+
+- **Agent:** Codex
+- **Vấn đề:** Bản kê khai thử nghiệm có đủ 2 ảnh CCCD và 2 ảnh GCN trong `PUBLIC_FILES`, nhưng
+  `file_summary_json` thiếu ảnh CCCD mặt sau. API gửi ưu tiên cache này nên báo thiếu ảnh sai.
+- **Thay đổi:** Quyết định nộp, khôi phục nháp và kiểm tra thay ảnh đều đọc `PUBLIC_FILES` là nguồn
+  thật. Khi upload, cache tóm tắt được dựng lại từ các dòng file thực thay vì từ snapshot cũ của
+  request, không còn ghi đè mất file vừa tải.
+- **Kiểm tra:** Sẽ chạy typecheck, lint, toàn bộ test và build trước khi triển khai.
+
+---
+
+## [2026-07-23] Chạy pipeline làm sạch 7.917 dòng dữ liệu Excel cũ (Gói B) + Sao lưu dữ liệu gốc & Đối sánh
+
+- **Agent:** Antigravity (Pair programming with User)
+- **Thay đổi:**
+  - Viết và thực thi script `scripts/clean_legacy_data.py` xử lý 7.917 dòng dữ liệu lịch sử.
+  - **Sao lưu tuyệt đối dữ liệu gốc**: Tạo bản sao file Excel nguyên bản tại `Tai lieu/backup/PHƯỜNG PHONG CHÂU - DS Tổng hợp Làm sạch CSDL đất đai 11-11-2025.ORIGINAL_BACKUP.xlsx` và bản backup JSON 1-1 tại `scratch/legacy_raw_backup.json` (7.920 dòng).
+  - **Làm sạch & Chuẩn hóa**: Ép kiểu chuỗi số GCN, xử lý ngày tháng (chuyển ISO/text về chuẩn, sửa lỗi năm `1017` -> `2017`), chuẩn hóa giới tính (`Nam` -> `NAM`, `Nma`/`Nư`/`Nừ` -> `NU`), chuẩn hóa diện tích (chuyển `,` và phân số `"385/2"` -> `192.5`), ánh xạ vai trò/pháp nhân về 6 enum PL3.
+  - **Phân loại chất lượng & Đối sánh**: Xuất 7.917 bản ghi chuẩn hóa tại `scratch/legacy_cleaned_records.json`, xuất tệp đối sánh `scratch/legacy_comparison_diff.json` (603 dòng có thay đổi/gắn cờ), và tệp báo cáo ngoại lệ `scratch/legacy_data_exceptions_report.json` (553 bản ghi cần cán bộ xác minh).
+- **Lý do:** Chuẩn bị bộ dữ liệu sạch cho Gói B, bảo lưu nguyên trạng file gốc để đối chiếu 1-1, và phân loại `REUSABLE` (7.364 dòng), `DATA_ONLY` (548 dòng), `CONFLICT` (5 dòng).
+- **Kiểm tra:** Script thực thi thành công, file sao lưu và các tệp JSON kết quả đã được ghi vào thư mục `Tai lieu/backup/` và `scratch/`.
+
+---
+
+## [2026-07-23] `VietnameseDateInput` — ba ô số Ngày/Tháng/Năm cho ngày sinh và ngày cấp GCN
+
+- **Agent:** Claude Code
+- **Thay đổi:** Component `src/components/vietnamese-date-input.tsx` (ba ô số, `inputMode=numeric`,
+  tự nhảy ô khi đủ số, Backspace ở ô rỗng lùi ô trước) + module thuần
+  `src/modules/public-intake/vietnamese-date.ts` (`splitIsoDate`, `assembleIsoDate` với kiểm ngày
+  hợp lệ / năm nhuận / chặn tương lai / khoảng năm). Ráp vào wizard cho **ngày sinh** (năm ≥ 1900)
+  và **ngày cấp GCN** (năm ≥ 1987). Gỡ ô `type=date` (ngày sinh) và ô gõ tự do + helper
+  `parseVietnameseDate`/`displayVietnameseDate` + state `issueDateInput` (ngày cấp) đã thay thế.
+- **Lý do:** gõ tự do dễ sai định dạng (PL3 mẫu có `9/10/1017`); lịch gốc trên điện thoại bắt cuộn
+  ngược nhiều năm cho ngày sinh. Ba ô số lấy được cả tốc độ bàn phím số lẫn chuẩn hóa `YYYY-MM-DD`.
+  Khép mục `VietnameseDateInput` treo trong `PLAN2.md` §4.5.
+- **File đã sửa:** thêm `vietnamese-date-input.tsx`, `vietnamese-date.ts`,
+  `tests/vietnamese-date.test.ts`; sửa `wizard.tsx`, `PLAN2.md`.
+- **Kiểm tra:** `tsc` sạch · `lint` sạch · `vitest` **144/144** (+8 test module ngày: ngày không tồn
+  tại, năm nhuận, chặn tương lai, khoảng năm bắt lỗi `1017`) · `build` sạch · `/ke-khai` không lỗi
+  console, component có trong bundle. Thao tác trực tiếp trên ô nằm sau bước tạo hồ sơ (cần Google)
+  nên chưa chạy tay được cục bộ; logic phủ bằng unit test.
+
+---
+
+## [2026-07-23] Khóa tra "hồ sơ đã có" rút về CCCD + bắt buộc QR
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - **Khớp chỉ theo HMAC của CCCD.** Gỡ điều kiện `item.identityMatchHmac === identityMatchHash`
+    khỏi `findExistingCertificates` và `hasPendingIdentityMatch` (repository.ts); bỏ tham số
+    `identityMatchHash` và bỏ ghi `identityMatchHmac` trong `appendPendingIdentityIndex`; gỡ hàm
+    `identityMatchHmac` + `normalizeIdentityName` khỏi workflow.ts; cập nhật 4 route caller (check,
+    link, no-action, submit) không còn tính/truyền match hash. Script Python `identity_hashes` bỏ
+    ngày sinh khỏi join.
+  - **Tra nhanh bắt buộc QR.** `hasCompleteExistingRecordLookupIdentity` chỉ nhận `QR_CONFIRMED`
+    (trước nhận cả `MANUAL_COMPLETE`); bỏ luôn tham số `dateOfBirth`. Gỡ nút "Kiểm tra GCN đã có"
+    đường gõ tay ở wizard (điều kiện thành code chết) + import thừa.
+- **Lý do:** soi kho thật thấy 87% ngày sinh chỉ có năm và họ tên đa nguồn hay lệch dấu — để trong
+  khóa là trượt phần lớn hồ sơ thật. Chống dò chuyển sang bắt buộc quét QR (đang cầm thẻ thật). Xem
+  `03-decisions.md` [2026-07-23].
+- **Đánh đổi:** khóa CCCD-đơn ưu tiên **không bỏ sót** (recall) — false-positive do lỗi nhập CCCD
+  trong kho được chặn ở bước người dân xác nhận + cán bộ duyệt liên kết. Ai QR không lên thì vẫn kê
+  khai/nộp bình thường, chỉ mất lối tắt "đã có".
+- **File đã sửa:** `workflow.ts`, `repository.ts`, `existing-records/check|link/route.ts`,
+  `no-action/route.ts`, `submit/route.ts`, `wizard.tsx`, `scripts/import_existing_certificates.py`,
+  `tests/public-workflow.test.ts`, `PLAN2.md`, `docs/brain/03-decisions.md`.
+- **Kiểm tra:** `tsc` sạch · `lint` sạch · `vitest` **136/136** (đổi test QR-only + che số GCN) ·
+  `build` sạch · `py_compile` script import OK.
+
+---
+
+## [2026-07-23] Thu "Người sử dụng đất hiện tại" (PL3 O, P, 14, 15) + nghiên cứu ba file kho
+
+- **Agent:** Claude Code
+- **Nghiên cứu ba tài liệu** (không sửa file gốc):
+  - `24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx` — kho đã duyệt, 5.041 dòng. CCCD phủ 99% cá
+    nhân (3.492 phân biệt); **87% ngày sinh chỉ có năm**; số phát hành GCN 90%, định dạng bẩn; 280
+    tổ chức không CCCD (mã dạng `N/A-<mst>`). → Chốt khóa tra = **CCCD, bỏ ngày sinh**, xem
+    `03-decisions.md`.
+  - `24.7.2026 PhuongPhongChau (hiện trạng dữ liệu).xlsx` — bảng phân loại chất lượng/trạng thái theo
+    thửa (nguồn gắn cờ `REUSABLE`), không phải nguồn định danh.
+  - `PL3.xlsx` — xác nhận nhóm cột O, P, 14, 15 = "Thông tin người sử dụng đất hiện tại".
+- **Thay đổi code — khối Người sử dụng đất hiện tại:** thêm cờ `hasDistinctCurrentUser` + 4 trường
+  (`currentUserName`, `currentUserCitizenId`, `currentUserAddress`, `changeReason`) vào `Owner`;
+  danh mục `CHANGE_REASON_OPTIONS` (Thừa kế/Tặng cho/Chuyển nhượng/Khác). Khi bật: `requiresCitizenId`
+  vẫn true nhưng loại khỏi yêu cầu ảnh CCCD ở `validateDraftForSubmit`, endpoint gửi
+  (`identityOwners`), và `completionChecklist`; UI ẩn khối ảnh/QR/ngày sinh, hiện khối người sử dụng
+  hiện tại; ô CCCD người trên GCN thành tùy chọn.
+- **Lý do:** nhiều ca chủ trên GCN đã mất; không quét được thẻ người đã mất nên phải miễn ảnh và thu
+  người thừa kế bằng chữ (chốt "miễn ảnh, chỉ khai chữ").
+- **File đã sửa:** `types.ts`, `reference.ts`, `validation.ts`, `submit/route.ts`, `workflow.ts`,
+  `wizard.tsx`, `schema.ts`, `repository.ts`, `tests/public-intake-validation.test.ts`, `PLAN2.md`,
+  `docs/brain/03-decisions.md`.
+- **Deploy:** phải chạy lại `npm run migrate:public-intake` (thêm 5 cột `PUBLIC_OWNERS`).
+- **Kiểm tra:** `tsc` sạch · `lint` sạch · `vitest` **136/136** (thêm 2 test: chủ đã mất miễn CCCD
+  nhưng bắt khai đủ người sử dụng hiện tại; CCCD người hiện tại 12 số + lý do trong danh mục) ·
+  `build` sạch · `/ke-khai` không lỗi console, các chuỗi mới có trong bundle client.
+
+---
+
+## [2026-07-22] Bốn lỗi dữ liệu chặn xuất PL3 — (c)(d)(e)(f) của `PLAN2.md` §4.2
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - **(c) Danh mục trường 12/13 theo PL3.** `OWNER_TYPES` thêm `DONG_SU_DUNG` và
+    `CONG_DONG_DAN_CU` (đủ sáu). `CERTIFICATE_ROLE_OPTIONS` thay toàn bộ bốn mã tự đặt bằng sáu giá
+    trị PL3: `CA_NHAN`/`CHU_HO`/`CHONG`/`VO`/`NGUOI_DAI_DIEN`/`THANH_VIEN`. `validateDraftForSubmit`
+    nay bắt vai trò phải nằm trong danh mục, không chỉ khác rỗng.
+  - **(d) Dung sai diện tích 0,5 m².** `LAND_USE_AREA_TOLERANCE_M2`, dùng chung giữa validation ở
+    máy chủ và kiểm theo bước ở trình duyệt.
+  - **(e) Bịt lỗ định danh.** `requiresCitizenId` nay đúng bằng "không phải tổ chức" — `HO_GIA_DINH`
+    và `DONG_SU_DUNG` bắt buộc CCCD 12 số, ngày sinh, giới tính, địa chỉ và đủ cặp ảnh CCCD. Thêm
+    `isOrganisationOwner`; tổ chức / cộng đồng dân cư miễn CCCD nhưng bắt buộc **mã số thuế** đúng
+    định dạng (10 số, hoặc 10 số kèm 3 số đơn vị trực thuộc) và **địa chỉ trụ sở**.
+  - **(f) Tối đa 3 dòng mục đích mỗi thửa.** `MAX_LAND_USES_PER_PARCEL`, chặn ở validation và vô
+    hiệu hóa nút "+ Thêm mục đích sử dụng" kèm dòng giải thích khi đủ 3.
+- **Lý do:**
+  - (c) Bộ mã cũ **không trùng giá trị nào** trong dropdown của PL3 — xuất ra sẽ là giá trị lạ giữa
+    file nộp. `label` giờ chính là chuỗi ghi ra file, nên test khóa cả thứ tự để đừng ai sửa nhãn
+    cho "gọn" rồi làm lệch file nộp.
+  - (d) Quy tắc "tổng không được vượt diện tích thửa" **từ chối chính dữ liệu do cơ quan phát
+    hành**: dòng 9 của PL3 mẫu có thửa `29,16` m² nhưng loại đất ghi `29,2` m². Nguyên nhân là làm
+    tròn tới 0,1 m², sai số tối đa 0,155 m² — lấy 0,5 m² cho rộng mà vẫn bắt được sai sót thật.
+  - (e) Chọn "Hộ gia đình" trước đây là bỏ qua **toàn bộ** phần định danh, nộp được hồ sơ chỉ với
+    một cái tên. PL3 mẫu có CCCD ở **cả ba** dòng hộ gia đình (CCCD chủ hộ) → là lỗi, không phải
+    thiết kế. Hộ gia đình là dạng phổ biến nhất nên đây là phần lớn thiệt hại.
+  - (f) PL3 chỉ có ba bộ cột loại đất (Z–AD, AE–AI, AJ–AN). Không chặn thì thửa khai 4 mục đích vẫn
+    nộp được rồi âm thầm mất dòng thứ tư lúc xuất — mất dữ liệu không ai thấy.
+- **Đường lùi cho dữ liệu cũ:** `LEGACY_CERTIFICATE_ROLE_CODES` + `normalizeCertificateRole()` đổi
+  bốn mã cũ sang giá trị PL3, gọi đúng một chỗ — lúc `adoptServerDraft` tải nháp về. Không có đường
+  này thì nháp cũ hiện ô "Vai trò trên GCN" trống mà người dân không hiểu vì sao.
+- **Còn hở, đã ghi vào `PLAN2.md` §4.2:** hồ sơ mà **mọi** chủ thể đều là tổ chức thì
+  `identityOwners` rỗng, `.every()` trả `true`, nộp được không cần ảnh CCCD nào. Mã số thuế + trụ sở
+  nâng rào nhưng chưa bịt hẳn; bịt hẳn phải thu CCCD người đại diện, gộp vào đợt làm trường 14/15.
+  `DONG_SU_DUNG` → `Thành viên` cũng là suy đoán gần nhất, cần cán bộ xem lại.
+- **File đã sửa:** `src/modules/public-intake/types.ts` (`OWNER_TYPES`, `OWNER_TYPE_LABELS`,
+  `requiresCitizenId`, `isOrganisationOwner`, `MAX_LAND_USES_PER_PARCEL`),
+  `reference.ts` (`CERTIFICATE_ROLE_OPTIONS`, `CERTIFICATE_ROLE_CODES`,
+  `LEGACY_CERTIFICATE_ROLE_CODES`, `normalizeCertificateRole`),
+  `validation.ts` (`LAND_USE_AREA_TOLERANCE_M2`, nhánh tổ chức, giới hạn 3 dòng, dung sai),
+  `src/app/ke-khai/wizard.tsx` (chuẩn hóa lúc tải nháp, ô mã số thuế / trụ sở, chặn nút thêm mục
+  đích, kiểm theo bước), `tests/public-intake-validation.test.ts`, `tests/reference-catalog.test.ts`,
+  `PLAN2.md`.
+- **Không đổi schema Google Sheets** — bốn sửa đổi đều nằm trong giá trị của cột đã có, nên **không
+  cần chạy lại `migrate:public-intake`** cho riêng đợt này (cảnh báo `old_ward` từ đợt trước vẫn còn
+  hiệu lực).
+- **Kiểm tra:** `npx tsc --noEmit` sạch · `npm run lint` sạch · `npx vitest run` **129/129 xanh**
+  (thêm 10 test: hộ gia đình và đồng sử dụng bắt buộc CCCD, tổ chức cần MST + trụ sở, từ chối vai
+  trò ngoài danh mục, khóa thứ tự hai danh mục PL3, ánh xạ bốn mã cũ, ca `29,16`/`29,2` của PL3 mẫu
+  phải qua còn `29,16`/`30` phải chặn, giới hạn 3 dòng) · `npm run build` sạch · `/ke-khai` chạy dev
+  không lỗi console, các chuỗi mới (`Cộng đồng dân cư`, `Mã số thuế`, `Địa chỉ trụ sở`,
+  `Thêm mục đích sử dụng (tối đa …)`) có mặt trong bundle client.
+
+---
+
+## [2026-07-22] Thêm trường "đơn vị hành chính cũ" của thửa đất
+
+- **Agent:** Claude Code
+- **Thay đổi:** Thêm ô chọn bắt buộc _"Thửa đất thuộc đơn vị nào trước sáp nhập?"_ ở bước Thửa đất:
+  Xã Phú Hộ (cũ) / Xã Hà Thạch (cũ) / Phường Phong Châu (cũ) / Không rõ.
+- **Lý do:** Mảnh cuối để `lookupNewMapSheet` chạy được. Ba xã cũ đều đánh số tờ bản đồ từ 1, nên
+  không có trường này thì "tờ 5" ra ba đáp án (5, 89, hoặc 148) và không thể điền trường 19 của PL3.
+- **`KHONG_RO` là lựa chọn hợp lệ, không phải để trống:** bắt buộc người dân chọn một mục, nhưng có
+  lối thoát. Phân biệt được "chưa xác định" với "chưa ai đụng tới" — để trống thì hai trạng thái
+  này lẫn vào nhau khi cán bộ lọc hàng chờ.
+- **File đã sửa:** `src/modules/public-intake/types.ts` (thêm `Parcel.oldWard`),
+  `reference.ts` (`OLD_WARD_OPTIONS`), `validation.ts` (kiểm ở ranh giới tin cậy),
+  `repository.ts` (ghi vào `PUBLIC_PARCELS`), `src/app/ke-khai/wizard.tsx` (ô chọn + kiểm theo bước),
+  `src/modules/bootstrap/schema.ts` (cột `old_ward`), `scripts/migrate-public-intake.ts`,
+  `tests/public-intake-validation.test.ts`.
+- **Migration:** cột `old_ward` thêm ở **cuối** `PUBLIC_PARCELS` để không dịch cột của dữ liệu đã
+  có (mã định vị theo chỉ số cột). `scripts/migrate-public-intake.ts` nay còn **nối cột thiếu vào
+  tab đã tồn tại**, không chỉ tạo tab mới — vẫn idempotent, chỉ nối thêm chứ không đổi tên/chèn
+  giữa/xóa. **Phải chạy `npm run migrate:public-intake` trước khi deploy bản này.**
+- **Kiểm tra:** `vitest run` 119/119 đạt (3 test mới: bắt buộc chọn, chấp nhận `KHONG_RO`, từ chối
+  mã lạ); typecheck và lint sạch; `/ke-khai` tải không lỗi console và trường mới có trong chunk gửi
+  xuống trình duyệt.
+- **Chưa làm:** màn hình chi tiết của cán bộ chưa hiện `oldWard` — nằm trong hạng mục lớn hơn "chi
+  tiết cán bộ chưa hiển thị đầy đủ land-use/assets" đã ghi nhận từ trước.
+
+## [2026-07-22] Bảng tham chiếu tờ bản đồ cũ → mới cho Phong Châu (trường 19 của PL3)
+
+- **Agent:** Claude Code
+- **Bối cảnh:** Chủ dự án cung cấp `Tai lieu/PL3.xlsx` (bộ **49 trường**, đích xuất cuối cùng — khác
+  với 15 trường Phụ lục 8 đang làm) và `Tai lieu/DS THAM CHIEU PHUTHO VINHPHUC HOABINH 25052026.pdf`
+  (313 trang, 33.309 dòng), yêu cầu quy đổi số tờ trên GCN sang số tờ bản đồ hiện nay khi xuất báo cáo.
+- **Thay đổi:** Trích 164 dòng có xã mới là Phường Phong Châu (mã `07954`, khớp mẫu PL3), sinh
+  `src/modules/public-intake/map-sheet-reference.ts` kèm hàm `lookupNewMapSheet`.
+- **Quy tắc quy đổi:**
+  - Xã Phú Hộ (07954): tờ 1–84 → **giữ nguyên số**.
+  - Xã Hà Thạch (07963): tờ 1–59 → tờ **85–143**.
+  - Phường Phong Châu cũ (07945): 21 tờ → tờ **144–164**.
+- **Phát hiện quan trọng — khóa tra cứu phải gồm TỶ LỆ:** phường Phong Châu cũ có **hai** bộ bản đồ
+  đánh số độc lập từ 1. Tờ 7 tỷ lệ 1/500 ra tờ 150, tờ 7 tỷ lệ 1/1000 ra tờ 156. GCN thường không
+  ghi tỷ lệ nên ca này **không tự quyết được** — hàm trả `AMBIGUOUS` để cán bộ đối chiếu. Đã kiểm
+  bằng test: đây là ca mập mờ **duy nhất** trong toàn bộ 164 dòng.
+- **File đã tạo:** `src/modules/public-intake/map-sheet-reference.ts`,
+  `tests/map-sheet-reference.test.ts`.
+- **File đã sửa:** `docs/brain/01-architecture.md`.
+- **Lý do:** Trường 19 "Số hiệu tờ trên bản đồ địa chính" của PL3 đang trống ở mọi dòng mẫu — đây
+  chính là việc cần tự động hóa.
+- **Kiểm tra:** `vitest run` 116/116 đạt (11 test mới, gồm ca mập mờ tờ 7 và ca số 0 đứng đầu như
+  `"07"` mà PL3 mẫu dùng); typecheck và lint sạch. Đối chiếu tổng: 84+59+21 = 164 dòng, tờ mới phủ
+  kín 1–164 không trùng không khuyết.
+- **Trường còn thiếu đã được bổ sung ngay sau đó** — xem entry kế tiếp cùng ngày.
+- **Bảng này KHÔNG giải quyết trường 20** ("Số thứ tự thửa trên bản đồ địa chính") — nó chỉ quy đổi
+  số tờ, không quy đổi số thửa. Trường 20 vẫn cần nguồn khác hoặc cán bộ làm thủ công.
+
+## [2026-07-22] Sửa lỗi ảnh JPG từ Zalo bị từ chối; thêm danh bạ cán bộ và phạm vi áp dụng
+
+- **Agent:** Claude Code
+- **Vấn đề:** Người dùng thật báo "một số đuôi ảnh không hoạt động, có người dùng đuôi JPG nhưng
+  không được". Ảnh chụp màn hình kèm theo cho thấy tên tệp dạng
+  `z8070298699198_b736ca25543c2e1e8d31942dab4553cf.jpg` — **tên tệp ảnh Zalo**.
+- **Nguyên nhân gốc:** Client gửi thẳng `File.type` lên `uploads/initiate`, route so khớp tuyệt đối
+  với `ACCEPTED_MIME_TYPES`. Ảnh nhận qua Zalo/Messenger thường về với `File.type` **rỗng** (hệ điều
+  hành không có đăng ký cho phần mở rộng) hoặc bí danh **`image/jpg`** — không có trong danh sách,
+  nên bị 400 "Chỉ chấp nhận ảnh JPEG, PNG, WebP hoặc HEIC" dù tệp là JPEG hợp lệ. Thuộc tính
+  `accept` chỉ có MIME còn khiến nhiều trình quản lý tệp Android làm mờ đúng ảnh cần chọn.
+- **Thay đổi:**
+  - Thêm `modules/public-intake/image-format.ts`: quy bí danh (`image/jpg`, `image/pjpeg`,
+    `image/x-png`, `image/heic-sequence`…) về tên chuẩn, suy từ phần mở rộng khi trình duyệt khai
+    rỗng, và chuỗi `IMAGE_FILE_ACCEPT` có cả đuôi lẫn MIME.
+  - `initiate` chuẩn hóa loại rồi **trả `mimeType` đã chuẩn** về client; client dùng đúng giá trị đó
+    cho `Content-Type` của lệnh PUT, không dùng lại `File.type` — lệnh PUT phải khai đúng loại đã
+    đăng ký với phiên resumable.
+  - Ảnh GCN nay cũng đi qua `prepareCitizenIdImage` (chuyển HEIC→JPEG) như ảnh CCCD. Trước đó chỉ
+    ảnh CCCD được chuyển, ảnh GCN chụp bằng iPhone đi thẳng lên Drive ở dạng HEIC.
+  - Ghi chú "Đã tải N ảnh GCN" đếm theo **tổng** ảnh của hồ sơ thay vì theo lượt chọn tệp vừa rồi
+    (trước đó chọn 2 lượt × 1 ảnh hiển thị "Đã tải 1 ảnh" dù danh sách có 2 dòng — thấy rõ trong ảnh
+    chụp màn hình người dùng gửi). Khóa React của danh sách kèm vị trí vì tệp Zalo dễ trùng tên.
+  - Thêm `modules/public-intake/support-contacts.ts`: danh bạ cán bộ hỗ trợ theo 8 tổ dân phố, đầu
+    mối tư vấn chung, và `COVERAGE_NOTICE` về phạm vi áp dụng. Hiển thị ở khối "Không tự làm được?"
+    (link `tel:` bấm gọi thẳng) và ngay đầu `/ke-khai`.
+- **File đã tạo:** `src/modules/public-intake/image-format.ts`,
+  `src/modules/public-intake/support-contacts.ts`, `tests/image-format.test.ts`.
+- **File đã sửa:** `src/modules/public-intake/storage.ts`,
+  `src/app/api/public/submissions/current/uploads/initiate/route.ts`, `src/app/ke-khai/wizard.tsx`,
+  `src/app/ke-khai/page.tsx`, `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`.
+- **Lý do:** Lỗi định dạng chặn người dân thật ngay ở bước tải ảnh — họ có tệp đúng nhưng hệ thống
+  bảo sai. Danh bạ và phạm vi áp dụng để người dân biết gọi ai và biết trước mình có thuộc địa bàn
+  không, thay vì kê khai xong mới bị từ chối.
+- **Không làm yếu kiểm soát:** Giá trị chuẩn hóa chỉ là lời khai lúc tạo phiên. Chốt chặn thật vẫn
+  là `verifyUploadedFile` đọc `mimeType` do Drive nhận dạng **từ nội dung tệp** — PDF đổi đuôi
+  `.jpg` vẫn bị chặn và xóa.
+- **Kiểm tra:** `vitest run` 105/105 đạt (thêm 10 test mới cho `image-format`, gồm đúng ca tên tệp
+  Zalo với `File.type` rỗng); `npm run typecheck` và `npm run lint` sạch; `next build` đạt. Kiểm
+  trực tiếp `/ke-khai` trên dev server: danh bạ hiện đủ 8 tổ, 8 liên kết `tel:`, phạm vi áp dụng
+  hiện đầu trang, không tràn ngang ở khung 375px, console không lỗi.
+- **Tồn đọng đã chủ dự án xác nhận cùng ngày (2026-07-22), cập nhật ngay:**
+  1. TDP Hà Thạch — đồng chí Dương Văn Dũng: bổ sung số `0964216333`.
+  2. Số trùng là của đồng chí Hoàng Minh Trung (không phải Vũ Đình Lâm) — sửa thành `0375998437`
+     cho cả hai tổ Phú An/Phú Lợi mà đồng chí phụ trách. Số của Vũ Đình Lâm (`0962558662`) giữ
+     nguyên, nay không còn trùng ai.
+- **Đã chốt, KHÔNG sửa:** `NEIGHBORHOOD_HINTS` giữ nguyên **10 tổ dân phố**. Chủ dự án xác nhận
+  (2026-07-22) danh sách 10 là đúng; danh bạ cán bộ chỉ có 8 đầu mối vì một cán bộ phụ trách nhiều
+  tổ, không phải vì thiếu tổ. Đừng rút danh sách này xuống 8.
+
 ## [2026-07-22] Sửa lỗi tải ảnh CCCD báo "Chủ sử dụng không hợp lệ" (400)
 
 - **Agent:** Claude Code
@@ -588,3 +859,35 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã tạo/sửa:** `package.json`, `package-lock.json`, `tsconfig.json`, cấu hình Next/ESLint/Prettier/Vitest/Playwright, `src/app/*`, `src/components/pwa-register.tsx`, `src/lib/app-metadata.ts`, `public/*`, `tests/*`, `docs/brain/00-project-overview.md`, `docs/brain/01-architecture.md`, `docs/brain/04-current-tasks.md`, `docs/brain/05-testing-and-deploy.md`, `docs/brain/06-ai-working-log.md`.
 - **Lý do:** Hoàn thành nền tảng kỹ thuật bắt buộc trước khi tạo module nghiệp vụ ở M0 Task 3.
 - **Kiểm tra:** Next.js build và TypeScript đạt; Vitest đạt 1/1. Playwright assertion đạt 1/1 nhưng runner dev server không tự dừng trước timeout của môi trường Windows; cần chạy lại ở terminal/CI bình thường.
+
+---
+
+## [2026-07-22] Thực thi Gói A — tra cứu, khôi phục, đối chiếu GCN cũ và bổ sung có cấu trúc
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm cookie phiên v2 có locator/access-version; API và trang `/tra-cuu`; khóa 5
+  lần sai/15 phút; file summary phục hồi sau reload; preview có audit; timeline công khai; yêu cầu
+  bổ sung theo field/file và khóa các trường ngoài yêu cầu; trạng thái `RESUBMITTED` và
+  `NO_ACTION_REQUIRED`; tra cứu GCN cũ bằng HMAC 256 bucket sau xác minh cặp ảnh CCCD + CCCD + họ
+  tên + ngày sinh; cảnh báo hồ sơ pending; cấp lại mã bí mật cho quản trị viên sau xác minh trực
+  tiếp. Bỏ lần chụp QR riêng, đưa hai ảnh CCCD lên đầu phần cá nhân và cho gõ ngày cấp GCN trực
+  tiếp. Thêm công cụ dry-run/apply nhập Excel cũ và báo cáo dòng lỗi không chứa PII.
+- **File chính:** `src/modules/public-intake/{workflow,session,repository}.ts`, schema bootstrap,
+  public/staff API routes, `/tra-cuu`, `wizard.tsx`, `submission-detail.tsx`,
+  `scripts/import_existing_certificates.py`, test và tài liệu kiến trúc.
+- **Dữ liệu import:** 7.916 dòng nguồn; 7.038 dòng hợp lệ; 878 dòng loại; 3.826 GCN; 4.517 liên
+  kết chủ; 289 dòng thuộc nhóm xung đột; 2.521 dòng lặp trong cùng quan hệ. Đã chạy migration
+  append-only và `--apply` bằng pepper thật vào Google Sheets cấu hình; chạy lại xác nhận nguồn
+  `COMPLETED` không ghi trùng. Đọc kiểm tra sau import: 3.826 GCN = 3.746 `VERIFIED` + 80
+  `CONFLICT`, 4.517 liên kết chủ và 4.394 mục chỉ mục công khai; chỉ `VERIFIED` được tra cứu.
+- **Kiểm tra:** `npm.cmd run lint`, `npm.cmd run typecheck`, Vitest 22 file/133 test,
+  `npm.cmd run build`, kiểm tra cú pháp Python và `git diff --check` đều đạt. Migration tạo 8 tab,
+  nối 3 cột; import thật và kiểm tra idempotency đều đạt.
+
+## [2026-07-23] Sửa lỗi dữ liệu và giao dịch của PR #1
+
+- **Agent:** Codex
+- **Thay đổi:** Import GCN cũ không còn loại/lưu ngày sinh; thêm `--backfill` append-only, resumable theo ID ổn định và reader lấy trạng thái GCN cuối. Cập nhật truy cập chỉ ghi cột hẹp. Claim/yêu cầu bổ sung/từ chối cùng audit, timeline và idempotency đi trong một Sheets batch; reset mã bí mật replay được mà không lưu secret rõ.
+- **File đã sửa:** import legacy, public-intake repository/session, staff routes, kiểm thử Python và tài liệu kiến trúc.
+- **Lý do:** Tránh bỏ mất dữ liệu chỉ vì ngày sinh, ghi đè autosave/upload, trạng thái NEEDS_SUPPLEMENT không có yêu cầu mở và reset mã lặp.
+- **Kiểm tra:** dry-run import 7.146/7.916 dòng hợp lệ; Python compile + unit test và TypeScript typecheck đạt trước dry-run backfill thật.

@@ -4,6 +4,199 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-23] Sửa import GCN cũ, batch staff action và reset mã bí mật
+
+- **Quyết định:** Import/tra cứu GCN cũ chỉ dựa vào CCCD HMAC; ngày sinh không được lưu trong `EXISTING_*` và không loại dòng import. Backfill dùng cùng ID xác định, append-only và reader lấy bản ghi cuối cùng. Các action cán bộ cùng audit/timeline/yêu cầu bổ sung/`REQUEST_LOG` dùng một Sheets batch; reset mã sinh ổn định theo idempotency key nhưng không lưu secret rõ.
+- **Lý do:** Kho cũ có nhiều ngày sinh chỉ ghi năm; code cũ đã bỏ 108 dòng chỉ vì trường này. Ghi status trước yêu cầu bổ sung có thể làm hồ sơ kẹt, còn full-row access update có thể ghi đè autosave/upload.
+- **Đánh đổi:** Không dựng lock/transaction ngoài Sheets; retry đúng key an toàn trong mô hình pilot. `QR_CONFIRMED` vẫn chỉ là rào UI theo quyết định chủ dự án, không được mô tả là chống giả mạo API.
+- **Người quyết định:** Chủ dự án (2026-07-23).
+
+## [2026-07-23] Khóa tra "hồ sơ đã có" = CCCD, BỎ ngày sinh; tra nhanh bắt buộc QR
+
+- **Quyết định:** Luồng "kiểm tra hồ sơ đã có" (PL3 §5.1) dùng **CCCD** làm khóa khớp, **không**
+  đưa ngày sinh vào khóa, và ô tra nhanh **chỉ mở khi có QR CCCD hợp lệ** trong phiên.
+- **Căn cứ — soi kho thật `24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx` (5.041 dòng):**
+  - CCCD phủ **99% cá nhân** (3.492 phân biệt); số phát hành GCN chỉ 90% và định dạng bẩn
+    (`AĐ 266864`) → CCCD là khóa, GCN chỉ là lối phụ cho 218 dòng thiếu CCCD.
+  - **87% ngày sinh chỉ ghi mỗi năm** (`1989`); phần còn lại định dạng Mỹ `mm/dd/yyyy`. Khóa
+    `CCCD+tên+ngày sinh` mà Codex dựng sẽ **trượt ~87%** vì app gửi ngày sinh đầy đủ.
+  - Chủ dự án chốt phương án chống dò: **bắt buộc quét QR** (đang cầm thẻ thật) thay cho việc cho gõ
+    tay CCCD.
+- **Hệ quả code (ĐÃ làm 2026-07-23):** khớp rút về **chỉ HMAC của CCCD** — gỡ `identityMatchHmac`
+  khỏi cả hai điều kiện khớp trong `repository.ts` (`findExistingCertificates`,
+  `hasPendingIdentityMatch`) và bỏ hàm `identityMatchHmac`/`normalizeIdentityName` khỏi
+  `workflow.ts`; `identity_hashes` của script import Python bỏ ngày sinh.
+  `hasCompleteExistingRecordLookupIdentity` giờ chỉ nhận `QR_CONFIRMED` (gỡ luôn nút gõ-tay ở
+  wizard). Tổ chức (280 dòng) khớp bằng MST (kho ghi `N/A-<mst>`) — **chưa làm**. Vì khóa chỉ còn
+  CCCD nên không còn phụ thuộc chuẩn hóa tên Python↔TS; nếu sau này đưa tên vào lại thì mới cần
+  vector test chung (`.upper()` vs `toLocaleUpperCase("vi-VN")`).
+- **Đánh đổi:** khóa CCCD-đơn không có ngày sinh làm lớp phụ → dựa vào QR + rate-limit + audit để
+  chống dò; ai QR không lên thì đi đường nộp thường. Chấp nhận vì kho quá thiếu ngày sinh để dùng.
+- **Người quyết định:** Chủ dự án (2026-07-23).
+
+## [2026-07-23] Thu "Người sử dụng đất hiện tại" (PL3 cột O, P + trường 14, 15) cho ca chủ đã mất
+
+- **Quyết định:** Biểu mẫu thu thêm khối **Người sử dụng đất hiện tại** khi người đứng tên trên GCN
+  không còn là người sử dụng thực tế (đã mất / thừa kế / tặng cho / chuyển nhượng): Tên (O),
+  CCCD (P), Địa chỉ thường trú 2 cấp (14), Lý do thay đổi (15). Khi bật, **miễn ảnh CCCD + QR + các
+  trường định danh của người trên GCN** (không thể quét thẻ người đã mất); đổi lại bắt khai đủ khối
+  này bằng **chữ**, không yêu cầu ảnh CCCD người thừa kế (chốt phương án "miễn ảnh, chỉ khai chữ").
+- **Lý do:** Nguồn "đã có dữ liệu" bỏ cột O/P vì đưa vào dùng ngay, nhưng khi **thu thập** phải có vì
+  nhiều trường hợp chủ đã mất. Không xử lý thì đúng những ca này bị chặn ngay ở bước ảnh CCCD.
+- **Đánh đổi / còn hở:** tick "chủ đã mất" là một lối bỏ qua ảnh CCCD — chống lạm dụng bằng: bắt CCCD
+  người sử dụng hiện tại + lý do, và cán bộ đối chiếu giấy tờ thừa kế/sang tên khi duyệt. Chưa thu
+  ảnh CCCD người thừa kế (để đợt sau nếu cần định danh chặt hơn).
+- **File:** `types.ts` (`Owner` + 5 trường), `reference.ts` (`CHANGE_REASON_OPTIONS`),
+  `validation.ts`, `wizard.tsx`, `schema.ts` (nối 5 cột `PUBLIC_OWNERS`), `repository.ts`.
+- **Cần chạy lại `migrate:public-intake`** trước deploy — thêm 5 cột vào `PUBLIC_OWNERS`.
+- **Người quyết định:** Chủ dự án (2026-07-23).
+
+## [2026-07-22] `PL3.xlsx` là đích xuất cuối cùng — 49 trường, đảo quyết định "dừng ở 15 trường"
+
+- **Quyết định:** Đầu ra cuối cùng của hệ thống là `Tai lieu/PL3.xlsx` — **49 trường** (đánh số
+  1–49, thiếu 21 và 22), **không phải** 15 trường của Phụ lục 8. Đảo quyết định [2026-07-21]
+  "Mục tiêu dữ liệu là 15 trường Phụ lục 8, không phải 50".
+- **Ba khác biệt then chốt so với Phụ lục 8:**
+  1. **Đơn vị mỗi dòng là (GCN × thửa × người)**, không phải mỗi hồ sơ. Dòng 9 và 10 của file mẫu
+     là cùng GCN `AE 475527`, cùng thửa tờ 06 số 03-1, nhưng tách hai dòng cho chồng và vợ — dữ
+     liệu GCN và thửa bị lặp lại theo từng người.
+  2. Giá trị ghi **bằng chữ** (`Đất ở tại đô thị`, `Lâu dài`), không phải mã (`ODT`,
+     `SU_DUNG_ON_DINH_LAU_DAI`). Cần bảng ánh xạ mã→chữ **được cơ quan duyệt**, tuyệt đối không để
+     AI tự dịch nhãn.
+  3. Tối đa **3** dòng mục đích sử dụng mỗi thửa (Loại đất 1/2/3). Hệ thống hiện không giới hạn.
+- **Mã ĐVHC cấp xã đã biết: `07954`** (trường 1) — trước đây ghi là "chưa có".
+- **Lý do:** Chủ dự án cung cấp và xác nhận PL3 là biểu mẫu phải nộp. Lý do cũ ("bộ 50 trường do
+  Chi nhánh VPĐK/đơn vị thi công lưu giữ, không phải việc của cấp xã") không còn đúng.
+- **Đánh đổi:** Hệ thống hiện thu được ~11/49 trường trọn vẹn. Thiếu hẳn nhóm nhà ở/chung cư
+  (trường 40–48), nhóm người sử dụng hiện tại (cột O, P và trường 14, 15), trường 20 và trường 49.
+  Biểu mẫu người dân sẽ dài thêm đáng kể — cần cân nhắc trường nào để cán bộ điền khi duyệt thay vì
+  bắt người dân khai.
+- **Bảng đối chiếu đầy đủ 49 trường → nguồn dữ liệu:** xem Phụ lục của `PLAN2.md`.
+- **Người quyết định:** Chủ dự án (2026-07-22).
+
+## [2026-07-22] Danh mục trường 12 và 13 đã chốt — lấy từ dropdown của chính PL3
+
+- **Quyết định:** Hai danh mục sau là **chính thức**, lấy từ ràng buộc dữ liệu (data validation)
+  nhúng trong `PL3.xlsx`:
+  - **Trường 12 — Pháp nhân trên GCN:** `Cá nhân` · `Hộ gia đình` · `Vợ chồng` · `Đồng sử dụng` ·
+    `Cộng đồng dân cư` · `Tổ chức`
+  - **Trường 13 — Vai trò pháp nhân trên GCN:** `Cá nhân` · `Chủ hộ` · `Chồng` · `Vợ` ·
+    `Người đại diện` · `Thành viên`
+- **Lý do:** Gỡ được mục "chưa chốt nội hàm trường 7 vai trò pháp nhân" treo từ đầu dự án trong
+  `04-current-tasks.md`. Đây là nguồn chính thức chứ không phải suy đoán.
+- **Hệ thống hiện SAI cả hai:** `OWNER_TYPES` thiếu `Đồng sử dụng` và `Cộng đồng dân cư`;
+  `CERTIFICATE_ROLE_OPTIONS` (`CHU_SU_DUNG`/`DONG_SU_DUNG`/`DAI_DIEN_HO`/`DAI_DIEN_TO_CHUC`)
+  **không trùng giá trị nào**. Cấu trúc hai trường thì đúng, chỉ giá trị sai — sửa danh mục là đủ,
+  không phải đổi mô hình.
+- **Vẫn CHƯA chốt:** danh mục `Loại đất`, `Nguồn gốc sử dụng`, `Hình thức sử dụng`,
+  `Thời hạn sử dụng`. Riêng **Nguồn gốc** có giá trị dạng câu ghép trong PL3 mẫu — _"Nhận chuyển
+  nhượng đất được Công nhận QSDĐ như giao đất có thu tiền sử dụng đất"_ — là **hai** khái niệm ghép
+  lại, mà danh mục 7 mã phẳng hiện tại chỉ chọn được một. Chưa biết đây là một mục trong danh mục
+  hay phải tách thành hai trường; câu hỏi đã soạn gửi cán bộ chuyên trách (xem `PLAN2.md` §9).
+- **Người quyết định:** Nguồn là PL3 do cơ quan ban hành; Claude Code trích xuất và đối chiếu.
+
+## [2026-07-22] Không sharding — giữ một spreadsheet, sửa ba chỗ ở tầng truy cập
+
+- **Quyết định:** Bỏ phương án chia 10 spreadsheet theo tổ dân phố kèm `CONTROL_PLANE` trung tâm.
+  Giữ **một** spreadsheet, thay vào đó sửa ba chỗ trong tầng truy cập dữ liệu.
+- **Lý do — sharding không giải bài toán thật:**
+  - Quota Google Sheets tính theo **project** và theo **người dùng trong project**, không theo
+    spreadsheet. Cả 10 shard đều được ghi bằng một refresh token OAuth duy nhất, nên chia kho nhân
+    được **0 lần** thông lượng.
+  - Giới hạn 10 triệu ô cũng không phải ràng buộc: 20.000 hồ sơ vẫn thoải mái kể cả không chia.
+  - Đổi lại, sharding sinh ra một lớp lỗi nhất quán mới: `CONTROL_PLANE` và 10 shard không có
+    transaction giữa chúng, hỏng giữa chừng là index mồ côi hoặc hồ sơ tra không ra.
+- **Ba chỗ sửa thay thế:**
+  1. **Lưu số dòng vào cookie phiên đã ký**, đọc đúng dải `A{dòng}:S{dòng}` thay vì đọc toàn bảng.
+     `repository.ts` hiện đọc **cả** `PUBLIC_SUBMISSIONS!A2:S` mỗi request — kéo về ~8 MB ở quy mô
+     2.000 hồ sơ chỉ để lấy một dòng. Payload giảm ~500 lần. An toàn vì bảng chỉ append nên số dòng
+     bất biến, cookie có HMAC, và số dòng giả sẽ đọc ra `submission_id` không khớp phiên.
+  2. **Autosave chỉ khi đổi bước** + `localStorage` giữ phần đang gõ. Giảm ~10 lần ghi/hồ sơ.
+  3. **Gộp audit vào cùng batch** với lệnh ghi trạng thái. Giảm ~6 lần ghi/hồ sơ.
+- **Kết quả tính toán:** ~22–31 → ~15–20 lần ghi mỗi hồ sơ; năng lực ~90 → **~135 hồ sơ/giờ**,
+  tức ~21.600 hồ sơ trong 20 ngày làm việc. Đạt mục tiêu 20.000 với một spreadsheet.
+- **Đánh đổi:** Vẫn phải chạy spike đo tải thật để xác nhận, nhưng là **sau** khi sửa và để xác
+  nhận, không phải để quyết kiến trúc. Nếu spike vẫn trượt thì mới xét PostgreSQL + object storage.
+- **Quan trọng — quota ĐỌC cũng 60/phút/người dùng** và trước đây bị bỏ sót hoàn toàn trong mọi
+  tính toán. Mỗi autosave là 1 đọc + 1 ghi; đọc chạm trần **trước** ghi.
+- **Người quyết định:** Claude Code (rà soát kỹ thuật kế hoạch 20.000 hồ sơ), chủ dự án chấp thuận.
+
+## [2026-07-22] Tra tờ bản đồ phải dùng khóa gồm TỶ LỆ, và không bao giờ đoán
+
+- **Quyết định:** Bảng tham chiếu tờ bản đồ cũ → mới (`map-sheet-reference.ts`, 164 dòng) tra theo
+  khóa **(đơn vị cũ, số tờ, tỷ lệ)**, không phải (đơn vị cũ, số tờ). Gặp mập mờ hoặc không tìm
+  thấy thì trả `AMBIGUOUS` / `NOT_FOUND` để cán bộ xử lý, **tuyệt đối không tự chọn** một ứng viên.
+- **Lý do:** Phường Phong Châu cũ (mã 07945) có **hai bộ bản đồ đánh số độc lập, đều bắt đầu từ 1**.
+  Tờ 7 tỷ lệ 1/500 ra tờ **150**; tờ 7 tỷ lệ 1/1000 ra tờ **156**. GCN thường không ghi tỷ lệ. Nếu
+  tra chỉ bằng số tờ, hệ thống sẽ âm thầm chọn bừa một trong hai — sai tờ bản đồ là sai vị trí thửa
+  đất, và lỗi này không hiện ra ở bất kỳ đâu.
+- **Quy tắc quy đổi:** Xã Phú Hộ (07954) tờ 1–84 giữ nguyên số · Xã Hà Thạch (07963) tờ 1–59 thành
+  85–143 · Phường Phong Châu cũ (07945) 21 tờ thành 144–164.
+- **Kèm theo một trường mới bắt buộc:** `Parcel.oldWard`. Ba đơn vị cũ đều đánh số tờ từ 1 nên
+  không biết đơn vị cũ thì "tờ 5" có ba đáp án (5, 89, hoặc 148). Có lựa chọn `KHONG_RO` làm lối
+  thoát — bắt buộc chọn một mục chứ không cho để trống, để phân biệt "chưa xác định" với "chưa ai
+  đụng tới".
+- **Đánh đổi:** Chỉ lấp được **trường 19** của PL3. **Trường 20** ("Số thứ tự thửa trên bản đồ địa
+  chính") không có nguồn — bảng này chỉ quy đổi số _tờ_, không quy đổi số _thửa_. Cần hỏi cơ quan
+  xem có bảng tham chiếu số thửa không, nếu không thì 20.000 hồ sơ phải tra tay trường này.
+- **GCN theo bản đồ giấy** (khoảng năm 2000) tra không thấy → `NOT_FOUND` → tự động rơi vào danh
+  sách cán bộ đối chiếu thủ công, đúng như chủ dự án yêu cầu.
+- **Người quyết định:** Claude Code, theo yêu cầu quy đổi số tờ của chủ dự án (2026-07-22).
+
+## [2026-07-22] Dùng Gemini đọc ảnh GCN để **đối chiếu** với bản người dân khai (đảo quyết định "chưa triển khai OCR")
+
+- **Quyết định:** Sau khi người dân bấm gửi, server gọi Gemini API đọc ảnh GCN và **so từng trường**
+  với bản người dân tự khai. Trường nào hai nguồn khớp thì đánh dấu "2 nguồn khớp" và hạ ưu tiên
+  duyệt; trường nào lệch thì đẩy lên đầu hàng chờ, hiện cạnh nhau giá trị hai bên kèm vùng ảnh
+  tương ứng. Đây là đảo quyết định [2026-07-21] "Chưa triển khai OCR (CCCD/GCN)" và mục "Không làm
+  lúc này" trong `04-current-tasks.md`.
+- **Lý do:** Nút thắt thật của quy mô 20.000 hồ sơ là năng lực duyệt của cán bộ, không phải quota
+  Google Sheets. Đối chiếu hai nguồn độc lập vừa giảm thời gian duyệt mỗi hồ sơ (ước tính ~5 phút
+  xuống ~2 phút), vừa cho độ tin cậy cao hơn **cả hai** nguồn riêng lẻ ở những trường trùng khớp.
+- **Ranh giới cứng (phải giữ bằng code, không bằng quy trình):**
+  - **Chỉ gửi ảnh GCN, không gửi ảnh CCCD.** CCCD đã có QR đọc chính xác tuyệt đối trên máy người
+    dân; gửi thêm sang bên thứ ba là tăng phơi nhiễm PII mà không được gì.
+  - Gửi bản preview đã hạ kích thước, không gửi ảnh gốc — tránh chạm timeout Vercel Function và
+    giảm token.
+  - **Không sinh mã trường 12.** Loại đất/nguồn gốc/hình thức/thời hạn chỉ được trích **nguyên văn
+    đoạn chữ** trên bìa để cán bộ đọc; bảng mã chưa được VPĐKĐĐ phê duyệt (xem entry "CHƯA CHỐT"
+    bên dưới), để mô hình sinh mã vào danh mục chưa chốt là đúng cái bẫy "code chạy đúng, form hiển
+    thị đẹp, dữ liệu sai".
+  - Mô hình phải trả `null` thay vì đoán; kết quả **không bao giờ tự ghi** vào hồ sơ chính thức —
+    chỉ thao tác xác nhận của cán bộ mới ghi.
+  - Lưu nguyên văn JSON kết quả kèm version model/prompt vào tab `OCR_FIELDS` (đã có sẵn trong
+    schema), append không ghi đè, để truy được hồ sơ nào đọc bằng bản nào.
+  - Cache theo `sha256Checksum` mà `verifyUploadedFile` đã lấy sẵn — một ảnh không gọi Gemini lần hai.
+- **Đánh đổi:** Thêm phụ thuộc bên thứ ba và một đường chuyển dữ liệu cá nhân **ra nước ngoài**,
+  làm nghĩa vụ theo Nghị định 13/2023/NĐ-CP nặng thêm chứ không nhẹ đi. Rủi ro vận hành lớn nhất là
+  _automation bias_: ô đã điền sẵn khiến người duyệt bấm qua ô sai nhiều hơn so với khi tự gõ — đó
+  là lý do thiết kế chọn "so lệch" thay vì "điền sẵn".
+- **Điều kiện chặn trước ảnh thật đầu tiên:**
+  1. Xác minh tài khoản Gemini đã bật thanh toán và điều khoản hiện hành **không** dùng dữ liệu để
+     huấn luyện (tầng miễn phí có dùng).
+  2. Thông báo bảo vệ dữ liệu cá nhân phải được soạn nguyên văn, nêu cả việc chuyển dữ liệu ra nước
+     ngoài — hiện vẫn là placeholder trong `wizard.tsx`.
+- **Người quyết định:** Chủ dự án (2026-07-22); Claude Code thiết kế luồng đối chiếu.
+
+## [2026-07-22] Chuẩn hóa loại ảnh theo bí danh và phần mở rộng, giữ chốt chặn ở Drive
+
+- **Quyết định:** Loại ảnh do trình duyệt khai (`File.type`) được quy về tên chuẩn trong
+  `modules/public-intake/image-format.ts` trước khi kiểm: bí danh `image/jpg`/`image/pjpeg` quy về
+  `image/jpeg`, và khi trình duyệt khai rỗng thì suy từ phần mở rộng tệp. Thuộc tính `accept` của ô
+  chọn tệp có cả phần mở rộng lẫn MIME.
+- **Lý do:** Ảnh nhận qua Zalo/Messenger — chiếm phần lớn ảnh người dân có sẵn trong máy — thường
+  về với `File.type` rỗng hoặc bí danh không chuẩn, dù nội dung vẫn là JPEG hợp lệ. Bản cũ từ chối
+  thẳng những tệp này với thông báo "Chỉ chấp nhận ảnh JPEG, PNG, WebP hoặc HEIC", khiến người dân
+  bế tắc với một tệp hoàn toàn đúng định dạng. `accept` chỉ có MIME còn làm nhiều trình quản lý tệp
+  Android làm mờ chính ảnh cần chọn.
+- **Vì sao không làm yếu kiểm soát:** Giá trị chuẩn hóa chỉ là **lời khai** gửi kèm lúc tạo phiên
+  tải lên. Ranh giới tin cậy thật vẫn là `verifyUploadedFile`, đọc `mimeType` do chính Google Drive
+  nhận dạng **từ nội dung tệp** sau khi tải xong — tệp PDF đổi đuôi thành `.jpg` vẫn bị chặn và xóa
+  tại đó. Ảnh GCN nay cũng đi qua bước chuyển HEIC→JPEG như ảnh CCCD, nên Drive chỉ còn phải nhận
+  dạng các định dạng nó luôn nhận đúng.
+- **Đánh đổi:** Không có. Kiểm soát giữ nguyên độ chặt, chỉ bỏ đi phần từ chối oan.
+- **Người quyết định:** Claude Code, theo lỗi người dùng thật báo ngày 2026-07-22.
+
 ## [2026-07-22] Cờ tạm mở chốt chặn Cloudflare để test trên `*.vercel.app` khi chưa có domain thật
 
 - **Quyết định:** Thêm `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` — biến môi trường mặc định không đặt
@@ -310,6 +503,70 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
   `tests/public-surface-guard.test.ts`: test tự liệt kê mọi `route.ts` dưới `src/app/api/public`
   và đỏ nếu file nào không đi qua chốt chặn.
 - **Người quyết định:** Claude Code, khi triển khai lớp biên (Phase A).
+
+## [2026-07-22] Gói A dùng mã tiếp nhận + mã bí mật và cho quản trị viên cấp lại mã
+
+- **Quyết định:** Người dân tra cứu/tiếp tục bằng đúng hai mã; sai 5 lần khóa 15 phút. Cookie v2
+  mang định vị dòng và `access_version`. Chỉ `WARD_ADMIN`/`SYSTEM_ADMIN` được cấp lại mã sau khi
+  đối chiếu trực tiếp giấy tờ; cấp lại làm mất hiệu lực mọi phiên cũ.
+- **Lý do:** Phiên trình duyệt 2 giờ không đủ cho kê khai thực tế, nhưng tra cứu chỉ bằng CCCD/số
+  điện thoại tạo nguy cơ dò dữ liệu. `access_version` giải quyết thu hồi phiên mà không lưu mã rõ.
+- **Đánh đổi:** Người dân phải giữ hai mã; trường hợp mất mã cần đến phường xác minh trực tiếp.
+- **Người quyết định:** Chủ dự án và Codex, theo các quyết định đã chốt trong Gói A.
+
+## [2026-07-23 — ĐÃ SỬA, xem entry đầu file] Đối chiếu GCN cũ bằng thông tin định danh, không buộc tải ảnh CCCD
+
+> ⚠️ **Entry này đã lỗi thời một phần.** Cùng ngày 2026-07-23, khóa khớp mô tả dưới đây (CCCD + họ
+> tên + ngày sinh) bị **thay bằng khóa CCCD-đơn**, và điều kiện "đã xác nhận/nhập đầy đủ" bị thay
+> bằng **bắt buộc `QR_CONFIRMED`**. Lý do và chi tiết code nằm ở entry đầu tiên của file này ("Khóa
+> tra 'hồ sơ đã có' = CCCD, BỎ ngày sinh; tra nhanh bắt buộc QR"). Giữ lại entry này vì phần còn lại
+> (bỏ yêu cầu ảnh CCCD trước khi tra cứu, che số GCN, cảnh báo hồ sơ đang xử lý, `NO_ACTION_REQUIRED`)
+> vẫn đúng.
+
+- **Quyết định:** Bỏ điều kiện phải tải đủ ảnh CCCD mặt trước và mặt sau trước khi kiểm tra, liên
+  kết GCN đã có hoặc kết thúc theo diện không cần nộp lại. ~~Ba thao tác chỉ chạy khi CCCD 12 số, họ
+  tên và ngày sinh đã được người dân xác nhận/nhập đầy đủ; đối chiếu vẫn dùng HMAC của cả ba
+  trường~~ (thay bằng khóa CCCD-đơn + bắt buộc QR, xem cảnh báo trên) và chỉ trả số GCN đã che +
+  ngày cấp. Hồ sơ đang xử lý chỉ cảnh báo, không tự liên kết. Nếu toàn bộ GCN đã có thì kết thúc
+  `NO_ACTION_REQUIRED`; nếu có GCN mới thì mỗi phiếu kê khai đúng một GCN, 1–10 ảnh là các trang của
+  GCN đó.
+- **Lý do:** Khi kiểm thử thực tế, người dân đã tải đủ hai ảnh nhưng vẫn bị chặn tra cứu. Ảnh CCCD
+  phục vụ QR và là tài liệu bắt buộc khi nộp GCN mới, không phải bằng chứng cần thiết để tìm trong
+  dữ liệu đã chuẩn hóa.
+- **Đánh đổi:** Không dùng cặp ảnh làm rào cản phụ cho tra cứu. Bù lại, hệ thống vẫn đòi phiên công
+  khai, CSRF, khóa idempotency, và không lộ số GCN đầy đủ; rate limit/WAF ở lớp biên vẫn phải được
+  cấu hình trước khi mở công khai.
+- **Người quyết định:** Chủ dự án (2026-07-23).
+
+## [2026-07-22] Bỏ lần chụp QR riêng; dùng ảnh CCCD mặt sau đã nộp
+
+- **Quyết định:** Quyết định "Quét QR chủ động bằng chụp một kiểu" ở trên được thay thế. Hai ô tải
+  CCCD mặt trước/mặt sau được đưa lên đầu phần cá nhân; ảnh mặt sau vừa lưu hồ sơ vừa đọc QR trên
+  thiết bị, không có lần chụp thứ ba.
+- **Lý do:** Người dân không phải tải/chụp CCCD hai lần và luồng trên điện thoại ngắn hơn.
+- **Đánh đổi:** QR chỉ được đọc sau khi người dùng chọn ảnh mặt sau, nhưng vẫn có nhập tay dự phòng.
+- **Người quyết định:** Chủ dự án.
+
+## [2026-07-22 — THAY THẾ bởi `VietnameseDateInput` 2026-07-23] Ngày cấp GCN cho phép gõ trực tiếp
+
+- **Quyết định (lịch sử):** Ô ngày cấp nhận `ngày/tháng/năm` gõ tự do một ô, kiểm tra ngày thật rồi
+  chuẩn hóa về ISO để lưu.
+- **Thay thế:** Xem entry `VietnameseDateInput` bên dưới — ba ô số riêng Ngày/Tháng/Năm, dùng chung
+  cho cả ngày sinh và ngày cấp GCN, chặn thêm khoảng năm hợp lý và ngày tương lai.
+- **Người quyết định:** Chủ dự án.
+
+## [2026-07-23] `VietnameseDateInput` — ba ô số Ngày/Tháng/Năm, năm cấp GCN từ 1987
+
+- **Quyết định:** Thay `<input type=date>` (ngày sinh) và ô gõ tự do một chuỗi (ngày cấp GCN, xem
+  entry lịch sử trên) bằng một component dùng chung: ba ô số riêng Ngày/Tháng/Năm, bàn phím số,
+  không mở lịch. Năm sinh cho phép từ **1900**; năm cấp GCN cho phép từ **1987**. Cả hai chặn ngày
+  không tồn tại (31/2, năm nhuận) và không cho ngày trong tương lai.
+- **Lý do:** Gõ tự do dễ sai định dạng — PL3 mẫu có `9/10/1017` (năm 1017, lỗi gõ của 2017) lọt vào
+  file mẫu chính thức. Lịch gốc (`type=date`) trên điện thoại bắt cuộn ngược hàng chục năm cho ngày
+  sinh, rất khó dùng. Ba ô số lấy được cả tốc độ bàn phím số lẫn chuẩn hóa `YYYY-MM-DD`.
+- **Đánh đổi:** Không có — cùng logic thuần (`vietnamese-date.ts`) dùng cho cả hai ô, có test riêng
+  cho phần khó (ngày không tồn tại, năm nhuận, chặn tương lai, khoảng năm).
+- **Người quyết định:** Chủ dự án (2026-07-23, chốt mốc năm 1987 cho GCN).
 
 ## Template cho entry mới
 

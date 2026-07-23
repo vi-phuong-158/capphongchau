@@ -14,6 +14,7 @@ import {
 } from "@/modules/public-intake/turnstile";
 import { requiresCitizenId, type IntakeDraft } from "@/modules/public-intake/types";
 import { validateDraftForSubmit } from "@/modules/public-intake/validation";
+import { identityHmac, newTimelineEvent } from "@/modules/public-intake/workflow";
 
 export const runtime = "nodejs";
 
@@ -64,9 +65,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError("VALIDATION_FAILED", draftError, requestId);
   }
 
-  // Không tin dòng PUBLIC_FILES của client: đọc lại từ kho trước khi cho gửi.
+  // `file_summary_json` chỉ là cache phục vụ giao diện và có thể chậm một nhịp khi nhiều lượt
+  // upload hoàn tất gần nhau. Chỉ PUBLIC_FILES là nguồn thật để quyết định có được nộp hay không.
   const files = await getPublicIntakeRepository().listFiles(record.submissionId);
-  const identityOwners = draft.owners.filter((owner) => requiresCitizenId(owner.ownerType));
+  // Người trên GCN đã mất / đã sang tên (hasDistinctCurrentUser) được miễn ảnh CCCD; chỉ những chủ
+  // còn phải tự chứng minh danh tính mới cần đủ cặp ảnh.
+  const identityOwners = draft.owners.filter(
+    (owner) => requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser,
+  );
   const hasEveryCitizenIdPair = identityOwners.every((owner) =>
     ["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK"].every((documentType) =>
       files.some((file) => file.ownerId === owner.id && file.documentType === documentType),
@@ -82,7 +88,41 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  await getPublicIntakeRepository().submit(record, draft);
+  const repository = getPublicIntakeRepository();
+  const status = record.status === "NEEDS_SUPPLEMENT" ? "RESUBMITTED" : "SUBMITTED";
+  await repository.submit(record, draft, status);
+  if (status === "RESUBMITTED") {
+    await repository.resolveOpenSupplementRequest(record.submissionId);
+  }
+  if (status === "SUBMITTED") {
+    await Promise.all(
+      identityOwners.map((owner) =>
+        repository.appendPendingIdentityIndex({
+          record,
+          citizenIdHmac: identityHmac(environment.DATA_HASH_PEPPER, owner.identityNumber),
+        }),
+      ),
+    );
+  }
+  await Promise.all([
+    repository.appendTimelineEvent(
+      record.submissionId,
+      newTimelineEvent({
+        eventType: status,
+        label: status === "RESUBMITTED" ? "Đã gửi bổ sung" : "Đã gửi hồ sơ",
+        actorDisplayName: "Người nộp",
+      }),
+      "PUBLIC",
+      requestId,
+    ),
+    repository.appendAudit({
+      actorEmail: "PUBLIC",
+      action:
+        status === "RESUBMITTED" ? "PUBLIC_SUBMISSION_RESUBMITTED" : "PUBLIC_SUBMISSION_SUBMITTED",
+      entityId: record.submissionId,
+      requestId,
+    }),
+  ]);
 
-  return NextResponse.json({ receiptCode: record.receiptCode, status: "SUBMITTED" });
+  return NextResponse.json({ receiptCode: record.receiptCode, status });
 }

@@ -7,7 +7,8 @@ import {
   publicError,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
-import { ACCEPTED_MIME_TYPES, getPublicIntakeStorage } from "@/modules/public-intake/storage";
+import { canonicalImageMimeType } from "@/modules/public-intake/image-format";
+import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import { requiresCitizenId } from "@/modules/public-intake/types";
 
 export const runtime = "nodejs";
@@ -54,8 +55,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError("VALIDATION_FAILED", "Loại giấy tờ không hợp lệ.", requestId);
   }
 
-  const mimeType = typeof body.mimeType === "string" ? body.mimeType : "";
-  if (!ACCEPTED_MIME_TYPES.includes(mimeType as (typeof ACCEPTED_MIME_TYPES)[number])) {
+  // Quy bí danh (`image/jpg`) và trường hợp trình duyệt không khai được loại về tên chuẩn trước
+  // khi kiểm. Ảnh nhận qua Zalo/Messenger thường rơi vào hai trường hợp này dù vẫn là JPEG hợp lệ.
+  const mimeType = canonicalImageMimeType(
+    typeof body.mimeType === "string" ? body.mimeType : "",
+    typeof body.fileName === "string" ? body.fileName : "",
+  );
+  if (!mimeType) {
     return publicError(
       "VALIDATION_FAILED",
       "Chỉ chấp nhận ảnh JPEG, PNG, WebP hoặc HEIC.",
@@ -75,7 +81,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Ràng buộc số lượng và ngân sách kiểm ở server, không tin phía trình duyệt.
-  const files = await getPublicIntakeRepository().listFiles(record.submissionId);
+  const files = record.fileSummaries.length
+    ? record.fileSummaries.filter((file) => file.status === "UPLOADED")
+    : await getPublicIntakeRepository().listFiles(record.submissionId);
   const usedBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   if (usedBytes + sizeBytes > SUBMISSION_BYTE_BUDGET) {
     return publicError(
@@ -87,6 +95,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
   const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
+  if (record.status === "NEEDS_SUPPLEMENT") {
+    const supplement = await getPublicIntakeRepository().getOpenSupplementRequest(
+      record.submissionId,
+    );
+    const allowed = supplement?.items.some(
+      (item) =>
+        item.itemType === "FILE" &&
+        item.documentType === documentType &&
+        (!item.targetEntityId || item.targetEntityId === ownerId),
+    );
+    if (!allowed) {
+      return publicError(
+        "ACCESS_DENIED",
+        "Tài liệu này không nằm trong nội dung cán bộ yêu cầu bổ sung.",
+        requestId,
+      );
+    }
+  }
   const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
   if (identityImage) {
     const owner = record.draft?.owners.find((candidate) => candidate.id === ownerId);
@@ -132,5 +158,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
 
   // URL phiên là bí mật: trả cho đúng trình duyệt đang giữ cookie, không ghi vào log hay audit.
-  return NextResponse.json({ uploadUrl: session.uploadUrl });
+  // Trả kèm loại đã chuẩn hóa: lệnh PUT của trình duyệt phải khai đúng loại đã đăng ký với phiên,
+  // nếu không Google từ chối phần thân tệp.
+  return NextResponse.json({ uploadUrl: session.uploadUrl, mimeType });
 }

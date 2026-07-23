@@ -9,8 +9,10 @@ import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { isTrustedEdgeRequest } from "./edge-guard";
 import { getPublicIntakeRepository, type SubmissionRecord } from "./repository";
 import {
+  createSessionToken,
   PUBLIC_CSRF_HEADER,
   PUBLIC_SESSION_COOKIE,
+  SESSION_COOKIE_OPTIONS,
   verifyPublicCsrfToken,
   verifySessionToken,
 } from "./session";
@@ -101,9 +103,36 @@ export async function resolvePublicRequest(
     }
   }
 
-  const record = await getPublicIntakeRepository().findById(session.submissionId);
+  const record = await getPublicIntakeRepository().findByLocator(
+    session.submissionId,
+    session.rowIndex,
+  );
   if (!record) {
     return publicError("NOT_FOUND", "Không tìm thấy bản kê khai.", requestId);
+  }
+
+  if (record.accessVersion !== session.accessVersion) {
+    return publicError(
+      "UNAUTHENTICATED",
+      "Phiên truy cập không còn hiệu lực. Nhập mã tiếp nhận và mã bí mật mới để tiếp tục.",
+      requestId,
+    );
+  }
+
+  if (session.tokenVersion === "v1" || session.rowIndex !== record.rowIndex) {
+    cookieStore.set(
+      PUBLIC_SESSION_COOKIE,
+      createSessionToken(environment.PUBLIC_SESSION_SECRET, {
+        submissionId: record.submissionId,
+        rowIndex: record.rowIndex,
+        accessVersion: record.accessVersion,
+        issuedAt: session.issuedAt,
+      }),
+      {
+        ...SESSION_COOKIE_OPTIONS,
+        secure: process.env.NODE_ENV === "production",
+      },
+    );
   }
 
   return { record, requestId };

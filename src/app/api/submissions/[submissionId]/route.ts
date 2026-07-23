@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
+import { UserRole } from "@/modules/common/domain";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
@@ -55,6 +56,8 @@ export async function GET(
             fileId: file.fileId,
             documentType: file.documentType,
           })),
+          canResetAccessSecret:
+            user.roles.includes(UserRole.SYSTEM_ADMIN) || user.roles.includes(UserRole.WARD_ADMIN),
         },
         requestId,
       },

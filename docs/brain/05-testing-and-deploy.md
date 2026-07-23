@@ -94,8 +94,8 @@ giữa cổng công khai trả 404/403 cho mọi người.
    `ORIGIN_SHARED_SECRET` vào mọi request. Thiếu bước này thì origin từ chối toàn bộ cổng công khai.
 4. **Cache Rule**: bypass cache cho `/api/*` và `/ke-khai*`. Không bật "Cache Everything" hay
    Automatic Platform Optimization — một trang nháp bị cache là lộ PII sang người khác.
-5. **Rate limiting** theo bảng `PLAN_NL` §10.2 (`/api/public/*` 120 req/10 phút/IP;
-   `/api/public/submissions/access` 10 req/10 phút/IP; POST tạo nháp 5 req/giờ/IP). Bật chế độ
+5. **Rate limiting** theo bảng `PLAN2.md` (`/api/public/*` 120 req/10 phút/IP;
+   `/api/public/submissions/recover` 10 req/10 phút/IP; POST tạo nháp 5 req/giờ/IP). Bật chế độ
    **Log** trước, quan sát rồi mới chuyển Block. Kiểm số rule gói hiện tại cho phép trước khi
    thiết kế — gói Free thường chỉ được một rule.
 6. Vercel: đặt `ORIGIN_SHARED_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
@@ -116,10 +116,49 @@ Nghiệm thu bắt buộc (`PLAN_NL` §11):
 | Production | `main` (dự kiến) | _(cần bổ sung sau khi deploy lần đầu)_ |
 | Local      | —                | _(cần bổ sung sau M0)_                 |
 
+## Migration schema (chạy trước mỗi lần deploy có cột mới)
+
+```powershell
+npm run migrate:public-intake
+```
+
+Idempotent: tạo tab `PUBLIC_*` còn thiếu, **và nối cột còn thiếu vào cuối hàng header của tab đã
+tồn tại**. Chỉ nối thêm — không đổi tên, không chèn giữa, không xóa, vì mã định vị dữ liệu theo
+**chỉ số cột** nên dịch cột là hỏng toàn bộ dữ liệu đã ghi.
+
+⚠️ Bản hiện tại có cột mới `old_ward` trong `PUBLIC_PARCELS` — **phải chạy lệnh trên trước khi
+deploy**, nếu không dữ liệu đơn vị hành chính cũ ghi vào một cột không có tiêu đề.
+
+### Nhập dữ liệu GCN cũ cho Gói A
+
+Chạy theo đúng thứ tự, dùng Python 3.11+ và không dùng pepper giả ở môi trường thật:
+
+```powershell
+python -m pip install -r requirements-import.txt
+npm run migrate:public-intake
+python scripts/import_existing_certificates.py
+# Duyệt reports/existing-import-*.json, backup Sheet, rồi mới:
+python scripts/import_existing_certificates.py --apply
+```
+
+Dry-run không ghi Sheets và báo cáo chỉ chứa số dòng nguồn + mã lỗi, không chứa CCCD/họ tên. `--apply`
+ghi `EXISTING_*` và chỉ mục HMAC; cùng SHA-256 nguồn đã `COMPLETED` sẽ không nhập lại. Nếu lần trước
+dừng ở `STARTED`, script fail-closed để quản trị viên kiểm tra dữ liệu trước khi chạy tiếp.
+
 ## Lưu ý
 
-- Giới hạn quy mô bản thử nghiệm: tối đa 500 hồ sơ.
+- **Quy mô mục tiêu: 20.000 hồ sơ** (nâng từ 500 vào 2026-07-22). Không sharding — xem
+  `03-decisions.md`. Trước khi mở rộng thật phải chạy spike đo tải, đo **cả đọc lẫn ghi** (quota
+  đọc cũng 60/phút/người dùng và trước đây bị bỏ sót trong mọi tính toán).
+- Dung lượng ước tính: 20.000 hồ sơ × ~7 ảnh × ~3 MB ≈ **420 GB**, cộng preview ≈ **500–600 GB**.
+  Tài khoản Google miễn phí chỉ có 15 GB — phải mua dung lượng trước khi mở chiến dịch.
 - Upload file gốc giới hạn 30 MB/file (`MAX_UPLOAD_MB`), preview tối đa 2.5 MB.
 - OAuth app ở trạng thái `Testing` có thể khiến refresh token Drive hết hạn sau 7 ngày — phải chuyển `In production` trước khi dùng dữ liệu thật.
 - Vercel Cron tạo snapshot hằng ngày trong `99_BACKUP` — đây là copy **trong cùng tài khoản**, không bảo vệ khỏi việc tài khoản `anmphongandn@gmail.com` bị khóa/mất quyền truy cập (single point of failure, xem `01-architecture.md` và `03-decisions.md`). Cần thêm export Google Sheets định kỳ ra ngoài tài khoản gốc, và bản backup mã hóa ngoại tuyến hằng tuần phải tách khỏi tài khoản này.
 - Chỉ dùng dữ liệu giả/ẩn danh cho test tự động và môi trường Preview.
+
+## Backfill GCN cũ
+
+1. Chạy python scripts/import_existing_certificates.py --backfill và duyệt báo cáo không PII.
+2. Sao lưu restricted spreadsheet, rồi mới chạy --backfill --apply.
+3. Chạy lại cùng lệnh; phải trả BACKFILL_NOOP. Không chạy --apply import thường cho nguồn đã COMPLETED.

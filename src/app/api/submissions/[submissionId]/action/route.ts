@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -13,6 +13,12 @@ import {
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
 import {
+  newTimelineEvent,
+  publicActorName,
+  SUPPLEMENT_REASON_CODES,
+  type SupplementRequest,
+} from "@/modules/public-intake/workflow";
+import {
   isClaimedBy,
   mayClaim,
   mayReject,
@@ -26,6 +32,30 @@ export const runtime = "nodejs";
 const schema = z.object({
   action: z.enum(["CLAIM", "REQUEST_SUPPLEMENT", "REJECT"]),
   version: z.number().int().positive(),
+  reasonCode: z.enum(SUPPLEMENT_REASON_CODES).optional(),
+  message: z.string().trim().max(1000).optional(),
+  items: z
+    .array(
+      z.object({
+        itemType: z.enum(["FIELD", "FILE"]),
+        targetEntityType: z.enum([
+          "SUBMISSION",
+          "CERTIFICATE",
+          "OWNER",
+          "PARCEL",
+          "LAND_USE",
+          "ASSET",
+        ]),
+        targetEntityId: z.string().trim().max(100).default(""),
+        fieldPath: z.string().trim().max(200).default(""),
+        documentType: z
+          .enum(["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK", "CERTIFICATE"])
+          .or(z.literal("")),
+        instruction: z.string().trim().min(1).max(500),
+      }),
+    )
+    .max(30)
+    .optional(),
 });
 
 function fail(
@@ -35,6 +65,7 @@ function fail(
     | "VALIDATION_FAILED"
     | "NOT_FOUND"
     | "VERSION_CONFLICT"
+    | "IDEMPOTENCY_CONFLICT"
     | "INTERNAL_ERROR",
   message: string,
   requestId: string,
@@ -72,6 +103,53 @@ export async function POST(
     }
     const { submissionId } = await context.params;
     const repository = getPublicIntakeRepository();
+    const scopedIdempotencyKey = `STAFF_ACTION:${submissionId}:${idempotencyKey}`;
+    const mutationHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          submissionId,
+          actorEmail: user.email,
+          action: body.data.action,
+          version: body.data.version,
+          reasonCode: body.data.reasonCode ?? "",
+          message: body.data.message ?? "",
+          items: body.data.items ?? [],
+        }),
+      )
+      .digest("hex");
+    const replay = await repository.findStoredMutation(scopedIdempotencyKey, "STAFF_ACTION");
+    if (replay) {
+      if (replay.mutationHash !== mutationHash) {
+        return fail(
+          "IDEMPOTENCY_CONFLICT",
+          "Khóa chống gửi trùng đã dùng cho thao tác khác.",
+          requestId,
+          409,
+        );
+      }
+      const status = replay.response.status;
+      const version = replay.response.version;
+      if (typeof status !== "string" || typeof version !== "number") {
+        return fail(
+          "INTERNAL_ERROR",
+          "Không thể khôi phục kết quả thao tác trước.",
+          requestId,
+          500,
+        );
+      }
+      return NextResponse.json(
+        {
+          submission: {
+            status,
+            version,
+            claimedBy:
+              typeof replay.response.claimedBy === "string" ? replay.response.claimedBy : "",
+          },
+          requestId,
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
     const record = await repository.findById(submissionId);
     if (!record) return fail("NOT_FOUND", "Không tìm thấy bản kê khai.", requestId, 404);
     if (record.version !== body.data.version) {
@@ -91,19 +169,23 @@ export async function POST(
       if (record.claimedBy && !isClaimedBy(record, user.email) && !force) {
         return fail("ACCESS_DENIED", "Hồ sơ đang do cán bộ khác xử lý.", requestId, 403);
       }
-      const updated = await repository.transition({
+      const updated = await repository.commitStaffAction({
         record,
         expectedVersion: body.data.version,
         status: "UNDER_REVIEW",
         claimedBy: user.email,
         claimedAt: new Date().toISOString(),
-      });
-      await repository.appendAudit({
         actorEmail: user.email,
-        action: "SUBMISSION_CLAIMED",
-        entityId: record.submissionId,
+        auditAction: "SUBMISSION_CLAIMED",
+        auditMetadata: { forced: force },
+        timelineEvent: newTimelineEvent({
+          eventType: "UNDER_REVIEW",
+          label: "Đang kiểm tra",
+          actorDisplayName: user.displayName,
+        }),
         requestId,
-        metadata: { forced: force },
+        idempotencyKey: scopedIdempotencyKey,
+        mutationHash,
       });
       return NextResponse.json(
         {
@@ -135,20 +217,63 @@ export async function POST(
           user.roles.includes(UserRole.SYSTEM_ADMIN);
     if (!allowed)
       return fail("VALIDATION_FAILED", "Hồ sơ không ở trạng thái có thể xử lý.", requestId, 400);
+    if (
+      body.data.action === "REQUEST_SUPPLEMENT" &&
+      (!body.data.reasonCode || !body.data.message || !body.data.items?.length)
+    ) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Cần nêu lý do, hướng dẫn và ít nhất một trường hoặc tài liệu phải bổ sung.",
+        requestId,
+        400,
+      );
+    }
     const status = body.data.action === "REQUEST_SUPPLEMENT" ? "NEEDS_SUPPLEMENT" : "REJECTED";
-    const updated = await repository.transition({
+    let supplementRequest: SupplementRequest | undefined;
+    if (body.data.action === "REQUEST_SUPPLEMENT") {
+      const supplementRequestId = randomUUID();
+      const createdAt = new Date().toISOString();
+      supplementRequest = {
+        requestId: supplementRequestId,
+        status: "OPEN",
+        reasonCode: body.data.reasonCode!,
+        message: body.data.message!,
+        requestedByDisplayName: publicActorName(user.displayName),
+        createdAt,
+        resolvedAt: "",
+        items: body.data.items!.map((item) => ({
+          itemId: randomUUID(),
+          requestId: supplementRequestId,
+          itemType: item.itemType,
+          targetEntityType: item.targetEntityType,
+          targetEntityId: item.targetEntityId,
+          fieldPath: item.fieldPath,
+          documentType: item.documentType,
+          reasonCode: body.data.reasonCode!,
+          instruction: item.instruction,
+          status: "OPEN",
+        })),
+      };
+    }
+    const updated = await repository.commitStaffAction({
       record,
       expectedVersion: body.data.version,
       status,
-    });
-    await repository.appendAudit({
+      supplementRequest,
       actorEmail: user.email,
-      action:
+      auditAction:
         body.data.action === "REQUEST_SUPPLEMENT"
           ? "SUBMISSION_NEEDS_SUPPLEMENT"
           : "SUBMISSION_REJECTED",
-      entityId: record.submissionId,
+      timelineEvent: newTimelineEvent({
+        eventType: status,
+        label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",
+        actorDisplayName: user.displayName,
+        message: body.data.message,
+      }),
       requestId,
+      idempotencyKey: scopedIdempotencyKey,
+      mutationHash,
     });
     return NextResponse.json(
       { submission: { status: updated.status, version: updated.version }, requestId },

@@ -6,20 +6,50 @@
  * `PLAN_NL.md` §5.3.
  */
 
-/** Trường 5, 6, 7 — GCN có thể cấp cho cá nhân, hộ gia đình, vợ chồng hoặc tổ chức. */
-export const OWNER_TYPES = ["CA_NHAN", "HO_GIA_DINH", "VO_CHONG", "TO_CHUC"] as const;
+/**
+ * Trường 12 của PL3 — "Pháp nhân trên GCN".
+ *
+ * Sáu giá trị và thứ tự lấy nguyên từ ràng buộc dữ liệu (data validation) nhúng trong
+ * `Tai lieu/PL3.xlsx`, nên `OWNER_TYPE_LABELS` **chính là** chuỗi phải ghi ra khi xuất — đừng sửa
+ * nhãn cho "gọn" rồi làm lệch file nộp.
+ */
+export const OWNER_TYPES = [
+  "CA_NHAN",
+  "HO_GIA_DINH",
+  "VO_CHONG",
+  "DONG_SU_DUNG",
+  "CONG_DONG_DAN_CU",
+  "TO_CHUC",
+] as const;
 export type OwnerType = (typeof OWNER_TYPES)[number];
 
 export const OWNER_TYPE_LABELS: Record<OwnerType, string> = {
   CA_NHAN: "Cá nhân",
   HO_GIA_DINH: "Hộ gia đình",
   VO_CHONG: "Vợ chồng",
+  DONG_SU_DUNG: "Đồng sử dụng",
+  CONG_DONG_DAN_CU: "Cộng đồng dân cư",
   TO_CHUC: "Tổ chức",
 };
 
-/** Trường 6 chỉ bắt buộc CCCD 12 số với cá nhân/vợ chồng. */
+/**
+ * Pháp nhân là **người tự nhiên** — bắt buộc CCCD 12 số, ngày sinh, giới tính, địa chỉ và đủ cặp
+ * ảnh CCCD.
+ *
+ * Trước 2026-07-22 hàm này loại trừ cả `HO_GIA_DINH`, khiến chọn "Hộ gia đình" là bỏ qua toàn bộ
+ * phần định danh — nộp được hồ sơ chỉ với một cái tên. PL3 mẫu có CCCD ở **cả** ba dòng hộ gia
+ * đình (CCCD của chủ hộ), nên đó là lỗi chứ không phải thiết kế.
+ */
 export function requiresCitizenId(ownerType: OwnerType): boolean {
-  return ownerType === "CA_NHAN" || ownerType === "VO_CHONG";
+  return !isOrganisationOwner(ownerType);
+}
+
+/**
+ * Tổ chức và cộng đồng dân cư không có CCCD 12 số — định danh là mã số thuế / mã số quyết định
+ * thành lập. Vẫn bắt buộc có mã và địa chỉ trụ sở, chỉ miễn ngày sinh/giới tính/ảnh CCCD.
+ */
+export function isOrganisationOwner(ownerType: OwnerType): boolean {
+  return ownerType === "TO_CHUC" || ownerType === "CONG_DONG_DAN_CU";
 }
 
 export interface Owner {
@@ -42,7 +72,33 @@ export interface Owner {
   identityConfirmedAt: string;
   /** Trường 7 — vai trò pháp nhân trên GCN. */
   roleOnCertificate: string;
+  /**
+   * Nhóm "Người sử dụng đất hiện tại" của PL3 (cột O, P và trường 14, 15) — chỉ dùng khi người
+   * đứng tên trên GCN **không còn** là người sử dụng thực tế: đã mất, thừa kế, tặng cho, chuyển
+   * nhượng. Nguồn "đã có dữ liệu" bỏ cột O/P vì đưa vào dùng ngay, nhưng khi thu thập vẫn phải có
+   * để xử lý các ca này.
+   *
+   * Khi bật, người trên GCN (có thể đã mất) được **miễn** ảnh CCCD/QR và các trường định danh; đổi
+   * lại phải khai đủ thông tin người sử dụng hiện tại bên dưới. Cán bộ đối chiếu giấy tờ thừa
+   * kế/sang tên khi duyệt.
+   */
+  hasDistinctCurrentUser: boolean;
+  /** Cột O — tên người sử dụng hiện tại. */
+  currentUserName: string;
+  /** Cột P — số định danh cá nhân (CCCD 12 số) của người sử dụng hiện tại. */
+  currentUserCitizenId: string;
+  /** Trường 14 — địa chỉ thường trú hai cấp của người sử dụng hiện tại. */
+  currentUserAddress: string;
+  /** Trường 15 — lý do thay đổi; mã trong `CHANGE_REASON_OPTIONS`. */
+  changeReason: string;
 }
+
+/**
+ * PL3 chỉ chừa **ba** bộ cột loại đất cho mỗi thửa (cột Z–AD, AE–AI, AJ–AN). Không chặn ở đây thì
+ * thửa khai 4 mục đích vẫn nộp được rồi âm thầm mất dòng thứ tư lúc xuất — mất dữ liệu không ai
+ * thấy, tệ hơn là báo lỗi ngay lúc khai.
+ */
+export const MAX_LAND_USES_PER_PARCEL = 3;
 
 /** Trường 12 — mỗi thửa có thể có nhiều dòng mục đích sử dụng. */
 export interface LandUse {
@@ -69,6 +125,13 @@ export interface Parcel {
    */
   addressOnCertificate: string;
   addressTwoLevel: string;
+  /**
+   * Đơn vị hành chính cũ nơi cấp GCN — `PHU_HO` | `HA_THACH` | `PHONG_CHAU_CU` | `KHONG_RO`.
+   *
+   * Không thuộc Phụ lục 8 nhưng bắt buộc để suy ra trường 19 của PL3 ("Số hiệu tờ trên bản đồ địa
+   * chính"): ba xã cũ đều đánh số tờ bản đồ từ 1, nên không biết đơn vị cũ thì "tờ 5" có ba đáp án.
+   */
+  oldWard: string;
   /** Trường 11 — bắt buộc, đơn vị m². */
   area: string;
   landUses: LandUse[];
@@ -110,6 +173,7 @@ export function emptyParcel(id: string, landUseId: string): Parcel {
     parcelNumber: "",
     addressOnCertificate: "",
     addressTwoLevel: "",
+    oldWard: "",
     area: "",
     landUses: [emptyLandUse(landUseId)],
   };
@@ -131,6 +195,11 @@ export function emptyOwner(id: string): Owner {
     identityStatus: "",
     identityConfirmedAt: "",
     roleOnCertificate: "",
+    hasDistinctCurrentUser: false,
+    currentUserName: "",
+    currentUserCitizenId: "",
+    currentUserAddress: "",
+    changeReason: "",
   };
 }
 

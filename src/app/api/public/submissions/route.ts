@@ -258,6 +258,8 @@ async function createSuccessResponse(input: {
     PUBLIC_SESSION_COOKIE,
     createSessionToken(input.sessionSecret, {
       submissionId: input.submissionId,
+      rowIndex: 0,
+      accessVersion: 1,
       issuedAt: Math.floor(Date.now() / 1000),
     }),
     {

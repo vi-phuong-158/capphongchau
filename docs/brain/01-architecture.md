@@ -63,8 +63,8 @@ src/modules/files/index.ts ─────→ kiểu file nội bộ (file_id t�
 src/modules/qr/index.ts ────────→ quy ước giải mã QR phía client
 src/modules/public-intake/citizen-id-qr* → parser QR bảo thủ + ZXing/HEIC chỉ chạy client
   ├── bắt buộc hint TRY_HARDER (mặc định trượt thất thường — tests/citizen-id-qr-decoding.test.ts)
-  ├── đọc ngầm khi tải ảnh CCCD, và nút "Quét QR" chụp một kiểu (ảnh quét không tải lên)
-  └── wizard.tsx: applyQrResult dùng chung hai đường, cờ force phân biệt ghi đè
+  ├── đọc từ chính ảnh CCCD mặt sau đã tải; không còn nút/chụp QR riêng
+  └── wizard.tsx: kết quả chỉ gợi ý, người nộp vẫn phải xác nhận hoặc nhập tay
 src/modules/audit/index.ts ─────→ kiểu tham chiếu audit append-only
 src/modules/sheets/index.ts ────→ src/modules/sheets/data-repository.ts
 src/modules/drive/index.ts ─────→ src/modules/drive/storage-repository.ts
@@ -101,6 +101,25 @@ src/modules/public-intake/turnstile.ts ─→ Cloudflare siteverify (fail-closed
 └── src/app/api/public/submissions/current/submit/route.ts (action submit)
 tests/public-surface-guard.test.ts ─→ mọi route /api/public + matcher src/proxy.ts
 
+src/modules/public-intake/image-format.ts → tên chuẩn của loại ảnh + chuỗi `accept` dùng chung
+├── src/app/ke-khai/wizard.tsx (chuẩn hóa `File.type` trước khi gọi initiate; `accept` có cả đuôi)
+├── src/app/api/public/submissions/current/uploads/initiate/route.ts (quy bí danh → tên chuẩn,
+│     trả `mimeType` đã chuẩn để trình duyệt PUT đúng loại đã đăng ký với phiên)
+├── src/modules/public-intake/storage.ts (ACCEPTED_MIME_TYPES; chốt chặn thật ở verifyUploadedFile
+│     đọc mimeType do Drive tự nhận dạng từ nội dung)
+└── tests/image-format.test.ts
+
+src/modules/public-intake/map-sheet-reference.ts → tra tờ bản đồ cũ (trên GCN) sang tờ Phong Châu mới
+├── 164 dòng sinh từ `Tai lieu/DS THAM CHIEU ... 25052026.pdf` (lọc xã mới = 07954)
+├── khóa tra cứu = (đơn vị cũ, số tờ, TỶ LỆ) — Phong Châu cũ có hai bộ bản đồ cùng đánh số từ 1
+├── trả RESOLVED / AMBIGUOUS / NOT_FOUND, không bao giờ tự đoán
+└── tests/map-sheet-reference.test.ts
+    (chưa nối vào biểu mẫu — còn thiếu trường "thửa đất thuộc đơn vị cũ nào")
+
+src/modules/public-intake/support-contacts.ts → danh bạ cán bộ theo tổ dân phố + phạm vi áp dụng
+├── src/app/ke-khai/wizard.tsx (khối "Không tự làm được?", link `tel:`)
+└── src/app/ke-khai/page.tsx (COVERAGE_NOTICE ở đầu trang)
+
 src/app/ke-khai/wizard.tsx
 └── POST /api/public/submissions (UUID idempotency-key, retry 5xx/network)
     ├── src/modules/public-intake/creation-idempotency.ts (HMAC định danh/mã ổn định)
@@ -109,6 +128,17 @@ src/app/ke-khai/wizard.tsx
     ├── src/modules/public-intake/storage.ts ─→ Google Drive 01_INBOX
     └── src/modules/public-intake/session.ts ─→ cookie + CSRF phiên công khai
 tests/public-submission-create.test.ts ─→ route tạo nháp, replay, concurrent retry, lỗi Google
+src/app/tra-cuu/page.tsx → public-lookup.tsx
+  ├── POST /api/public/submissions/recover → lockout + cookie v2(row/access_version)
+  ├── GET /api/public/submissions/current → file summary + checklist + supplement + timeline
+  └── GET /api/public/submissions/current/files/:fileId → preview no-store + audit
+src/app/ke-khai/wizard.tsx → POST /api/public/submissions/current/existing-records/check
+  ├── workflow.ts → HMAC(CCCD)-đơn + che số GCN; bắt buộc identityStatus=QR_CONFIRMED (chống dò,
+  │   xem 03-decisions.md 2026-07-23 — ngày sinh KHÔNG còn trong khóa, kho thật 87% ngày sinh chỉ có năm)
+  ├── repository.ts → đọc đúng một bucket PUBLIC_LOOKUP_INDEX
+  └── POST /api/public/submissions/current/no-action → NO_ACTION_REQUIRED
+scripts/import_existing_certificates.py
+  └── Excel đã xác minh → validate/report → EXISTING_* + PUBLIC_LOOKUP_INDEX
 src/app/submissions/page.tsx ─→ src/components/submissions-queue.tsx
   └── GET /api/submissions ─→ PublicIntakeRepository (Google Sheets)
 src/app/submissions/[submissionId]/page.tsx ─→ src/components/submission-detail.tsx
@@ -156,11 +186,28 @@ src/app/api/users/route.ts
 src/app/api/security/csrf/route.ts -> authorization + CSRF HMAC
 ```
 
+## Đầu ra cuối cùng: PL3 (49 trường)
+
+`Tai lieu/PL3.xlsx` thay cho bộ 15 trường Phụ lục 8 (đổi 2026-07-22, xem `03-decisions.md`).
+
+- **Mỗi dòng = một (GCN × thửa × người)** — dữ liệu GCN và thửa lặp lại theo từng chủ sử dụng.
+- Giá trị ghi **bằng chữ** (`Đất ở tại đô thị`, `Lâu dài`), không phải mã. Cần bảng ánh xạ mã→chữ
+  **được cơ quan duyệt** — không để AI tự dịch nhãn.
+- Tối đa **3** dòng mục đích sử dụng mỗi thửa.
+- Mã ĐVHC cấp xã Phường Phong Châu: **`07954`** (trường 1).
+- Trường 19 tự tính được từ `Parcel.oldWard` + `map-sheet-reference.ts`. **Trường 20 chưa có nguồn.**
+- Cột O, P + trường 14, 15 ("Người sử dụng đất hiện tại") đã thu qua `Owner.hasDistinctCurrentUser`
+  — bật khi người trên GCN đã mất/sang tên, miễn ảnh CCCD/QR của người đó (2026-07-23).
+- Ngày sinh và ngày cấp GCN dùng chung `VietnameseDateInput` (ba ô số Ngày/Tháng/Năm), không phải
+  `<input type=date>` hay gõ tự do một chuỗi (2026-07-23).
+
+Bảng đối chiếu đầy đủ 49 trường → nguồn dữ liệu: Phụ lục của [`PLAN2.md`](../../PLAN2.md).
+
 ## Mô hình dữ liệu / API
 
 Chi tiết đầy đủ nằm ở `AGENTS.md` §4 (mô hình dữ liệu) và §5 (API). Tóm tắt:
 
-**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), cùng bảy tab `PUBLIC_*` của cổng kê khai. `REQUEST_LOG` giữ idempotency key và kết quả đã cache tối thiểu 24 giờ; tạo nháp công khai ghi `PUBLIC_SUBMISSIONS` + `REQUEST_LOG` trong cùng batch và không cache mã bí mật rõ.
+**Google Sheets tabs**: `CASES`, `CERTIFICATES`, `OWNERS`, `FILES`, `IDENTITY_QR_SCANS`, `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX` (đang dùng); `PARCELS`, `ASSETS`, `OCR_FIELDS` (tạo sẵn cho nâng cấp, chưa dùng trong luồng MVP), các tab intake hiện có và các tab append-only của Gói A: `PUBLIC_STATUS_EVENTS`, `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`, `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS`, `PUBLIC_LOOKUP_INDEX`. `PUBLIC_LOOKUP_INDEX` chia 256 cột theo byte đầu HMAC để một lần đối chiếu không quét toàn bộ 20.000 hồ sơ.
 
 **API chính**:
 
@@ -179,11 +226,17 @@ GET/POST/PATCH /api/users
 GET        /api/health/google
 GET        /api/security/csrf
 POST       /api/public/submissions
+POST       /api/public/submissions/recover
 GET/PATCH  /api/public/submissions/current
+GET        /api/public/submissions/current/files/:fileId
+POST       /api/public/submissions/current/existing-records/check
+POST       /api/public/submissions/current/existing-records/link
+POST       /api/public/submissions/current/no-action
 POST       /api/public/submissions/current/uploads/initiate
 POST       /api/public/submissions/current/uploads/complete
 POST       /api/public/submissions/current/submit
 POST       /api/submissions/:submissionId/accept
+POST       /api/submissions/:submissionId/reset-access-secret
 ```
 
 Google Drive folder layout:
@@ -248,3 +301,10 @@ M1 có `scripts/bootstrap-google.ts`, chạy cục bộ để xin OAuth offline 
 - Case ID tính năm theo múi giờ `Asia/Ho_Chi_Minh` (UTC+7), không dùng UTC mặc định của Vercel.
 - PWA online-only: báo lỗi mất kết nối rõ ràng, không cam kết lưu nháp hoặc upload khi offline.
 - Xóa GCN chỉ là soft-delete; CCCD chỉ được thay sau khi ảnh mới upload/xác minh thành công, không được xóa trắng.
+- Loại ảnh do trình duyệt khai không đáng tin (`File.type` rỗng hoặc bí danh với ảnh từ Zalo/Messenger). Chuẩn hóa ở `modules/public-intake/image-format.ts`; chốt chặn thật là `mimeType` do Drive nhận dạng từ nội dung trong `verifyUploadedFile`.
+- **Chưa xây — đối chiếu Gemini (đã chốt hướng, xem `03-decisions.md` 2026-07-22):** sau khi hồ sơ chuyển `SUBMITTED`, server đọc ảnh **GCN** (bản preview, không gửi ảnh CCCD) qua Gemini, lưu JSON thô vào `OCR_FIELDS` kèm version model, rồi so từng trường với `draft_json`. Cán bộ chỉ duyệt phần lệch. Không sinh mã trường 12; không tự ghi hồ sơ chính thức.
+
+## Sửa lỗi PR #1 (2026-07-23)
+
+- Legacy GCN: CCCD HMAC là khóa; import/backfill không dùng ngày sinh và các tab EXISTING_* append-only dùng dòng cuối theo ID.
+- Staff action/reset secret: ghi cột hẹp hoặc một Sheets batch kèm audit, timeline và idempotency.

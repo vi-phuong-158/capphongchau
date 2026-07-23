@@ -15,6 +15,7 @@ type Submission = {
   updatedAt: string;
   officialCaseId: string | null;
   acceptStep: string | null;
+  canResetAccessSecret: boolean;
   draft: {
     certificate: { issueNumber: string; issueDate: string; registryNumber: string };
     owners: {
@@ -70,6 +71,16 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [supplementReason, setSupplementReason] = useState("MISSING_INFORMATION");
+  const [supplementMessage, setSupplementMessage] = useState("");
+  const [supplementKind, setSupplementKind] = useState<"FIELD" | "FILE">("FIELD");
+  const [supplementTarget, setSupplementTarget] = useState("");
+  const [supplementDocument, setSupplementDocument] = useState<
+    "" | "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE"
+  >("");
+  const [supplementInstruction, setSupplementInstruction] = useState("");
+  const [resetConfirmation, setResetConfirmation] = useState("");
+  const [newAccessSecret, setNewAccessSecret] = useState("");
   useEffect(() => {
     fetch(`/api/submissions/${submissionId}`, { cache: "no-store" })
       .then(async (response) => {
@@ -92,7 +103,26 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
           "x-csrf-token": token,
           "idempotency-key": crypto.randomUUID(),
         },
-        body: JSON.stringify({ action, version: submission.version }),
+        body: JSON.stringify({
+          action,
+          version: submission.version,
+          ...(action === "REQUEST_SUPPLEMENT"
+            ? {
+                reasonCode: supplementReason,
+                message: supplementMessage,
+                items: [
+                  {
+                    itemType: supplementKind,
+                    targetEntityType: "SUBMISSION",
+                    targetEntityId: "",
+                    fieldPath: supplementKind === "FIELD" ? supplementTarget : "",
+                    documentType: supplementKind === "FILE" ? supplementDocument : "",
+                    instruction: supplementInstruction,
+                  },
+                ],
+              }
+            : {}),
+        }),
       });
       const data = (await response.json()) as {
         submission?: { status: string; version: number; claimedBy?: string };
@@ -119,6 +149,39 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resetAccessSecret() {
+    if (!submission || resetConfirmation !== "ĐÃ XÁC MINH") return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const token = await csrfToken();
+      const response = await fetch(
+        `/api/submissions/${submission.submissionId}/reset-access-secret`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-csrf-token": token,
+            "idempotency-key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({ identityVerified: true }),
+        },
+      );
+      const data = (await response.json()) as {
+        accessSecret?: string;
+        error?: { message?: string };
+      };
+      if (!response.ok || !data.accessSecret)
+        throw new Error(data.error?.message ?? "Không thể đặt lại mã.");
+      setNewAccessSecret(data.accessSecret);
+      setResetConfirmation("");
+      setMessage("Đã đặt lại mã bí mật. Mọi phiên truy cập cũ đã bị vô hiệu.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể đặt lại mã bí mật.");
     } finally {
       setBusy(false);
     }
@@ -163,7 +226,13 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
             </button>
             <button
               className="rounded-lg border border-amber-700 px-4 py-2 font-semibold text-amber-800 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW"}
+              disabled={
+                busy ||
+                submission.status !== "UNDER_REVIEW" ||
+                !supplementMessage.trim() ||
+                !supplementInstruction.trim() ||
+                (supplementKind === "FIELD" ? !supplementTarget.trim() : !supplementDocument)
+              }
               onClick={() => action("REQUEST_SUPPLEMENT")}
               type="button"
             >
@@ -201,6 +270,115 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
           </div>
         </dl>
       </section>
+      {submission.status === "UNDER_REVIEW" ? (
+        <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-5">
+          <h2 className="text-lg font-bold text-amber-950">Soạn yêu cầu bổ sung có cấu trúc</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label>
+              <span className="pc-field-label">Lý do</span>
+              <select
+                className="pc-select"
+                value={supplementReason}
+                onChange={(event) => setSupplementReason(event.target.value)}
+              >
+                <option value="MISSING_INFORMATION">Thiếu thông tin</option>
+                <option value="UNREADABLE_IMAGE">Ảnh không đọc được</option>
+                <option value="INCONSISTENT_INFORMATION">Thông tin chưa thống nhất</option>
+                <option value="WRONG_DOCUMENT">Sai loại tài liệu</option>
+                <option value="OTHER">Lý do khác</option>
+              </select>
+            </label>
+            <label>
+              <span className="pc-field-label">Loại nội dung</span>
+              <select
+                className="pc-select"
+                value={supplementKind}
+                onChange={(event) => setSupplementKind(event.target.value as "FIELD" | "FILE")}
+              >
+                <option value="FIELD">Sửa trường thông tin</option>
+                <option value="FILE">Thay/bổ sung ảnh</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-3 block">
+            <span className="pc-field-label">Thông báo chung cho người nộp</span>
+            <textarea
+              className="pc-textarea"
+              value={supplementMessage}
+              onChange={(event) => setSupplementMessage(event.target.value)}
+            />
+          </label>
+          {supplementKind === "FIELD" ? (
+            <label className="mt-3 block">
+              <span className="pc-field-label">Đường dẫn trường được phép sửa</span>
+              <input
+                className="pc-input"
+                value={supplementTarget}
+                onChange={(event) => setSupplementTarget(event.target.value)}
+                placeholder="Ví dụ: certificate.issueNumber"
+              />
+            </label>
+          ) : (
+            <label className="mt-3 block">
+              <span className="pc-field-label">Ảnh cần bổ sung/thay</span>
+              <select
+                className="pc-select"
+                value={supplementDocument}
+                onChange={(event) =>
+                  setSupplementDocument(event.target.value as typeof supplementDocument)
+                }
+              >
+                <option value="">— Chọn —</option>
+                <option value="CITIZEN_ID_FRONT">CCCD mặt trước</option>
+                <option value="CITIZEN_ID_BACK">CCCD mặt sau</option>
+                <option value="CERTIFICATE">Ảnh Giấy chứng nhận</option>
+              </select>
+            </label>
+          )}
+          <label className="mt-3 block">
+            <span className="pc-field-label">Hướng dẫn cụ thể</span>
+            <textarea
+              className="pc-textarea"
+              value={supplementInstruction}
+              onChange={(event) => setSupplementInstruction(event.target.value)}
+            />
+          </label>
+          <p className="mt-2 text-sm text-amber-900">
+            Sau khi gửi, người nộp chỉ sửa được đúng trường hoặc loại ảnh đã chọn; các nội dung khác
+            bị khóa.
+          </p>
+        </section>
+      ) : null}
+      {submission.canResetAccessSecret ? (
+        <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5">
+          <h2 className="text-lg font-bold">Cấp lại mã bí mật</h2>
+          <p className="mt-1 text-sm text-stone-600">
+            Chỉ thực hiện sau khi người dân đến trực tiếp và cán bộ đã đối chiếu giấy tờ. Nhập “ĐÃ
+            XÁC MINH” để xác nhận.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <input
+              className="pc-input max-w-xs"
+              value={resetConfirmation}
+              onChange={(event) => setResetConfirmation(event.target.value.toUpperCase())}
+            />
+            <button
+              className="pc-button-quiet"
+              type="button"
+              disabled={busy || resetConfirmation !== "ĐÃ XÁC MINH"}
+              onClick={() => void resetAccessSecret()}
+            >
+              Tạo mã bí mật mới
+            </button>
+          </div>
+          {newAccessSecret ? (
+            <div className="mt-4 rounded-lg bg-amber-50 p-3">
+              <p className="font-semibold">Mã mới — chỉ hiển thị lần này</p>
+              <p className="mt-1 select-all font-mono text-lg font-bold">{newAccessSecret}</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {draft ? (
         <div className="mt-5 grid gap-5">
           <section className="rounded-xl border border-stone-200 bg-white p-5">

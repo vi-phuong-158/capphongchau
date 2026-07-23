@@ -1,7 +1,23 @@
 # 04 — Current Tasks
 
 > Cập nhật mỗi khi bắt đầu hoặc hoàn thành task. Agent đọc đây để biết được phép làm gì.
-> Nguồn: `PLAN.md` (kế hoạch M0–M5 đầy đủ). File này là bản tóm tắt trạng thái, không thay thế `PLAN.md`.
+>
+> **Kế hoạch đang có hiệu lực là [`PLAN2.md`](../../PLAN2.md)** (bản cập nhật 2026-07-22).
+> `PLAN.md` (M0–M5) và `PLAN_NL.md` là bối cảnh lịch sử — các mốc M0–M2 đã xong, nhưng thứ tự ưu
+> tiên và mục tiêu dữ liệu đã thay đổi. Khi ba tài liệu mâu thuẫn, **`PLAN2.md` thắng**.
+
+---
+
+## Thay đổi lớn về mục tiêu (2026-07-22)
+
+**Đích xuất là `Tai lieu/PL3.xlsx` — 49 trường, không phải 15 trường Phụ lục 8.** Mỗi dòng là một
+(GCN × thửa × người), giá trị ghi bằng chữ chứ không phải mã. Hệ thống hiện thu trọn vẹn ~11/49.
+Xem quyết định cùng ngày trong `03-decisions.md` và bảng đối chiếu đầy đủ ở Phụ lục `PLAN2.md`.
+
+**Quy mô mục tiêu nâng lên 20.000 hồ sơ** (trước là 500). Đã có phương án: **không sharding**, giữ
+một spreadsheet và sửa ba chỗ ở tầng truy cập dữ liệu — xem `03-decisions.md`.
+
+**Duyệt hồ sơ sẽ có Gemini đối chiếu** (so lệch hai nguồn, không điền sẵn). Chưa xây.
 
 ---
 
@@ -19,9 +35,10 @@ nhận có tác dụng: `/ke-khai` từ 404 chuyển sang 200 sau khi bật + re
 M2 đã hoàn thành và được kiểm tra build.
 
 **Cổng kê khai công khai `/ke-khai` đã chạy thật**: tạo nháp, autosave, upload trực tiếp lên
-Drive và gửi hồ sơ đều ghi vào Google Sheets + Google Drive thật. 7 tab `PUBLIC_*` đã được tạo
-bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab mới — **chưa** đụng cột của
-`CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN_NL.md` (kế hoạch đầy đủ M3.5) và entry log
+Drive và gửi hồ sơ đều ghi vào Google Sheets + Google Drive thật. Các tab intake ban đầu đã được tạo;
+Gói A bổ sung timeline, yêu cầu bổ sung, dữ liệu GCN cũ và chỉ mục HMAC qua migration append-only
+bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab hoặc nối header ở cuối — **không**
+đụng cột của `CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN2.md` và entry log
 [2026-07-21] trong `06-ai-working-log.md`.
 
 **Lớp biên — phần code đã xong (2026-07-22, nhánh `feat/edge-protection`):** Turnstile fail-closed
@@ -31,24 +48,69 @@ bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab mới — **
 rate limiting rules, đặt biến môi trường mới trên Vercel, bật Deployment Protection cho Preview.
 Chưa xong các mục đó thì chốt chặn ở origin **chưa bảo vệ được gì**.
 
-**Chưa làm, bắt buộc trước khi mở công khai:** luồng truy cập lại bằng mã tiếp nhận + mã bí mật
-(hiện `accessSecretMatches` là mã chết, `failedAttempts`/`lockedUntil` không ai ghi — người dân mất
-cookie là mất bản khai), security headers, và toàn bộ đường cán bộ duyệt
-(`/api/submissions/*` + acceptance saga).
+### Đã làm xong 2026-07-22 (nhánh `fix/image-format-and-support-contacts`)
 
-Hạng mục tiếp theo theo kế hoạch là **M3** (tiếp nhận hồ sơ phía cán bộ, QR, upload) — phải làm
-trước M3.5 để `modules/uploads` + `modules/media` được dùng chung, tránh hai đường upload.
+- Sửa lỗi ảnh JPG từ Zalo bị từ chối oan (`File.type` rỗng hoặc bí danh `image/jpg`).
+- Ảnh GCN cũng qua bước chuyển HEIC→JPEG như ảnh CCCD.
+- Danh bạ cán bộ hỗ trợ theo tổ dân phố + câu phạm vi áp dụng ở đầu `/ke-khai`.
+- Bảng tham chiếu tờ bản đồ cũ → mới (164 dòng) và trường `Parcel.oldWard`.
+
+✅ Đã chạy `npm run migrate:public-intake` trên Google Sheet đang cấu hình ngày 2026-07-22 — thêm
+8 tab Gói A và nối `access_version`, `file_summary_json`, `old_ward`. Môi trường Google Sheet khác
+vẫn phải chạy migration trước deploy.
+Script nay còn nối được cột thiếu vào tab đã tồn tại, không chỉ tạo tab mới.
 
 ### Chặn trước khi đưa cổng công khai vào dữ liệu thật
 
-- **Danh mục trường 12 Phụ lục 8:** mã loại đất demo đã dùng Mục A, Phụ lục II Thông tư
-  08/2024/TT-BTNMT; các mã nguồn gốc/hình thức/thời hạn là mã nội bộ có thể map lại. Trước dữ liệu
-  thật vẫn cần đối chiếu danh mục trao đổi dữ liệu của Chi nhánh VPĐKĐĐ Phú Thọ.
-- **Định nghĩa phân nhóm A/B/C/E** (KH 247/KH-UBND ngày 30/6/2026 của tỉnh) — ảnh hưởng schema và
-  dashboard báo cáo, phải chốt trước migration.
-- Ba việc cần người am hiểu nghiệp vụ, AI không làm thay: nội hàm trường 7 "vai trò pháp nhân";
-  cách xử lý địa chỉ 2 cấp mới so với địa danh cũ in trên GCN; tỷ lệ GCN nhiều thửa ở Phong Châu
-  (đếm trên ~30 GCN thật).
+Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự chặn:
+
+1. **Thông báo bảo vệ dữ liệu vẫn là placeholder** (`wizard.tsx`) và server tự ghi
+   `consentAccepted = true` không kiểm (`submissions/route.ts:230`).
+2. **Lớp biên:** `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` đang **BẬT** trên production; chưa có
+   security headers; chưa có domain thật sau Cloudflare.
+3. **Tổ chức trong tra cứu GCN đã có chưa khớp được** — hiện chỉ khớp cá nhân bằng HMAC(CCCD); 280
+   dòng tổ chức trong kho (mã dạng `N/A-<mst>`) chưa có đường khớp bằng mã số thuế.
+
+✅ **Đã sửa trong phiên 2026-07-23** (từng là mục 1/3/5 của danh sách này, xem `03-decisions.md` và
+`06-ai-working-log.md` cùng ngày):
+
+- Khôi phục hồ sơ bằng mã tiếp nhận + mã bí mật (`/tra-cuu`, session v2, khóa tạm 5 lần sai).
+- Lỗ định danh Hộ gia đình/Tổ chức bỏ qua CCCD — `requiresCitizenId`/`isOrganisationOwner` sửa lại.
+- Quy tắc kiểm diện tích từ chối chính dữ liệu PL3 mẫu — thêm dung sai 0,5 m².
+- Danh mục trường 12/13 sai theo PL3; giới hạn 3 dòng mục đích/thửa; thu "Người sử dụng hiện tại"
+  (cột O, P) cho ca chủ đã mất; tra cứu GCN đã có theo CCCD-đơn + bắt buộc QR;
+  `VietnameseDateInput` cho ngày sinh/ngày cấp GCN.
+- **Chưa chạy `npm run migrate:public-intake` sau các thay đổi này ở môi trường khác** — nhớ chạy
+  trước deploy môi trường mới (cột `access_version`, `file_summary_json`, 5 cột `PUBLIC_OWNERS`,
+  8 tab Gói A).
+
+### Chờ cơ quan trả lời — AI không làm thay được
+
+- **Danh mục `Loại đất` / `Nguồn gốc` / `Hình thức` / `Thời hạn`.** Câu quan trọng nhất: giá trị
+  _"Nhận chuyển nhượng đất được Công nhận QSDĐ như giao đất có thu tiền sử dụng đất"_ là **một mục
+  trong danh mục** hay **ghép hai ý**? Đáp án quyết định biểu mẫu có một ô chọn hay hai. Bộ câu hỏi
+  đã soạn sẵn ở `PLAN2.md` §9.
+- **Trường 21 và 22 của PL3 là gì** (số thứ tự nhảy từ 20 sang 23), và cột O, P không đánh số có
+  thuộc bộ 49 không.
+- **Có bảng tham chiếu số THỬA cũ→mới không?** Bảng hiện có chỉ quy đổi số _tờ_ (trường 19); trường
+  20 chưa có nguồn nào.
+- **Định nghĩa phân nhóm A/B/C/E** (KH 247/KH-UBND ngày 30/6/2026) — ảnh hưởng schema báo cáo.
+- **Tỷ lệ GCN cấp cho hộ gia đình** ở Phong Châu (đếm trên ~30 GCN thật) — quyết định có chặn được
+  hộ gia đình gửi hồ sơ hay không; nếu HGĐ chiếm đa số thì quy tắc chặn làm cổng vô dụng.
+- **Tỷ lệ GCN nhiều thửa** — đếm cùng lần trên ~30 GCN thật.
+- **Xác minh tầng dịch vụ Gemini** (bật thanh toán, điều khoản không dùng dữ liệu huấn luyện) trước
+  tấm ảnh thật đầu tiên.
+
+### Đã chốt — đừng đề xuất lại
+
+- **Kho dữ liệu:** giữ Google Sheets + Drive của tài khoản dùng chung. Ghi chú kỹ thuật: mã nguồn
+  **không hỗ trợ Shared Drive** (không có `supportsAllDrives` ở bất kỳ lời gọi Drive API nào) —
+  muốn chuyển sau này phải sửa toàn bộ lời gọi, không chỉ đổi folder ID.
+- **Nhân sự duyệt:** chủ dự án xác nhận có đủ. Không cần phân tích lại năng lực duyệt.
+- **10 tổ dân phố** trong `NEIGHBORHOOD_HINTS` là đúng — danh bạ chỉ có 8 đầu mối vì một cán bộ phụ
+  trách nhiều tổ. **Không rút xuống 8.**
+- **Không sharding, không PostgreSQL** cho tới khi spike đo tải chứng minh là cần.
+- **Danh mục trường 12 và 13** đã lấy từ dropdown PL3 — xem `03-decisions.md`.
 
 ---
 
@@ -98,7 +160,11 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ## Không làm lúc này
 
-- OCR CCCD/GCN, Google Cloud Vision — chưa trong scope MVP (xem `03-decisions.md`).
+- **OCR ảnh CCCD — vẫn cấm.** Ảnh CCCD không được gửi đi đâu; QR đã đọc chính xác tuyệt đối ngay
+  trên máy người dân, gửi thêm sang bên thứ ba là tăng phơi nhiễm PII mà không được gì.
+  _(Ngoại lệ đã chốt 2026-07-22: **ảnh GCN** được gửi Gemini để **đối chiếu** với bản người dân
+  khai — xem `03-decisions.md`. Không sinh mã trường 12, không tự ghi vào hồ sơ chính thức.)_
+- Google Cloud Vision — không dùng; đã chọn Gemini.
 - PostgreSQL, Vercel Blob, Shared Drive, service account — kiến trúc đã chốt dùng My Drive + Sheets + Vercel.
 - Đối soát dân cư tự động — cần thẩm quyền pháp lý riêng, chưa có kênh kỹ thuật chính thức.
 - Cung cấp dữ liệu công khai hoặc link Drive công khai — vi phạm nguyên tắc bảo mật của dự án.
@@ -125,3 +191,5 @@ Theo thứ tự mốc trong `PLAN.md`:
 - [2026-07-21] Hoàn thành M0 Task 1: đồng bộ `AGENTS.md`, `README.md`, `docs/architecture.md` và tài liệu brain theo PLAN đã rà soát (online-only, HEIC/HEIF, `drive.file` bootstrap, idempotency, an toàn thay/xóa file, backup và PII).
 - [2026-07-21] Hoàn tất tài liệu kiến trúc và kế hoạch: `README.md`, `AGENTS.md`, `PLAN.md`, `docs/architecture.md`.
 - [2026-07-21] Khởi tạo bộ não dự án AI dùng chung: `CLAUDE.md`, `docs/brain/00-06` (merge với `AGENTS.md` hiện có, không ghi đè).
+
+- [2026-07-23] PR #1: code sửa import ngày sinh, backfill append-only, staff action atomic và reset idempotent đã hoàn tất; còn dry-run/backup/apply Google Sheet và xác nhận Preview.

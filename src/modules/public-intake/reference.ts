@@ -93,13 +93,77 @@ export const ASSET_TYPE_OPTIONS: readonly ReferenceOption[] = [
   { code: "RUNG_TRONG", label: "Rừng trồng sản xuất" },
 ];
 
-/** Trường 7 — nội hàm vẫn cần cán bộ nghiệp vụ xác nhận khi dùng dữ liệu thật. */
+/**
+ * Trường 13 của PL3 — "Vai trò pháp nhân trên GCN".
+ *
+ * Sáu giá trị lấy nguyên từ ràng buộc dữ liệu nhúng trong `Tai lieu/PL3.xlsx`, thay cho bộ bốn mã
+ * tự đặt trước 2026-07-22 (`CHU_SU_DUNG`/`DONG_SU_DUNG`/`DAI_DIEN_HO`/`DAI_DIEN_TO_CHUC`) vốn
+ * **không trùng giá trị nào** của PL3. `label` chính là chuỗi phải ghi ra khi xuất.
+ */
 export const CERTIFICATE_ROLE_OPTIONS: readonly ReferenceOption[] = [
-  { code: "CHU_SU_DUNG", label: "Chủ sử dụng" },
-  { code: "DONG_SU_DUNG", label: "Đồng sử dụng" },
-  { code: "DAI_DIEN_HO", label: "Người đại diện hộ gia đình" },
-  { code: "DAI_DIEN_TO_CHUC", label: "Người đại diện tổ chức" },
+  { code: "CA_NHAN", label: "Cá nhân" },
+  { code: "CHU_HO", label: "Chủ hộ" },
+  { code: "CHONG", label: "Chồng" },
+  { code: "VO", label: "Vợ" },
+  { code: "NGUOI_DAI_DIEN", label: "Người đại diện" },
+  { code: "THANH_VIEN", label: "Thành viên" },
 ];
+
+export const CERTIFICATE_ROLE_CODES: readonly string[] = CERTIFICATE_ROLE_OPTIONS.map(
+  (option) => option.code,
+);
+
+/**
+ * Bốn mã cũ đã nằm trong các hồ sơ nộp trước 2026-07-22. Ánh xạ sang giá trị PL3 gần nhất để hồ sơ
+ * cũ vẫn xuất được, thay vì trở thành giá trị lạ giữa file nộp.
+ *
+ * `DONG_SU_DUNG` là ca duy nhất không khớp một-một: PL3 xếp "Đồng sử dụng" vào **trường 12**
+ * (pháp nhân) chứ không phải trường 13, nên vai trò tương ứng là `Thành viên`. Cán bộ duyệt cần
+ * xem lại các hồ sơ này.
+ */
+export const LEGACY_CERTIFICATE_ROLE_CODES: Readonly<Record<string, string>> = {
+  CHU_SU_DUNG: "CA_NHAN",
+  DONG_SU_DUNG: "THANH_VIEN",
+  DAI_DIEN_HO: "CHU_HO",
+  DAI_DIEN_TO_CHUC: "NGUOI_DAI_DIEN",
+};
+
+/** Trả mã PL3 hợp lệ, hoặc `""` nếu không nhận ra — không đoán bừa. */
+export function normalizeCertificateRole(code: string): string {
+  const trimmed = code.trim();
+  if (CERTIFICATE_ROLE_CODES.includes(trimmed)) return trimmed;
+  return LEGACY_CERTIFICATE_ROLE_CODES[trimmed] ?? "";
+}
+
+/**
+ * Đơn vị hành chính cũ nơi cấp GCN. Mã trùng `OldWard` trong `map-sheet-reference.ts`, thêm
+ * `KHONG_RO` làm lối thoát cho người dân không đọc được tên xã cũ trên bìa GCN.
+ *
+ * Cần thiết vì ba xã cũ đều đánh số tờ bản đồ từ 1: thiếu trường này thì không quy đổi được số tờ
+ * sang bản đồ Phong Châu mới (trường 19 của PL3).
+ */
+export const OLD_WARD_OPTIONS: readonly ReferenceOption[] = [
+  { code: "PHU_HO", label: "Xã Phú Hộ (cũ)" },
+  { code: "HA_THACH", label: "Xã Hà Thạch (cũ)" },
+  { code: "PHONG_CHAU_CU", label: "Phường Phong Châu (cũ)" },
+  { code: "KHONG_RO", label: "Không rõ — đề nghị cán bộ xác định" },
+];
+
+/**
+ * Trường 15 của PL3 — "Lý do thay đổi" khi người sử dụng hiện tại khác người trên GCN. Nhãn ghi
+ * thẳng ra file nộp. Danh mục rút từ gợi ý trong tiêu đề PL3 ("thừa kế, tặng cho, chuyển nhượng...")
+ * kèm lối thoát "Khác" cho các trường hợp còn lại.
+ */
+export const CHANGE_REASON_OPTIONS: readonly ReferenceOption[] = [
+  { code: "THUA_KE", label: "Thừa kế" },
+  { code: "TANG_CHO", label: "Tặng cho" },
+  { code: "CHUYEN_NHUONG", label: "Chuyển nhượng" },
+  { code: "KHAC", label: "Khác" },
+];
+
+export const CHANGE_REASON_CODES: readonly string[] = CHANGE_REASON_OPTIONS.map(
+  (option) => option.code,
+);
 
 export const NEIGHBORHOOD_HINTS: readonly string[] = [
   "Hà Thạch",
