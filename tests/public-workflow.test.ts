@@ -12,7 +12,6 @@ import {
   lookupExistingCertificates,
   maskCertificateNumber,
   unauthorizedSupplementChanges,
-  type ExistingCertificatesIndex,
   type SupplementItem,
 } from "@/modules/public-intake/workflow";
 
