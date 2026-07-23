@@ -98,7 +98,8 @@ src/modules/public-intake/edge-guard.ts ─→ header X-Origin-Auth vs ORIGIN_SH
 └── src/app/api/public/submissions/route.ts
 src/modules/public-intake/turnstile.ts ─→ Cloudflare siteverify (fail-closed)
 ├── src/app/api/public/submissions/route.ts (action create, duplicate → chỉ replay)
-└── src/app/api/public/submissions/current/submit/route.ts (action submit)
+├── src/app/api/public/submissions/current/submit/route.ts (action submit)
+└── src/app/api/public/certificate-lookup/route.ts (action lookup)
 tests/public-surface-guard.test.ts ─→ mọi route /api/public + matcher src/proxy.ts
 
 src/modules/public-intake/image-format.ts → tên chuẩn của loại ảnh + chuỗi `accept` dùng chung
@@ -137,10 +138,27 @@ src/app/tra-cuu/page.tsx → public-lookup.tsx
 src/app/ke-khai/wizard.tsx → POST /api/public/submissions/current/existing-records/check
   ├── workflow.ts → HMAC(CCCD)-đơn + che số GCN; bắt buộc identityStatus=QR_CONFIRMED (chống dò,
   │   xem 03-decisions.md 2026-07-23 — ngày sinh KHÔNG còn trong khóa, kho thật 87% ngày sinh chỉ có năm)
-  ├── repository.ts → đọc đúng một bucket PUBLIC_LOOKUP_INDEX
+  ├── repository.findExistingCertificates → đọc cache JSON (không gọi Sheets, xem dưới)
   └── POST /api/public/submissions/current/no-action → NO_ACTION_REQUIRED
+src/modules/public-intake/existing-certificates-index.json (committed — ngoại lệ có chủ ý với quy
+  ước "dữ liệu công dân không vào git", xem 03-decisions.md 2026-07-23)
+  ├── sinh bởi `python scripts/import_existing_certificates.py --emit-json` từ
+  │   EXISTING_CERTIFICATES + EXISTING_CERTIFICATE_OWNERS (Sheets vẫn là nguồn sự thật)
+  ├── workflow.lookupExistingCertificates(index, citizenIdHmac) → tra cứu thuần, không Sheets
+  └── repository.findExistingCertificates → gọi thẳng hàm trên (bỏ 2 lệnh gọi Sheets/lượt tra cứu)
 scripts/import_existing_certificates.py
-  └── Excel đã xác minh → validate/report → EXISTING_* + PUBLIC_LOOKUP_INDEX
+  ├── read_source (mẫu DS Tổng hợp cũ) / read_source_pl3 (mẫu Phụ lục 3, Biểu mẫu số 02) — chọn
+  │   qua --format {legacy,pl3}, không tự đoán theo tên file
+  ├── Excel đã xác minh → validate/report → EXISTING_CERTIFICATES + EXISTING_CERTIFICATE_OWNERS
+  │   (PUBLIC_LOOKUP_INDEX từ nay chỉ nhận kind=PENDING, không còn ghi kind=EXISTING)
+  └── --emit-json → compute_index() → existing-certificates-index.json ở trên
+src/app/page.tsx → src/components/certificate-lookup.tsx (client, không cần phiên kê khai)
+  ├── citizen-id-qr.client.ts → giải mã QR cục bộ, ảnh không rời trình duyệt
+  └── POST /api/public/certificate-lookup (action lookup, không session/không idempotency-key)
+      ├── workflow.ts → HMAC(CCCD)-đơn + che số GCN (cùng hàm với existing-records/check)
+      ├── repository.findExistingCertificates + hasPendingIdentityMatch("")
+      └── appendAudit PUBLIC_HOME_CERTIFICATE_LOOKUP (chỉ matchCount, không CCCD/HMAC)
+tests/certificate-lookup.test.ts → che số, chặn Turnstile fail, chặn thiếu QR, cảnh báo pending
 src/app/submissions/page.tsx ─→ src/components/submissions-queue.tsx
   └── GET /api/submissions ─→ PublicIntakeRepository (Google Sheets)
 src/app/submissions/[submissionId]/page.tsx ─→ src/components/submission-detail.tsx
@@ -259,6 +277,7 @@ POST       /api/public/submissions/current/no-action
 POST       /api/public/submissions/current/uploads/initiate
 POST       /api/public/submissions/current/uploads/complete
 POST       /api/public/submissions/current/submit
+POST       /api/public/certificate-lookup
 POST       /api/submissions/:submissionId/accept
 POST       /api/submissions/:submissionId/reset-access-secret
 POST       /api/exports

@@ -4,6 +4,7 @@ import Link from "next/link";
 import logoPhongChau from "@/../public/logo-phongchau.png";
 import { signIn } from "@/auth";
 import { appMetadata } from "@/lib/app-metadata";
+import { CertificateLookup } from "@/components/certificate-lookup";
 
 export default function HomePage() {
   return (
@@ -87,6 +88,10 @@ export default function HomePage() {
               </button>
             </form>
           </div>
+        </div>
+
+        <div className="text-left">
+          <CertificateLookup />
         </div>
 
         <p

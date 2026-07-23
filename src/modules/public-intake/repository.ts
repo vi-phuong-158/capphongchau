@@ -5,8 +5,11 @@ import type { sheets_v4 } from "googleapis";
 import { loadGoogleStorageEnvironment, type GoogleStorageEnvironment } from "@/modules/common/env";
 import { createGoogleWorkspaceClient } from "@/modules/google/workspace-client";
 
+import existingCertificatesIndex from "./existing-certificates-index.json";
 import type { IntakeDraft } from "./types";
 import {
+  lookupExistingCertificates,
+  type ExistingCertificateMatch,
   type PublicFileSummary,
   type PublicStatus,
   type PublicTimelineEvent,
@@ -74,13 +77,6 @@ export interface StoredCreationRequest {
   readonly submissionId: string;
   readonly receiptCode: string;
   readonly mutationHash: string;
-}
-
-export interface ExistingCertificateMatch {
-  readonly existingRecordId: string;
-  readonly issueNumber: string;
-  readonly issueDate: string;
-  readonly registryNumber: string;
 }
 
 export interface StoredSubmissionMutation {
@@ -422,51 +418,15 @@ export class PublicIntakeRepository {
     return next;
   }
 
+  /**
+   * Tra cứu GCN đã có — đọc cache tĩnh committed (`existing-certificates-index.json`), không gọi
+   * Sheets. Dữ liệu gần như bất biến (chỉ đổi khi có đợt import mới, xem `03-decisions.md`
+   * 2026-07-23); mỗi lượt tra cứu trước đây tốn 2 lệnh gọi Sheets (đọc bucket + quét toàn bảng
+   * `EXISTING_CERTIFICATES`), giờ là tra cứu trong bộ nhớ. Sinh lại file bằng
+   * `python scripts/import_existing_certificates.py --emit-json` sau mỗi đợt import/backfill.
+   */
   async findExistingCertificates(citizenIdHmac: string): Promise<ExistingCertificateMatch[]> {
-    const bucket = Number.parseInt(citizenIdHmac.slice(0, 2), 16);
-    if (!Number.isInteger(bucket) || bucket < 0 || bucket > 255) return [];
-    const column = columnName(bucket + 1);
-    const { sheets } = this.workspace();
-    const indexResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: `PUBLIC_LOOKUP_INDEX!${column}2:${column}`,
-    });
-    const recordIds = new Set<string>();
-    for (const candidate of indexResponse.data.values ?? []) {
-      try {
-        const item = JSON.parse(readCell(candidate, 0)) as {
-          citizenIdHmac?: string;
-          existingRecordId?: string;
-        };
-        // Khớp chỉ theo HMAC của CCCD — ngày sinh/họ tên không đưa vào khóa (xem workflow.ts).
-        if (item.citizenIdHmac === citizenIdHmac && item.existingRecordId) {
-          recordIds.add(item.existingRecordId);
-        }
-      } catch {
-        // Bỏ qua ô chỉ mục hỏng; health check/import report sẽ cảnh báo riêng.
-      }
-    }
-    if (!recordIds.size) return [];
-
-    const recordsResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: "EXISTING_CERTIFICATES!A2:I",
-    });
-    // EXISTING_CERTIFICATES l? append-only. Backfill c? th? append b?n hi?u ch?nh c?ng ID;
-    // khi ?? d?ng cu?i c?ng l? tr?ng th?i hi?u l?c.
-    const latest = new Map<string, readonly unknown[]>();
-    for (const candidate of recordsResponse.data.values ?? []) {
-      const recordId = readCell(candidate, 0);
-      if (recordIds.has(recordId)) latest.set(recordId, candidate);
-    }
-    return [...latest.values()]
-      .filter((candidate) => readCell(candidate, 5) === "VERIFIED")
-      .map((candidate) => ({
-        existingRecordId: readCell(candidate, 0),
-        issueNumber: readCell(candidate, 1),
-        issueDate: readCell(candidate, 3),
-        registryNumber: readCell(candidate, 4),
-      }));
+    return lookupExistingCertificates(existingCertificatesIndex, citizenIdHmac);
   }
 
   async findStoredMutation(

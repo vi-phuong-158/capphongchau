@@ -4,6 +4,72 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-23] Tra cứu GCN đã có: chuyển sang cache JSON committed + thêm nguồn Phụ lục 3
+
+- **Quyết định:** `PublicIntakeRepository.findExistingCertificates()` không còn gọi Google Sheets.
+  Thay bằng đọc `src/modules/public-intake/existing-certificates-index.json` — file **committed
+  vào repo**, sinh bởi `python scripts/import_existing_certificates.py --emit-json` từ đúng hai
+  bảng `EXISTING_CERTIFICATES`/`EXISTING_CERTIFICATE_OWNERS` (chỉ giữ chứng nhận `VERIFIED`). Logic
+  tra cứu thuần nằm ở `workflow.lookupExistingCertificates(index, citizenIdHmac)`. Sheets vẫn là
+  **nguồn sự thật** — cán bộ vẫn xem/đối chiếu được trong hai bảng đó như cũ; JSON chỉ là cache dẫn
+  xuất, sinh lại được bất cứ lúc nào. `PUBLIC_LOOKUP_INDEX` từ nay **chỉ còn chứa `kind: PENDING`**
+  — không còn ghi bucket `"kind": "EXISTING"` (script vẫn tính `buckets`/`indexAppends` để giữ
+  nguyên test và báo cáo cũ, chỉ không ghi Sheets nữa qua `append_bucket_values` — hàm này cùng
+  `a1_column` đã bị xóa vì hết người gọi). Các dòng `"kind": "EXISTING"` cũ trong Sheets (từ lần
+  import 23/7) cứ để nguyên, vô hại, không ai đọc nữa.
+- **Ngoại lệ có chủ ý với quy ước "dữ liệu công dân không vào git":** `Tai lieu/` và `reports/` bị
+  `.gitignore` đúng vì chứa dữ liệu công dân (tên, CCCD gốc, địa chỉ...). File JSON committed lần
+  này **chỉ chứa HMAC(CCCD) — không đảo ngược được nếu không có `DATA_HASH_PEPPER` — và số GCN thật
+  (không tên, không CCCD gốc)**, tức nhạy cảm hơn dữ liệu tĩnh khác đã committed (`map-sheet-
+  reference.ts`) nhưng nhẹ hơn nhiều so với nguồn thô. Đã hỏi rõ trước khi làm: người dùng **chọn
+  commit thẳng vào repo** để tốc độ tối đa, biết rõ đánh đổi (repo hiện tại là private, nhưng dữ
+  liệu này vào git thì nằm trong lịch sử vĩnh viễn, khác Sheets có ACL riêng). Nếu sau này repo đổi
+  sang public hoặc chính sách đổi, phải dời file này ra khỏi git (ví dụ đọc từ Drive + cache bộ nhớ
+  server) trước khi đổi visibility.
+- **Nguồn dữ liệu Phụ lục 3 mới:** thêm `read_source_pl3()` đọc mẫu "Phụ lục 3, Biểu mẫu số 02"
+  (đối soát CSDL quốc gia dân cư — layout cột khác hẳn `read_source()` cũ: `min_row=7`, cột
+  `issue_number=3, issue_date=4, registry_number=5, full_name=8, citizen_id=12`). Chọn qua cờ
+  `--format {legacy,pl3}` **bắt buộc tường minh**, không tự đoán theo tên file (đọc lệch cột là gán
+  sai CCCD↔GCN của người thật). Dòng chủ là tổ chức (không có CCCD cá nhân) bị invalid như file cũ —
+  mô hình khớp của app chỉ theo CCCD, không có khóa cho tổ chức, không xây thêm ở đây.
+- **Chính sách dữ liệu:** bổ sung thêm, **không thay thế** dữ liệu từ file `11-11-2025.xlsx` đã
+  nạp — quyết định của chủ dự án. Cơ chế `--backfill` (vốn có, để chạy lại CÙNG một file sau khi đổi
+  khóa khớp) được nới ra để dùng được cho NGUỒN KHÁC hẳn: bỏ điều kiện "tệp nguồn này phải có một
+  lần import thường COMPLETED trước đó" trong `run_backfill()`, vì an toàn thật nằm ở
+  `backfill_rows()` diff với Sheets hiện tại (chỉ append phần thiếu/khác theo `existing_record_id`/
+  cặp `(citizen_hash, existing_record_id)`), không nằm ở lịch sử của riêng tệp đó.
+  Dry-run thử với file Phụ lục 3 (5.041 dòng): 3.684 hợp lệ, 2.406 chứng nhận mới sẽ được thêm,
+  3.542 owner mới — chưa `--apply` (cần xác nhận riêng trước khi ghi Sheets thật).
+- **Đánh đổi:** thêm bước thủ công sau mỗi đợt import mới: chạy `--backfill --apply` (hoặc import
+  thường nếu là lần đầu) rồi `--emit-json`, xem `git diff`, commit — cập nhật dữ liệu tĩnh giờ cần
+  một lượt deploy, không chỉ "chạy script xong là xong" như trước.
+- **Người quyết định:** Chủ dự án (nguồn bổ sung không thay thế; commit JSON vào repo) + Claude Code
+  (thiết kế cache/tách hàm thuần, nới điều kiện `--backfill`).
+
+## [2026-07-23] Tra cứu "đã nộp GCN chưa" ở trang chủ — không phiên, vẫn che số GCN
+
+- **Quyết định:** Thêm `POST /api/public/certificate-lookup` + `src/components/certificate-lookup.tsx`
+  cho người dân tự tra cứu ngay ở trang chủ, không cần bắt đầu kê khai hay có phiên nào. Ảnh CCCD
+  giải mã QR hoàn toàn cục bộ (`citizen-id-qr.client.ts`, canvas + ZXing), không rời trình duyệt;
+  chỉ số định danh + họ tên (không phải ảnh) được gửi lên để đối chiếu, và server không lưu lại gì
+  ngoài một dòng audit (`matchCount`, không CCCD/HMAC). Giao diện **không có ô nhập tay số CCCD** —
+  chỉ có ô chọn/chụp ảnh, giữ đúng lớp chống dò đã chốt cho tra cứu GCN đã có
+  ("bắt buộc QR_CONFIRMED", xem entry 2026-07-23 "Khóa tra 'hồ sơ đã có'..."). Kết quả **vẫn che số
+  GCN** (`••••1234` + ngày cấp), theo đúng quyết định che số đã chốt cùng ngày — không đổi thành
+  hiện đầy đủ dù người dùng đề xuất, vì tính năng này còn mở hơn tính năng cũ: không có phiên/CSRF
+  nào ràng buộc người tra cứu đúng là chủ CCCD, nên ai cầm được một ảnh QR (kể cả không phải của
+  mình — ảnh cũ, ảnh nhặt được) cũng tra được.
+- **Lý do:** Người dân muốn kiểm tra nhanh xem đã nộp GCN chưa mà không phải bắt đầu cả luồng kê
+  khai. Vì đây là bề mặt công khai **không gắn phiên** (rộng hơn `existing-records/check` vốn nằm
+  sau session/CSRF/idempotency), giữ nguyên hai lớp phòng vệ đã có (chỉ nhận QR đã giải mã, che số
+  GCN) là bắt buộc, không phải tùy chọn.
+- **Đánh đổi:** Không dùng rate-limiter tự viết trong app — dựa vào Cloudflare edge + Turnstile
+  (action `lookup`, cùng cơ chế `create`/`submit`/`recover`) làm lớp chống dò/chống bot duy nhất,
+  đúng stack đã chọn (không tự thêm hạ tầng mới). Route không đòi `idempotency-key` vì đây là thao
+  tác đọc, lặp lại vô hại (khác các route ghi PUBLIC_SUBMISSIONS).
+- **Người quyết định:** Chủ dự án (đề xuất tính năng) + Claude Code (giữ nguyên mức che số sau khi
+  hỏi lại, vì đây là quyết định bảo mật đã chốt trước và diện lộ ở đây rộng hơn).
+
 ## [2026-07-23] Làm lại biểu mẫu người dân (PLAN2 §5): a11y, số Việt, loại đất tìm kiếm, quản lý ảnh
 
 - **Quyết định:** Hoàn thiện các mục §5 "Biểu mẫu người dân":

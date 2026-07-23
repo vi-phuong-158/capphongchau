@@ -57,7 +57,7 @@ export function TurnstileWidget({
   action,
   onToken,
 }: {
-  action: "create" | "recover" | "submit";
+  action: "create" | "recover" | "submit" | "lookup";
   /** Chuỗi rỗng nghĩa là chưa/không còn token hợp lệ — cha phải khóa nút hành động lại. */
   onToken: (token: string) => void;
 }) {

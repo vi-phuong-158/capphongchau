@@ -3,6 +3,105 @@
 > Nhật ký các lần AI (Claude Code / Codex) sửa code. Mỗi agent PHẢI thêm entry sau mỗi lần
 > chạm vào code. Đọc ngược từ trên xuống để biết gần đây ai đã làm gì và vì sao.
 
+## [2026-07-23] Chuyển tra cứu GCN sang cache JSON committed + thêm nguồn Phụ lục 3
+
+- **Agent:** Claude Code (kế hoạch đã duyệt qua EnterPlanMode; xem
+  `C:\Users\admin\.claude\plans\toasty-questing-swan.md`)
+- **Bối cảnh:** file `Tai lieu/24.7.2026_PhuongPhongChau (đã có dữ liệu).xlsx` (mẫu "Phụ lục 3,
+  Biểu mẫu số 02", 5.041 dòng) người dùng gửi để đối sánh **chưa từng được nạp**. Đồng thời
+  `repository.findExistingCertificates()` gọi Sheets 2 lần/lượt tra cứu (đọc bucket +
+  quét toàn bảng `EXISTING_CERTIFICATES`) — người dùng đề xuất chuyển dữ liệu tĩnh này sang JSON để
+  tăng tốc.
+- **Thay đổi:**
+  - `scripts/import_existing_certificates.py`:
+    - Thêm `read_source_pl3()` — parser riêng cho layout Phụ lục 3 (`min_row=7`, cột lệch hẳn so
+      với `read_source()` cũ). Chọn qua `--format {legacy,pl3}` bắt buộc tường minh.
+    - Thêm `compute_index()` (thuần) + `build_index_json()` (I/O mỏng) + cờ `--emit-json`: đọc
+      `EXISTING_CERTIFICATES`/`EXISTING_CERTIFICATE_OWNERS` hiện tại, ghi
+      `src/modules/public-intake/existing-certificates-index.json`.
+    - Bỏ ghi bucket `"kind": "EXISTING"` vào `PUBLIC_LOOKUP_INDEX` (2 lệnh gọi
+      `append_bucket_values` trong `run_backfill`/`main`) — thay bằng JSON ở trên.
+      `append_bucket_values`/`a1_column` bị xóa vì hết người gọi.
+    - Nới điều kiện trong `run_backfill()`: bỏ yêu cầu "tệp nguồn này phải có một lần import
+      thường COMPLETED trước đó" — điều kiện này chặn nhầm việc backfill một NGUỒN KHÁC hẳn (Phụ
+      lục 3), trong khi an toàn thật nằm ở `backfill_rows()` diff với Sheets hiện tại.
+  - `src/modules/public-intake/workflow.ts`: thêm `ExistingCertificatesIndex` +
+    `lookupExistingCertificates()` (thuần, tách khỏi I/O — repo trước đây chưa có test trực tiếp
+    nào cho logic này). `ExistingCertificateMatch` dời từ `repository.ts` sang đây (tránh khai báo
+    trùng tên).
+  - `src/modules/public-intake/repository.ts`: `findExistingCertificates()` giờ gọi thẳng
+    `lookupExistingCertificates(existingCertificatesIndex, citizenIdHmac)` — bỏ hoàn toàn 2 lệnh
+    gọi Sheets. Chữ ký vẫn `async`, không đổi bất kỳ nơi gọi nào.
+  - `src/modules/public-intake/existing-certificates-index.json` (mới, **committed**): sinh bằng
+    `--emit-json` chạy thật (chỉ đọc Sheets, không ghi) — 4.043 khóa CCCD, 3.798 chứng nhận
+    VERIFIED, từ đúng dữ liệu Nov-2025 đang có. ~1.1MB.
+  - Test: `tests/test_import_existing_certificates.py` thêm test cho `read_source_pl3` (đọc đúng
+    cột, tổ chức không CCCD → invalid đúng lý do) và `compute_index` (lọc VERIFIED theo dòng cuối
+    cùng trùng ID, dedupe cặp hmac/record). `tests/public-workflow.test.ts` thêm test cho
+    `lookupExistingCertificates`.
+- **Ngoại lệ có chủ ý đã hỏi trước khi làm:** commit JSON chứa HMAC(CCCD)+số GCN thật vào git —
+  trái quy ước "dữ liệu công dân không vào git" (`Tai lieu/`/`reports/` bị gitignore) — người dùng
+  chọn rõ ràng sau khi được cảnh báo. Xem lý do đầy đủ + điều kiện đảo ngược trong
+  `03-decisions.md` cùng ngày.
+- **File đã sửa/thêm:** `scripts/import_existing_certificates.py`, `tests/test_import_existing_certificates.py`,
+  `src/modules/public-intake/workflow.ts`, `src/modules/public-intake/repository.ts`,
+  `src/modules/public-intake/existing-certificates-index.json` (mới), `tests/public-workflow.test.ts`,
+  `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`.
+- **Kiểm tra:** `npm run typecheck`, `npm run lint`, `npm test` (27 file, 180/180),
+  `python -m unittest discover -s tests -p "test_*.py"` (4/4) — tất cả pass **trước khi** có thay
+  đổi bên ngoài vào `env.ts` (xem dưới). Chạy thật `--emit-json` (chỉ đọc Sheets) để nạp đúng dữ
+  liệu Nov-2025 vào file committed. Chạy dry-run `--backfill --format pl3` cho file Phụ lục 3:
+  3.684/5.041 dòng hợp lệ, 2.406 chứng nhận mới + 3.542 owner mới sẽ được thêm nếu `--apply` — **chưa
+  `--apply`**, cần người dùng xác nhận riêng trước khi ghi dữ liệu công dân thật vào Sheets.
+- **Việc còn lại (chờ xác nhận, không tự làm):** chạy `--backfill --apply --format pl3` cho file
+  Phụ lục 3 rồi `--emit-json` lại, xem `git diff`, commit.
+- **Lưu ý phát hiện giữa chừng (không phải do lượt sửa này):** một thay đổi bên ngoài đã sửa
+  `src/modules/common/env.ts` (thêm `SUPABASE_DATABASE_URL`, đổi `GOOGLE_SHEETS_SPREADSHEET_ID`
+  thành optional) trong lúc đang làm — hiện làm `npm run typecheck` đỏ ở
+  `scripts/migrate-public-intake.ts:70` và `repository.ts:1890` (getter `spreadsheetId`), **không
+  liên quan gì đến thay đổi trong entry này**. Không tự sửa vì có vẻ đang có một migration khác dở
+  dang; cần người phụ trách việc đó xử lý.
+
+---
+
+## [2026-07-23] Thêm tra cứu "đã nộp GCN chưa" ở trang chủ (không cần phiên kê khai)
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - `src/app/api/public/certificate-lookup/route.ts` (mới): route công khai đứng độc lập, không
+    gắn phiên kê khai. Qua đủ 3 lớp: `isTrustedEdgeRequest` (Cloudflare), Turnstile action mới
+    `"lookup"`, rồi kiểm `identityNumber` 12 số + `fullName` khác rỗng (chỉ đến từ QR đã giải mã,
+    giao diện không có ô gõ tay). Tra bằng `identityHmac` + `findExistingCertificates` +
+    `hasPendingIdentityMatch(hash, "")` (không có submission để loại trừ). Trả số GCN **đã che**
+    (`maskCertificateNumber`, giữ nguyên chính sách 2026-07-23) + `pendingWarning`. Ghi 1 dòng audit
+    `PUBLIC_HOME_CERTIFICATE_LOOKUP` chỉ có `matchCount`, không CCCD/HMAC.
+  - `src/components/certificate-lookup.tsx` (mới): UI trang chủ — chọn/chụp ảnh CCCD →
+    `prepareCitizenIdImage` + `readCitizenIdQr` giải mã cục bộ (không upload ảnh) → hiện họ tên đã
+    đọc → Turnstile → gọi route trên → hiện kết quả (số GCN che + ngày cấp) hoặc "chưa tìm thấy".
+  - `src/modules/public-intake/turnstile.ts`, `src/components/turnstile-widget.tsx`: thêm action
+    `"lookup"` vào `TurnstileAction`/props của widget.
+  - `src/app/page.tsx`: nối `CertificateLookup` vào trang chủ, dưới hai lối vào chính.
+  - `tests/certificate-lookup.test.ts` (mới, 5 test): che số GCN, không khớp, chặn khi Turnstile
+    fail, chặn khi thiếu CCCD/họ tên hợp lệ, cảnh báo `pendingWarning`.
+- **Quyết định bảo mật đi kèm:** đã hỏi lại chủ dự án về mức hiện số GCN trước khi code (xem
+  `03-decisions.md` entry cùng ngày) — vì tính năng mở hơn `existing-records/check` cũ (không có
+  phiên/CSRF ràng buộc người tra đúng là chủ CCCD). Chốt: **vẫn che số**, không đổi.
+- **Giới hạn đã biết:** ô chọn ảnh dùng `<input type=file accept="image/*">` như phần còn lại của
+  app (trình duyệt di động tự cho chọn "Chụp ảnh" hoặc "Chọn từ thư viện") — không phải camera quét
+  video liên tục; không rate-limit tự viết trong app, dựa hoàn toàn vào Cloudflare/Turnstile như
+  các route công khai khác.
+- **File đã sửa/thêm:** `src/app/api/public/certificate-lookup/route.ts`,
+  `src/components/certificate-lookup.tsx`, `src/modules/public-intake/turnstile.ts`,
+  `src/components/turnstile-widget.tsx`, `src/app/page.tsx`, `tests/certificate-lookup.test.ts`,
+  `docs/brain/01-architecture.md`, `docs/brain/03-decisions.md`.
+- **Kiểm tra:** `npm run typecheck`, `npm run lint`, `npm test` (27 file, 179/179) đều pass. Mở
+  `localhost:3000` qua dev server, xác nhận mục mới hiển thị đúng (heading, mô tả, ô chọn ảnh),
+  không lỗi console. Chưa kiểm được luồng giải mã QR thật đầu-cuối qua trình duyệt tự động (cần ảnh
+  QR CCCD thật); logic giải mã tái dùng nguyên `citizen-id-qr.client.ts` đã có test riêng
+  (`citizen-id-qr.test.ts`, `citizen-id-qr-decoding.test.ts`), không sửa file đó.
+
+---
+
 ## [2026-07-23] Hotfix: cổng công khai sập sau deploy 20k (consent + env)
 
 - **Agent:** Claude Code
