@@ -353,61 +353,6 @@ def existing_index_pairs(rows: list[list[str]]) -> set[tuple[str, str]]:
     return pairs
 
 
-EXISTING_CERTIFICATES_INDEX_PATH = (
-    ROOT / "src" / "modules" / "public-intake" / "existing-certificates-index.json"
-)
-
-
-def compute_index(
-    certificate_rows: list[list[str]], owner_rows: list[list[str]]
-) -> dict[str, Any]:
-    """Dựng cache tra cứu ``{index, records}`` từ hai bảng Sheets đã đọc sẵn.
-
-    Thuần — không gọi mạng — để test được với fixture nhỏ (xem
-    `tests/test_import_existing_certificates.py`). `latest_rows_by_id` áp đúng bất biến append-only
-    của `EXISTING_CERTIFICATES`: dòng ghi sau cùng một `existing_record_id` là trạng thái hiệu lực.
-    Chỉ giữ chứng nhận `VERIFIED` — khớp đúng bộ lọc mà `findExistingCertificates` áp dụng từ trước.
-    """
-    latest_certificates = latest_rows_by_id(certificate_rows)
-    records: dict[str, dict[str, str]] = {
-        record_id: {
-            "issueNumber": row[1] if len(row) > 1 else "",
-            "issueDate": row[3] if len(row) > 3 else "",
-            "registryNumber": row[4] if len(row) > 4 else "",
-        }
-        for record_id, row in latest_certificates.items()
-        if len(row) > 5 and row[5] == "VERIFIED"
-    }
-    index: dict[str, list[str]] = defaultdict(list)
-    seen_pairs: set[tuple[str, str]] = set()
-    for row in owner_rows:
-        if len(row) < 3:
-            continue
-        record_id, citizen_hash = row[1], row[2]
-        # `record_id not in records` lọc luôn owner của chứng nhận không VERIFIED — cert và owner
-        # cùng nhóm luôn được ghi cùng trạng thái (build_rows), không cần kiểm riêng cột status
-        # của owner.
-        if not record_id or not citizen_hash or record_id not in records:
-            continue
-        pair = (citizen_hash, record_id)
-        if pair in seen_pairs:
-            continue
-        seen_pairs.add(pair)
-        index[citizen_hash].append(record_id)
-    return {"index": dict(index), "records": records}
-
-
-def build_index_json(token: str, spreadsheet_id: str, output_path: Path) -> dict[str, Any]:
-    """Đọc Sheets hiện tại và ghi lại cache JSON committed dùng cho tra cứu tại runtime."""
-    certificate_rows = get_values(token, spreadsheet_id, "EXISTING_CERTIFICATES!A2:J")
-    owner_rows = get_values(token, spreadsheet_id, "EXISTING_CERTIFICATE_OWNERS!A2:I")
-    payload = compute_index(certificate_rows, owner_rows)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    return payload
-
-
 def backfill_rows(
     certificates: list[list[str]],
     owners: list[list[str]],
@@ -545,8 +490,8 @@ def run_backfill(
         append_values(token, spreadsheet_id, "EXISTING_CERTIFICATES!A:J", certificate_appends)
     if owner_appends:
         append_values(token, spreadsheet_id, "EXISTING_CERTIFICATE_OWNERS!A:I", owner_appends)
-    # Không còn ghi bucket "EXISTING" vào PUBLIC_LOOKUP_INDEX — từ bản này, tra cứu đọc file JSON
-    # committed (--emit-json), sinh trực tiếp từ EXISTING_CERTIFICATES/EXISTING_CERTIFICATE_OWNERS.
+    # Không còn ghi bucket "EXISTING" vào PUBLIC_LOOKUP_INDEX — runtime tra cứu qua Postgres
+    # (migrate-sheets-to-supabase dựng lại index này trực tiếp từ EXISTING_CERTIFICATE_OWNERS).
     # `buckets` vẫn được backfill_rows trả về để giữ nguyên test hiện có, chỉ không ghi Sheets nữa.
     del buckets
     completed_row = started.copy()
@@ -576,38 +521,8 @@ def main() -> int:
             "thật (CCCD/GCN gán sai người)."
         ),
     )
-    parser.add_argument(
-        "--emit-json",
-        action="store_true",
-        help=(
-            "Đọc EXISTING_CERTIFICATES/EXISTING_CERTIFICATE_OWNERS hiện tại trên Sheets và ghi "
-            "lại src/modules/public-intake/existing-certificates-index.json (cache tra cứu dùng "
-            "lúc chạy, không cần Sheets ở đường đọc). Chạy độc lập, không cần tệp nguồn — dùng sau "
-            "khi đã --backfill --apply xong."
-        ),
-    )
     args = parser.parse_args()
     load_dotenv()
-
-    if args.emit_json:
-        spreadsheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
-        if not spreadsheet_id:
-            raise RuntimeError("Thiếu GOOGLE_SHEETS_SPREADSHEET_ID.")
-        token = access_token()
-        payload = build_index_json(token, spreadsheet_id, EXISTING_CERTIFICATES_INDEX_PATH)
-        print(
-            json.dumps(
-                {
-                    "output": str(EXISTING_CERTIFICATES_INDEX_PATH),
-                    "citizenKeys": len(payload["index"]),
-                    "verifiedRecords": len(payload["records"]),
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        print("Đã ghi lại cache tra cứu. Xem `git diff` rồi commit nếu đúng như kỳ vọng.")
-        return 0
 
     source = args.source
     if source is None:
@@ -675,13 +590,13 @@ def main() -> int:
     append_values(token, spreadsheet_id, "EXISTING_IMPORT_RUNS!A:L", [run_base])
     append_values(token, spreadsheet_id, "EXISTING_CERTIFICATES!A:J", certificates)
     append_values(token, spreadsheet_id, "EXISTING_CERTIFICATE_OWNERS!A:I", owners)
-    # Không còn ghi bucket "EXISTING" vào PUBLIC_LOOKUP_INDEX — xem run_backfill() và --emit-json.
+    # Không còn ghi bucket "EXISTING" vào PUBLIC_LOOKUP_INDEX — xem ghi chú trong run_backfill().
     del buckets
     completed = run_base.copy()
     completed[3] = "COMPLETED"
     completed[11] = datetime.now().astimezone().isoformat()
     append_values(token, spreadsheet_id, "EXISTING_IMPORT_RUNS!A:L", [completed])
-    print("Đã nhập dữ liệu và chỉ mục HMAC vào Google Sheets. Chạy --emit-json để cập nhật cache tra cứu.")
+    print("Đã nhập dữ liệu vào Google Sheets. Chạy scripts/migrate-sheets-to-supabase.ts để đồng bộ Postgres.")
     return 0
 
 if __name__ == "__main__":

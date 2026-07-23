@@ -79,30 +79,6 @@ class ImportExistingCertificatesTests(unittest.TestCase):
         self.assertEqual(valid[0].citizen_id, "012345678901")
         self.assertEqual(invalid, [{"sourceRow": 8, "reasons": ["INVALID_CITIZEN_ID"]}])
 
-    def test_compute_index_keeps_latest_verified_status_and_dedupes_pairs(self):
-        certificates = [
-            ["record-1", "A", "A", "2010-01-01", "S", "CONFLICT", "run", "1", "old", "old"],
-            # Dòng sau cùng một existing_record_id đè trạng thái dòng trước (append-only).
-            ["record-1", "A", "A", "2010-01-01", "S", "VERIFIED", "run", "1", "old", "old"],
-            ["record-2", "B", "B", "2010-01-01", "S", "CONFLICT", "run", "2", "old", "old"],
-        ]
-        owners = [
-            ["owner-1", "record-1", "hash-1", "match-1", "", "VERIFIED", "run", "1", "old"],
-            # Trùng cặp (hash-1, record-1) — không được nhân đôi trong index.
-            ["owner-1b", "record-1", "hash-1", "match-1", "", "VERIFIED", "run", "1", "old"],
-            ["owner-2", "record-1", "hash-2", "match-2", "", "VERIFIED", "run", "1", "old"],
-            # record-2 không VERIFIED nên owner của nó không được vào index.
-            ["owner-3", "record-2", "hash-3", "match-3", "", "CONFLICT", "run", "2", "old"],
-        ]
-
-        result = MODULE.compute_index(certificates, owners)
-
-        self.assertEqual(list(result["records"].keys()), ["record-1"])
-        self.assertEqual(result["records"]["record-1"]["issueNumber"], "A")
-        self.assertEqual(sorted(result["index"]["hash-1"]), ["record-1"])
-        self.assertEqual(result["index"]["hash-2"], ["record-1"])
-        self.assertNotIn("hash-3", result["index"])
-
     def test_backfill_only_appends_missing_or_corrected_rows(self):
         certificates = [
             ["record-1", "A", "A", "2010-01-01", "S", "VERIFIED", "run", "5", "now", "now"],

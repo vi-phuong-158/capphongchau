@@ -1201,3 +1201,19 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** `src/app/layout.tsx`, `src/app/manifest.ts`, `src/app/profile/page.tsx`, `public/icon.png`, `public/apple-touch-icon.png`, `docs/brain/06-ai-working-log.md`.
 - **Lý do:** Đảm bảo nhận diện thương hiệu hành chính công Phường Phong Châu đồng bộ trên tab trình duyệt, shortcut mobile, PWA app icon và giao diện.
 - **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅.
+
+## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
+
+- **Agent:** Claude Code
+- **Thay đổi:** Sau khi runtime chuyển sang Postgres (`findExistingCertificates` đọc trực tiếp
+  `public.public_lookup_index`/`public.existing_certificates`), cache JSON committed
+  (`existing-certificates-index.json`) không còn được đọc ở đâu — xóa file này, xóa hàm
+  `lookupExistingCertificates`/kiểu `ExistingCertificatesIndex` (`workflow.ts`) và test tương ứng,
+  xóa chế độ `--emit-json`/`compute_index`/`build_index_json` cùng test Python liên quan
+  trong `scripts/import_existing_certificates.py`.
+- **File đã sửa:** `scripts/import_existing_certificates.py`, `src/modules/public-intake/workflow.ts`,
+  `tests/public-workflow.test.ts`, `tests/test_import_existing_certificates.py`,
+  `docs/brain/03-decisions.md`; xóa `src/modules/public-intake/existing-certificates-index.json`.
+- **Lý do:** Review commit migration Supabase phát hiện toàn bộ đường cache JSON (từ PR #2) đã thành
+  code chết — Postgres có index thật nên không cần cache tĩnh song song nữa.
+- **Kiểm tra:** `python -m unittest discover` 3/3, `npx vitest run` 180/180, `npx tsc --noEmit` sạch.
