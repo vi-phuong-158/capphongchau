@@ -1,6 +1,51 @@
 # 06 — AI Working Log
 
-## [2026-07-24] Làm đẹp giao diện Nộp kê khai và Kiểm tra CCCD (UI/UX)
+## [2026-07-24] Sửa đoạn tài liệu lỗi thời về saga trong 04-current-tasks.md
+
+- **Agent:** Claude Code
+- **Thay đổi:** Viết lại đoạn "Hoãn có chủ đích" trong `04-current-tasks.md` — đoạn cũ khẳng định
+  hạ tầng saga "chưa tồn tại trong code, phải viết mới toàn bộ" trong khi
+  `acceptance-saga.ts` đã được cài đặt đầy đủ cùng ngày, mâu thuẫn trực tiếp với Code Graph
+  mới và task gác cổng bên dưới. Đoạn mới ghi đúng hiện trạng: code đã xong, route vẫn khóa
+  sau `REFERENCE_IS_PLACEHOLDER`, chỉ gỡ sau khi hoàn thành diễn tập staging 3 kịch bản và
+  nhập danh mục trường 12 chính thức.
+- **File đã sửa:** `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Tài liệu lỗi thời nguy hiểm hơn không có — agent sau đọc đoạn cũ sẽ viết lại saga
+  từ đầu.
+- **Kiểm tra:** Đọc đối chiếu với `acceptance-saga.ts` và Code Graph trong `01-architecture.md`.
+
+## [2026-07-24] Cập nhật tài liệu kiến trúc & công việc gác cổng sau Code Review Vòng 2
+
+- **Agent:** Antigravity (Gemini 3.6 Flash)
+- **Thay đổi:**
+  - **`01-architecture.md`**: Bổ sung `202607240001_official_acceptance.sql` và `acceptance-saga.ts` vào mục Cấu trúc quan trọng; thêm Code Graph chi tiết cho `runOfficialAcceptance`; bổ sung `case_counters` và `public_acceptance_sagas` vào mục Database và 3 bất biến quan trọng (`case_counters`, `id_reservations`, quy tắc pool `max: 1`).
+  - **`04-current-tasks.md`**: Thêm task gác cổng trước khi gỡ `REFERENCE_IS_PLACEHOLDER` (diễn tập 3 kịch bản staging); thêm task backlog `mutation_hash` cho `public_acceptance_sagas`.
+- **File đã sửa:** `docs/brain/01-architecture.md`, `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Hoàn thiện tài liệu dự án đồng bộ 100% với mã nguồn thật sau khi Code Review Vòng 2 xác nhận toàn bộ code fix đã ĐẠT.
+- **Kiểm tra:** `git status --short` xác nhận CHỈ có các tệp trong `docs/brain/` bị thay đổi trong lượt này.
+
+- **Agent:** Antigravity (Gemini 3.6 Flash)
+- **Thay đổi:**
+  - **Fix A1 (Deadlock)**: Đổi `insertAudit` và `insertTimeline` trong `repository.ts` sang `public`, truyền trực tiếp đối tượng `transaction` để không dùng connection pool riêng. Đưa `listFiles` ra ngoài transaction #3.
+  - **Fix A2 (Schema Mismatch)**: Khôi phục chính xác 100% schema 202607230001 (`cases.neighborhood_code/name`, `certificates.registry_number/land_user_name/case_id`, `owners.case_id/citizen_id/date_of_birth/gender/address/source`, `files.checksum_sha256`). Sửa lỗi cú pháp SQL literal `""` thành `${""}`.
+  - **Fix A3 (COMPLETED Step Guard)**: Bọc khối COMPLETED trong `if (currentSaga.step === "RECORDS_WRITTEN")`, thêm nhánh `if (currentSaga.step === "COMPLETED")` trả lại `AcceptanceResult` không mutate DB và không insert `request_log` mới.
+  - **Fix B1 (Advisory Lock & Re-read Step)**: Mỗi transaction bước 2-5 bắt đầu bằng `pg_advisory_xact_lock` và đọc lại `step` từ `public_acceptance_sagas` để chống race condition.
+  - **Fix B2 (Bộ test thật & Verification Suite)**: Thêm unit/audit test trong `acceptance-saga.test.ts` (kiểm tra 1-1 cột SQL với file schema migration) và `audit-fixes.test.ts`.
+  - **Fix B3 (3-level Folder Structure)**: Khôi phục cấu trúc 3 cấp `01_INBOX/{submissionId}/originals` trong `storage.ts`.
+  - **Fix B4 (Lộ email công khai)**: Đổi `actorDisplayName` từ `user.email` thành `user.displayName` trong `accept/route.ts`.
+  - **Fix C1, C2, C3, C4, C5**: Thêm `AcceptanceNotAllowedError` (trả 400), chuẩn hóa response `accept/route.ts` thành `{ submission, requestId }`, bổ sung `requestId` ở mọi nhánh lỗi `no-action` / `uploads/complete`, siết điều kiện `and status = 'UPLOADED'` khi replace file, và dùng ID định trước `` `CERT:${submissionId}` `` trong `refreshCanonicalProjection`.
+- **File đã sửa:** `src/modules/submissions/acceptance-saga.ts`, `src/app/api/submissions/[submissionId]/accept/route.ts`, `src/modules/public-intake/repository.ts`, `src/modules/public-intake/storage.ts`, `src/app/api/public/submissions/current/no-action/route.ts`, `src/app/api/public/submissions/current/uploads/complete/route.ts`, `src/modules/submissions/__tests__/acceptance-saga.test.ts`, `tests/audit-fixes.test.ts`.
+- **Kiểm tra:** `npm test` (30 test files / 191 tests passed), `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors, 0 warnings).
+
+- **Agent:** Antigravity (Gemini 3.6 Flash)
+- **Thay đổi:**
+  - **Nhóm B1**: Thêm `registerFailedAccessAttempt` thực thi SQL nguyên tử `failed_attempts = failed_attempts + 1` loại bỏ hoàn toàn race condition brute-force mã bí mật.
+  - **Nhóm B2**: Nâng cấp `appendFile` hỗ trợ `idempotencyOptions`, advisory lock, kiểm tra `request_log` cache replay `{ ok: true, fileId, sizeBytes }`, gộp đánh dấu `REPLACED` vào cùng 1 transaction (sửa F5). Siết `idempotency-key` bắt buộc ở `/uploads/complete`.
+  - **Nhóm B4, B5, B6, B8**: Thêm DB advisory lock cho `findOrCreateFolder` với JSDoc cảnh báo phòng chống deadlock kết nối pool `max: 1`; thêm timeout 15s cho mọi fetch/Google client; cache `OAuth2` client trên `globalThis`; siết `verifyUploadedFile` kiểm `trashed` và checksum.
+  - **Nhóm A (Saga tiếp nhận chính thức)**: Tạo migration `202607240001_official_acceptance.sql` (`case_counters`, `public_acceptance_sagas`, mở rộng `id_reservations`); viết `acceptance-saga.ts` chia bước resumable theo `accept_step` (Drive nằm ngoài DB transaction, primary key sinh theo deterministic pattern `ACC:${subId}:${id}`, check-trước-tăng-sau số thứ tự); mở nối route `/accept` và mở đường resume khi `status === 'ACCEPTING'`.
+  - **Nhóm B3, B7, B9**: Gộp `commitNoAction` thành 1 transaction duy nhất cho `no-action/route.ts`; viết `refreshCanonicalProjection` tự động làm mới các bảng chuẩn hóa khi `RESUBMITTED` hoặc cán bộ sửa draft; ghi nhận task B9 vào `04-current-tasks.md`.
+- **File đã sửa/tạo mới:** `supabase/migrations/202607240001_official_acceptance.sql`, `src/modules/submissions/acceptance-saga.ts`, `src/app/api/submissions/[submissionId]/accept/route.ts`, `src/modules/public-intake/repository.ts`, `src/modules/public-intake/storage.ts`, `src/modules/google/workspace-client.ts`, `src/app/api/public/submissions/recover/route.ts`, `src/app/api/public/submissions/current/uploads/complete/route.ts`, `src/app/api/public/submissions/current/no-action/route.ts`, `src/modules/common/api-error.ts`, `tests/audit-fixes.test.ts`, `src/modules/submissions/__tests__/acceptance-saga.test.ts`, `docs/brain/*`.
+- **Kiểm tra:** `npm test` (30 test files / 188 tests passed), `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors, 0 warnings).
 
 - **Agent:** Antigravity (Gemini 3.6 Flash / Claude 4.6 Opus)
 - **Thay đổi:** 

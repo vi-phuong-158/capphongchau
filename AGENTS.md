@@ -152,7 +152,7 @@ Không xóa bảng/cột hoặc dữ liệu đã dùng. Nếu thay đổi schema
 ### 4.2. Mã định danh và idempotency
 
 - Case ID: `PHONGCHAU-{NAM}-{SO_THU_TU_6_CHU_SO}`, ví dụ `PHONGCHAU-2026-000001`; năm phải tính theo `Asia/Ho_Chi_Minh`.
-- `ID_RESERVATIONS` append-only. Số thứ tự chỉ lấy từ `updatedRange` của chính lệnh `values.append`, không đọc số dòng rồi cộng một.
+- `ID_RESERVATIONS` append-only. Số thứ tự nguyên tử cấp theo năm qua `CASE_COUNTERS` (PostgreSQL `ON CONFLICT (year) DO UPDATE SET last_sequence = case_counters.last_sequence + 1 RETURNING last_sequence`), đảm bảo không trùng số khi retry hoặc xử lý song song. (Mô tả cũ về `updatedRange` thuộc thời Google Sheets — đã thay bằng counter PostgreSQL trong Supabase).
 - Mọi API ghi yêu cầu `idempotency_key` và `request_id`. `REQUEST_LOG` lưu key, kết quả đã cache và timestamp tối thiểu 24 giờ để trả đúng kết quả cho request lặp.
 - Riêng `POST /api/public/submissions`, trình duyệt gửi UUID v4 trong header `idempotency-key`.
   Server namespace key bằng `PUBLIC_CREATE:`, dùng HMAC để suy ra ổn định `submission_id`, mã tiếp

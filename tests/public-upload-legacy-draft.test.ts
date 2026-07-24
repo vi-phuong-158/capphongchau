@@ -56,7 +56,10 @@ function initiateRequest(): Request {
 function completeRequest(): Request {
   return new Request("https://example.test/api/public/submissions/current/uploads/complete", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "00000000-0000-4000-8000-000000000000",
+    },
     body: JSON.stringify({
       driveFileId: "drive-file-test",
       documentType: "CITIZEN_ID_FRONT",

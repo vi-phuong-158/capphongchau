@@ -1,9 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
-import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
+import { isValidPublicIdempotencyKey } from "@/modules/public-intake/creation-idempotency";
+import {
+  getPublicIntakeRepository,
+  SubmissionIdempotencyConflictError,
+} from "@/modules/public-intake/repository";
 import {
   isEditable,
   publicError,
@@ -15,12 +19,18 @@ import { requiresCitizenId } from "@/modules/public-intake/types";
 export const runtime = "nodejs";
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const requestId = request.headers.get("x-request-id") ?? randomUUID();
+  const rawIdempotencyKey = request.headers.get("idempotency-key");
+  if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {
+    return publicError("VALIDATION_FAILED", "Idempotency key không hợp lệ.", requestId);
+  }
+
   const context = await resolvePublicRequest(request, { requireCsrf: true });
   if (context instanceof NextResponse) {
     return context;
   }
 
-  const { record, requestId } = context;
+  const { record } = context;
   if (!isEditable(record)) {
     return publicError("INVALID_STATE", "Bản kê khai đang bị khóa.", requestId);
   }
@@ -111,24 +121,47 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const fileId = randomUUID();
-  await getPublicIntakeRepository().appendFile(
-    {
-      fileId,
-      submissionId: record.submissionId,
-      ownerId,
-      documentType,
-      driveFileId: verified.driveFileId,
-      mimeType: verified.mimeType,
-      sizeBytes: verified.sizeBytes,
-      checksum: verified.checksum,
-      fileName: verified.fileName,
-    },
-    record,
-  );
-  if (replaceFileId) {
-    await getPublicIntakeRepository().markFileReplaced(record.submissionId, replaceFileId);
-  }
+  const idempotencyKey = `PUBLIC_UPLOAD_COMPLETE:${record.submissionId}:${rawIdempotencyKey}`;
+  const mutationHash = createHash("sha256")
+    .update(
+      JSON.stringify({
+        submissionId: record.submissionId,
+        driveFileId: verified.driveFileId,
+        documentType,
+        ownerId,
+        replaceFileId,
+      }),
+    )
+    .digest("hex");
 
-  // Không trả Drive ID ra ngoài — người dân không cần và không được biết.
-  return NextResponse.json({ ok: true, fileId, sizeBytes: verified.sizeBytes });
+  try {
+    const summary = await getPublicIntakeRepository().appendFile(
+      {
+        fileId,
+        submissionId: record.submissionId,
+        ownerId,
+        documentType,
+        driveFileId: verified.driveFileId,
+        mimeType: verified.mimeType,
+        sizeBytes: verified.sizeBytes,
+        checksum: verified.checksum,
+        fileName: verified.fileName,
+      },
+      record,
+      {
+        idempotencyKey,
+        mutationHash,
+        requestId,
+        replaceFileId: replaceFileId || undefined,
+      },
+    );
+
+    // Không trả Drive ID ra ngoài — người dân không cần và không được biết.
+    return NextResponse.json({ ok: true, fileId: summary.fileId, sizeBytes: verified.sizeBytes });
+  } catch (error) {
+    if (error instanceof SubmissionIdempotencyConflictError) {
+      return publicError("IDEMPOTENCY_CONFLICT", "Yêu cầu hoàn tất tải lên bị xung đột.", requestId);
+    }
+    throw error;
+  }
 }

@@ -80,16 +80,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (
     !accessSecretMatches(environment.PUBLIC_ACCESS_CODE_PEPPER, accessSecret, record.accessCodeHash)
   ) {
-    const baseFailures = record.lockedUntil ? 0 : record.failedAttempts;
-    const failedAttempts = baseFailures + 1;
-    await repository.updateAccessState(record, {
-      failedAttempts,
-      lockedUntil:
-        failedAttempts >= MAX_FAILURES
-          ? new Date(now.getTime() + LOCK_MINUTES * 60_000).toISOString()
-          : "",
-    });
-    return failedAttempts >= MAX_FAILURES
+    const result = await repository.registerFailedAccessAttempt(
+      record.submissionId,
+      MAX_FAILURES,
+      LOCK_MINUTES,
+    );
+    const isLocked = result.failedAttempts >= MAX_FAILURES || result.lockedUntil !== null;
+    return isLocked
       ? publicError(
           "SUBMISSION_LOCKED",
           "Đã nhập sai quá 5 lần. Vui lòng thử lại sau 15 phút.",

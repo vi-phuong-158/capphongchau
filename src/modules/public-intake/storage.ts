@@ -5,6 +5,7 @@ import {
   createGoogleWorkspaceClient,
   getGoogleAccessToken,
 } from "@/modules/google/workspace-client";
+import { getDatabase } from "@/modules/supabase/database";
 
 import { CANONICAL_IMAGE_MIME_TYPES, isCanonicalImageMimeType } from "./image-format";
 
@@ -17,6 +18,20 @@ const RESUMABLE_ENDPOINT =
  * quy về tên chuẩn **trước** khi tới đây, nên danh sách này giữ nguyên độ chặt.
  */
 export const ACCEPTED_MIME_TYPES = CANONICAL_IMAGE_MIME_TYPES;
+
+export class UploadVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UploadVerificationError";
+  }
+}
+
+export class PreviewUnavailableError extends Error {
+  constructor(message = "Không thể đọc ảnh xem trước.") {
+    super(message);
+    this.name = "PreviewUnavailableError";
+  }
+}
 
 export interface UploadSession {
   readonly uploadUrl: string;
@@ -36,16 +51,10 @@ export interface PreviewFile {
   readonly contentType: string;
 }
 
-function escapeQueryValue(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
-
 export class PublicIntakeStorage {
-  constructor(
-    private readonly environment: GoogleStorageEnvironment = loadGoogleStorageEnvironment(),
-  ) {}
+  constructor(private readonly environment: GoogleStorageEnvironment) {}
 
-  /** Thư mục chờ của mỗi bản kê khai: `01_INBOX/{submission_id}/originals`. */
+  /** Thư mục chờ của mỗi bản kê khai: `01_INBOX/{submissionId}/originals`. */
   async createSubmissionFolder(submissionId: string): Promise<string> {
     const inbox = await this.findOrCreateFolder(
       "01_INBOX",
@@ -55,8 +64,12 @@ export class PublicIntakeStorage {
     return this.findOrCreateFolder("originals", submissionFolder);
   }
 
+  async ensureSubmissionFolder(submissionId: string): Promise<string> {
+    return this.createSubmissionFolder(submissionId);
+  }
+
   /**
-   * Tạo phiên resumable để trình duyệt tải thẳng lên Drive — ảnh gốc không đi qua body của
+   * Tạo URL phiên resumable upload để trình duyệt PUT trực tiếp tới Google Drive, không đi qua
    * Vercel Function. URL phiên là bí mật: không log, không đưa vào audit.
    */
   async createUploadSession(input: {
@@ -83,6 +96,7 @@ export class PublicIntakeStorage {
         Origin: input.browserOrigin,
       },
       body: JSON.stringify({ name: input.fileName, parents: [input.folderId] }),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!response.ok) {
@@ -110,12 +124,12 @@ export class PublicIntakeStorage {
 
     const response = await drive.files.get({
       fileId: input.driveFileId,
-      fields: "id,name,parents,mimeType,size,sha256Checksum",
+      fields: "id,name,parents,mimeType,size,sha256Checksum,trashed",
     });
     const file = response.data;
 
-    if (!file.id) {
-      throw new UploadVerificationError("Không tìm thấy tệp trên Drive.");
+    if (!file.id || file.trashed) {
+      throw new UploadVerificationError("Tệp không hợp lệ hoặc đã bị xóa trên Drive.");
     }
     if (!file.parents?.includes(input.expectedFolderId)) {
       throw new UploadVerificationError("Tệp không nằm trong thư mục của bản kê khai.");
@@ -133,12 +147,16 @@ export class PublicIntakeStorage {
       throw new UploadVerificationError("Kích thước tệp vượt giới hạn cho phép.");
     }
 
+    if (!file.sha256Checksum) {
+      throw new UploadVerificationError("Không thể xác minh mã checksum của tệp.");
+    }
+
     return {
       driveFileId: file.id,
       fileName: file.name ?? file.id,
       mimeType,
       sizeBytes,
-      checksum: file.sha256Checksum ?? "",
+      checksum: file.sha256Checksum,
     };
   }
 
@@ -151,11 +169,11 @@ export class PublicIntakeStorage {
     mimeType: string;
     bytes: Uint8Array;
   }): Promise<string> {
-    const { drive } = createGoogleWorkspaceClient(this.credentials);
     const folderId = await this.findOrCreateFolder(
       "03_EXPORTS",
       this.environment.GOOGLE_MY_DRIVE_ROOT_FOLDER_ID,
     );
+    const { drive } = createGoogleWorkspaceClient(this.credentials);
     const created = await drive.files.create({
       requestBody: { name: input.fileName, parents: [folderId] },
       media: { mimeType: input.mimeType, body: Readable.from(Buffer.from(input.bytes)) },
@@ -188,7 +206,10 @@ export class PublicIntakeStorage {
       throw new PreviewUnavailableError();
     }
     const token = await getGoogleAccessToken(this.credentials);
-    const response = await fetch(thumbnailLink, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(thumbnailLink, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!response.ok) {
       throw new PreviewUnavailableError();
     }
@@ -207,50 +228,55 @@ export class PublicIntakeStorage {
     };
   }
 
-  private async findOrCreateFolder(name: string, parentId: string): Promise<string> {
-    const { drive } = createGoogleWorkspaceClient(this.credentials);
+  /**
+   * TUYỆT ĐỐI KHÔNG GỌI findOrCreateFolder BÊN TRONG MỘT `database.begin` ĐANG MỞ
+   * (Do connection pool max: 1, gọi Google bên trong transaction lồng sẽ gây deadlock).
+   */
+  async findOrCreateFolder(name: string, parentId: string): Promise<string> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${`DRIVE_FOLDER:${parentId}:${name}`}, 0))`;
+      const { drive } = createGoogleWorkspaceClient(this.credentials);
 
-    const existing = await drive.files.list({
-      q: [
-        `name = '${escapeQueryValue(name)}'`,
-        `mimeType = '${FOLDER_MIME_TYPE}'`,
-        `'${parentId}' in parents`,
-        "trashed = false",
-      ].join(" and "),
-      fields: "files(id)",
-      pageSize: 1,
+      const existing = await drive.files.list({
+        q: [
+          `name = '${escapeQueryValue(name)}'`,
+          `mimeType = '${FOLDER_MIME_TYPE}'`,
+          `'${parentId}' in parents`,
+          "trashed = false",
+        ].join(" and "),
+        fields: "files(id)",
+        pageSize: 1,
+      });
+
+      const existingId = existing.data.files?.[0]?.id;
+      if (existingId) {
+        return existingId;
+      }
+
+      const created = await drive.files.create({
+        requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
+        fields: "id",
+      });
+
+      const folderId = created.data.id;
+      if (!folderId) {
+        throw new Error(`Google Drive không tạo được thư mục: ${name}`);
+      }
+      return folderId;
     });
-
-    const existingId = existing.data.files?.[0]?.id;
-    if (existingId) {
-      return existingId;
-    }
-
-    const created = await drive.files.create({
-      requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
-      fields: "id",
-    });
-    if (!created.data.id) {
-      throw new Error(`Google Drive không trả folder ID cho ${name}.`);
-    }
-    return created.data.id;
   }
 }
 
-export class UploadVerificationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "UploadVerificationError";
-  }
-}
-
-export class PreviewUnavailableError extends Error {
-  constructor() {
-    super("Chưa tạo được ảnh xem trước cho tệp này.");
-    this.name = "PreviewUnavailableError";
-  }
-}
+let publicIntakeStorageInstance: PublicIntakeStorage | null = null;
 
 export function getPublicIntakeStorage(): PublicIntakeStorage {
-  return new PublicIntakeStorage();
+  if (!publicIntakeStorageInstance) {
+    publicIntakeStorageInstance = new PublicIntakeStorage(loadGoogleStorageEnvironment());
+  }
+  return publicIntakeStorageInstance;
+}
+
+function escapeQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }

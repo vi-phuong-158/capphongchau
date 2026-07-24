@@ -4,6 +4,17 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24] Thiết kế hạ tầng Saga Tiếp nhận chính thức & Khắc phục lỗ hổng kiểm toán
+
+- **Quyết định:** 
+  1. Cấp mã hồ sơ chính thức theo năm qua bảng `case_counters` SQL nguyên tử (`case_counters.last_sequence`), loại bỏ phụ thuộc Google Sheets `updatedRange`. Nếu Saga bị bỏ dở giữa chừng, lỗ hổng trong dãy số được chấp nhận (không tái sử dụng số cũ).
+  2. Bảng `public_acceptance_sagas` chốt checkpoint theo các mốc `accept_step`. Thao tác Drive (`CASE_FOLDER_READY`, `FILES_MOVED`) chạy **ngoài DB transaction** để tránh deadlock do pool kết nối `max: 1`. 
+  3. Mọi bản ghi ở bước `RECORDS_WRITTEN` sinh primary key theo quy luật cố định (deterministic, ví dụ `ACC:${submissionId}:${id}`), cấm `randomUUID()` để retry `ON CONFLICT DO NOTHING` không sinh dữ liệu trùng.
+  4. Mã hồ sơ `official_case_id` chỉ được ghi vào `public_submissions` ở bước cuối `COMPLETED`.
+  5. Các bảng chiếu chuẩn hóa `public_certificates`, `public_owners`, `public_parcels`, `public_land_uses`, `public_assets` được tự động làm mới (refresh projection) khi người dân gửi lại `RESUBMITTED` hoặc cán bộ sửa draft.
+- **Lý do:** Đảm bảo hệ thống đạt tiêu chuẩn Definition of Done (không tạo case/file trùng khi retry), chịu lỗi đứt mạng giữa chừng và hoàn toàn an toàn trong môi trường serverless Vercel + Supabase connection pool `max: 1`.
+- **File:** `supabase/migrations/202607240001_official_acceptance.sql`, `acceptance-saga.ts`, `accept/route.ts`, `repository.ts`, `storage.ts`, `workspace-client.ts`.
+
 ## [2026-07-24] Chuẩn hóa `draft_json` legacy bị lưu hai lần
 
 - **Quyết định:** Dữ liệu `jsonb` dạng chuỗi nhưng nội dung là object nháp được chuẩn hóa một lần bằng migration/script có audit, tăng `version` và không chỉnh từng trường PII. Repository giải mã tương thích chuỗi JSON khi đọc trong thời gian chuyển đổi; UI chỉ nhận nháp có mảng `owners`.

@@ -18,7 +18,8 @@ Quyết định dùng Google Sheets làm kho runtime đã bị thay thế ngày 
 
 ```text
 supabase/migrations/
-└── 202607230001_supabase_schema.sql       schema/constraint/RLS
+├── 202607230001_supabase_schema.sql       schema/constraint/RLS
+└── 202607240001_official_acceptance.sql   case_counters + saga checkpoint
 scripts/
 ├── migrate-sheets-to-supabase.ts          ETL một lần, transaction + marker
 ├── migrate-public-intake.ts                schema Sheets legacy
@@ -26,6 +27,7 @@ scripts/
 src/modules/supabase/database.ts             PostgreSQL client + health
 src/modules/public-intake/repository.ts      repository hồ sơ Supabase
 src/modules/users/supabase-user-repository.ts allowlist/roles Supabase
+src/modules/submissions/acceptance-saga.ts   saga tiếp nhận chính thức resumable
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive
 src/app/api/health/database/route.ts         health Supabase
@@ -72,6 +74,19 @@ src/app/submissions/page.tsx / [submissionId]
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
+src/app/api/submissions/[submissionId]/accept/route.ts
+└── runOfficialAcceptance (src/modules/submissions/acceptance-saga.ts)
+    ├── Bước 0 (tx): advisory lock + request_log replay + public_acceptance_sagas
+    │   + public_submissions ACCEPTING + audit/timeline (insertAudit/insertTimeline
+    │   của PublicIntakeRepository, truyền transaction — KHÔNG dùng method pool)
+    ├── ID_RESERVED (tx): case_counters (ON CONFLICT ... RETURNING) + id_reservations
+    ├── CASE_FOLDER_READY: storage.findOrCreateFolder 02_CASES/{TDP}/{CASE_ID}/originals
+    │   (NGOÀI transaction — quy tắc pool max:1)
+    ├── FILES_MOVED: drive.files.update từng file, checkpoint moved_files (NGOÀI tx)
+    ├── RECORDS_WRITTEN (tx): cases + owners + certificates + files,
+    │   ID deterministic ACC:{submissionId}:{id}, ON CONFLICT DO NOTHING
+    └── COMPLETED (tx): public_submissions ACCEPTED + official_case_id + request_log
+
 src/app/api/health/google/route.ts
 └── Google Drive OAuth + root folder + quota
 
@@ -88,7 +103,7 @@ Các module frontend/service không được gọi trực tiếp PostgreSQL ho�
 
 Migration SQL tạo các nhóm bảng:
 
-- `users`, `audit_logs`, `request_log`, `reference_data`, `id_reservations`, `search_index`.
+- `users`, `audit_logs`, `request_log`, `reference_data`, `id_reservations`, `case_counters`, `public_acceptance_sagas`, `search_index`.
 - `public_submissions`, `public_files`, status/supplement tables và các bảng chuẩn hóa public.
 - `existing_certificates`, owners/link/import/index append-only.
 - `cases`, `certificates`, `owners`, `files`, QR scans và bảng tương thích nâng cấp.
@@ -100,6 +115,9 @@ Bất biến quan trọng:
 - Mutation nghiệp vụ + audit/timeline + request log cùng transaction.
 - Update version có điều kiện; không khớp → `409 VERSION_CONFLICT`.
 - Partial unique index chặn hai ảnh CCCD cùng mặt active.
+- `case_counters` cấp số theo năm nguyên tử; lỗ hổng dãy số khi saga bỏ dở được chấp nhận.
+- `id_reservations` có thêm `sequence_number`, `official_case_id`, `submission_id`; unique `(year, sequence_number)`; idempotent theo `request_id`.
+- Quy tắc pool `max: 1`: không gọi method repository/storage dùng pool bên trong `database.begin`; thao tác Drive luôn nằm ngoài transaction.
 - `legacy_row_index` chỉ giữ tương thích cookie session v2 trong giai đoạn migration. ETL chèn giá trị legacy phải đồng bộ identity sequence trong cùng transaction để bản ghi mới không va chạm khóa unique.
 - Nháp legacy thiếu `owners` hoặc bị lưu JSON lồng được phục hồi/chuẩn hóa có audit; repository giải mã tương thích trong thời gian chuyển đổi, còn route upload luôn kiểm shape dữ liệu trước khi gọi Drive và trả `409 INVALID_STATE` thay vì lỗi 500.
 - GCN cũ append-only; bản mới nhất theo `row_version` có hiệu lực.

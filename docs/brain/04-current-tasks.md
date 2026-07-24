@@ -18,28 +18,37 @@ Schema and data ETL have completed successfully after the Google Sheets backup. 
 `draft_json` (thông tin GCN + thông tin cá nhân, khóa cứng trường định danh của chủ đã
 `QR_CONFIRMED`). Xem quyết định [2026-07-24] trong `03-decisions.md`.
 
-**Hoãn có chủ đích — chưa làm:** Mở khóa Saga "Tiếp nhận chính thức" (`POST
-/api/submissions/:submissionId/accept`, nút vẫn `disabled` ở UI). Cần thêm hạ tầng **chưa tồn
-tại** (tạo thư mục `02_CASES/{TĐP}/{CASE_ID}`, di chuyển file Drive từ `01_INBOX`, ghi
-`CASES/CERTIFICATES/OWNERS`), và **chỉ làm sau khi runbook migration Supabase ở mục dưới hoàn tất
-cutover** — không mở saga ghi CASE trong lúc còn treo giữa Sheets/Supabase, vì di chuyển file +
-ghi record không có transaction phân tán giữa hai hệ thống (xem `03-decisions.md`
-[2026-07-23 Supabase PostgreSQL...] mục "Đánh đổi"). Chủ dự án đã chốt thứ tự này 2026-07-24.
+**[SỬA 2026-07-24] Đã sửa nhận định sai bên dưới:** phần "Migration Supabase" ghi "production chưa
+cutover" là **tài liệu cũ, không khớp code** — `PublicIntakeRepository` (`repository.ts`) chỉ còn
+gọi `getDatabase()` (Supabase), không còn đường ghi Sheets nào; ETL thật đã chạy và đối chiếu số
+dòng (xem `06-ai-working-log.md` [2026-07-23] "Supabase schema and real ETL completed" — 6729
+GCN, 8798 owner, không phải dry-run); commit `9a5cea9` (migrate runtime sang Supabase) đã nằm trên
+`main`. Về code + dữ liệu, cutover coi như **đã xong**. Việc duy nhất AI không tự xác nhận được từ
+đây là biến môi trường `SUPABASE_DATABASE_URL` có đang cấu hình đúng trên **Vercel Production**
+hay không (chỉ chủ dự án xem được dashboard Vercel) — nếu nghi ngờ, kiểm tra `/api/health/database`
+trên production trước khi coi cutover là chốt hoàn toàn.
 
-## Migration Supabase (2026-07-23)
+**Hoãn có chủ đích — code đã xong, chưa mở khóa:** Saga "Tiếp nhận chính thức" (`POST
+/api/submissions/:submissionId/accept`) **đã được cài đặt đầy đủ 2026-07-24** trong
+`src/modules/submissions/acceptance-saga.ts` (tạo thư mục `02_CASES/{TĐP}/{CASE_ID}/originals`,
+di chuyển file Drive từ `01_INBOX`, ghi `CASES/CERTIFICATES/OWNERS/FILES` — xem Code Graph trong
+`01-architecture.md`). Route vẫn bị khóa sau `REFERENCE_IS_PLACEHOLDER` và nút vẫn `disabled` ở
+UI. **Chỉ được gỡ khóa sau khi hoàn thành task gác cổng** (diễn tập staging 3 kịch bản, xem mục
+"Còn thật sự chặn" bên dưới) **và** danh mục trường 12 chính thức được nhập thay dữ liệu demo.
 
-**Code đã hoàn tất, production chưa cutover.** Runtime repository hồ sơ và `USERS` đã chuyển sang
-Supabase PostgreSQL; schema SQL, health endpoint và ETL Sheets→Supabase đã có. Google Drive vẫn lưu file.
+## Migration Supabase (2026-07-23, đã xong về code + dữ liệu 2026-07-24)
 
-Việc quản trị còn phải làm trước deploy:
+Runtime repository hồ sơ và `USERS` đã chuyển hẳn sang Supabase PostgreSQL — không còn đường ghi
+Sheets nào trong `repository.ts`. Schema SQL, health endpoint, ETL Sheets→Supabase đã có **và đã
+chạy thật** (xem `06-ai-working-log.md` [2026-07-23]). Google Drive vẫn lưu file, không đổi.
 
-1. Tạo Supabase project Singapore và áp dụng `supabase/migrations/*`.
-2. Đặt `SUPABASE_DATABASE_URL` Supavisor transaction pooler trong Vercel/local.
-3. Backup + tạm dừng ghi vào production, chạy ETL dry-run rồi chạy thật một lần.
-4. Đối chiếu row count/mẫu hồ sơ, file, user, audit, lookup; kiểm tra `/api/health/database` và
-   `/api/health/google`.
-5. Deploy, theo dõi lỗi/latency và giữ spreadsheet restricted/read-only trong cửa sổ rollback.
-6. Thiết lập backup/PITR và `pg_dump` mã hóa ra nơi độc lập.
+Còn lại — không chặn code, nhưng nên xác nhận trước khi coi pilot dữ liệu thật là an toàn:
+
+1. Xác nhận `SUPABASE_DATABASE_URL` (Supavisor transaction pooler) đúng trên Vercel Production —
+   chỉ chủ dự án xem được, AI không tự kiểm tra qua dashboard.
+2. Đối chiếu lại `/api/health/database` trên production trả `ok`.
+3. Thiết lập backup/PITR và `pg_dump` mã hóa ra nơi độc lập (Supabase project Singapore).
+4. Giữ Google Sheet cũ ở chế độ read-only/restricted — không ghi lại vào Sheet, không chạy lại ETL.
 
 Quyết định “giữ Sheets, không PostgreSQL” trong `PLAN2.md` và mục “Đã chốt” bên dưới là lịch sử,
 đã bị yêu cầu mới của chủ dự án thay thế.
@@ -101,11 +110,15 @@ Script nay còn nối được cột thiếu vào tab đã tồn tại, không c
 
 Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự chặn:
 
-1. **Thông báo bảo vệ dữ liệu vẫn là placeholder** (`wizard.tsx`) và server tự ghi
+1. **Gác cổng trước khi gỡ `REFERENCE_IS_PLACEHOLDER` (mở saga cho dữ liệu thật)** — saga hiện chỉ được kiểm chứng bằng test tĩnh (đối chiếu schema + grep source), CHƯA có test hành vi. Trước khi gỡ khóa, phải chạy end-to-end trên môi trường staging với Supabase thật + folder Drive test, diễn tập đủ 3 kịch bản:
+   - Ngắt giữa chừng bước `FILES_MOVED` (move được 1/3 file) → retry cùng idempotency key → đếm file ở folder đích đúng và đủ, không file nào bị move 2 lần, không case trùng.
+   - Hai request accept song song với 2 idempotency key khác nhau → request sau nhận `409 ACCEPTANCE_IN_PROGRESS`.
+   - Retry sau khi đã `COMPLETED` (trong và sau cửa sổ 24h của `request_log`) → trả kết quả cũ, version không tăng thêm, không timeline/audit trùng.
+2. **Thông báo bảo vệ dữ liệu vẫn là placeholder** (`wizard.tsx`) và server tự ghi
    `consentAccepted = true` không kiểm (`submissions/route.ts:230`).
-2. **Lớp biên:** `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` đang **BẬT** trên production; chưa có
+3. **Lớp biên:** `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` đang **BẬT** trên production; chưa có
    security headers; chưa có domain thật sau Cloudflare.
-3. **Tổ chức trong tra cứu GCN đã có chưa khớp được** — hiện chỉ khớp cá nhân bằng HMAC(CCCD); 280
+4. **Tổ chức trong tra cứu GCN đã có chưa khớp được** — hiện chỉ khớp cá nhân bằng HMAC(CCCD); 280
    dòng tổ chức trong kho (mã dạng `N/A-<mst>`) chưa có đường khớp bằng mã số thuế.
 
 ✅ **Đã sửa trong phiên 2026-07-23** (từng là mục 1/3/5 của danh sách này, xem `03-decisions.md` và
@@ -152,6 +165,9 @@ Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự c
 ---
 
 ## Chờ làm (backlog)
+
+- **B9 Task (Chờ làm)**: Bổ sung `request_log` kind `'PUBLIC_SAVE_DRAFT'` và idempotency-key cho `PATCH /api/public/submissions/current` (`saveDraft`). Hiện đã có `version` guard nên không mất dữ liệu.
+- **Thêm cột `mutation_hash` vào `public_acceptance_sagas`** (migration mới) — hiện retry cùng key nhưng khác payload trong lúc saga dở dang không bị phát hiện `IDEMPOTENCY_CONFLICT` cho đến bước COMPLETED. Rủi ro thấp, làm khi có dịp.
 
 Theo thứ tự mốc trong `PLAN.md`:
 

@@ -362,6 +362,106 @@ export class PublicIntakeRepository {
     return mapSubmission(rows[0]);
   }
 
+  async registerFailedAccessAttempt(
+    submissionId: string,
+    maxFailures: number,
+    lockMinutes: number,
+  ): Promise<{ failedAttempts: number; lockedUntil: string | null }> {
+    const database = getDatabase();
+    const rows = await database<{ failed_attempts: number; locked_until: string | null }[]>`
+      update public.public_submissions set
+        failed_attempts = case when locked_until is not null and locked_until <= now()
+                               then 1 else failed_attempts + 1 end,
+        locked_until = case
+          when (case when locked_until is not null and locked_until <= now()
+                     then 1 else failed_attempts + 1 end) >= ${maxFailures}
+          then now() + (${lockMinutes} || ' minutes')::interval else null end,
+        updated_at = now()
+      where submission_id = ${submissionId}
+      returning failed_attempts, locked_until
+    `;
+    if (!rows[0]) throw new Error("Không tìm thấy bản kê khai khi ghi nhận đăng nhập sai.");
+    return {
+      failedAttempts: rows[0].failed_attempts,
+      lockedUntil: rows[0].locked_until ? new Date(rows[0].locked_until).toISOString() : null,
+    };
+  }
+
+  async commitNoAction(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    ownerId: string;
+    existingRecordIds: string[];
+    matchesCount: number;
+    timelineEvent: PublicTimelineEvent;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<{ receiptCode: string; status: PublicStatus }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+        select mutation_hash, response_json from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return cached[0].response_json as { receiptCode: string; status: PublicStatus };
+      }
+
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           status = 'NO_ACTION_REQUIRED', version = version + 1, updated_at = now()
+         where submission_id = $1 and version = $2
+         returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.expectedVersion],
+      );
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const updated = mapSubmission(rows[0]);
+
+      for (const recordId of input.existingRecordIds) {
+        await transaction`
+          insert into public.public_existing_record_links (
+            submission_id, owner_id, existing_record_id, outcome
+          ) values (
+            ${input.record.submissionId}, ${input.ownerId}, ${recordId}, 'MATCHED_VERIFIED'
+          ) on conflict do nothing
+        `;
+      }
+
+      await this.insertTimeline(
+        transaction,
+        updated.submissionId,
+        input.timelineEvent,
+        "SYSTEM",
+        input.requestId,
+      );
+
+      await this.insertAudit(transaction, {
+        actorEmail: "PUBLIC",
+        action: "PUBLIC_SUBMISSION_NO_ACTION_REQUIRED",
+        entityId: updated.submissionId,
+        requestId: input.requestId,
+        metadata: { matchCount: input.matchesCount },
+      });
+
+      const response = { receiptCode: updated.receiptCode, status: updated.status };
+
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, 'PUBLIC_NO_ACTION', ${input.requestId},
+          ${input.mutationHash}, ${transaction.json(response)}, now() + interval '24 hours'
+        )
+      `;
+
+      return response;
+    });
+  }
+
   async findExistingCertificates(citizenIdHmac: string): Promise<ExistingCertificateMatch[]> {
     const database = getDatabase();
     const rows = await database<
@@ -537,6 +637,10 @@ export class PublicIntakeRepository {
       );
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
+
+      if (input.record.status !== "DRAFT") {
+        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+      }
 
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
@@ -947,9 +1051,36 @@ export class PublicIntakeRepository {
   async appendFile(
     file: Omit<StoredFile, "status">,
     record?: SubmissionRecord,
+    idempotencyOptions?: {
+      idempotencyKey: string;
+      mutationHash: string;
+      requestId: string;
+      replaceFileId?: string;
+    },
   ): Promise<PublicFileSummary> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
+      if (idempotencyOptions) {
+        await transaction`select pg_advisory_xact_lock(hashtextextended(${idempotencyOptions.idempotencyKey}, 0))`;
+        const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+          select mutation_hash, response_json from public.request_log where idempotency_key = ${idempotencyOptions.idempotencyKey}
+        `;
+        if (cached[0]) {
+          if (cached[0].mutation_hash !== idempotencyOptions.mutationHash) {
+            throw new SubmissionIdempotencyConflictError();
+          }
+          return cached[0].response_json as PublicFileSummary;
+        }
+      }
+
+      if (idempotencyOptions?.replaceFileId) {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${file.submissionId} and file_id = ${idempotencyOptions.replaceFileId}
+            and status = 'UPLOADED'
+        `;
+      }
+
       if (file.documentType !== "CERTIFICATE") {
         await transaction`
           update public.public_files set status = 'REPLACED', updated_at = now()
@@ -968,7 +1099,21 @@ export class PublicIntakeRepository {
           size_bytes, checksum_sha256, file_name, status, created_at, updated_at
       `;
       if (record) await this.refreshFileSummaries(transaction, file.submissionId);
-      return this.fileSummary(mapFile(rows[0]));
+      const summary = this.fileSummary(mapFile(rows[0]));
+
+      if (idempotencyOptions) {
+        await transaction`
+          insert into public.request_log (
+            idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+          ) values (
+            ${idempotencyOptions.idempotencyKey}, 'PUBLIC_UPLOAD_COMPLETE',
+            ${idempotencyOptions.requestId}, ${idempotencyOptions.mutationHash},
+            ${JSON.stringify(summary)}::jsonb, now() + interval '24 hours'
+          )
+        `;
+      }
+
+      return summary;
     });
   }
 
@@ -1025,69 +1170,14 @@ export class PublicIntakeRepository {
       `;
       if (!updated[0]) throw new SubmissionVersionConflictError();
 
-      if (input.status === "SUBMITTED") {
-        await transaction`
-          insert into public.public_certificates
-            (certificate_id, submission_id, issue_number, issue_date, registry_number)
-          values (${randomUUID()}, ${input.record.submissionId}, ${input.draft.certificate.issueNumber},
-            ${input.draft.certificate.issueDate}, ${input.draft.certificate.registryNumber})
-        `;
-        for (const owner of input.draft.owners) {
-          await transaction`
-            insert into public.public_owners (
-              owner_id, submission_id, owner_type, full_name, identity_number, role_on_certificate,
-              date_of_birth, gender, residence_address, identity_source, qr_payload_hash,
-              qr_decoder_version, qr_parser_version, identity_status, identity_confirmed_at,
-              has_distinct_current_user, current_user_name, current_user_citizen_id,
-              current_user_address, change_reason
-            ) values (
-              ${owner.id}, ${input.record.submissionId}, ${owner.ownerType}, ${owner.fullName},
-              ${owner.identityNumber}, ${owner.roleOnCertificate}, ${owner.dateOfBirth},
-              ${owner.gender}, ${owner.residenceAddress}, ${owner.identitySource},
-              ${owner.qrPayloadHash}, ${owner.qrDecoderVersion}, ${owner.qrParserVersion},
-              ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.hasDistinctCurrentUser},
-              ${owner.currentUserName}, ${owner.currentUserCitizenId}, ${owner.currentUserAddress},
-              ${owner.changeReason}
-            )
-          `;
-        }
-        for (const parcel of input.draft.parcels) {
-          await transaction`
-            insert into public.public_parcels (
-              parcel_id, submission_id, parcel_id_code, map_sheet_number, parcel_number,
-              address_on_certificate, address_two_level, area, old_ward
-            ) values (
-              ${parcel.id}, ${input.record.submissionId}, ${parcel.parcelIdCode},
-              ${parcel.mapSheetNumber}, ${parcel.parcelNumber}, ${parcel.addressOnCertificate},
-              ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard}
-            )
-          `;
-          for (const landUse of parcel.landUses) {
-            await transaction`
-              insert into public.public_land_uses (
-                land_use_id, submission_id, parcel_id, purpose_code, purpose_free_text,
-                origin_code, form_code, term_code, area
-              ) values (
-                ${landUse.id}, ${input.record.submissionId}, ${parcel.id}, ${landUse.purposeCode},
-                ${landUse.purposeFreeText ?? ""}, ${landUse.originCode}, ${landUse.formCode},
-                ${landUse.termCode}, ${landUse.area}
-              )
-            `;
-          }
-        }
-        for (const asset of input.draft.assets) {
-          await transaction`
-            insert into public.public_assets (asset_id, submission_id, asset_type, description)
-            values (${asset.id}, ${input.record.submissionId}, ${asset.assetType}, ${asset.description})
-          `;
-        }
-        for (const hmac of input.pendingIdentityHmacs ?? []) {
-          await transaction`
-            insert into public.public_lookup_index (kind, citizen_id_hmac, submission_id)
-            values ('PENDING', ${hmac}, ${input.record.submissionId}) on conflict do nothing
-          `;
-        }
-      } else {
+      await this.refreshCanonicalProjection(
+        transaction,
+        input.record.submissionId,
+        input.draft,
+        input.pendingIdentityHmacs,
+      );
+
+      if (input.status === "RESUBMITTED") {
         await this.resolveOpenSupplementRequestWithSql(transaction, input.record.submissionId);
       }
 
@@ -1119,7 +1209,7 @@ export class PublicIntakeRepository {
     });
   }
 
-  private async insertAudit(
+  async insertAudit(
     sql: Sql,
     input: {
       actorEmail: string;
@@ -1139,7 +1229,7 @@ export class PublicIntakeRepository {
     `;
   }
 
-  private async insertTimeline(
+  async insertTimeline(
     sql: Sql,
     submissionId: string,
     event: PublicTimelineEvent,
@@ -1256,6 +1346,83 @@ export class PublicIntakeRepository {
       driveFileId: file.driveFileId,
       mimeType: file.mimeType,
     };
+  }
+
+  private async refreshCanonicalProjection(
+    transaction: Sql,
+    submissionId: string,
+    draft: IntakeDraft,
+    pendingIdentityHmacs?: string[],
+  ): Promise<void> {
+    await transaction`delete from public.public_certificates where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_owners where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_parcels where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_land_uses where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_assets where submission_id = ${submissionId}`;
+
+    if (draft.certificate) {
+      await transaction`
+        insert into public.public_certificates
+          (certificate_id, submission_id, issue_number, issue_date, registry_number)
+        values (${`CERT:${submissionId}`}, ${submissionId}, ${draft.certificate.issueNumber},
+          ${draft.certificate.issueDate}, ${draft.certificate.registryNumber})
+      `;
+    }
+    for (const owner of draft.owners || []) {
+      await transaction`
+        insert into public.public_owners (
+          owner_id, submission_id, owner_type, full_name, identity_number, role_on_certificate,
+          date_of_birth, gender, residence_address, identity_source, qr_payload_hash,
+          qr_decoder_version, qr_parser_version, identity_status, identity_confirmed_at,
+          has_distinct_current_user, current_user_name, current_user_citizen_id,
+          current_user_address, change_reason
+        ) values (
+          ${owner.id}, ${submissionId}, ${owner.ownerType}, ${owner.fullName},
+          ${owner.identityNumber}, ${owner.roleOnCertificate}, ${owner.dateOfBirth},
+          ${owner.gender}, ${owner.residenceAddress}, ${owner.identitySource},
+          ${owner.qrPayloadHash}, ${owner.qrDecoderVersion}, ${owner.qrParserVersion},
+          ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.hasDistinctCurrentUser},
+          ${owner.currentUserName}, ${owner.currentUserCitizenId}, ${owner.currentUserAddress},
+          ${owner.changeReason}
+        )
+      `;
+    }
+    for (const parcel of draft.parcels || []) {
+      await transaction`
+        insert into public.public_parcels (
+          parcel_id, submission_id, parcel_id_code, map_sheet_number, parcel_number,
+          address_on_certificate, address_two_level, area, old_ward
+        ) values (
+          ${parcel.id}, ${submissionId}, ${parcel.parcelIdCode},
+          ${parcel.mapSheetNumber}, ${parcel.parcelNumber}, ${parcel.addressOnCertificate},
+          ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard}
+        )
+      `;
+      for (const landUse of parcel.landUses || []) {
+        await transaction`
+          insert into public.public_land_uses (
+            land_use_id, submission_id, parcel_id, purpose_code, purpose_free_text,
+            origin_code, form_code, term_code, area
+          ) values (
+            ${landUse.id}, ${submissionId}, ${parcel.id}, ${landUse.purposeCode},
+            ${landUse.purposeFreeText ?? ""}, ${landUse.originCode}, ${landUse.formCode},
+            ${landUse.termCode}, ${landUse.area}
+          )
+        `;
+      }
+    }
+    for (const asset of draft.assets || []) {
+      await transaction`
+        insert into public.public_assets (asset_id, submission_id, asset_type, description)
+        values (${asset.id}, ${submissionId}, ${asset.assetType}, ${asset.description})
+      `;
+    }
+    for (const hmac of pendingIdentityHmacs ?? []) {
+      await transaction`
+        insert into public.public_lookup_index (kind, citizen_id_hmac, submission_id)
+        values ('PENDING', ${hmac}, ${submissionId}) on conflict do nothing
+      `;
+    }
   }
 }
 
