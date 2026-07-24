@@ -1,5 +1,17 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Thêm 2 tài khoản vdl.0595@gmail.com và thanhson2311@gmail.com vào vai trò SYSTEM_ADMIN
+
+- **Agent:** Antigravity
+- **Thay đổi:**
+  - Nghiên cứu cơ chế phân quyền và quản lý tài khoản trong dự án: Hệ thống quản lý danh sách người dùng và phân quyền theo allowlist lưu tại bảng `public.users` trong Supabase PostgreSQL. Để tài khoản có quyền `SYSTEM_ADMIN`, mảng `roles` của người dùng phải chứa `'SYSTEM_ADMIN'` và `active = true`.
+  - Tạo script CLI `scripts/add-system-admins.ts` để thực hiện upsert an toàn 2 tài khoản `vdl.0595@gmail.com` và `thanhson2311@gmail.com` vào Supabase PostgreSQL kèm theo nhật ký kiểm toán (`audit_logs`).
+  - Đã thêm lệnh `seed:admin-users` vào `package.json` (`npm run seed:admin-users`).
+  - Hướng dẫn 3 phương án để chủ dự án / quản trị viên thực thi (bằng script CLI `npm run seed:admin-users`, bằng câu lệnh SQL trực tiếp trên Supabase SQL Editor, hoặc qua giao diện `/users` của Web App).
+- **File đã sửa:** `scripts/add-system-admins.ts` (mới), `package.json`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Người dùng yêu cầu nghiên cứu dự án và giúp thêm 2 email `vdl.0595@gmail.com` và `thanhson2311@gmail.com` vào vai trò `SYSTEM_ADMIN`.
+- **Kiểm tra:** Đã xác minh cấu trúc TypeScript, kiểm tra bảng `public.users` và luồng phân quyền `requireActiveUser`.
+
 ## [2026-07-24] Diễn tập staging thật cho saga tiếp nhận — PASS 6/6, phát hiện + vá 1 bug thật
 
 - **Agent:** Claude Code
