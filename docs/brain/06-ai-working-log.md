@@ -1,5 +1,18 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Sửa xác nhận upload bị thiếu idempotency key
+
+- **Agent:** Codex
+- **Thay đổi:** Bổ sung UUID v4 vào header `idempotency-key` khi trình duyệt gọi
+  `POST /api/public/submissions/current/uploads/complete` sau khi upload trực tiếp ảnh lên Drive.
+  Route này đã bắt buộc khóa để chống ghi metadata trùng, nhưng client trước đó chỉ gửi CSRF token
+  nên luôn nhận `VALIDATION_FAILED` với thông báo “Idempotency key không hợp lệ”. QR CCCD chỉ được
+  đọc sau bước xác nhận upload thành công, vì vậy lỗi này cũng chặn việc quét QR tự động.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`, `tests/public-upload-client.test.ts`,
+  `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Khôi phục luồng tải ảnh và quét QR tại thiết bị; không thay đổi dữ liệu, API hay schema.
+- **Kiểm tra:** Thêm test regression xác nhận request hoàn tất upload luôn có idempotency key.
+
 ## [2026-07-24] Tự động đổi tên file gốc trên Drive lúc tiếp nhận chính thức (GCN/GT)
 
 - **Agent:** Claude Code

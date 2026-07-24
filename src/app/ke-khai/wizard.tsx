@@ -1003,7 +1003,11 @@ export function IntakeWizard() {
 
       const complete = await fetchApi("/api/public/submissions/current/uploads/complete", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
+        headers: {
+          "content-type": "application/json",
+          "x-public-csrf-token": csrfToken,
+          "idempotency-key": crypto.randomUUID(),
+        },
         body: JSON.stringify({ driveFileId: id, documentType, ownerId, replaceFileId }),
       });
 
