@@ -8,91 +8,104 @@ import { CertificateLookup } from "@/components/certificate-lookup";
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl items-center px-6 py-16">
-      <section className="w-full space-y-8 text-center">
-        <div className="flex flex-col items-center justify-center gap-3">
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-16 sm:py-24">
+      <section className="w-full space-y-12 text-center pc-fade-in">
+        <div className="flex flex-col items-center justify-center gap-4">
           <Image
             src={logoPhongChau}
             alt="Biểu trưng Phường Phong Châu"
-            width={96}
-            height={96}
+            width={112}
+            height={112}
             priority
-            className="h-20 w-20 sm:h-24 sm:w-24 object-contain"
+            className="h-24 w-24 sm:h-28 sm:w-28 object-contain drop-shadow-sm"
           />
-          <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
-            PHƯỜNG PHONG CHÂU
-          </p>
-        </div>
-
-        <div className="flex flex-col items-center space-y-3">
-          <h1 className="max-w-2xl text-3xl font-bold tracking-tight sm:text-5xl leading-tight">
-            CSDL đất đai <span className="inline-block">Phường Phong Châu</span>
-          </h1>
-          <p className="max-w-xl text-base sm:text-lg" style={{ color: "var(--muted)" }}>
+          <div className="space-y-1">
+            <p className="text-xs sm:text-sm font-bold tracking-[0.2em] uppercase" style={{ color: "var(--accent)" }}>
+              Phường Phong Châu
+            </p>
+            <h1 className="max-w-2xl text-3xl font-extrabold tracking-tight sm:text-5xl leading-tight">
+              CSDL Đất đai
+            </h1>
+          </div>
+          <p className="max-w-lg mx-auto text-base sm:text-lg mt-2" style={{ color: "var(--text-secondary)" }}>
             {appMetadata.description}
           </p>
         </div>
 
-        {/* Hai đường đi tách bạch: người dân không được hiểu nhầm là phải đăng nhập. */}
-        <div className="grid gap-6 text-left sm:grid-cols-2">
+        <div className="space-y-8 text-left">
           <div
-            className="pc-card flex flex-col gap-4 shadow-sm"
-            style={{ borderTop: "4px solid var(--gold-500)" }}
+            className="pc-card flex flex-col gap-6 p-8 sm:p-10 shadow-md relative overflow-hidden"
+            style={{ borderTop: "4px solid var(--cherry-600)", background: "var(--surface)" }}
           >
-            <div className="space-y-1">
+            <div className="space-y-2 text-center">
               <span
-                className="inline-block text-xs font-semibold uppercase tracking-wider px-2 py-0.5 rounded"
-                style={{ background: "var(--gold-100)", color: "var(--gold-900)" }}
+                className="inline-block text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full mb-2"
+                style={{ background: "var(--cherry-50)", color: "var(--cherry-700)" }}
               >
                 Dành cho công dân
               </span>
-              <h2 className="text-xl font-bold">Người dân</h2>
+              <h2 className="text-2xl sm:text-3xl font-bold">Kê khai trực tuyến</h2>
+              <p className="text-sm sm:text-base max-w-md mx-auto" style={{ color: "var(--text-secondary)" }}>
+                Thực hiện nộp hồ sơ, giấy chứng nhận trực tuyến nhanh chóng. Không yêu cầu đăng ký tài khoản.
+              </p>
             </div>
-            <p className="flex-1 text-sm sm:text-base" style={{ color: "var(--muted)" }}>
-              Kê khai hồ sơ đất đai và nộp ảnh giấy tờ trực tuyến. Không cần tài khoản.
-            </p>
-            <div className="space-y-3 pt-2">
+            
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
               <Link
                 href="/ke-khai"
-                className="pc-button flex w-full items-center justify-center no-underline"
+                className="pc-button-gold w-full sm:w-auto text-base sm:text-lg px-8 py-3 shadow-sm no-underline"
               >
-                Kê khai hồ sơ
+                Bắt đầu kê khai
               </Link>
-              <div className="text-center">
-                <Link
-                  href="/tra-cuu"
-                  className="text-sm font-medium no-underline hover:underline"
-                  style={{ color: "var(--accent)" }}
-                >
-                  Tra cứu hồ sơ đã nộp
-                </Link>
-              </div>
+              <Link
+                href="/tra-cuu"
+                className="pc-button-quiet w-full sm:w-auto text-base px-6 py-3 no-underline"
+              >
+                Tra cứu kết quả
+              </Link>
             </div>
           </div>
 
-          <div className="pc-card flex flex-col justify-between gap-4">
+          <div className="text-left">
+            <CertificateLookup />
+          </div>
+        </div>
+
+        <div className="relative py-4">
+          <div className="absolute inset-0 flex items-center" aria-hidden="true">
+            <div className="w-full border-t border-dashed" style={{ borderColor: "var(--border-strong)" }}></div>
+          </div>
+        </div>
+
+        <div className="mx-auto max-w-sm">
+          <div className="flex flex-col items-center gap-3 text-center opacity-80 hover:opacity-100 transition-opacity">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold">Cán bộ</h2>
-              <p className="text-sm sm:text-base" style={{ color: "var(--muted)" }}>
-                Tiếp nhận, kiểm tra và duyệt hồ sơ. Chỉ dành cho email đã được quản trị viên cho phép.
-              </p>
+              <h2 className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+                Khu vực nội bộ
+              </h2>
             </div>
             <form
               action={async () => {
                 "use server";
                 await signIn("google", { redirectTo: "/profile" });
               }}
+              className="w-full"
             >
-              <button className="pc-button-quiet w-full" type="submit">
-                Đăng nhập bằng Google
+              <button 
+                className="pc-button-quiet w-full text-sm py-2" 
+                style={{ 
+                  color: "var(--text-secondary)", 
+                  borderColor: "transparent",
+                  backgroundColor: "var(--neutral-soft)"
+                }} 
+                type="submit"
+              >
+                Đăng nhập dành cho cán bộ
               </button>
             </form>
           </div>
         </div>
 
-        <div className="text-left">
-          <CertificateLookup />
-        </div>
       </section>
     </main>
   );

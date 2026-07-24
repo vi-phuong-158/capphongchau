@@ -107,10 +107,13 @@ export function CertificateLookup() {
   }, [scan, challenge]);
 
   return (
-    <section className="pc-card space-y-4">
-      <div className="space-y-1">
-        <h2 className="text-lg font-bold">Kiểm tra đã nộp Giấy chứng nhận chưa?</h2>
-        <p className="text-sm" style={{ color: "var(--muted)" }}>
+    <section 
+      className="pc-card space-y-6 shadow-md"
+      style={{ borderTop: "4px solid var(--gold-500)", background: "var(--surface)" }}
+    >
+      <div className="space-y-2 text-center">
+        <h2 className="text-xl sm:text-2xl font-bold">Kiểm tra đã nộp Giấy chứng nhận chưa?</h2>
+        <p className="text-sm sm:text-base max-w-lg mx-auto" style={{ color: "var(--muted)" }}>
           Quét mã QR trên căn cước (chụp ảnh hoặc chọn ảnh có sẵn) để xem đã có hồ sơ nào nộp cho
           CCCD này chưa. Ảnh không được tải lên hay lưu lại — hệ thống chỉ đọc mã QR ngay trên thiết
           bị của bạn.
@@ -118,21 +121,40 @@ export function CertificateLookup() {
       </div>
 
       {scan.step === "idle" || scan.step === "decoding" ? (
-        <>
-          <input
-            ref={fileInputRef}
-            className="pc-input"
-            type="file"
-            accept={IMAGE_FILE_ACCEPT}
-            disabled={scan.step === "decoding"}
-            onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
-          />
+        <div className="space-y-3">
+          <label 
+            className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+              scan.step === "decoding" ? "opacity-50 pointer-events-none" : "hover:bg-black/5"
+            }`} 
+            style={{ borderColor: "var(--border-strong)" }}
+          >
+            <input
+              ref={fileInputRef}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              type="file"
+              accept={IMAGE_FILE_ACCEPT}
+              disabled={scan.step === "decoding"}
+              onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
+            />
+            <div className="flex flex-col items-center text-center space-y-3 pointer-events-none">
+              <div className="p-4 rounded-full shadow-sm" style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}>
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-bold text-lg">Chạm để chụp ảnh / Chọn tệp</p>
+                <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>Đưa mã QR trên CCCD vào khung hình</p>
+              </div>
+            </div>
+          </label>
           {scan.step === "decoding" ? (
-            <p className="text-sm" style={{ color: "var(--muted)" }}>
+            <p className="text-sm text-center font-medium animate-pulse" style={{ color: "var(--accent)" }}>
               Đang đọc mã QR trên thiết bị…
             </p>
           ) : null}
-        </>
+        </div>
       ) : null}
 
       {scan.step === "decoded" || scan.step === "checking" ? (

@@ -1,5 +1,18 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Làm đẹp giao diện Nộp kê khai và Kiểm tra CCCD (UI/UX)
+
+- **Agent:** Antigravity (Gemini 3.6 Flash / Claude 4.6 Opus)
+- **Thay đổi:** 
+  - Đẩy phần "Nộp kê khai" và "Kiểm tra CCCD" lên đầu trang chủ, dời "Khu vực nội bộ" xuống cuối.
+  - Làm đẹp và nhấn mạnh nút "Kiểm tra" và "Kê khai" ở trang chủ. 
+  - Nâng cấp Dropzone tải ảnh CCCD và GCN trong `wizard.tsx`, thêm loading spinner ("Đang xử lý ảnh...") đồng bộ với trạng thái `busy`.
+  - Làm đẹp nút "Thay ảnh" (GCN) và hộp trạng thái `uploadNote` ở dưới cùng.
+  - Bypass Edge Guard cho môi trường local (`PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE`).
+- **File đã sửa:** `src/app/page.tsx`, `src/components/certificate-lookup.tsx`, `src/app/ke-khai/wizard.tsx`, `.env.local`.
+- **Lý do:** Người dùng yêu cầu làm nổi bật phần nộp kê khai, tối ưu giao diện tải ảnh cho rõ ràng tiến trình (spinner/thông báo) tránh bị tưởng là ứng dụng treo.
+- **Kiểm tra:** Đã chạy server local, UI hiển thị đúng, Edge Guard bypass thành công. Logic xử lý upload và data không thay đổi.
+
 ## [2026-07-24] Khắc phục lỗi QR/upload do `draft_json` legacy lồng chuỗi
 
 - **Agent:** Codex.
