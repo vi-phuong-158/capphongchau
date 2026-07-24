@@ -1,5 +1,20 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Ghi nhận quyết định chấp nhận rủi ro: bỏ qua 3/4 điều kiện gác cổng saga
+
+- **Agent:** Claude Code
+- **Thay đổi:** Ghi quyết định của chủ dự án vào `03-decisions.md` — chấp nhận bỏ qua (không sửa
+  code) 3 điều kiện: lớp biên/Cloudflare, thông báo bảo vệ dữ liệu cá nhân, khớp tổ chức trong tra
+  cứu GCN — chỉ áp dụng cho phạm vi thử nghiệm (1 phường, tối đa 500 hồ sơ, đợt 180 ngày). Cập nhật
+  `04-current-tasks.md`: gạch 3 mục khỏi danh sách chặn, chỉ giữ lại "diễn tập staging 3 kịch bản"
+  làm điều kiện chặn duy nhất trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true`.
+- **File đã sửa:** `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md`,
+  `docs/brain/06-ai-working-log.md`. Không đổi code — đây là quyết định chấp nhận rủi ro, không
+  phải bản vá.
+- **Lý do:** Chủ dự án xác nhận trực tiếp trong hội thoại (2026-07-24), sau khi được giải thích rõ
+  rủi ro cụ thể của từng mục.
+- **Kiểm tra:** Không áp dụng (chỉ thay đổi tài liệu, không đổi hành vi hệ thống).
+
 ## [2026-07-24] Sửa đoạn tài liệu lỗi thời về saga trong 04-current-tasks.md
 
 - **Agent:** Claude Code

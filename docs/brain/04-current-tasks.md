@@ -124,12 +124,18 @@ Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự c
    - Ngắt giữa chừng bước `FILES_MOVED` (move được 1/3 file) → retry cùng idempotency key → đếm file ở folder đích đúng và đủ, không file nào bị move 2 lần, không case trùng.
    - Hai request accept song song với 2 idempotency key khác nhau → request sau nhận `409 ACCEPTANCE_IN_PROGRESS`.
    - Retry sau khi đã `COMPLETED` (trong và sau cửa sổ 24h của `request_log`) → trả kết quả cũ, version không tăng thêm, không timeline/audit trùng.
-2. **Thông báo bảo vệ dữ liệu vẫn là placeholder** (`wizard.tsx`) và server tự ghi
-   `consentAccepted = true` không kiểm (`submissions/route.ts:230`).
-3. **Lớp biên:** `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` đang **BẬT** trên production; chưa có
-   security headers; chưa có domain thật sau Cloudflare.
-4. **Tổ chức trong tra cứu GCN đã có chưa khớp được** — hiện chỉ khớp cá nhân bằng HMAC(CCCD); 280
-   dòng tổ chức trong kho (mã dạng `N/A-<mst>`) chưa có đường khớp bằng mã số thuế.
+
+**Đây là điều kiện chặn DUY NHẤT còn lại.** Ba mục dưới đây từng nằm trong danh sách này đã được
+chủ dự án **chấp nhận rủi ro và bỏ qua** ngày 2026-07-24 (không sửa code, không chặn nữa) — xem
+`03-decisions.md` [2026-07-24 — Chấp nhận rủi ro] để biết rủi ro cụ thể còn tồn tại trong hệ thống:
+
+- ~~Thông báo bảo vệ dữ liệu vẫn là placeholder, server ghi `consentVersion` không xác minh người
+  dân thật sự đã đọc/tick~~ (`submissions/route.ts`).
+- ~~Lớp biên: `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` bật trên production; chưa có domain thật sau
+  Cloudflare~~ — chấp nhận chạy trên `*.vercel.app`, bù bằng Turnstile (vẫn bật) + công tắc khẩn
+  `PUBLIC_INTAKE_MODE=PAUSED`.
+- ~~Tổ chức trong tra cứu GCN đã có chưa khớp được bằng mã số thuế~~ (280 dòng tổ chức trong kho) —
+  cán bộ tự đối chiếu thủ công cho nhóm tổ chức, hệ thống không tự động hóa.
 
 ✅ **Đã sửa trong phiên 2026-07-23** (từng là mục 1/3/5 của danh sách này, xem `03-decisions.md` và
 `06-ai-working-log.md` cùng ngày):

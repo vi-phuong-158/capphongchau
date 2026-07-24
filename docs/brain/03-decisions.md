@@ -4,6 +4,41 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24] Chấp nhận rủi ro: bỏ qua 3/4 điều kiện gác cổng saga tiếp nhận
+
+- **Quyết định:** Chủ dự án chấp nhận **bỏ qua, không sửa** 3 trong 4 điều kiện gác cổng trước khi
+  đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` (xem `04-current-tasks.md` mục "Chặn trước khi đưa cổng
+  công khai vào dữ liệu thật"):
+  1. **Lớp biên (Cloudflare/domain thật):** Giữ nguyên chạy trên `capphongchau.vercel.app`, không
+     mua domain riêng + cấu hình Cloudflare. Giữ `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên
+     production.
+  2. **Thông báo bảo vệ dữ liệu cá nhân:** Giữ nguyên chữ placeholder ở `/ke-khai` (`wizard.tsx`);
+     server tiếp tục ghi `consentVersion` bằng `CONSENT_NOTICE_VERSION` cấu hình sẵn, không xác
+     minh người dân thật sự đã đọc/tick đồng ý (`src/app/api/public/submissions/route.ts`).
+  3. **Tra cứu tổ chức trong GCN đã có:** Không làm khớp mã số thuế cho khoảng 280 dòng tổ chức
+     trong kho GCN cũ (mã dạng `N/A-<mst>`); tra cứu `/tra-cuu` và luồng "không cần nộp lại" tiếp
+     tục chỉ khớp cá nhân qua HMAC(CCCD).
+  Điều kiện còn lại **KHÔNG được bỏ qua**: diễn tập staging 3 kịch bản của saga (mục 1 cùng danh
+  sách) — đây là điều kiện chặn duy nhất còn lại trước khi mở `OFFICIAL_ACCEPTANCE_ENABLED`.
+- **Lý do:** Quy mô thử nghiệm nhỏ (một phường Phong Châu, tối đa 500 hồ sơ) và có thời hạn (đợt
+  chiến dịch 180 ngày, không lặp lại/không mở rộng sau đó) — chi phí làm đủ cả 3 mục không tương
+  xứng lợi ích trong phạm vi và thời gian này.
+- **Rủi ro chấp nhận (không phải "đã sửa" — vẫn tồn tại trong hệ thống)::**
+  1. Không WAF/rate limit ở edge (xác nhận: code hiện không có bất kỳ giới hạn tốc độ nào ở tầng
+     ứng dụng, `RATE_LIMITED` chỉ là mã lỗi định nghĩa sẵn, chưa nơi nào ném ra) → rủi ro **vận
+     hành** (nghẽn/chậm đúng lúc cao điểm nếu bị bot quét hoặc spam), không phải rủi ro lộ dữ liệu
+     vì CSRF/role/Turnstile vẫn nguyên vẹn. Giảm nhẹ bằng Turnstile (vẫn bật, độc lập domain) và
+     công tắc khẩn `PUBLIC_INTAKE_MODE=PAUSED` (đổi env, không cần deploy lại) khi phát hiện bất
+     thường.
+  2. Ghi nhận đồng ý thu thập CCCD/PII mà không có bằng chứng phía server rằng người dân đã thật
+     sự đọc/tick — rủi ro tuân thủ/pháp lý nếu phát sinh tranh chấp về thu thập dữ liệu cá nhân.
+  3. Hồ sơ tổ chức tra cứu "đã có GCN chưa" có thể trả sai/thiếu do không khớp được mã số thuế —
+     cán bộ phải tự đối chiếu thủ công cho nhóm tổ chức, hệ thống không cảnh báo được cho nhóm này.
+- **Đánh giá lại:** Bắt buộc đánh giá lại cả 3 mục nếu dự án mở rộng khỏi phạm vi thử nghiệm hiện
+  tại (quá 500 hồ sơ, quá một phường, tiếp tục vận hành sau đợt 180 ngày, hoặc dùng cho phường
+  khác) — quyết định này CHỈ áp dụng cho phạm vi thử nghiệm đã nêu.
+- **Người quyết định:** Chủ dự án (2026-07-24).
+
 ## [2026-07-24 — SỬA KHẨN] Tách hard-stop saga khỏi `REFERENCE_IS_PLACEHOLDER` thành cờ riêng
 
 - **Phát hiện:** Sau khi nối `runOfficialAcceptance` vào `accept/route.ts` (entry ngay dưới), gate
