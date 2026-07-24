@@ -42,9 +42,25 @@ nhận ra: saga có thể chạy thật cho bất kỳ ai có role quyết đị
 `OFFICIAL_ACCEPTANCE_ENABLED` độc lập, mặc định `false`, có test trip-wire trong
 `tests/submission-acceptance.test.ts`. Xem `03-decisions.md` [2026-07-24 — SỬA KHẨN].
 
-**Chỉ được đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` sau khi hoàn thành task gác cổng** (diễn tập
-staging 3 kịch bản, xem mục "Còn thật sự chặn" bên dưới) **và** danh mục trường 12 chính thức được
-nhập thay dữ liệu demo.
+**[2026-07-24] Diễn tập staging đã chạy THẬT và PASS 6/6** — xem
+`tests/staging-rehearsal-acceptance-saga.integration.test.ts`, gọi trực tiếp
+`runOfficialAcceptance` trên một Postgres Supabase THỬ NGHIỆM (project riêng, khác production),
+chỉ giả lập tầng Google Drive. Cả 3 kịch bản gốc + 3 biến thể đều đạt (xem `03-decisions.md`
+[2026-07-24 — Diễn tập staging]). Diễn tập này còn phát hiện và vá được 1 **bug thật**: Supavisor
+transaction-mode pooler (`prepare: false`) đôi khi trả cột `jsonb` (`moved_files`, `response_json`)
+về dạng chuỗi thô thay vì object — nếu không vá, replay idempotent của saga sẽ trả kết quả sai cho
+client thật. Đã sửa trong `acceptance-saga.ts` (hàm `parseJsonbMaybeString`/`mapSagaRow`).
+
+**Điều kiện gác cổng "diễn tập staging" coi như đã xong.** Muốn chạy lại độc lập:
+`ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run tests/staging-rehearsal-acceptance-saga.integration.test.ts`
+(tự skip an toàn nếu thiếu biến môi trường, tự chặn nếu trỏ trùng `SUPABASE_DATABASE_URL` thật).
+
+**Còn cần chủ dự án quyết định trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true`:** dòng "danh mục
+trường 12 chính thức được nhập thay dữ liệu demo" ghi từ trước có thể đã lỗi thời — cả trường 12
+của Phụ lục 8 (loại đất/nguồn gốc) lẫn trường 12 của PL3 (pháp nhân trên GCN) đều đã được xác nhận
+chốt chính thức trong `03-decisions.md` [2026-07-22]/[2026-07-23]. Nếu đúng vậy, điều kiện gác cổng
+cuối cùng đã xong toàn bộ và chỉ còn chờ quyết định đảo cờ; nếu chủ dự án biết một danh mục trường
+12 khác còn treo, cần nói rõ ở đây.
 
 ## Migration Supabase (2026-07-23, đã xong về code + dữ liệu 2026-07-24)
 
@@ -118,12 +134,11 @@ Script nay còn nối được cột thiếu vào tab đã tồn tại, không c
 
 ### Chặn trước khi đưa cổng công khai vào dữ liệu thật
 
-Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự chặn:
+Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2.
 
-1. **Gác cổng trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` (mở saga cho dữ liệu thật)** — saga hiện chỉ được kiểm chứng bằng test tĩnh (đối chiếu schema + grep source), CHƯA có test hành vi. Trước khi gỡ khóa, phải chạy end-to-end trên môi trường staging với Supabase thật + folder Drive test, diễn tập đủ 3 kịch bản:
-   - Ngắt giữa chừng bước `FILES_MOVED` (move được 1/3 file) → retry cùng idempotency key → đếm file ở folder đích đúng và đủ, không file nào bị move 2 lần, không case trùng.
-   - Hai request accept song song với 2 idempotency key khác nhau → request sau nhận `409 ACCEPTANCE_IN_PROGRESS`.
-   - Retry sau khi đã `COMPLETED` (trong và sau cửa sổ 24h của `request_log`) → trả kết quả cũ, version không tăng thêm, không timeline/audit trùng.
+1. ~~Gác cổng trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` (diễn tập staging 3 kịch bản)~~ —
+   **ĐÃ XONG 2026-07-24**, xem chi tiết ở mục "Hoãn có chủ đích" phía trên và
+   `03-decisions.md` [2026-07-24 — Diễn tập staging].
 
 **Đây là điều kiện chặn DUY NHẤT còn lại.** Ba mục dưới đây từng nằm trong danh sách này đã được
 chủ dự án **chấp nhận rủi ro và bỏ qua** ngày 2026-07-24 (không sửa code, không chặn nữa) — xem

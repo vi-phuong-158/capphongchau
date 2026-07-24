@@ -77,6 +77,22 @@ const STEP_ORDER: Record<string, number> = {
   COMPLETED: 6,
 };
 
+/**
+ * Supavisor transaction-mode pooler (`prepare: false`) đôi khi trả cột `jsonb` về dạng chuỗi JSON
+ * thô thay vì object đã parse — cùng hiện tượng `decodeSubmissionDraft` (repository.ts) đã phải
+ * xử lý phòng thủ cho `draft_json`. Phát hiện qua diễn tập staging thật trên Postgres thật (không
+ * phải mock) 2026-07-24: nếu không chuẩn hóa, `moved_files` bị spread thành object theo ký tự
+ * (`{...'{"a":"b"}'}` → `{0:'{',1:'"',...}`), và `response_json` trả thẳng ra ngoài dưới dạng
+ * chuỗi thay vì `AcceptanceResult`, khiến `result.officialCaseId` là `undefined` phía client.
+ */
+function parseJsonbMaybeString<T>(value: T | string): T {
+  return typeof value === "string" ? (JSON.parse(value) as T) : value;
+}
+
+function mapSagaRow(row: SagaRow): SagaRow {
+  return { ...row, moved_files: parseJsonbMaybeString<Record<string, string>>(row.moved_files) };
+}
+
 async function getLatestSaga(sql: Sql, submissionId: string): Promise<SagaRow | undefined> {
   const rows = await sql<SagaRow[]>`
     select submission_id, idempotency_key, step, official_case_id, case_folder_id,
@@ -84,7 +100,7 @@ async function getLatestSaga(sql: Sql, submissionId: string): Promise<SagaRow | 
     from public.public_acceptance_sagas
     where submission_id = ${submissionId}
   `;
-  return rows[0];
+  return rows[0] ? mapSagaRow(rows[0]) : undefined;
 }
 
 /**
@@ -109,7 +125,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
       if (cachedLog[0].mutation_hash !== input.mutationHash) {
         throw new SubmissionIdempotencyConflictError();
       }
-      return { cachedResult: cachedLog[0].response_json, saga: null };
+      return { cachedResult: parseJsonbMaybeString<AcceptanceResult>(cachedLog[0].response_json), saga: null };
     }
 
     const existingSaga = await getLatestSaga(transaction, input.record.submissionId);
@@ -170,7 +186,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
       input.requestId,
     );
 
-    return { cachedResult: null, saga: newSagaRows[0] };
+    return { cachedResult: null, saga: mapSagaRow(newSagaRows[0]) };
   });
 
   if (saga.cachedResult) {
@@ -232,7 +248,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         where submission_id = ${input.record.submissionId}
       `;
 
-      return updatedSaga[0];
+      return mapSagaRow(updatedSaga[0]);
     });
   }
 
@@ -273,7 +289,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
           set accept_step = 'CASE_FOLDER_READY', updated_at = now()
           where submission_id = ${input.record.submissionId}
         `;
-        return updated[0];
+        return mapSagaRow(updated[0]);
       });
     } catch (error) {
       throw new AcceptanceRetryableError(`Lỗi tạo thư mục lưu trữ: ${error instanceof Error ? error.message : "Thất bại"}`);
@@ -355,7 +371,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
           set accept_step = 'FILES_MOVED', updated_at = now()
           where submission_id = ${input.record.submissionId}
         `;
-        return updated[0];
+        return mapSagaRow(updated[0]);
       });
     } catch (error) {
       throw new AcceptanceRetryableError(`Lỗi di chuyển tệp hồ sơ: ${error instanceof Error ? error.message : "Thất bại"}`);
@@ -456,7 +472,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         metadata: { officialCaseId: currentSaga.official_case_id },
       });
 
-      return updated[0];
+      return mapSagaRow(updated[0]);
     });
   }
 

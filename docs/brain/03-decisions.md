@@ -4,6 +4,45 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24 — Diễn tập staging] Saga tiếp nhận chính thức chạy thật, PASS 6/6, vá 1 bug thật
+
+- **Quyết định:** Viết `tests/staging-rehearsal-acceptance-saga.integration.test.ts` — gọi trực
+  tiếp `runOfficialAcceptance` (không mock hàm này), áp đúng 2 file migration production lên một
+  Postgres Supabase **thử nghiệm** (project riêng, khác hẳn production — khác region: test ở
+  `ap-northeast-2`, production ở `ap-southeast-1`), chỉ giả lập (mock) tầng Google Drive vì thứ cần
+  kiểm chứng là hành vi Postgres (advisory lock, transaction, `ON CONFLICT`, tên cột), không phải
+  chính Drive API. Đã chạy thật và **PASS 6/6**:
+  1. Ngắt giữa chừng `FILES_MOVED` (di chuyển được 1/3 file) → retry cùng idempotency key → file đã
+     chuyển không bị chuyển lại, file lỗi retry đúng 1 lần thành công, đúng 1 case/3 file được ghi.
+  2. Hồ sơ đang có saga dở dang, request khác dùng key khác → `AcceptanceInProgressError`, không
+     sinh saga/case thứ hai. Bổ sung: hai request tiếp nhận thật sự cùng lúc (`Promise.allSettled`)
+     trên hồ sơ mới toanh — race thật của Postgres quyết định lỗi là `ACCEPTANCE_IN_PROGRESS` hay
+     `VERSION_CONFLICT` tùy thời điểm, nhưng bất biến cốt lõi luôn đúng: không bao giờ có 2 case.
+  3. Bấm lại sau `COMPLETED` (còn/đã hết `request_log`) → trả đúng kết quả cache, không tăng
+     version, không audit/timeline trùng; dùng lại key cũ với payload khác → `IDEMPOTENCY_CONFLICT`.
+- **Bug thật phát hiện qua rehearsal (không phải qua test mock):** Supavisor transaction-mode
+  pooler (`prepare: false`) đôi khi trả cột `jsonb` (`moved_files`, `response_json`) về dạng
+  **chuỗi JSON thô** thay vì object đã parse — cùng hiện tượng `decodeSubmissionDraft`
+  (`repository.ts`) đã phải xử lý phòng thủ cho `draft_json` từ trước, nhưng `acceptance-saga.ts`
+  chưa có phòng thủ tương tự. Hậu quả nếu không vá: `moved_files` bị spread theo ký tự
+  (`{...'{"a":"b"}'}` → object có key `"0","1","2"...`), và replay idempotent (`response_json`) trả
+  thẳng ra một **chuỗi** thay vì `AcceptanceResult` — client thật sẽ nhận `officialCaseId: undefined`
+  khi bấm lại nút tiếp nhận sau khi mạng đã ổn.
+- **Đã vá:** thêm `parseJsonbMaybeString`/`mapSagaRow` trong `acceptance-saga.ts`, áp dụng ở mọi nơi
+  đọc `moved_files` (mọi `SagaRow` trả về từ SQL) và `response_json` (cache hit ở Bước 0).
+- **Lý do đây là bằng chứng đủ mạnh:** khác với `tests/staging-rehearsal-scenarios.test.ts` (bị
+  đánh giá KHÔNG ĐẠT trong lần thử trước — chỉ mock JS thuần, không chạm code saga thật), lần này
+  toàn bộ SQL chạy trên Postgres thật, dùng đúng connection string kiểu Supavisor production, và
+  chính rehearsal này đã tự phát hiện ra một bug mà không mock nào bắt được — chứng minh giá trị
+  của việc yêu cầu Postgres thật thay vì mock.
+- **Đánh đổi:** Script cần một Postgres thử nghiệm riêng (không dùng chung với production); có
+  khóa cứng tự chặn nếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` trùng `SUPABASE_DATABASE_URL`. Không
+  chạy trong `npm test` mặc định trừ khi đặt biến môi trường (tự skip an toàn).
+- **File:** `tests/staging-rehearsal-acceptance-saga.integration.test.ts` (mới),
+  `src/modules/submissions/acceptance-saga.ts` (vá bug jsonb).
+- **Người quyết định:** Chủ dự án (cung cấp Supabase project thử nghiệm để chạy thật, 2026-07-24);
+  Claude Code viết script, chạy, chẩn đoán và vá bug.
+
 ## [2026-07-24] Đổi tên file gốc trên Drive lúc tiếp nhận: chỉ đổi tên ảnh, không ghép PDF
 
 - **Quyết định:** Khi saga tiếp nhận chính thức chạy tới bước `FILES_MOVED`

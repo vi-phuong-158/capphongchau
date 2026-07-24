@@ -1,5 +1,34 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Diễn tập staging thật cho saga tiếp nhận — PASS 6/6, phát hiện + vá 1 bug thật
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - Viết `tests/staging-rehearsal-acceptance-saga.integration.test.ts`: gọi thật
+    `runOfficialAcceptance`, áp 2 migration production lên Postgres Supabase thử nghiệm (chủ dự án
+    cấp connection string riêng, khác production), chỉ mock tầng Google Drive. Tự skip nếu thiếu
+    `ACCEPTANCE_SAGA_TEST_DATABASE_URL`; tự chặn cứng nếu biến đó trùng `SUPABASE_DATABASE_URL`.
+  - Chạy thật trên project test (region `ap-northeast-2`, khác production `ap-southeast-1`) — lần
+    đầu 5/6 fail do 2 lỗi: (1) shape mock Drive sai (`drive.files` undefined — lỗi trong test, đã
+    sửa), (2) **bug thật trong `acceptance-saga.ts`**: Supavisor transaction-mode pooler
+    (`prepare:false`) trả `jsonb` (`moved_files`, `response_json`) dạng chuỗi thô thay vì object —
+    y hệt hiện tượng `decodeSubmissionDraft` từng phải xử lý cho `draft_json`, nhưng saga chưa có
+    phòng thủ tương tự. Đã vá bằng `parseJsonbMaybeString`/`mapSagaRow`. Sau vá: PASS 6/6.
+  - Cập nhật `docs/brain/04-current-tasks.md`: đánh dấu điều kiện gác cổng "diễn tập staging" đã
+    xong; nêu nghi vấn dòng "danh mục trường 12 chính thức" có thể lỗi thời (cả hai "trường 12" —
+    Phụ lục 8 và PL3 — đều đã chốt theo `03-decisions.md` trước đó), cần chủ dự án xác nhận.
+- **File đã sửa:** `tests/staging-rehearsal-acceptance-saga.integration.test.ts` (mới),
+  `src/modules/submissions/acceptance-saga.ts`, `docs/brain/03-decisions.md`,
+  `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Yêu cầu người dùng "tạo script diễn tập"; sau khi có Postgres test thật, chạy để có
+  bằng chứng thật thay vì tin báo cáo mock của lần thử trước (`tests/staging-rehearsal-scenarios.test.ts`,
+  đã bị đánh giá KHÔNG ĐẠT cùng ngày).
+- **Kiểm tra:** `npx tsc --noEmit` sạch; `npm run lint` sạch (0 lỗi, chỉ còn 3 warning cũ ở file
+  khác); `npm test` 33 file/211 test pass + 1 file/6 test tự skip (đúng, do thiếu env thật);
+  rehearsal thật chạy riêng qua
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run tests/staging-rehearsal-acceptance-saga.integration.test.ts`
+  → 6/6 PASS trên Postgres thật.
+
 ## [2026-07-24] Sửa xác nhận upload bị thiếu idempotency key
 
 - **Agent:** Codex
