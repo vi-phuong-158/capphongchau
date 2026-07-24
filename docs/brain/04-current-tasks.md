@@ -32,9 +32,19 @@ trên production trước khi coi cutover là chốt hoàn toàn.
 /api/submissions/:submissionId/accept`) **đã được cài đặt đầy đủ 2026-07-24** trong
 `src/modules/submissions/acceptance-saga.ts` (tạo thư mục `02_CASES/{TĐP}/{CASE_ID}/originals`,
 di chuyển file Drive từ `01_INBOX`, ghi `CASES/CERTIFICATES/OWNERS/FILES` — xem Code Graph trong
-`01-architecture.md`). Route vẫn bị khóa sau `REFERENCE_IS_PLACEHOLDER` và nút vẫn `disabled` ở
-UI. **Chỉ được gỡ khóa sau khi hoàn thành task gác cổng** (diễn tập staging 3 kịch bản, xem mục
-"Còn thật sự chặn" bên dưới) **và** danh mục trường 12 chính thức được nhập thay dữ liệu demo.
+`01-architecture.md`). Route bị khóa bằng cờ `OFFICIAL_ACCEPTANCE_ENABLED = false`
+(`src/modules/submissions/acceptance.ts`) và nút vẫn `disabled` ở UI.
+
+**[SỬA KHẨN 2026-07-24]** Trước bản sửa này, route chỉ còn được chặn bởi `REFERENCE_IS_PLACEHOLDER`
+— nhưng cờ đó **đã là `false`** từ quyết định export PL3 2026-07-23 (không liên quan gì tới việc
+mở saga). Nghĩa là sau khi saga được nối vào route cùng ngày, hard-stop thật đã bị gỡ mà không ai
+nhận ra: saga có thể chạy thật cho bất kỳ ai có role quyết định + CSRF hợp lệ. Đã tách thành cờ
+`OFFICIAL_ACCEPTANCE_ENABLED` độc lập, mặc định `false`, có test trip-wire trong
+`tests/submission-acceptance.test.ts`. Xem `03-decisions.md` [2026-07-24 — SỬA KHẨN].
+
+**Chỉ được đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` sau khi hoàn thành task gác cổng** (diễn tập
+staging 3 kịch bản, xem mục "Còn thật sự chặn" bên dưới) **và** danh mục trường 12 chính thức được
+nhập thay dữ liệu demo.
 
 ## Migration Supabase (2026-07-23, đã xong về code + dữ liệu 2026-07-24)
 
@@ -110,7 +120,7 @@ Script nay còn nối được cột thiếu vào tab đã tồn tại, không c
 
 Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2. Còn thật sự chặn:
 
-1. **Gác cổng trước khi gỡ `REFERENCE_IS_PLACEHOLDER` (mở saga cho dữ liệu thật)** — saga hiện chỉ được kiểm chứng bằng test tĩnh (đối chiếu schema + grep source), CHƯA có test hành vi. Trước khi gỡ khóa, phải chạy end-to-end trên môi trường staging với Supabase thật + folder Drive test, diễn tập đủ 3 kịch bản:
+1. **Gác cổng trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` (mở saga cho dữ liệu thật)** — saga hiện chỉ được kiểm chứng bằng test tĩnh (đối chiếu schema + grep source), CHƯA có test hành vi. Trước khi gỡ khóa, phải chạy end-to-end trên môi trường staging với Supabase thật + folder Drive test, diễn tập đủ 3 kịch bản:
    - Ngắt giữa chừng bước `FILES_MOVED` (move được 1/3 file) → retry cùng idempotency key → đếm file ở folder đích đúng và đủ, không file nào bị move 2 lần, không case trùng.
    - Hai request accept song song với 2 idempotency key khác nhau → request sau nhận `409 ACCEPTANCE_IN_PROGRESS`.
    - Retry sau khi đã `COMPLETED` (trong và sau cửa sổ 24h của `request_log`) → trả kết quả cũ, version không tăng thêm, không timeline/audit trùng.

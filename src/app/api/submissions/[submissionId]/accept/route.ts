@@ -17,6 +17,8 @@ import { REFERENCE_IS_PLACEHOLDER } from "@/modules/public-intake/reference";
 import {
   canStartOfficialAcceptance,
   OFFICIAL_ACCEPTANCE_CATALOG_MESSAGE,
+  OFFICIAL_ACCEPTANCE_DISABLED_MESSAGE,
+  OFFICIAL_ACCEPTANCE_ENABLED,
 } from "@/modules/submissions/acceptance";
 import {
   AcceptanceInProgressError,
@@ -53,7 +55,10 @@ function fail(
 
 /**
  * Điểm vào saga tiếp nhận chính thức (resumable).
- * Bị khóa an toàn khi danh mục trường 12 còn là dữ liệu demo.
+ * Bị khóa an toàn bằng cờ `OFFICIAL_ACCEPTANCE_ENABLED` (acceptance.ts) — độc lập với
+ * `REFERENCE_IS_PLACEHOLDER`, vốn chỉ nói lên việc nhãn danh mục xuất PL3 đã chốt, không phải
+ * việc đã đủ điều kiện ghi dữ liệu thật. Chỉ đảo `OFFICIAL_ACCEPTANCE_ENABLED` sau khi hoàn thành
+ * gác cổng ở docs/brain/04-current-tasks.md.
  */
 export async function POST(
   request: NextRequest,
@@ -113,6 +118,16 @@ export async function POST(
         requestId,
       });
       return fail("VALIDATION_FAILED", OFFICIAL_ACCEPTANCE_CATALOG_MESSAGE, requestId, 409);
+    }
+
+    if (!OFFICIAL_ACCEPTANCE_ENABLED) {
+      await repository.appendAudit({
+        actorEmail: user.email,
+        action: "OFFICIAL_ACCEPTANCE_BLOCKED_DISABLED",
+        entityId: record.submissionId,
+        requestId,
+      });
+      return fail("VALIDATION_FAILED", OFFICIAL_ACCEPTANCE_DISABLED_MESSAGE, requestId, 409);
     }
 
     const idempotencyKey = `OFFICIAL_ACCEPT:${submissionId}:${rawIdempotencyKey}`;

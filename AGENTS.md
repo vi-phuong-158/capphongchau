@@ -273,7 +273,10 @@ role lưu trong JWT vì tài khoản vừa bị khóa phải mất quyền ngay.
 chỉ `REVIEW_OFFICER`, `WARD_ADMIN` hoặc `SYSTEM_ADMIN` sau khi nhận xử lý mới gọi được. Saga phải
 ghi checkpoint `accept_step` theo thứ tự reserve Case ID → tạo folder → di chuyển file → ghi dữ
 liệu chính thức → hoàn tất; retry dùng cùng `idempotency_key` không được sinh CASE/file trùng.
-Route bị khóa khi danh mục trường 12 còn là placeholder hoặc schema chuẩn hóa chưa được migration.
+Route bị khóa bằng cờ `OFFICIAL_ACCEPTANCE_ENABLED` (`src/modules/submissions/acceptance.ts`,
+mặc định `false`) — độc lập với `REFERENCE_IS_PLACEHOLDER` (cờ đó chỉ nói nhãn danh mục xuất PL3
+đã chốt, không phải đã đủ điều kiện ghi dữ liệu thật). Chỉ đảo `true` sau khi hoàn thành gác cổng
+ở `docs/brain/04-current-tasks.md`.
 
 ## 6. Bảo mật và vận hành
 

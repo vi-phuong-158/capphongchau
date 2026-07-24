@@ -20,6 +20,23 @@ export type OfficialAcceptanceStep = (typeof OFFICIAL_ACCEPTANCE_STEPS)[number];
 export const OFFICIAL_ACCEPTANCE_CATALOG_MESSAGE =
   "Chưa thể tiếp nhận chính thức vì danh mục mã trường 12 chưa được phê duyệt và nhập vào hệ thống.";
 
+/**
+ * Hard stop ĐỘC LẬP với `REFERENCE_IS_PLACEHOLDER` (reference.ts). Hai cờ đó phục vụ hai câu hỏi
+ * khác nhau: `REFERENCE_IS_PLACEHOLDER` hỏi "nhãn danh mục dùng để xuất PL3 đã chốt chưa" (đã chốt
+ * 2026-07-23, xem 03-decisions.md), còn cờ này hỏi "đã đủ điều kiện ghi CASE/di chuyển file Drive
+ * thật cho dữ liệu thật chưa". Dùng chung một cờ cho hai câu hỏi từng khiến saga bị mở khóa ngoài ý
+ * muốn khi cờ kia bị đảo vì lý do export — xem 03-decisions.md [2026-07-24].
+ *
+ * Chỉ đảo `true` sau khi hoàn thành TOÀN BỘ điều kiện gác cổng ở
+ * `docs/brain/04-current-tasks.md` mục "Chặn trước khi đưa cổng công khai vào dữ liệu thật":
+ * diễn tập staging 3 kịch bản saga, thông báo bảo vệ dữ liệu thật, tắt
+ * `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` + bật security headers, và khớp tổ chức trong tra cứu GCN.
+ */
+export const OFFICIAL_ACCEPTANCE_ENABLED = false;
+
+export const OFFICIAL_ACCEPTANCE_DISABLED_MESSAGE =
+  "Saga tiếp nhận chính thức chưa được mở cho dữ liệu thật — đang chờ diễn tập staging và các điều kiện gác cổng khác.";
+
 export function canStartOfficialAcceptance(
   record: SubmissionRecord,
   actorEmail: string,

@@ -4,6 +4,34 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24 — SỬA KHẨN] Tách hard-stop saga khỏi `REFERENCE_IS_PLACEHOLDER` thành cờ riêng
+
+- **Phát hiện:** Sau khi nối `runOfficialAcceptance` vào `accept/route.ts` (entry ngay dưới), gate
+  duy nhất còn lại chặn saga chạy thật là `if (REFERENCE_IS_PLACEHOLDER)`. Nhưng cờ này đã bị đảo
+  thành `false` từ quyết định [2026-07-23] "Xây export PL3 ngay, dùng nhãn danh mục sẵn có trong
+  code" — một quyết định **hoàn toàn không liên quan** tới việc mở saga, chỉ nói nhãn dùng để xuất
+  PL3 đã chốt. Bản gốc của route có một `return fail(...)` cứng, vô điều kiện, độc lập với
+  `REFERENCE_IS_PLACEHOLDER` — đó mới là hard-stop thật ("Saga tiếp nhận chưa được mở cho dữ liệu
+  thật", nhắc tới ở `PLAN2.md` §6.3 là `accept/route.ts:101`). Khi thay khối đó bằng lời gọi saga
+  thật (theo chỉ dẫn fix lỗ hổng kiểm toán), hard-stop cứng bị gỡ trong khi tưởng `REFERENCE_IS_PLACEHOLDER`
+  vẫn đang khóa — thực tế nó đã tắt từ một hôm trước. Kết quả: route có thể chạy saga thật cho bất
+  kỳ ai có role `REVIEW_OFFICER`/`WARD_ADMIN`/`SYSTEM_ADMIN` + CSRF hợp lệ, bất kể 4 điều kiện gác
+  cổng (diễn tập staging, thông báo bảo vệ dữ liệu, lớp biên, khớp tổ chức) đã xong hay chưa. Đây
+  chính là rủi ro `PLAN2.md:410` cảnh báo trước (dùng chung một cờ cho hai mục đích, dễ bị đảo mà
+  không ai để ý), chỉ khác kịch bản: cờ bị đảo vì lý do export, không phải bị xóa dòng code.
+- **Quyết định:** Thêm `OFFICIAL_ACCEPTANCE_ENABLED` (mặc định `false`) trong
+  `src/modules/submissions/acceptance.ts`, độc lập hoàn toàn với `REFERENCE_IS_PLACEHOLDER`. Route
+  kiểm cả hai cờ trước khi gọi saga. Thêm test trip-wire
+  `tests/submission-acceptance.test.ts` khẳng định cờ là `false`, buộc ai muốn mở saga phải sửa
+  test có chủ đích (không thể vô tình đảo cờ qua một quyết định không liên quan).
+- **Lý do:** Không được để một cờ phục vụ hai câu hỏi khác nhau ("nhãn xuất đã chốt chưa" và "đã đủ
+  an toàn ghi dữ liệu thật chưa") — quyết định đúng cho câu hỏi này có thể vô tình sai cho câu hỏi
+  kia.
+- **File:** `src/modules/submissions/acceptance.ts`, `src/app/api/submissions/[submissionId]/accept/route.ts`,
+  `tests/submission-acceptance.test.ts`, `AGENTS.md`, `docs/brain/04-current-tasks.md`.
+- **Người phát hiện:** Claude Code, khi được hỏi giải thích "trường 12" và rà lại toàn bộ điều kiện
+  khóa route trước khi trả lời.
+
 ## [2026-07-24] Thiết kế hạ tầng Saga Tiếp nhận chính thức & Khắc phục lỗ hổng kiểm toán
 
 - **Quyết định:** 

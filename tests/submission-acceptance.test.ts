@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canStartOfficialAcceptance,
   formatOfficialCaseId,
+  OFFICIAL_ACCEPTANCE_ENABLED,
   vietnamBusinessYear,
 } from "@/modules/submissions/acceptance";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
@@ -52,5 +53,9 @@ describe("official acceptance guards", () => {
   it("builds stable case IDs and uses Vietnam's business year", () => {
     expect(formatOfficialCaseId("2026", 9)).toBe("PHONGCHAU-2026-000009");
     expect(vietnamBusinessYear(new Date("2026-12-31T18:00:00.000Z"))).toBe("2027");
+  });
+
+  it("keeps the official acceptance hard stop OFF until the staging rehearsal gate is done — flip only with explicit review, never silently", () => {
+    expect(OFFICIAL_ACCEPTANCE_ENABLED).toBe(false);
   });
 });

@@ -404,11 +404,26 @@ nhận có đủ nhân sự.
 
 ### 6.3. Saga tiếp nhận
 
-Hiện là **hard stop** (`accept/route.ts:101`). Chỉ mở khi đủ: thông báo dữ liệu cá nhân, danh mục
-trường 12, mã phường, phân loại nhóm 4/5.
+**[CẬP NHẬT 2026-07-24]** Mục này đã lỗi thời — giữ lại để biết lịch sử cảnh báo. Saga đã được cài
+đặt đầy đủ (`src/modules/submissions/acceptance-saga.ts`) và hard stop không còn ở dòng `return`
+dễ xóa như cảnh báo ⚠️ bên dưới từng lo ngại — nó **đã thật sự bị xóa đúng như cảnh báo dự đoán**
+khi saga được nối vào route, và được thay bằng cờ riêng `OFFICIAL_ACCEPTANCE_ENABLED = false`
+(`src/modules/submissions/acceptance.ts`), độc lập với `REFERENCE_IS_PLACEHOLDER`. Xem
+`docs/brain/03-decisions.md` [2026-07-24 — SỬA KHẨN] để biết toàn bộ diễn biến.
 
-⚠️ `REFERENCE_IS_PLACEHOLDER` đang bị đặt `false` trong khi bảng mã chưa chốt — nên đảo về `true`
-để chốt chặn nằm ở **dữ liệu**, không nằm ở một dòng `return` dễ xóa.
+Chỉ mở khi đủ điều kiện gác cổng ở `docs/brain/04-current-tasks.md` mục "Chặn trước khi đưa cổng
+công khai vào dữ liệu thật": diễn tập staging 3 kịch bản saga, thông báo bảo vệ dữ liệu thật, lớp
+biên (tắt `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` + security headers), khớp tổ chức trong tra cứu
+GCN. Danh mục trường 12 (Phụ lục 8 — loại đất/nguồn gốc/hình thức/thời hạn) đã chốt dùng nhãn
+Thông tư 08/2024 theo quyết định 2026-07-23; phân loại Loại 4/Loại 5 đã giải quyết bằng phạm vi v1
+(chỉ nhận Loại 4 — hồ sơ đã có GCN). "Mã phường"/phân nhóm A/B/C/E của chiến dịch vẫn **chờ chủ dự
+án** (mục B4b, `PLAN_NL.md` §5.3) nhưng ảnh hưởng schema/dashboard báo cáo, không chặn logic tạo
+CASE của saga.
+
+~~⚠️ `REFERENCE_IS_PLACEHOLDER` đang bị đặt `false` trong khi bảng mã chưa chốt — nên đảo về `true`
+để chốt chặn nằm ở **dữ liệu**, không nằm ở một dòng `return` dễ xóa.~~ (Cảnh báo này đúng nhưng
+nhắm sai cờ — bảng mã trường 12 đã chốt hợp lệ; vấn đề thật là dùng chung `REFERENCE_IS_PLACEHOLDER`
+cho cả gate xuất PL3 lẫn gate saga. Đã tách, xem trên.)
 
 ---
 
