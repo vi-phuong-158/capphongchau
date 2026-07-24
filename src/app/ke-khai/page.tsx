@@ -27,43 +27,46 @@ export default async function IntakePage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
-      <header className="mb-8">
-        <div className="mb-6 flex items-center gap-3">
+      <header className="mb-8 flex flex-col items-center text-center">
+        <div className="mb-4 flex flex-col items-center gap-2 sm:mb-6 sm:flex-row sm:gap-3">
           <Image
             src={logoPhongChau}
             alt="Logo Phường Phong Châu"
-            width={48}
-            height={48}
-            className="h-12 w-12 object-contain"
+            width={56}
+            height={56}
+            className="h-12 w-12 sm:h-14 sm:w-14 object-contain drop-shadow-sm"
           />
-          <p className="text-sm font-semibold tracking-[0.16em]" style={{ color: "var(--accent)" }}>
-            PHƯỜNG PHONG CHÂU
+          <p className="text-sm font-bold tracking-[0.2em] uppercase" style={{ color: "var(--accent)" }}>
+            Phường Phong Châu
           </p>
         </div>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+        <h1 className="mt-1 text-3xl font-extrabold tracking-tight sm:text-4xl">
           Kê khai hồ sơ đất đai
         </h1>
-        <p className="mt-3 text-lg" style={{ color: "var(--muted)" }}>
-          Dành cho trường hợp thửa đất đã có Giấy chứng nhận. Bạn không cần tài khoản. Kê khai
-          xong sẽ nhận mã tra cứu.
+        <p className="mt-3 text-base sm:text-lg max-w-2xl" style={{ color: "var(--muted)" }}>
+          Dành cho trường hợp thửa đất đã có Giấy chứng nhận. Không yêu cầu đăng nhập. Kê khai
+          xong bạn sẽ nhận được mã tra cứu kết quả.
         </p>
-        <p className="mt-3">
+        <p className="mt-4 text-sm sm:text-base">
           Đã có mã tiếp nhận?{" "}
-          <a className="font-semibold underline" href="/tra-cuu">
+          <a className="font-semibold underline hover:no-underline" style={{ color: "var(--accent)" }} href="/tra-cuu">
             Tra cứu hoặc tiếp tục hồ sơ
           </a>
         </p>
-        {/* Phạm vi áp dụng nêu ngay đầu trang: người có thửa đất ngoài địa bàn phải biết trước khi
-            bỏ công kê khai và tải ảnh, không phải sau khi cán bộ từ chối. */}
-        <p
-          className="mt-4 rounded-lg border p-3 text-sm"
-          style={{
-            background: "var(--warning-surface)",
-            borderColor: "var(--warning-border)",
-          }}
-        >
-          {COVERAGE_NOTICE}
-        </p>
+        
+        {/* Phạm vi áp dụng nêu ngay đầu trang */}
+        <div className="w-full mt-8 text-left">
+          <p
+            className="rounded-xl border p-4 text-sm sm:text-base shadow-sm"
+            style={{
+              background: "var(--warning-surface)",
+              borderColor: "var(--warning-border)",
+            }}
+          >
+            <strong className="block mb-1" style={{ color: "var(--warning)" }}>Phạm vi áp dụng:</strong>
+            {COVERAGE_NOTICE}
+          </p>
+        </div>
       </header>
 
       {environment.PUBLIC_INTAKE_MODE === "PAUSED" ? (
