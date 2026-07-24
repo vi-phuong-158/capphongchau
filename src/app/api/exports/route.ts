@@ -46,16 +46,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return fail("ACCESS_DENIED", "Yêu cầu bảo mật không hợp lệ hoặc đã hết hạn.", requestId);
     }
 
-    const statusFilter = request.nextUrl.searchParams.get("status");
-    if (!statusFilter) {
-      return fail("ACCESS_DENIED", "Phải chọn trạng thái để xuất dữ liệu.", requestId);
-    }
-
     const repository = getPublicIntakeRepository();
     const allRecords = await repository.list();
-    const records = allRecords
-      .filter((r) => r.status === statusFilter)
-      .slice(0, 2000);
+    const records = allRecords.slice(0, 2000);
 
     const content = buildPl3Content(records);
     const bytes = await renderPl3Workbook(content);

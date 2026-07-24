@@ -2,6 +2,7 @@ import type { Sql } from "postgres";
 
 import { loadGoogleStorageEnvironment } from "@/modules/common/env";
 import { createGoogleWorkspaceClient } from "@/modules/google/workspace-client";
+import { buildOriginalFileNames } from "@/modules/public-intake/file-naming";
 import {
   getPublicIntakeRepository,
   SubmissionIdempotencyConflictError,
@@ -290,9 +291,17 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
       };
       const { drive } = createGoogleWorkspaceClient(credentials);
 
+      // Đổi tên đúng quy ước PL3 trường 49 (cùng hàm với `pl3-export.ts`, không lệch nhau). STT
+      // tính trên `activeFiles` — thứ tự này khớp `repository.listFiles` (created_at, file_id).
+      const originalFileNames = buildOriginalFileNames(
+        input.record.draft?.certificate?.issueNumber ?? "",
+        activeFiles.map((file) => ({ documentType: file.documentType, mimeType: file.mimeType })),
+      );
+
       const movedMap: Record<string, string> = { ...(currentSaga.moved_files || {}) };
 
-      for (const file of activeFiles) {
+      for (let index = 0; index < activeFiles.length; index += 1) {
+        const file = activeFiles[index];
         if (movedMap[file.fileId]) continue;
 
         const metadata = await drive.files.get({
@@ -301,13 +310,17 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         });
 
         const currentParents = metadata.data.parents || [];
-        if (!currentParents.includes(currentSaga.originals_folder_id)) {
+        const needsMove = !currentParents.includes(currentSaga.originals_folder_id);
+        const newName = originalFileNames[index];
+
+        if (needsMove || newName) {
           const removeParents = currentParents.join(",");
           await drive.files.update({
             fileId: file.driveFileId,
-            addParents: currentSaga.originals_folder_id,
-            removeParents: removeParents || undefined,
-            fields: "id,parents",
+            addParents: needsMove ? currentSaga.originals_folder_id : undefined,
+            removeParents: needsMove ? removeParents || undefined : undefined,
+            requestBody: newName ? { name: newName } : undefined,
+            fields: "id,parents,name",
           });
         }
 

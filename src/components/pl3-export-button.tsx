@@ -17,14 +17,13 @@ function fileNameFrom(header: string | null): string {
 export function Pl3ExportButton() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState("VERIFIED");
 
   async function exportPl3() {
     setBusy(true);
     setMessage(null);
     try {
       const token = await csrfToken();
-      const response = await fetch(`/api/exports?status=${statusFilter}`, {
+      const response = await fetch("/api/exports", {
         method: "POST",
         headers: { "x-csrf-token": token, "idempotency-key": crypto.randomUUID() },
       });
@@ -32,9 +31,7 @@ export function Pl3ExportButton() {
         setMessage(
           response.status === 403
             ? "Bạn không có quyền xuất dữ liệu."
-            : response.status === 400
-              ? "Bộ lọc không hợp lệ hoặc dữ liệu quá lớn (tối đa 2000 dòng)."
-              : "Không tạo được bản kết xuất PL3.",
+            : "Không tạo được bản kết xuất PL3.",
         );
         return;
       }
@@ -64,25 +61,14 @@ export function Pl3ExportButton() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="pc-input max-w-[200px]"
-        >
-          <option value="VERIFIED">Đã xác nhận</option>
-          <option value="PENDING_REVIEW">Chờ kiểm tra</option>
-          <option value="UPLOADED">Đã tải lên đủ file</option>
-        </select>
-        <button
-          type="button"
-          onClick={exportPl3}
-          disabled={busy || !statusFilter}
-          className="inline-flex rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          {busy ? "Đang xuất…" : "Xuất PL3 (XLSX)"}
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={exportPl3}
+        disabled={busy}
+        className="inline-flex rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {busy ? "Đang xuất…" : "Xuất PL3 (XLSX)"}
+      </button>
       {message ? <p className="text-sm text-stone-600">{message}</p> : null}
     </div>
   );

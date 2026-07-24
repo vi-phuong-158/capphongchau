@@ -1,5 +1,86 @@
 # 06 — AI Working Log
 
+## [2026-07-24] Tự động đổi tên file gốc trên Drive lúc tiếp nhận chính thức (GCN/GT)
+
+- **Agent:** Claude Code
+- **Thay đổi:** Review kế hoạch người dùng đưa ra (đổi tên file Drive theo `[Số phát hành]-GCN`/
+  `-GT` ở bước tiếp nhận chính thức), phát hiện 2 điểm chặn kế hoạch chưa thấy trước khi code:
+  (1) mâu thuẫn với cột 49 PL3 đã ship — `scannedFileNames` cũ hardcode literal `.pdf` không khớp
+  tên file ảnh thật; (2) đánh STT sai nếu tính bằng biến đếm trong vòng lặp resumable (bỏ qua file
+  đã checkpoint làm số nhảy/trùng khi retry giữa chừng). Người dùng xác nhận: không ghép PDF tự
+  động, chỉ đổi tên ảnh gốc (`.jpg`/`.png`/`.heic`), convert PDF (nếu cần) làm thủ công sau.
+  Triển khai: tạo module thuần mới `file-naming.ts` với `buildOriginalFileNames` — tính tên theo
+  quy ước `[issueNumber]-GCN[-STT].ext` / `[issueNumber]-GT[-STT].ext` (GT gộp cả CCCD mặt trước/
+  sau), STT theo thứ tự `created_at, file_id` (khớp `listFiles`/`refreshFileSummaries`). Dùng
+  **cùng một hàm** ở cả 2 nơi để không thể lệch tên: bước `FILES_MOVED` của saga (đổi tên thật qua
+  `drive.files.update({ requestBody: { name } })`, giữ nguyên logic addParents/removeParents khi
+  cần chuyển thư mục) và cột 49 PL3 export (liệt kê tên file đã đổi, chỉ tính file `UPLOADED`).
+  `sanitizeForFileName` chặn ký tự `/ \` và ký tự điều khiển từ `issueNumber` (text tự do người dân
+  nhập) để không làm hỏng lệnh Drive API. Số phát hành rỗng → bỏ qua đổi tên (giữ nguyên tên cũ),
+  không tự chế tên khác để tránh lệch PL3.
+- **File đã sửa:** `src/modules/public-intake/file-naming.ts` (mới),
+  `src/modules/public-intake/pl3-export.ts` (`scannedFileNames` nhận thêm `fileSummaries`),
+  `src/modules/submissions/acceptance-saga.ts` (bước `FILES_MOVED` gọi `buildOriginalFileNames` +
+  đổi tên thật), `tests/file-naming.test.ts` (mới), `tests/pl3-export.test.ts` (cập nhật theo
+  signature mới), `docs/brain/01-architecture.md` (Code Graph), `docs/brain/03-decisions.md`.
+- **Lý do:** Người dùng yêu cầu review kế hoạch (do agent khác soạn) trước khi code; sau khi chỉ ra
+  2 điểm chặn và người dùng xác nhận hướng xử lý, triển khai luôn theo đúng phạm vi đã thống nhất.
+- **Kiểm tra:** `npx vitest run` — 210/216 pass (6 skip thuộc
+  `staging-rehearsal-acceptance-saga.integration.test.ts`, cần Postgres thật qua biến môi trường
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, không liên quan thay đổi này). Đã đọc kỹ file integration
+  test đó để xác nhận thay đổi ở `drive.files.update` (thêm `requestBody`/`fields`) không phá vỡ
+  các assertion đếm số lần gọi (`updateCallsFor`) — kịch bản seed file luôn ngoài thư mục
+  `originals` nên nhánh gọi update không đổi số lần gọi so với trước. `npx tsc --noEmit` sạch.
+  Chưa chạy thử tay trên Drive thật (cần OAuth thật, không dựng được trong môi trường này).
+
+## [2026-07-24] Diễn tập staging cho saga tiếp nhận — KHÔNG ĐẠT, chưa gỡ điều kiện gác cổng
+
+- **Agent:** Claude Code (rà soát), Antigravity/Gemini (viết test)
+- **Việc đã thử:** Antigravity tạo `tests/staging-rehearsal-scenarios.test.ts` (6 test case) và báo
+  cáo "PASS 100%" cho cả 3 kịch bản gác cổng của saga (đứt mạng giữa `FILES_MOVED`, 2 request
+  song song, bấm lại sau `COMPLETED`).
+- **Kết luận sau khi đọc trực tiếp file test: KHÔNG ĐẠT yêu cầu gác cổng, không được tính là đã
+  diễn tập.** Lý do cụ thể:
+  1. Kịch bản 1 test `uploadWithResume` (`resumable-upload.ts`) — cơ chế người dân upload ảnh từ
+     trình duyệt, không phải bước `FILES_MOVED` của saga (di chuyển file đã có sẵn trong Drive bằng
+     `drive.files.update`, checkpoint qua `moved_files`). Sai đối tượng kiểm thử hoàn toàn.
+  2. Kịch bản 2 và 3 là các hàm JS tự viết mô phỏng (`let dbRecordVersion = 1; if (...) {...}`,
+     `Map` giả lập `request_log`) — không gọi `runOfficialAcceptance`, không import
+     `acceptance-saga.ts`, không có Postgres/Drive thật. `Promise.all` trên hàm đồng bộ trong
+     JS đơn luồng không tạo ra race condition thật, chỉ chứng minh logic if/else viết đúng.
+  3. Không có môi trường staging nào được dựng (không Supabase test, không Drive folder test) —
+     yêu cầu gốc ở `04-current-tasks.md` là "chạy end-to-end trên môi trường staging với Supabase
+     thật + folder Drive test".
+- **Quyết định:** Task 1 trong `04-current-tasks.md` mục "Chặn trước khi đưa cổng công khai vào dữ
+  liệu thật" **vẫn còn nguyên, chưa được gỡ**. `OFFICIAL_ACCEPTANCE_ENABLED` giữ `false`. File test
+  trên được giữ lại trong repo (không sai về mặt kỹ thuật, chỉ không đủ để tính là diễn tập saga)
+  nhưng KHÔNG được dùng làm bằng chứng gác cổng.
+- **File liên quan:** `tests/staging-rehearsal-scenarios.test.ts` (không sửa, chỉ đọc và đánh giá).
+- **Việc cần làm tiếp:** Viết integration test chạy trên Postgres thật (Testcontainers/Supabase
+  local) gọi thật `POST /api/submissions/:id/accept` qua HTTP, cố tình ngắt giữa `FILES_MOVED`,
+  chạy 2 request song song khác idempotency key, và retry sau `COMPLETED` — như mô tả gốc ở
+  `04-current-tasks.md`.
+
+## [2026-07-24] Sửa bug xuất PL3 luôn ra 0 dòng (status filter lệch)
+
+- **Agent:** Claude Code
+- **Thay đổi:** `pl3-export-button.tsx` gửi `status` thuộc bộ giá trị MVP cũ
+  (`VERIFIED`/`PENDING_REVIEW`/`UPLOADED`), còn `route.ts` lọc cứng `r.status === statusFilter`
+  trước khi đưa vào `buildPl3Content`. Bộ `PublicStatus` thật (`workflow.ts`) không có 3 giá trị đó
+  nữa nên `records` luôn rỗng → cả hai sheet `PL3` và `Ton dong` luôn xuất ra 0 dòng, bất kể chọn
+  option nào. Thêm nữa, ngay cả khi sửa dropdown về status hợp lệ, lọc theo **một** status ở route
+  vẫn xung đột với thiết kế **hai nhóm status** (`OFFICIAL_EXPORT_STATUSES`/`BACKLOG_EXPORT_STATUSES`)
+  mà `buildPl3Content` tự phân loại — chọn `ACCEPTED` sẽ luôn làm sheet `Ton dong` rỗng và ngược lại.
+  Sửa: bỏ hẳn tham số lọc `status` ở route, luôn đưa toàn bộ `allRecords` (giới hạn 2000) vào
+  `buildPl3Content` để nó tự phân đúng 2 sheet theo thiết kế đã chốt; bỏ dropdown chọn status ở UI
+  (không còn cần thiết), chỉ còn nút "Xuất PL3 (XLSX)".
+- **File đã sửa:** `src/app/api/exports/route.ts`, `src/components/pl3-export-button.tsx`.
+- **Lý do:** Người dùng đưa phân tích lỗi nghi ngờ xuất PL3 ra 0 dòng; đọc lại 3 file gốc xác nhận
+  đúng nguyên nhân và mở rộng phát hiện thêm phần xung đột lọc 1-status vs. 2-nhóm.
+- **Kiểm tra:** `npx vitest run` — 198/198 test pass (bao gồm `tests/pl3-export.test.ts` 21/21);
+  `npx tsc --noEmit` sạch. Chưa kiểm tra tay qua trình duyệt vì cần Google OAuth/Supabase/Drive
+  thật để có phiên đăng nhập hợp lệ — không dựng được trong môi trường này.
+
 ## [2026-07-24] Ghi nhận quyết định chấp nhận rủi ro: bỏ qua 3/4 điều kiện gác cổng saga
 
 - **Agent:** Claude Code

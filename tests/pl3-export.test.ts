@@ -20,7 +20,7 @@ import {
   type Owner,
   type Parcel,
 } from "@/modules/public-intake/types";
-import type { PublicStatus } from "@/modules/public-intake/workflow";
+import type { PublicFileSummary, PublicStatus } from "@/modules/public-intake/workflow";
 
 // Chỉ số cột (0-based) trong dòng 49 cột, khớp thứ tự B..AX của PL3_COLUMNS.
 const COL = {
@@ -84,7 +84,11 @@ function draft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
   };
 }
 
-function record(status: PublicStatus, draftValue: IntakeDraft | null): SubmissionRecord {
+function record(
+  status: PublicStatus,
+  draftValue: IntakeDraft | null,
+  fileSummaries: readonly PublicFileSummary[] = [],
+): SubmissionRecord {
   return {
     submissionId: "sub_1",
     receiptCode: "PC-KK-2026-0001",
@@ -106,8 +110,24 @@ function record(status: PublicStatus, draftValue: IntakeDraft | null): Submissio
     updatedAt: "2026-07-23T00:00:00.000Z",
     draft: draftValue,
     accessVersion: 1,
-    fileSummaries: [],
+    fileSummaries,
     rowIndex: 1,
+  };
+}
+
+function fileSummary(overrides: Partial<PublicFileSummary> = {}): PublicFileSummary {
+  return {
+    fileId: "f1",
+    ownerId: "own_1",
+    documentType: "CERTIFICATE",
+    status: "UPLOADED",
+    sizeBytes: 1024,
+    checksum: "abc",
+    createdAt: "2026-07-23T00:00:00.000Z",
+    updatedAt: "2026-07-23T00:00:00.000Z",
+    driveFileId: "drive_1",
+    mimeType: "image/jpeg",
+    ...overrides,
   };
 }
 
@@ -128,11 +148,33 @@ describe("formatExportDate", () => {
 });
 
 describe("scannedFileNames", () => {
-  it("sinh tên theo quy ước GCN/GT", () => {
-    expect(scannedFileNames("AD 266864")).toBe("AD 266864-GCN.pdf; AD 266864-GT.pdf");
+  it("một file mỗi nhóm — không thêm STT, đuôi theo mimeType thật", () => {
+    const files = [
+      fileSummary({ fileId: "f1", documentType: "CERTIFICATE", mimeType: "image/jpeg" }),
+      fileSummary({ fileId: "f2", documentType: "CITIZEN_ID_FRONT", mimeType: "image/png" }),
+    ];
+    expect(scannedFileNames("AD 266864", files)).toBe("AD 266864-GCN.jpg; AD 266864-GT.png");
   });
-  it("rỗng khi không có số phát hành", () => {
-    expect(scannedFileNames("  ")).toBe("");
+
+  it("nhiều file cùng nhóm (GT gộp cả mặt trước/sau) — đánh STT theo thứ tự", () => {
+    const files = [
+      fileSummary({ fileId: "f1", documentType: "CITIZEN_ID_FRONT", mimeType: "image/jpeg" }),
+      fileSummary({ fileId: "f2", documentType: "CITIZEN_ID_BACK", mimeType: "image/jpeg" }),
+    ];
+    expect(scannedFileNames("AD 266864", files)).toBe("AD 266864-GT-1.jpg; AD 266864-GT-2.jpg");
+  });
+
+  it("bỏ qua file đã REPLACED/DELETED", () => {
+    const files = [
+      fileSummary({ fileId: "f1", documentType: "CERTIFICATE", status: "REPLACED" }),
+      fileSummary({ fileId: "f2", documentType: "CERTIFICATE", mimeType: "image/png" }),
+    ];
+    expect(scannedFileNames("AD 266864", files)).toBe("AD 266864-GCN.png");
+  });
+
+  it("rỗng khi không có số phát hành hoặc không có file", () => {
+    expect(scannedFileNames("  ", [fileSummary()])).toBe("");
+    expect(scannedFileNames("AD 266864", [])).toBe("");
   });
 });
 
@@ -155,7 +197,11 @@ describe("buildSubmissionRows — nổ dòng và ánh xạ nhãn", () => {
   });
 
   it("mỗi dòng đúng 49 cột với hằng số và nhãn từ danh mục", () => {
-    const [row] = buildSubmissionRows(record("ACCEPTED", draft())).rows;
+    const [row] = buildSubmissionRows(
+      record("ACCEPTED", draft(), [
+        fileSummary({ fileId: "f1", documentType: "CERTIFICATE", mimeType: "image/jpeg" }),
+      ]),
+    ).rows;
     expect(row).toHaveLength(PL3_DATA_COLUMN_COUNT);
     expect(row[COL.wardCode]).toBe(WARD_ADMIN_CODE);
     expect(row[COL.issueDate]).toBe("20/02/2006");
@@ -164,7 +210,7 @@ describe("buildSubmissionRows — nổ dòng và ánh xạ nhãn", () => {
     expect(row[COL.ownerType]).toBe("Cá nhân");
     expect(row[COL.role]).toBe("Cá nhân");
     expect(row[COL.landType1]).toBe("Đất ở tại đô thị");
-    expect(row[COL.scannedFile]).toBe("AD 266864-GCN.pdf; AD 266864-GT.pdf");
+    expect(row[COL.scannedFile]).toBe("AD 266864-GCN.jpg");
   });
 
   it("dịch nhãn nguồn gốc / hình thức / thời hạn / tài sản từ mã", () => {

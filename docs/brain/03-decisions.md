@@ -4,6 +4,29 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-24] Đổi tên file gốc trên Drive lúc tiếp nhận: chỉ đổi tên ảnh, không ghép PDF
+
+- **Quyết định:** Khi saga tiếp nhận chính thức chạy tới bước `FILES_MOVED`
+  (`acceptance-saga.ts`), hệ thống đổi tên các file ảnh gốc ngay trên Drive theo quy ước
+  `[Số phát hành GCN]-GCN[-STT].ext` / `[Số phát hành]-GT[-STT].ext` (STT chỉ xuất hiện khi ≥2 file
+  cùng nhóm; nhóm GT gộp chung cả CCCD mặt trước lẫn mặt sau, không phân biệt theo người).
+  **Không** ghép nhiều ảnh thành 1 file PDF — file trên Drive vẫn là ảnh gốc (`.jpg`/`.png`/`.heic`),
+  cán bộ tự convert sang PDF thủ công sau nếu cần.
+- **Vì sao:** Ghép ảnh độ phân giải cao thành PDF trên Vercel serverless function dễ tràn bộ nhớ
+  (giới hạn RAM runtime); chỉ đổi tên là thao tác Drive API rẻ và an toàn. Đây cũng là quyết định
+  của chủ dự án khi được hỏi lựa chọn giữa 2 phương án.
+- **Ràng buộc quan trọng:** Cột 49 (`scannedFileNames` trong `pl3-export.ts`) trước đây hardcode
+  literal `"{issueNumber}-GCN.pdf; {issueNumber}-GT.pdf"` — hoàn toàn không khớp với tên file ảnh
+  thật (khác đuôi, không có STT, không đúng số lượng file). Đã tách logic đặt tên thành một hàm
+  thuần duy nhất `buildOriginalFileNames` (`src/modules/public-intake/file-naming.ts`), dùng chung
+  giữa bước đổi tên thật trên Drive và cột 49 PL3 — để hai nơi không thể lệch tên nhau nữa. STT
+  tính theo thứ tự `created_at, file_id` (khớp `repository.listFiles`/`refreshFileSummaries`), nên
+  saga (dùng `listFiles`) và PL3 export (dùng `record.fileSummaries`, cùng thứ tự) luôn ra cùng STT.
+- **Đánh giá lại:** Nếu sau này cần ghép PDF thật (đúng mẫu `Tai lieu/PL3.xlsx` gốc), phải làm ở một
+  bước riêng ngoài saga (ví dụ background job hoặc thao tác thủ công), không ghép trong request path
+  của tiếp nhận chính thức.
+- **Người quyết định:** Chủ dự án (2026-07-24).
+
 ## [2026-07-24] Chấp nhận rủi ro: bỏ qua 3/4 điều kiện gác cổng saga tiếp nhận
 
 - **Quyết định:** Chủ dự án chấp nhận **bỏ qua, không sửa** 3 trong 4 điều kiện gác cổng trước khi

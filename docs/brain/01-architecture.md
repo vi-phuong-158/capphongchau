@@ -28,6 +28,7 @@ src/modules/supabase/database.ts             PostgreSQL client + health
 src/modules/public-intake/repository.ts      repository hồ sơ Supabase
 src/modules/users/supabase-user-repository.ts allowlist/roles Supabase
 src/modules/submissions/acceptance-saga.ts   saga tiếp nhận chính thức resumable
+src/modules/public-intake/file-naming.ts     quy ước tên file gốc GCN/GT (thuần, dùng chung)
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive
 src/app/api/health/database/route.ts         health Supabase
@@ -82,10 +83,19 @@ src/app/api/submissions/[submissionId]/accept/route.ts
     ├── ID_RESERVED (tx): case_counters (ON CONFLICT ... RETURNING) + id_reservations
     ├── CASE_FOLDER_READY: storage.findOrCreateFolder 02_CASES/{TDP}/{CASE_ID}/originals
     │   (NGOÀI transaction — quy tắc pool max:1)
-    ├── FILES_MOVED: drive.files.update từng file, checkpoint moved_files (NGOÀI tx)
+    ├── FILES_MOVED: drive.files.update từng file (đổi parent + đổi tên `requestBody.name`),
+    │   checkpoint moved_files (NGOÀI tx) — tên sinh bởi buildOriginalFileNames
+    │   (src/modules/public-intake/file-naming.ts), issueNumber rỗng → bỏ qua đổi tên
     ├── RECORDS_WRITTEN (tx): cases + owners + certificates + files,
     │   ID deterministic ACC:{submissionId}:{id}, ON CONFLICT DO NOTHING
     └── COMPLETED (tx): public_submissions ACCEPTED + official_case_id + request_log
+
+src/modules/public-intake/pl3-export.ts (thuần, không I/O)
+├── buildPl3Content(records) → tách sheet PL3 (ACCEPTED) / Ton dong (đang xử lý)
+├── scannedFileNames (trường 49) → buildOriginalFileNames cùng file-naming.ts,
+│   dùng chung quy ước với bước FILES_MOVED để tên không lệch nhau
+└── POST /api/exports (route.ts) không còn lọc theo status — luôn đưa toàn bộ
+    allRecords (giới hạn 2000) vào buildPl3Content, để nó tự phân 2 sheet
 
 src/app/api/health/google/route.ts
 └── Google Drive OAuth + root folder + quota

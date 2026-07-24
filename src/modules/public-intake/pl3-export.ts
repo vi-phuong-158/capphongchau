@@ -13,6 +13,7 @@
  */
 import ExcelJS from "exceljs";
 
+import { buildOriginalFileNames } from "./file-naming";
 import { lookupNewMapSheet, OLD_WARDS, type OldWard } from "./map-sheet-reference";
 import {
   ASSET_TYPE_OPTIONS,
@@ -35,7 +36,7 @@ import {
   type Owner,
   type Parcel,
 } from "./types";
-import type { PublicStatus } from "./workflow";
+import type { PublicFileSummary, PublicStatus } from "./workflow";
 
 /** Mã ĐVHC cấp xã Phường Phong Châu (trường 1) — hằng số, giữ số 0 đứng đầu. */
 export const WARD_ADMIN_CODE = "07954";
@@ -166,11 +167,20 @@ function field19(parcel: Parcel, context: string, warnings: string[]): string {
   return "";
 }
 
-/** Tên file quét theo quy ước PL3 (trường 49): `{số phát hành}-GCN.pdf; {số phát hành}-GT.pdf`. */
-export function scannedFileNames(issueNumber: string): string {
-  const base = issueNumber.trim();
-  if (!base) return "";
-  return `${base}-GCN.pdf; ${base}-GT.pdf`;
+/**
+ * Tên file quét (trường 49) — liệt kê đúng tên file thật đã được đổi trên Drive lúc tiếp nhận
+ * chính thức (`acceptance-saga.ts`, dùng chung `buildOriginalFileNames`). Chỉ tính file còn hiệu
+ * lực (`UPLOADED`); không có file hoặc chưa có số phát hành → trả rỗng.
+ */
+export function scannedFileNames(
+  issueNumber: string,
+  fileSummaries: readonly PublicFileSummary[],
+): string {
+  const uploaded = fileSummaries.filter(
+    (file): file is PublicFileSummary & { mimeType: string } =>
+      file.status === "UPLOADED" && Boolean(file.mimeType),
+  );
+  return buildOriginalFileNames(issueNumber, uploaded).filter(Boolean).join("; ");
 }
 
 /**
@@ -284,7 +294,7 @@ function buildRow(
     "",
     "",
     "", // 41–48 nhà ở / chung cư — chưa thu
-    scannedFileNames(certificate.issueNumber), // 49 tên file quét
+    scannedFileNames(certificate.issueNumber, record.fileSummaries), // 49 tên file quét
   ];
 }
 
