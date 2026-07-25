@@ -1,0 +1,10 @@
+{
+  "jobId": "job_demo_sanitized_001",
+  "submissionId": "PHONGCHAU-2026-000001",
+  "citizenPayloadVersion": 1,
+  "status": "QUEUED",
+  "workerType": "ANTIGRAVITY",
+  "schemaVersion": "v1.0",
+  "promptVersion": "v1.0",
+  "inputFingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

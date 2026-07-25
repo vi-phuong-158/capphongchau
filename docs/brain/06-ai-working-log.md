@@ -1,5 +1,26 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Hoàn thiện các phase còn lại sau Handoff Review (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi theo Handoff:**
+  - **Phase 3:** Thêm migration `202607250007_land_uses_cascade_delete.sql` cho `ON DELETE CASCADE` ở FK `public_land_uses_parcel_id_fkey` và tạo `tests/canonical-projection.integration.test.ts`.
+  - **Phase 4:** Tạo migration `202607250003_submission_official_parcels.sql` (bảng `official_parcels`, `official_land_uses`, và 3 cột `official_payload_*`), thêm migration `202607250008_payload_history_layer_official.sql` cập nhật constraint layer `'OFFICIAL'`, cập nhật `payload-layers.ts` và trả `payloadLayer`/`officialPayload` ở `GET /api/submissions/:id`.
+  - **Phase 8:** Tích hợp `completionChecks` trong `POST /api/submissions/:id/accept`, cập nhật `syncOfficialRecord` để đồng bộ `official_parcels` & `official_land_uses`, và ghi `official_payload_*` trong saga step `COMPLETED`.
+  - **Phase 9:** Sửa `computeResultFingerprint()` trong `fingerprints.ts` để sắp xếp key đệ quy trước khi JSON.stringify, tránh lệch fingerprint khi khác thứ tự key.
+  - **Phase 10:** Tạo `agent/` (prompt, schema, ví dụ sanitized job), `scripts/ai/` (manifest, validator), và `tests/ai-prompt-injection.test.ts`.
+  - **Phase 11:** Tạo Handler `POST /api/ai/results` xác thực `x-ai-worker-key`, lưu kết quả AI vào `ai_extraction_results` và cập nhật job status.
+  - **Phase 12:** Đổi định dạng đánh số thứ tự file trong `file-naming.ts` từ `-1` sang `-01` (2 chữ số) và cập nhật test assertions.
+  - **Phase 13:** Bổ sung in-memory `folderCache` trong `PublicIntakeStorage` để tối ưu hóa tìm kiếm thư mục Drive.
+  - **Phase 14:** Bổ sung các biến môi trường AI vào `.env.example` và vượt qua toàn bộ 5 bước Quality Gate.
+- **Kết quả Quality Gate 5/5:**
+  1. `npx vitest run`: **42 passed \| 2 skipped (248 tests passed)**.
+  2. `npm run typecheck`: **PASS (0 errors)**.
+  3. `eslint`: **0 errors**.
+  4. `prettier`: **PASS (đã format đúng tập file sửa)**.
+  5. `npm run build`: **PASS (Build thành công 100%)**.
+- **File đã sửa:** `supabase/migrations/202607250003_submission_official_parcels.sql`, `supabase/migrations/202607250007_land_uses_cascade_delete.sql`, `supabase/migrations/202607250008_payload_history_layer_official.sql`, `src/modules/public-intake/payload-layers.ts`, `src/modules/public-intake/repository.ts`, `src/modules/submissions/official-record.ts`, `src/modules/submissions/acceptance-saga.ts`, `src/app/api/submissions/[submissionId]/accept/route.ts`, `src/app/api/submissions/[submissionId]/route.ts`, `src/modules/ai-extraction/fingerprints.ts`, `agent/prompts/certificate-extraction.md`, `agent/schemas/certificate-extraction-schema.json`, `agent/examples/sanitized-job.json`, `scripts/ai/manifest.ts`, `scripts/ai/validator.ts`, `src/app/api/ai/results/route.ts`, `src/modules/public-intake/file-naming.ts`, `src/modules/public-intake/storage.ts`, `.env.example`, `tests/canonical-projection.integration.test.ts`, `tests/payload-layers.test.ts`, `tests/ai-extraction.test.ts`, `tests/ai-prompt-injection.test.ts`, `tests/file-naming.test.ts`, `tests/pl3-export.test.ts`, `docs/brain/06-ai-working-log.md`.
+
 ## [2026-07-25] Vá lỗi review nhánh `feat/antigravity-assisted-review` (Claude Opus)
 
 - **Agent:** Claude Opus 5

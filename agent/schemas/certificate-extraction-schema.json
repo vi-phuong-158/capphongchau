@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CertificateExtractionResult",
+  "type": "object",
+  "properties": {
+    "certificate": {
+      "type": "object",
+      "properties": {
+        "issueNumber": { "type": "string" },
+        "issueDate": { "type": "string" },
+        "registryNumber": { "type": "string" }
+      },
+      "required": ["issueNumber", "issueDate", "registryNumber"]
+    },
+    "owners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fullName": { "type": "string" },
+          "identityNumber": { "type": "string" },
+          "dateOfBirth": { "type": "string" },
+          "residenceAddress": { "type": "string" }
+        },
+        "required": ["fullName"]
+      }
+    },
+    "parcels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "mapSheetNumber": { "type": "string" },
+          "parcelNumber": { "type": "string" },
+          "area": { "type": "string" },
+          "oldWard": { "type": "string" }
+        },
+        "required": ["mapSheetNumber", "parcelNumber", "area"]
+      }
+    }
+  },
+  "required": ["certificate", "owners", "parcels"]
+}

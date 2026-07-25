@@ -16,4 +16,12 @@ describe("AI Extraction fingerprints and module tests", () => {
     const fp = computeResultFingerprint("job_1", { parcels: [{ number: "10" }] });
     expect(fp.length).toBe(64);
   });
+
+  it("F3: computeResultFingerprint is key-order agnostic", () => {
+    const objA = { b: "2", a: "1", nested: { y: "2", x: "1" } };
+    const objB = { a: "1", b: "2", nested: { x: "1", y: "2" } };
+    const fpA = computeResultFingerprint("job_1", objA);
+    const fpB = computeResultFingerprint("job_1", objB);
+    expect(fpA).toBe(fpB);
+  });
 });

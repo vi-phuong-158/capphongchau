@@ -11,6 +11,7 @@ import {
 } from "@/modules/public-intake/repository";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
+import { effectivePayload } from "@/modules/public-intake/payload-layers";
 import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { getDatabase } from "@/modules/supabase/database";
 import {
@@ -20,7 +21,9 @@ import {
 } from "./acceptance";
 
 export class AcceptanceRetryableError extends Error {
-  constructor(message = "Tiếp nhận chưa hoàn tất, hãy thử lại — hệ thống sẽ tiếp tục từ bước đã lưu.") {
+  constructor(
+    message = "Tiếp nhận chưa hoàn tất, hãy thử lại — hệ thống sẽ tiếp tục từ bước đã lưu.",
+  ) {
     super(message);
     this.name = "AcceptanceRetryableError";
   }
@@ -119,14 +122,19 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
   const saga = await database.begin(async (transaction) => {
     await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
 
-    const cachedLog = await transaction<{ response_json: AcceptanceResult; mutation_hash: string }[]>`
+    const cachedLog = await transaction<
+      { response_json: AcceptanceResult; mutation_hash: string }[]
+    >`
       select response_json, mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
     `;
     if (cachedLog[0]) {
       if (cachedLog[0].mutation_hash !== input.mutationHash) {
         throw new SubmissionIdempotencyConflictError();
       }
-      return { cachedResult: parseJsonbMaybeString<AcceptanceResult>(cachedLog[0].response_json), saga: null };
+      return {
+        cachedResult: parseJsonbMaybeString<AcceptanceResult>(cachedLog[0].response_json),
+        saga: null,
+      };
     }
 
     const existingSaga = await getLatestSaga(transaction, input.record.submissionId);
@@ -138,7 +146,9 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
     }
 
     if (input.record.status === "ACCEPTING") {
-      throw new AcceptanceNotAllowedError("Trạng thái tiếp nhận không nhất quán, liên hệ quản trị viên.");
+      throw new AcceptanceNotAllowedError(
+        "Trạng thái tiếp nhận không nhất quán, liên hệ quản trị viên.",
+      );
     }
 
     if (!canStartOfficialAcceptance(input.record, input.actorEmail, input.isAdministrator)) {
@@ -293,7 +303,9 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         return mapSagaRow(updated[0]);
       });
     } catch (error) {
-      throw new AcceptanceRetryableError(`Lỗi tạo thư mục lưu trữ: ${error instanceof Error ? error.message : "Thất bại"}`);
+      throw new AcceptanceRetryableError(
+        `Lỗi tạo thư mục lưu trữ: ${error instanceof Error ? error.message : "Thất bại"}`,
+      );
     }
   }
 
@@ -375,7 +387,9 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         return mapSagaRow(updated[0]);
       });
     } catch (error) {
-      throw new AcceptanceRetryableError(`Lỗi di chuyển tệp hồ sơ: ${error instanceof Error ? error.message : "Thất bại"}`);
+      throw new AcceptanceRetryableError(
+        `Lỗi di chuyển tệp hồ sơ: ${error instanceof Error ? error.message : "Thất bại"}`,
+      );
     }
   }
 
@@ -421,7 +435,9 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
       // 5. Insert public.files (idempotent - đúng schema: checksum_sha256)
       for (const file of activeFiles) {
         const deterministicFileId = `ACC:${input.record.submissionId}:${file.fileId}`;
-        const deterministicOwnerId = file.ownerId ? `ACC:${input.record.submissionId}:${file.ownerId}` : null;
+        const deterministicOwnerId = file.ownerId
+          ? `ACC:${input.record.submissionId}:${file.ownerId}`
+          : null;
         await transaction`
           insert into public.files (
             file_id, case_id, owner_id, document_type, variant, drive_file_id,
@@ -483,12 +499,29 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         };
       }
 
+      const effPayload = effectivePayload(input.record);
       const updatedSub = await transaction<{ version: number }[]>`
         update public.public_submissions
-        set status = 'ACCEPTED', official_case_id = ${currentSaga.official_case_id},
-          accept_step = 'COMPLETED', version = version + 1, updated_at = now()
+        set status = 'ACCEPTED',
+            official_case_id = ${currentSaga.official_case_id},
+            official_payload_json = ${JSON.stringify(effPayload)}::jsonb,
+            official_payload_at = now(),
+            official_payload_by = ${input.actorEmail},
+            accept_step = 'COMPLETED',
+            version = version + 1,
+            updated_at = now()
         where submission_id = ${input.record.submissionId}
         returning version
+      `;
+
+      await transaction`
+        insert into public.public_submission_payload_history
+          (submission_id, layer, payload_version, payload_json, actor_email)
+        values (
+          ${input.record.submissionId}, 'OFFICIAL', ${updatedSub[0].version},
+          ${JSON.stringify(effPayload)}::jsonb, ${input.actorEmail}
+        )
+        on conflict (submission_id, layer, payload_version) do nothing
       `;
 
       await transaction`

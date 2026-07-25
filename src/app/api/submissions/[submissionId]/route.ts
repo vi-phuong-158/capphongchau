@@ -22,6 +22,7 @@ import {
   ORGANISATION_ID_PATTERN,
 } from "@/modules/public-intake/validation";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
+import { payloadLayerOf } from "@/modules/public-intake/payload-layers";
 import {
   isOwnerIdentityQrConfirmed,
   mayAmendOfficialRecord,
@@ -126,6 +127,10 @@ export async function GET(
           officialCaseId: record.officialCaseId || null,
           acceptStep: record.acceptStep || null,
           draft: record.draft,
+          payloadLayer: payloadLayerOf(record),
+          citizenPayload: record.citizenPayload || null,
+          workingPayload: record.workingPayload || null,
+          officialPayload: record.officialPayload || null,
           files: files.map((file) => ({
             fileId: file.fileId,
             documentType: file.documentType,
@@ -379,7 +384,8 @@ export async function PATCH(
         owner.dateOfBirth = ownerPatch.dateOfBirth;
       }
       if (ownerPatch.gender !== undefined && ownerPatch.gender !== owner.gender) {
-        changes[`owners.${ownerPatch.id}.gender`] = `${owner.gender || "-"} → ${ownerPatch.gender || "-"}`;
+        changes[`owners.${ownerPatch.id}.gender`] =
+          `${owner.gender || "-"} → ${ownerPatch.gender || "-"}`;
         owner.gender = ownerPatch.gender;
       }
       if (

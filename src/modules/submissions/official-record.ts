@@ -117,19 +117,70 @@ export async function syncOfficialRecord(
     where case_id = ${caseId} and not (owner_id = any(${ownerIds}::text[]))
   `;
 
-  // --- Thửa đất (mục đích sử dụng nằm trong data_json) -----------------------------------------
+  // --- Thửa đất (mục đích sử dụng nằm trong data_json và bảng chuẩn hóa) -----------------------
   for (const [index, parcel] of parcels.entries()) {
+    const officialParcelId = parcelIds[index];
+    const areaNum = Number(parcel.area) || 0;
+
     await transaction`
       insert into public.parcels (parcel_id, case_id, data_json)
-      values (${parcelIds[index]}, ${caseId}, ${JSON.stringify({ ...parcel, sortOrder: index })}::jsonb)
+      values (${officialParcelId}, ${caseId}, ${JSON.stringify({ ...parcel, sortOrder: index })}::jsonb)
       on conflict (parcel_id) do update set
         data_json = excluded.data_json,
         updated_at = now()
+    `;
+
+    await transaction`
+      insert into public.official_parcels (
+        official_parcel_id, official_case_id, submission_id, map_sheet_number,
+        parcel_number, address_on_cert, old_ward, area
+      ) values (
+        ${officialParcelId}, ${caseId}, ${submissionId}, ${parcel.mapSheetNumber || ""},
+        ${parcel.parcelNumber || ""}, ${parcel.addressOnCertificate || ""},
+        ${parcel.oldWard || ""}, ${areaNum}
+      )
+      on conflict (official_parcel_id) do update set
+        map_sheet_number = excluded.map_sheet_number,
+        parcel_number = excluded.parcel_number,
+        address_on_cert = excluded.address_on_cert,
+        old_ward = excluded.old_ward,
+        area = excluded.area
+    `;
+
+    const landUses = Array.isArray(parcel.landUses) ? parcel.landUses : [];
+    const landUseIds: string[] = [];
+    for (const [luIndex, lu] of landUses.entries()) {
+      const officialLuId = `${officialParcelId}:${lu.id || luIndex}`;
+      landUseIds.push(officialLuId);
+      const luAreaNum = lu.area !== undefined && lu.area !== "" ? Number(lu.area) : null;
+      await transaction`
+        insert into public.official_land_uses (
+          official_land_use_id, official_parcel_id, purpose_code, origin_code,
+          form_code, term_code, area
+        ) values (
+          ${officialLuId}, ${officialParcelId}, ${lu.purposeCode || ""}, ${lu.originCode || ""},
+          ${lu.formCode || ""}, ${lu.termCode || ""}, ${luAreaNum}
+        )
+        on conflict (official_land_use_id) do update set
+          purpose_code = excluded.purpose_code,
+          origin_code = excluded.origin_code,
+          form_code = excluded.form_code,
+          term_code = excluded.term_code,
+          area = excluded.area
+      `;
+    }
+    await transaction`
+      delete from public.official_land_uses
+      where official_parcel_id = ${officialParcelId} and not (official_land_use_id = any(${landUseIds}::text[]))
     `;
   }
   await transaction`
     delete from public.parcels
     where case_id = ${caseId} and not (parcel_id = any(${parcelIds}::text[]))
+  `;
+  await transaction`
+    delete from public.official_parcels
+    where official_case_id = ${caseId} and not (official_parcel_id = any(${parcelIds}::text[]))
   `;
 
   // --- Tài sản gắn liền với đất ----------------------------------------------------------------

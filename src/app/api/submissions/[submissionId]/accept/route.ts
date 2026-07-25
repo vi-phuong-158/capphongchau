@@ -26,6 +26,8 @@ import {
   AcceptanceRetryableError,
   runOfficialAcceptance,
 } from "@/modules/submissions/acceptance-saga";
+import { completionChecks } from "@/modules/submissions/completion-checks";
+import { effectivePayload } from "@/modules/public-intake/payload-layers";
 import { SUBMISSION_DECISION_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
@@ -108,6 +110,23 @@ export async function POST(
 
     if (record.status !== "ACCEPTING" && record.version !== body.data.version) {
       return fail("VERSION_CONFLICT", "Hồ sơ đã thay đổi. Hãy tải lại trang.", requestId, 409);
+    }
+
+    const checks = completionChecks(record, effectivePayload(record));
+    const blocking = checks.filter((c) => c.severity === "BLOCKING");
+    if (blocking.length > 0) {
+      return NextResponse.json(
+        createApiErrorPayload({
+          code: "VALIDATION_FAILED",
+          message: "Hồ sơ chưa đủ điều kiện tiếp nhận chính thức.",
+          requestId,
+          details: {
+            blockingCount: blocking.length,
+            warningCount: checks.length - blocking.length,
+          },
+        }),
+        { status: 400, headers: { "cache-control": "no-store" } },
+      );
     }
 
     if (REFERENCE_IS_PLACEHOLDER) {

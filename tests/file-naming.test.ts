@@ -55,10 +55,10 @@ describe("buildOriginalFileNames", () => {
       { documentType: "CITIZEN_ID_BACK", mimeType: "image/jpeg" },
     ]);
     expect(names).toEqual([
-      "AD 266864-GCN-1.jpg",
-      "AD 266864-GCN-2.jpg",
-      "AD 266864-GT-1.jpg",
-      "AD 266864-GT-2.jpg",
+      "AD 266864-GCN-01.jpg",
+      "AD 266864-GCN-02.jpg",
+      "AD 266864-GT-01.jpg",
+      "AD 266864-GT-02.jpg",
     ]);
   });
 
@@ -70,10 +70,10 @@ describe("buildOriginalFileNames", () => {
       { documentType: "CITIZEN_ID_BACK", mimeType: "image/jpeg" }, // vợ - mặt sau
     ]);
     expect(names).toEqual([
-      "AD 266864-GT-1.jpg",
-      "AD 266864-GT-2.jpg",
-      "AD 266864-GT-3.jpg",
-      "AD 266864-GT-4.jpg",
+      "AD 266864-GT-01.jpg",
+      "AD 266864-GT-02.jpg",
+      "AD 266864-GT-03.jpg",
+      "AD 266864-GT-04.jpg",
     ]);
   });
 

@@ -161,7 +161,7 @@ describe("scannedFileNames", () => {
       fileSummary({ fileId: "f1", documentType: "CITIZEN_ID_FRONT", mimeType: "image/jpeg" }),
       fileSummary({ fileId: "f2", documentType: "CITIZEN_ID_BACK", mimeType: "image/jpeg" }),
     ];
-    expect(scannedFileNames("AD 266864", files)).toBe("AD 266864-GT-1.jpg; AD 266864-GT-2.jpg");
+    expect(scannedFileNames("AD 266864", files)).toBe("AD 266864-GT-01.jpg; AD 266864-GT-02.jpg");
   });
 
   it("bỏ qua file đã REPLACED/DELETED", () => {

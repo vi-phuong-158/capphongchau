@@ -44,6 +44,9 @@ export interface SubmissionRecord {
   readonly workingPayload?: IntakeDraft | null;
   readonly workingPayloadAt?: string;
   readonly workingPayloadBy?: string;
+  readonly officialPayload?: IntakeDraft | null;
+  readonly officialPayloadAt?: string;
+  readonly officialPayloadBy?: string;
   readonly accessVersion: number;
   readonly fileSummaries: readonly PublicFileSummary[];
   /** Locator ổn định, giữ tên cũ để cookie phiên v2 tiếp tục tương thích sau migration. */
@@ -137,6 +140,9 @@ interface SubmissionRow {
   readonly working_payload_json: unknown;
   readonly working_payload_at: Date | null;
   readonly working_payload_by: string | null;
+  readonly official_payload_json?: unknown;
+  readonly official_payload_at?: Date | null;
+  readonly official_payload_by?: string | null;
   readonly access_version: number;
   readonly file_summary_json: PublicFileSummary[] | null;
   readonly legacy_row_index: string | number;
@@ -163,10 +169,11 @@ const SUBMISSION_SELECT = `
   official_case_id, drive_folder_id, accept_step, claimed_by, claimed_at,
   created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
   citizen_payload_json, citizen_payload_version, citizen_payload_at,
-  working_payload_json, working_payload_at, working_payload_by
+  working_payload_json, working_payload_at, working_payload_by,
+  official_payload_json, official_payload_at, official_payload_by
 `;
 
-function asIso(value: Date | null): string {
+function asIso(value: Date | null | undefined): string {
   return value ? value.toISOString() : "";
 }
 
@@ -232,6 +239,9 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     workingPayload: decodeSubmissionDraft(row.working_payload_json),
     workingPayloadAt: asIso(row.working_payload_at),
     workingPayloadBy: row.working_payload_by ?? "",
+    officialPayload: decodeSubmissionDraft(row.official_payload_json),
+    officialPayloadAt: asIso(row.official_payload_at),
+    officialPayloadBy: row.official_payload_by ?? "",
     accessVersion: row.access_version,
     fileSummaries: decodeFileSummaries(row.file_summary_json),
     rowIndex: Number(row.legacy_row_index),

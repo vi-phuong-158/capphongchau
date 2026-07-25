@@ -59,12 +59,6 @@ function makeRecord(overrides: Partial<SubmissionRecord> = {}): SubmissionRecord
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     draft: d,
-    citizenPayload: null,
-    citizenPayloadVersion: 0,
-    citizenPayloadAt: "",
-    workingPayload: null,
-    workingPayloadAt: "",
-    workingPayloadBy: "",
     accessVersion: 1,
     fileSummaries: [],
     rowIndex: 1,
@@ -72,31 +66,35 @@ function makeRecord(overrides: Partial<SubmissionRecord> = {}): SubmissionRecord
   };
 }
 
-describe("Payload layers unit tests", () => {
-  it("P1: only draft exists -> effectivePayload returns draft, layer is DRAFT", () => {
+describe("Payload layers module tests", () => {
+  it("P1: only draft present -> layer is DRAFT", () => {
     const rec = makeRecord();
+    expect(payloadLayerOf(rec)).toBe("DRAFT");
     expect(effectivePayload(rec)?.owners[0].fullName).toBe("Nguyen Van Draft");
-    expect(payloadLayerOf(rec)).toBe("DRAFT");
   });
 
-  it("P2: citizenPayload exists -> effectivePayload returns citizenPayload, layer is CITIZEN", () => {
-    const citizen = makeDraft("Nguyen Van Citizen");
-    const rec = makeRecord({ citizenPayload: citizen, citizenPayloadVersion: 1 });
-    expect(effectivePayload(rec)?.owners[0].fullName).toBe("Nguyen Van Citizen");
+  it("P2: citizen payload present -> layer is CITIZEN", () => {
+    const rec = makeRecord({ citizenPayload: makeDraft("Nguyen Van Citizen") });
     expect(payloadLayerOf(rec)).toBe("CITIZEN");
+    expect(effectivePayload(rec)?.owners[0].fullName).toBe("Nguyen Van Citizen");
   });
 
-  it("P3: workingPayload exists -> effectivePayload returns workingPayload, layer is WORKING", () => {
-    const citizen = makeDraft("Nguyen Van Citizen");
-    const working = makeDraft("Nguyen Van Working");
-    const rec = makeRecord({ citizenPayload: citizen, workingPayload: working });
-    expect(effectivePayload(rec)?.owners[0].fullName).toBe("Nguyen Van Working");
+  it("P3: working payload present -> layer is WORKING", () => {
+    const rec = makeRecord({
+      citizenPayload: makeDraft("Nguyen Van Citizen"),
+      workingPayload: makeDraft("Nguyen Van Working"),
+    });
     expect(payloadLayerOf(rec)).toBe("WORKING");
+    expect(effectivePayload(rec)?.owners[0].fullName).toBe("Nguyen Van Working");
   });
 
-  it("P4: no payloads exist -> effectivePayload returns null", () => {
-    const rec = makeRecord({ draft: null, citizenPayload: null, workingPayload: null });
-    expect(effectivePayload(rec)).toBeNull();
-    expect(payloadLayerOf(rec)).toBe("DRAFT");
+  it("P4: official payload present -> layer is OFFICIAL", () => {
+    const rec = makeRecord({
+      citizenPayload: makeDraft("Nguyen Van Citizen"),
+      workingPayload: makeDraft("Nguyen Van Working"),
+      officialPayload: makeDraft("Nguyen Van Official"),
+    });
+    expect(payloadLayerOf(rec)).toBe("OFFICIAL");
+    expect(effectivePayload(rec)?.owners[0].fullName).toBe("Nguyen Van Official");
   });
 });

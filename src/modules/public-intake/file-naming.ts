@@ -61,7 +61,7 @@ export function buildOriginalFileNames(
   return files.map((file) => {
     const tag = tagForDocumentType(file.documentType);
     seenByTag[tag] += 1;
-    const suffix = countByTag[tag] > 1 ? `-${seenByTag[tag]}` : "";
+    const suffix = countByTag[tag] > 1 ? `-${String(seenByTag[tag]).padStart(2, "0")}` : "";
     return `${base}-${tag}${suffix}.${extensionFromMimeType(file.mimeType)}`;
   });
 }

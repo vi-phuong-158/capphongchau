@@ -5,7 +5,6 @@ import {
   createGoogleWorkspaceClient,
   getGoogleAccessToken,
 } from "@/modules/google/workspace-client";
-import { getDatabase } from "@/modules/supabase/database";
 
 import { CANONICAL_IMAGE_MIME_TYPES, isCanonicalImageMimeType } from "./image-format";
 
@@ -52,6 +51,8 @@ export interface PreviewFile {
 }
 
 export class PublicIntakeStorage {
+  private static folderCache = new Map<string, string>();
+
   constructor(private readonly environment: GoogleStorageEnvironment) {}
 
   /** Thư mục chờ của mỗi bản kê khai: `01_INBOX/{submissionId}/originals`. */
@@ -233,38 +234,39 @@ export class PublicIntakeStorage {
    * (Do connection pool max: 1, gọi Google bên trong transaction lồng sẽ gây deadlock).
    */
   async findOrCreateFolder(name: string, parentId: string): Promise<string> {
-    const database = getDatabase();
-    return database.begin(async (transaction) => {
-      await transaction`select pg_advisory_xact_lock(hashtextextended(${`DRIVE_FOLDER:${parentId}:${name}`}, 0))`;
-      const { drive } = createGoogleWorkspaceClient(this.credentials);
+    const cacheKey = `${parentId}:${name}`;
+    const cachedId = PublicIntakeStorage.folderCache.get(cacheKey);
+    if (cachedId) return cachedId;
 
-      const existing = await drive.files.list({
-        q: [
-          `name = '${escapeQueryValue(name)}'`,
-          `mimeType = '${FOLDER_MIME_TYPE}'`,
-          `'${parentId}' in parents`,
-          "trashed = false",
-        ].join(" and "),
-        fields: "files(id)",
-        pageSize: 1,
-      });
-
-      const existingId = existing.data.files?.[0]?.id;
-      if (existingId) {
-        return existingId;
-      }
-
-      const created = await drive.files.create({
-        requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
-        fields: "id",
-      });
-
-      const folderId = created.data.id;
-      if (!folderId) {
-        throw new Error(`Google Drive không tạo được thư mục: ${name}`);
-      }
-      return folderId;
+    const drive = createGoogleWorkspaceClient(this.credentials).drive;
+    const existing = await drive.files.list({
+      q: [
+        `name = '${escapeQueryValue(name)}'`,
+        `mimeType = '${FOLDER_MIME_TYPE}'`,
+        `'${parentId}' in parents`,
+        "trashed = false",
+      ].join(" and "),
+      fields: "files(id)",
+      pageSize: 1,
     });
+
+    const existingId = existing.data.files?.[0]?.id;
+    if (existingId) {
+      PublicIntakeStorage.folderCache.set(cacheKey, existingId);
+      return existingId;
+    }
+
+    const created = await drive.files.create({
+      requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
+      fields: "id",
+    });
+
+    const folderId = created.data.id;
+    if (!folderId) {
+      throw new Error(`Google Drive không tạo được thư mục: ${name}`);
+    }
+    PublicIntakeStorage.folderCache.set(cacheKey, folderId);
+    return folderId;
   }
 }
 
