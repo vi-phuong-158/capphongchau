@@ -1,5 +1,18 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 9 — Schema hàng đợi AI Extraction (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`202607250005_ai_extraction_tables.sql`:** Thêm migration tạo hai bảng `ai_extraction_jobs` và `ai_extraction_results` với đầy đủ trạng thái job, checksum fingerprint, RLS disabled cho public/authenticated và unique indexes chống trùng lặp.
+  - **`types.ts` & `fingerprints.ts`:** Thêm kiểu dữ liệu `AiExtractionJob`, `AiExtractionResult` và các hàm tính toán sha256 fingerprint cho input & output.
+  - **Kiểm tra:**
+    - `npx vitest run`: 41 file pass / 1 skip (**246 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `supabase/migrations/202607250005_ai_extraction_tables.sql` (mới), `src/modules/ai-extraction/types.ts` (mới), `src/modules/ai-extraction/fingerprints.ts` (mới), `tests/ai-extraction.test.ts` (mới), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Chuẩn bị hạ tầng lưu trữ bền vững cho tính năng AI Assistive Extraction.
+
 ## [2026-07-25] Phase 8 — Hoàn thành xử lý & Kiểm tra điều kiện chính thức (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)
