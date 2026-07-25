@@ -24,7 +24,7 @@
  * — tránh trường hợp gõ nhầm biến rồi chạy diễn tập lên thẳng database thật.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -178,13 +178,12 @@ if (!hasTestDb) {
   );
 }
 
-const MIGRATION_FILES = [
-  "supabase/migrations/202607230001_supabase_schema.sql",
-  "supabase/migrations/202607240001_official_acceptance.sql",
-];
-
 const REPO_ROOT = join(__dirname, "..");
 
+const MIGRATION_FILES = readdirSync(join(REPO_ROOT, "supabase", "migrations"))
+  .filter((f) => f.endsWith(".sql"))
+  .sort()
+  .map((f) => join("supabase", "migrations", f));
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
 function setEnv(key: string, value: string): void {
   if (!(key in ORIGINAL_ENV)) ORIGINAL_ENV[key] = process.env[key];
