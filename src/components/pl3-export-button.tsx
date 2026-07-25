@@ -67,7 +67,9 @@ export function Pl3ExportButton() {
 
       setMessage(
         `Đã xuất ${rows} dòng${Number(warnings) > 0 ? `, ${warnings} cảnh báo trong sheet "Canh bao"` : ""}. ` +
-          (archived ? "Đã lưu bản sao vào 03_EXPORTS." : "Chưa lưu được bản sao lên Drive — file đã tải về máy."),
+          (archived
+            ? "Đã lưu bản sao vào 03_EXPORTS."
+            : "Chưa lưu được bản sao lên Drive — file đã tải về máy."),
       );
 
       if (isTruncated) {
@@ -77,7 +79,9 @@ export function Pl3ExportButton() {
       }
 
       if (auditStatus === "failed") {
-        setAuditNotice("Ghi chú: Việc ghi nhật ký hệ thống bị gián đoạn, nhưng file vẫn được tải về an toàn.");
+        setAuditNotice(
+          "Ghi chú: Việc ghi nhật ký hệ thống bị gián đoạn, nhưng file vẫn được tải về an toàn.",
+        );
       }
     } catch {
       setMessage("Có lỗi mạng khi xuất dữ liệu.");
@@ -93,7 +97,7 @@ export function Pl3ExportButton() {
           <label className="block font-semibold mb-1 text-stone-700">Phạm vi xuất:</label>
           <select
             value={scope}
-            onChange={(e) => setScope(e.target.value as any)}
+            onChange={(e) => setScope(e.target.value as "all" | "official" | "backlog")}
             className="rounded border border-stone-300 bg-white px-2 py-1 text-xs"
           >
             <option value="all">Tất cả (Chính thức + Tồn đọng)</option>

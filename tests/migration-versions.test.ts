@@ -12,7 +12,10 @@ describe("Supabase migration file version integrity", () => {
 
     for (const file of files) {
       const match = /^(\d{12})_/.exec(file);
-      expect(match, `Migration filename '${file}' must start with a 12-digit timestamp prefix (YYYYMMDDHHMM_).`).not.toBeNull();
+      expect(
+        match,
+        `Migration filename '${file}' must start with a 12-digit timestamp prefix (YYYYMMDDHHMM_).`,
+      ).not.toBeNull();
 
       const version = match![1];
       if (versions.includes(version)) {

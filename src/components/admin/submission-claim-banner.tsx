@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 
+async function csrfToken(): Promise<string> {
+  const response = await fetch("/api/security/csrf", { cache: "no-store" });
+  if (!response.ok) throw new Error();
+  return ((await response.json()) as { csrfToken: string }).csrfToken;
+}
+
 interface SubmissionClaimBannerProps {
   submissionId: string;
   version: number;
@@ -32,16 +38,17 @@ export function SubmissionClaimBanner({
   const isClaimedByMe = claimedBy.trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
   const isAvailableForClaim = status === "SUBMITTED" || status === "RESUBMITTED";
 
-  const handleAction = async (action: string, payload: Record<string, any> = {}) => {
+  const handleAction = async (action: string, payload: Record<string, string | boolean> = {}) => {
     setLoading(true);
     setError(null);
     try {
+      const token = await csrfToken();
       const res = await fetch(`/api/submissions/${submissionId}/action`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "idempotency-key": crypto.randomUUID(),
-          "x-csrf-token": "",
+          "x-csrf-token": token,
         },
         body: JSON.stringify({
           action,
@@ -57,8 +64,8 @@ export function SubmissionClaimBanner({
       setReason("");
       setToEmail("");
       onRefresh();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Thao tác thất bại.");
     } finally {
       setLoading(false);
     }
@@ -158,7 +165,9 @@ export function SubmissionClaimBanner({
               Hủy
             </button>
             <button
-              disabled={loading || reason.trim().length < 5 || (showModal === "TRANSFER" && !toEmail)}
+              disabled={
+                loading || reason.trim().length < 5 || (showModal === "TRANSFER" && !toEmail)
+              }
               onClick={() => {
                 if (showModal === "RELEASE") handleAction("RELEASE", { reason });
                 if (showModal === "TRANSFER") handleAction("TRANSFER", { toEmail, reason });

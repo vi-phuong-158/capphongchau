@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { PUT } from "@/app/api/submissions/[submissionId]/working-payload/route";
-import type { SubmissionRecord } from "@/modules/public-intake/repository";
+import type { PublicStatus, SubmissionRecord } from "@/modules/public-intake/repository";
 import { UserRole } from "@/modules/common/domain";
-import { emptyLandUse, emptyOwner, emptyParcel, type IntakeDraft } from "@/modules/public-intake/types";
+import {
+  emptyLandUse,
+  emptyOwner,
+  emptyParcel,
+  type IntakeDraft,
+} from "@/modules/public-intake/types";
 
 const mockUser = {
   email: "officer@phongchau.gov.vn",
@@ -38,9 +43,9 @@ const mockCommitWorkingPayload = vi.fn();
 
 vi.mock("@/modules/public-intake/repository", () => ({
   getPublicIntakeRepository: vi.fn().mockReturnValue({
-    findById: (...args: any[]) => mockFindById(...args),
-    findStoredMutation: (...args: any[]) => mockFindStoredMutation(...args),
-    commitWorkingPayload: (...args: any[]) => mockCommitWorkingPayload(...args),
+    findById: (...args: unknown[]) => mockFindById(...args),
+    findStoredMutation: (...args: unknown[]) => mockFindStoredMutation(...args),
+    commitWorkingPayload: (...args: unknown[]) => mockCommitWorkingPayload(...args),
   }),
   SubmissionVersionConflictError: class SubmissionVersionConflictError extends Error {},
 }));
@@ -74,7 +79,7 @@ function makeDraft(): IntakeDraft {
   };
 }
 
-function makeRecord(claimedBy: string, status: any = "UNDER_REVIEW"): SubmissionRecord {
+function makeRecord(claimedBy: string, status: PublicStatus = "UNDER_REVIEW"): SubmissionRecord {
   const d = makeDraft();
   return {
     submissionId: "sub_1",
@@ -108,7 +113,7 @@ function makeRecord(claimedBy: string, status: any = "UNDER_REVIEW"): Submission
   };
 }
 
-function makeRequest(body: any): NextRequest {
+function makeRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost:3000/api/submissions/sub_1/working-payload", {
     method: "PUT",
     headers: {
@@ -130,9 +135,12 @@ describe("PUT /api/submissions/:id/working-payload route tests", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    const res = await PUT(makeRequest({ expectedVersion: 1, payload: makeDraft(), changeNote: "Test edit" }), {
-      params: Promise.resolve({ submissionId: "sub_1" }),
-    });
+    const res = await PUT(
+      makeRequest({ expectedVersion: 1, payload: makeDraft(), changeNote: "Test edit" }),
+      {
+        params: Promise.resolve({ submissionId: "sub_1" }),
+      },
+    );
 
     expect(res.status).toBe(200);
     const data = await res.json();

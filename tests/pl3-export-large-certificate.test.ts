@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import {
-  buildPl3Content,
-  renderPl3Workbook,
-} from "@/modules/public-intake/pl3-export";
+import { buildPl3Content, renderPl3Workbook } from "@/modules/public-intake/pl3-export";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
 import {
   emptyLandUse,
@@ -91,6 +88,8 @@ describe("PL3 export large certificate and warnings tests", () => {
 
     const bytes = await renderPl3Workbook(content);
     const wb = new ExcelJS.Workbook();
+    // exceljs khai báo Buffer khác generic shape với @types/node hiện tại — ép kiểu có chủ đích.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await wb.xlsx.load(Buffer.from(bytes) as any);
 
     const sheet = wb.getWorksheet("PL3")!;
@@ -119,6 +118,8 @@ describe("PL3 export large certificate and warnings tests", () => {
     const bytes = await renderPl3Workbook(content);
 
     const wb = new ExcelJS.Workbook();
+    // exceljs khai báo Buffer khác generic shape với @types/node hiện tại — ép kiểu có chủ đích.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await wb.xlsx.load(Buffer.from(bytes) as any);
     const sheet = wb.getWorksheet("PL3")!;
     const row3 = sheet.getRow(3);
@@ -137,6 +138,8 @@ describe("PL3 export large certificate and warnings tests", () => {
     const bytes = await renderPl3Workbook(content);
 
     const wb = new ExcelJS.Workbook();
+    // exceljs khai báo Buffer khác generic shape với @types/node hiện tại — ép kiểu có chủ đích.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await wb.xlsx.load(Buffer.from(bytes) as any);
     const sheet = wb.getWorksheet("PL3")!;
     const row3 = sheet.getRow(3);
@@ -179,6 +182,8 @@ describe("PL3 export large certificate and warnings tests", () => {
 
     const bytes = await renderPl3Workbook(content);
     const wb = new ExcelJS.Workbook();
+    // exceljs khai báo Buffer khác generic shape với @types/node hiện tại — ép kiểu có chủ đích.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await wb.xlsx.load(Buffer.from(bytes) as any);
 
     const warningSheet = wb.getWorksheet("Canh bao");

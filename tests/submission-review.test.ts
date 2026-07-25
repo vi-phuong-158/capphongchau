@@ -67,8 +67,7 @@ describe("submission review helpers", () => {
   });
 
   describe("mayAmendOfficialRecord — điều chỉnh hồ sơ đã tiếp nhận (Q2, 2026-07-25)", () => {
-    const accepted = () =>
-      record({ status: "ACCEPTED", officialCaseId: "PHONGCHAU-2026-000001" });
+    const accepted = () => record({ status: "ACCEPTED", officialCaseId: "PHONGCHAU-2026-000001" });
 
     it("cho phép cán bộ đã nhận hồ sơ, và cho phép cả quản trị viên", () => {
       expect(mayAmendOfficialRecord(accepted(), "officer@example.com", false)).toBe(true);

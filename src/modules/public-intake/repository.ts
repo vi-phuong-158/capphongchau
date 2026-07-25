@@ -619,7 +619,12 @@ export class PublicIntakeRepository {
           `select claimed_by from public.public_submissions where submission_id = $1`,
           [input.record.submissionId],
         );
-        if (current[0] && current[0].claimed_by && current[0].claimed_by !== input.actorEmail && !isForce) {
+        if (
+          current[0] &&
+          current[0].claimed_by &&
+          current[0].claimed_by !== input.actorEmail &&
+          !isForce
+        ) {
           throw new SubmissionAlreadyClaimedError();
         }
         throw new SubmissionVersionConflictError();
@@ -783,7 +788,12 @@ export class PublicIntakeRepository {
            updated_at = now()
          where submission_id = $1 and version = $2
          returning ${SUBMISSION_SELECT}`,
-        [input.record.submissionId, input.expectedVersion, JSON.stringify(input.draft), input.actorEmail],
+        [
+          input.record.submissionId,
+          input.expectedVersion,
+          JSON.stringify(input.draft),
+          input.actorEmail,
+        ],
       );
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
@@ -1054,13 +1064,7 @@ export class PublicIntakeRepository {
            and legacy_row_index > $4
          order by legacy_row_index
          limit $5`,
-        [
-          input.statuses,
-          input.fromDate || null,
-          input.toDate || null,
-          lastRowIndex,
-          batchSize,
-        ],
+        [input.statuses, input.fromDate || null, input.toDate || null, lastRowIndex, batchSize],
       );
 
       if (rows.length === 0) {

@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/exports/route";
-import type { SubmissionRecord } from "@/modules/public-intake/repository";
+import type { SubmissionRecord, PublicStatus } from "@/modules/public-intake/repository";
 import { UserRole } from "@/modules/common/domain";
-import { emptyLandUse, emptyOwner, emptyParcel, type IntakeDraft } from "@/modules/public-intake/types";
+import {
+  emptyLandUse,
+  emptyOwner,
+  emptyParcel,
+  type IntakeDraft,
+} from "@/modules/public-intake/types";
 
 // Setup mocks for route dependencies
 const mockUser = {
@@ -39,9 +44,9 @@ const mockAppendAudit = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/modules/public-intake/repository", () => ({
   getPublicIntakeRepository: vi.fn().mockReturnValue({
-    listForExport: (...args: any[]) => mockListForExport(...args),
-    appendExportJob: (...args: any[]) => mockAppendExportJob(...args),
-    appendAudit: (...args: any[]) => mockAppendAudit(...args),
+    listForExport: (...args: unknown[]) => mockListForExport(...args),
+    appendExportJob: (...args: unknown[]) => mockAppendExportJob(...args),
+    appendAudit: (...args: unknown[]) => mockAppendAudit(...args),
   }),
   decodeFileSummaries: (value: unknown) => {
     if (typeof value === "string") {
@@ -60,7 +65,7 @@ const mockUploadExport = vi.fn().mockResolvedValue("drive_file_123");
 
 vi.mock("@/modules/public-intake/storage", () => ({
   getPublicIntakeStorage: vi.fn().mockReturnValue({
-    uploadExport: (...args: any[]) => mockUploadExport(...args),
+    uploadExport: (...args: unknown[]) => mockUploadExport(...args),
   }),
 }));
 
@@ -99,7 +104,11 @@ function makeDraft(): IntakeDraft {
   };
 }
 
-function makeRecord(id: string, status: any = "ACCEPTED", overrides: Partial<SubmissionRecord> = {}): SubmissionRecord {
+function makeRecord(
+  id: string,
+  status: PublicStatus = "ACCEPTED",
+  overrides: Partial<SubmissionRecord> = {},
+): SubmissionRecord {
   const d = makeDraft();
   return {
     submissionId: id,
@@ -166,7 +175,9 @@ describe("POST /api/exports route tests", () => {
 
   it("T2: 2.500 records ACCEPTED -> x-export-row-count = 2500, x-export-truncated = 0", async () => {
     const records = Array.from({ length: 2500 }, (_, i) => makeRecord(String(i + 1)));
-    mockListForExport.mockReturnValueOnce(toAsyncGen([records.slice(0, 1000), records.slice(1000, 2000), records.slice(2000)]));
+    mockListForExport.mockReturnValueOnce(
+      toAsyncGen([records.slice(0, 1000), records.slice(1000, 2000), records.slice(2000)]),
+    );
 
     const res = await POST(makeRequest());
 
@@ -223,7 +234,7 @@ describe("POST /api/exports route tests", () => {
     ]);
 
     const recordWithJsonString = makeRecord("1", "ACCEPTED", {
-      fileSummaries: rawFileSummariesJson as any,
+      fileSummaries: rawFileSummariesJson as unknown as SubmissionRecord["fileSummaries"],
     });
 
     mockListForExport.mockReturnValueOnce(toAsyncGen([[recordWithJsonString]]));
@@ -234,6 +245,8 @@ describe("POST /api/exports route tests", () => {
     const buf = await res.arrayBuffer();
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
+    // exceljs khai báo Buffer khác generic shape với @types/node hiện tại — ép kiểu có chủ đích.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await wb.xlsx.load(Buffer.from(buf) as any);
 
     const sheet = wb.getWorksheet("PL3")!;

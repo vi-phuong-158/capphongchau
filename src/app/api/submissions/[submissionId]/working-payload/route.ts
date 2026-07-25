@@ -50,14 +50,21 @@ export async function PUT(
   try {
     const user = await requireActiveUser(SUBMISSION_READ_ROLES);
     const environment = loadServerEnvironment();
-    if (!verifyCsrfToken(environment.AUTH_SECRET, user.email, request.headers.get("x-csrf-token"))) {
+    if (
+      !verifyCsrfToken(environment.AUTH_SECRET, user.email, request.headers.get("x-csrf-token"))
+    ) {
       return fail("ACCESS_DENIED", "Yêu cầu bảo mật không hợp lệ hoặc đã hết hạn.", requestId, 403);
     }
 
     const idempotencyKey = request.headers.get("idempotency-key");
     const body = schema.safeParse(await request.json());
     if (!body.success || !idempotencyKey || idempotencyKey.length > 256) {
-      return fail("VALIDATION_FAILED", "Dữ liệu biên tập hoặc idempotency key không hợp lệ.", requestId, 400);
+      return fail(
+        "VALIDATION_FAILED",
+        "Dữ liệu biên tập hoặc idempotency key không hợp lệ.",
+        requestId,
+        400,
+      );
     }
 
     const { submissionId } = await context.params;
@@ -75,14 +82,27 @@ export async function PUT(
       )
       .digest("hex");
 
-    const replay = await repository.findStoredMutation(scopedIdempotencyKey, "WORKING_PAYLOAD_EDIT");
+    const replay = await repository.findStoredMutation(
+      scopedIdempotencyKey,
+      "WORKING_PAYLOAD_EDIT",
+    );
     if (replay) {
       if (replay.mutationHash !== mutationHash) {
-        return fail("IDEMPOTENCY_CONFLICT", "Khóa chống gửi trùng đã dùng cho thao tác khác.", requestId, 409);
+        return fail(
+          "IDEMPOTENCY_CONFLICT",
+          "Khóa chống gửi trùng đã dùng cho thao tác khác.",
+          requestId,
+          409,
+        );
       }
       const version = replay.response.version;
       if (typeof version !== "number") {
-        return fail("INTERNAL_ERROR", "Không thể khôi phục kết quả thao tác trước.", requestId, 500);
+        return fail(
+          "INTERNAL_ERROR",
+          "Không thể khôi phục kết quả thao tác trước.",
+          requestId,
+          500,
+        );
       }
       return NextResponse.json(
         { submission: { version }, requestId },
@@ -122,7 +142,12 @@ export async function PUT(
     );
   } catch (error) {
     if (error instanceof AuthorizationError) {
-      return fail(error.kind, error.message, requestId, error.kind === "UNAUTHENTICATED" ? 401 : 403);
+      return fail(
+        error.kind,
+        error.message,
+        requestId,
+        error.kind === "UNAUTHENTICATED" ? 401 : 403,
+      );
     }
     if (error instanceof SubmissionVersionConflictError) {
       return fail("VERSION_CONFLICT", error.message, requestId, 409);

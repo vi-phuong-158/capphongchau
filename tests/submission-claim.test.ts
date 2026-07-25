@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { mayClaim, mayForceClaim, mayRelease, mayTransfer } from "@/modules/submissions/review";
 import { UserRole } from "@/modules/common/domain";
-import type { SubmissionRecord } from "@/modules/public-intake/repository";
+import type { PublicStatus, SubmissionRecord } from "@/modules/public-intake/repository";
 
-function makeRecord(claimedBy: string, status: any = "UNDER_REVIEW"): SubmissionRecord {
+function makeRecord(claimedBy: string, status: PublicStatus = "UNDER_REVIEW"): SubmissionRecord {
   return {
     submissionId: "sub_1",
     receiptCode: "PC-KK-2026-0001",

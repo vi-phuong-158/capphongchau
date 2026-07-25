@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { effectivePayload, payloadLayerOf } from "@/modules/public-intake/payload-layers";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
-import { emptyLandUse, emptyOwner, emptyParcel, type IntakeDraft } from "@/modules/public-intake/types";
+import {
+  emptyLandUse,
+  emptyOwner,
+  emptyParcel,
+  type IntakeDraft,
+} from "@/modules/public-intake/types";
 
 function makeDraft(name: string): IntakeDraft {
   return {

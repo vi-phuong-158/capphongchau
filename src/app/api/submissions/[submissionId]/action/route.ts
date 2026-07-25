@@ -103,7 +103,10 @@ export async function POST(
 
     const action = body.data.action;
     const roles =
-      action === "CLAIM" || action === "FORCE_CLAIM" || action === "RELEASE" || action === "TRANSFER"
+      action === "CLAIM" ||
+      action === "FORCE_CLAIM" ||
+      action === "RELEASE" ||
+      action === "TRANSFER"
         ? SUBMISSION_READ_ROLES
         : SUBMISSION_DECISION_ROLES;
     const user = await requireActiveUser(roles);
@@ -175,7 +178,12 @@ export async function POST(
     // 1. CLAIM
     if (action === "CLAIM") {
       if (!mayClaim(record.status)) {
-        return fail("VALIDATION_FAILED", "Hồ sơ không ở trạng thái có thể nhận xử lý.", requestId, 400);
+        return fail(
+          "VALIDATION_FAILED",
+          "Hồ sơ không ở trạng thái có thể nhận xử lý.",
+          requestId,
+          400,
+        );
       }
       if (record.claimedBy && !isClaimedBy(record, user.email)) {
         return fail("ACCESS_DENIED", "Hồ sơ đang do cán bộ khác nhận xử lý.", requestId, 403);
@@ -200,7 +208,14 @@ export async function POST(
         mutationHash,
       });
       return NextResponse.json(
-        { submission: { status: updated.status, version: updated.version, claimedBy: updated.claimedBy }, requestId },
+        {
+          submission: {
+            status: updated.status,
+            version: updated.version,
+            claimedBy: updated.claimedBy,
+          },
+          requestId,
+        },
         { headers: { "cache-control": "no-store" } },
       );
     }
@@ -208,7 +223,12 @@ export async function POST(
     // 2. FORCE_CLAIM
     if (action === "FORCE_CLAIM") {
       if (!mayForceClaim(user.roles)) {
-        return fail("ACCESS_DENIED", "Chỉ quản trị viên mới có quyền mở khóa cưỡng chế.", requestId, 403);
+        return fail(
+          "ACCESS_DENIED",
+          "Chỉ quản trị viên mới có quyền mở khóa cưỡng chế.",
+          requestId,
+          403,
+        );
       }
       if (!body.data.reason) {
         return fail("VALIDATION_FAILED", "Bắt buộc nhập lý do mở khóa cưỡng chế.", requestId, 400);
@@ -227,14 +247,20 @@ export async function POST(
           eventType: "FORCE_CLAIMED",
           label: "Mở khóa cưỡng chế",
           actorDisplayName: user.displayName,
-          message: `Quản trị viên cưỡng chế nhận xử lý thay cán bộ ${record.claimedBy}. Lý do: ${body.data.reason}`,
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
         mutationHash,
       });
       return NextResponse.json(
-        { submission: { status: updated.status, version: updated.version, claimedBy: updated.claimedBy }, requestId },
+        {
+          submission: {
+            status: updated.status,
+            version: updated.version,
+            claimedBy: updated.claimedBy,
+          },
+          requestId,
+        },
         { headers: { "cache-control": "no-store" } },
       );
     }
@@ -242,7 +268,12 @@ export async function POST(
     // 3. RELEASE
     if (action === "RELEASE") {
       if (!mayRelease(record, user.email, user.roles)) {
-        return fail("ACCESS_DENIED", "Bạn không có quyền trả lại hồ sơ này vào hàng chờ.", requestId, 403);
+        return fail(
+          "ACCESS_DENIED",
+          "Bạn không có quyền trả lại hồ sơ này vào hàng chờ.",
+          requestId,
+          403,
+        );
       }
       if (!body.data.reason) {
         return fail("VALIDATION_FAILED", "Bắt buộc nhập lý do trả lại hàng chờ.", requestId, 400);
@@ -261,14 +292,16 @@ export async function POST(
           eventType: "CLAIM_RELEASED",
           label: "Trả lại hàng chờ",
           actorDisplayName: user.displayName,
-          message: `Cán bộ ${user.displayName} trả lại hồ sơ vào hàng chờ. Lý do: ${body.data.reason}`,
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
         mutationHash,
       });
       return NextResponse.json(
-        { submission: { status: updated.status, version: updated.version, claimedBy: "" }, requestId },
+        {
+          submission: { status: updated.status, version: updated.version, claimedBy: "" },
+          requestId,
+        },
         { headers: { "cache-control": "no-store" } },
       );
     }
@@ -279,7 +312,12 @@ export async function POST(
         return fail("ACCESS_DENIED", "Bạn không có quyền chuyển giao hồ sơ này.", requestId, 403);
       }
       if (!body.data.toEmail || !body.data.reason) {
-        return fail("VALIDATION_FAILED", "Bắt buộc chọn người nhận và nhập lý do chuyển giao.", requestId, 400);
+        return fail(
+          "VALIDATION_FAILED",
+          "Bắt buộc chọn người nhận và nhập lý do chuyển giao.",
+          requestId,
+          400,
+        );
       }
       const updated = await repository.commitStaffAction({
         record,
@@ -290,19 +328,29 @@ export async function POST(
         force: true,
         actorEmail: user.email,
         auditAction: "SUBMISSION_TRANSFERRED",
-        auditMetadata: { fromEmail: record.claimedBy, toEmail: body.data.toEmail, reason: body.data.reason },
+        auditMetadata: {
+          fromEmail: record.claimedBy,
+          toEmail: body.data.toEmail,
+          reason: body.data.reason,
+        },
         timelineEvent: newTimelineEvent({
           eventType: "TRANSFERRED",
           label: "Chuyển giao xử lý",
           actorDisplayName: user.displayName,
-          message: `Chuyển giao xử lý cho ${body.data.toEmail}. Lý do: ${body.data.reason}`,
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
         mutationHash,
       });
       return NextResponse.json(
-        { submission: { status: updated.status, version: updated.version, claimedBy: updated.claimedBy }, requestId },
+        {
+          submission: {
+            status: updated.status,
+            version: updated.version,
+            claimedBy: updated.claimedBy,
+          },
+          requestId,
+        },
         { headers: { "cache-control": "no-store" } },
       );
     }
@@ -368,9 +416,7 @@ export async function POST(
       supplementRequest,
       actorEmail: user.email,
       auditAction:
-        action === "REQUEST_SUPPLEMENT"
-          ? "SUBMISSION_NEEDS_SUPPLEMENT"
-          : "SUBMISSION_REJECTED",
+        action === "REQUEST_SUPPLEMENT" ? "SUBMISSION_NEEDS_SUPPLEMENT" : "SUBMISSION_REJECTED",
       timelineEvent: newTimelineEvent({
         eventType: status,
         label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",

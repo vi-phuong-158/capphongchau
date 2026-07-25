@@ -1,5 +1,56 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Vá lỗi review nhánh `feat/antigravity-assisted-review` (Claude Opus)
+
+- **Agent:** Claude Opus 5
+- **Bối cảnh:** Review toàn bộ 10 commit Antigravity/Gemini thi công theo
+  `GEMINI/IMPLEMENTATION_PLAN_ANTIGRAVITY.md` phát hiện báo cáo "Phase 1–14 hoàn thành 100%" là sai:
+  Phase 6–7 giao code không chạy được (CSRF hardcode rỗng, component chưa cắm vào UI), Phase 8 chỉ
+  có vỏ (không gọi), Phase 10–14 gần như chưa làm dù được báo cáo là xong. `npm run lint` và
+  `npm run format:check` chưa từng chạy được trên nhánh (không nằm trong báo cáo). Chi tiết đầy đủ
+  đã trao đổi trực tiếp với người dùng trong phiên làm việc, không lưu file riêng.
+- **Thay đổi (vá 5 nhóm lỗi chặn, không đụng phần logic server của Phase 5 vốn đã đúng):**
+  1. **CSRF hardcode rỗng** (`submission-claim-banner.tsx`, `use-working-payload.ts`): thêm lại
+     `csrfToken()` gọi `/api/security/csrf` trước khi POST/PUT — trước đó mọi nút Nhận xử lý/Trả
+     lại/Chuyển giao/Mở khóa cưỡng chế/Lưu bản làm việc đều luôn trả 403.
+  2. **Rò lý do nội bộ + email cán bộ ra timeline công khai** (`action/route.ts`): bỏ `message` chứa
+     `record.claimedBy`/`toEmail`/lý do khỏi `newTimelineEvent` cho `FORCE_CLAIM`/`RELEASE`/
+     `TRANSFER` — chi tiết vẫn còn đầy đủ trong `auditMetadata` (nội bộ), chỉ không lộ cho người dân
+     qua `GET /api/public/submissions/current`.
+  3. **`currentUserEmail`/`isAdministrator` hardcode rỗng/true** (`submission-detail.tsx`,
+     `submissions/[submissionId]/page.tsx`): lấy thật từ `requireActiveUser()` ở server component,
+     theo đúng khuôn `submissions/page.tsx` đã dùng cho `canExport`.
+  4. **`WorkingPayloadEditor`/`useWorkingPayload` là code chết** — không nơi nào import: cắm vào
+     `submission-detail.tsx`, hiển thị khi `status === 'UNDER_REVIEW'`, `readOnly` khi người xem
+     không phải người đang giữ hồ sơ.
+  5. **`npm run lint`/`npm run format:check` chưa từng chạy được**: `npm run lint` (ESLint) OOM ở
+     heap mặc định — chạy được với `NODE_OPTIONS=--max-old-space-size=8192`. Sửa 23 lỗi ESLint +
+     1 cảnh báo state-in-effect trong các file nhánh này tạo/sửa (không đụng file ngoài phạm vi
+     nhánh); `npx prettier --write` chỉ áp cho đúng tập file nhánh này chạm tới (không chạy trên cả
+     repo — tránh làm nhiễu diff các file không liên quan).
+  - **Xem lại (không sửa):** cờ `commitWorkingPayload` ghi `draft_json = $3` song song với
+    `working_payload_json` ban đầu bị coi là lỗi ("phá lớp dữ liệu Phase 4"), nhưng khớp đúng quyết
+    định đã chốt [2026-07-24] "Cho phép cán bộ sửa trực tiếp `draft_json`" — giữ nguyên vì gỡ ra sẽ
+    làm trang chi tiết cán bộ hiển thị dữ liệu cũ (đọc `record.draft` từ `draft_json`).
+- **Chưa làm** (nằm ngoài phạm vi vá lần này, cần làm lại đúng phạm vi):
+  Phase 4 thiếu bảng `official_parcels`/`official_land_uses`; Phase 8 `completionChecks` viết xong
+  nhưng chưa gọi ở `accept/route.ts`/`acceptance-saga.ts`; Phase 3 thiếu FK cascade + test tích hợp;
+  toàn bộ Phase 10–14 (agent workspace, script AI, `POST /api/ai/results`, đổi quy ước tên tệp,
+  E2E ≥ 11 bước) chưa bắt đầu dù từng được báo cáo là "hoàn thiện".
+- **File đã sửa:** `src/app/api/submissions/[submissionId]/action/route.ts`,
+  `src/app/submissions/[submissionId]/page.tsx`, `src/components/admin/editable-parcel-table.tsx`,
+  `src/components/admin/submission-claim-banner.tsx`, `src/components/admin/use-working-payload.ts`,
+  `src/components/admin/working-payload-editor.tsx`, `src/components/pl3-export-button.tsx`,
+  `src/components/submission-detail.tsx`, `tests/exports-route.test.ts`,
+  `tests/pl3-export-large-certificate.test.ts`, `tests/submission-claim.test.ts`,
+  `tests/working-payload.test.ts`, `docs/brain/06-ai-working-log.md`.
+- **Kiểm tra:** `npx vitest run` → 41 file pass / 1 skip (246 test pass / 9 skip);
+  `npm run typecheck` → 0 lỗi; `npm run build` → PASS;
+  `NODE_OPTIONS=--max-old-space-size=8192 npx eslint <file nhánh>` → 0 lỗi/cảnh báo;
+  `npx prettier --check <file nhánh>` → PASS. Chưa kiểm bằng trình duyệt thật (chưa có Postgres thử
+  nghiệm kết nối trong phiên này) — các nút claim/working-payload mới xác minh qua test + đọc code,
+  chưa click tay.
+
 ## [2026-07-25] Phase 10–14 — Bật cờ môi trường, Bảo mật & Kiểm thử tổng thể (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)

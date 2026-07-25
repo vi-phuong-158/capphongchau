@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { IntakeDraft } from "@/modules/public-intake/types";
+
+async function csrfToken(): Promise<string> {
+  const response = await fetch("/api/security/csrf", { cache: "no-store" });
+  if (!response.ok) throw new Error();
+  return ((await response.json()) as { csrfToken: string }).csrfToken;
+}
 
 export function useWorkingPayload(
   submissionId: string,
@@ -15,10 +21,14 @@ export function useWorkingPayload(
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  useEffect(() => {
+  // Đồng bộ khi `initialDraft` đổi tham chiếu (ví dụ sau khi tải lại hồ sơ) — cập nhật ngay trong
+  // lúc render thay vì trong effect để tránh một lượt render thừa.
+  const [syncedDraft, setSyncedDraft] = useState(initialDraft);
+  if (initialDraft !== syncedDraft) {
+    setSyncedDraft(initialDraft);
     setDraft(initialDraft);
     setIsDirty(false);
-  }, [initialDraft]);
+  }
 
   const updateDraft = (newDraft: IntakeDraft) => {
     setDraft(newDraft);
@@ -33,12 +43,13 @@ export function useWorkingPayload(
     setSaveSuccess(false);
 
     try {
+      const token = await csrfToken();
       const res = await fetch(`/api/submissions/${submissionId}/working-payload`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           "idempotency-key": crypto.randomUUID(),
-          "x-csrf-token": "",
+          "x-csrf-token": token,
         },
         body: JSON.stringify({
           expectedVersion: version,
@@ -55,8 +66,8 @@ export function useWorkingPayload(
       setIsDirty(false);
       setSaveSuccess(true);
       return true;
-    } catch (err: any) {
-      setSaveError(err.message);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không thể lưu bản làm việc.");
       return false;
     } finally {
       setSaving(false);

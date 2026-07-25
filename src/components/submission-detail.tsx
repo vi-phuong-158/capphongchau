@@ -4,20 +4,11 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
+import type { IntakeDraft } from "@/modules/public-intake/types";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
-
-type Owner = {
-  id: string;
-  fullName: string;
-  identityNumber: string;
-  dateOfBirth: string;
-  gender: string;
-  residenceAddress: string;
-  ownerType: string;
-  roleOnCertificate: string;
-  identityStatus: string;
-};
+import { WorkingPayloadEditor } from "@/components/admin/working-payload-editor";
+import { useWorkingPayload } from "@/components/admin/use-working-payload";
 
 type Submission = {
   submissionId: string;
@@ -32,25 +23,7 @@ type Submission = {
   officialCaseId: string | null;
   acceptStep: string | null;
   canResetAccessSecret: boolean;
-  draft: {
-    certificate: { issueNumber: string; issueDate: string; registryNumber: string };
-    owners: Owner[];
-    parcels: {
-      parcelNumber: string;
-      mapSheetNumber: string;
-      addressOnCertificate: string;
-      addressTwoLevel: string;
-      area: string;
-      landUses: {
-        purposeCode: string;
-        originCode: string;
-        formCode: string;
-        termCode: string;
-        area: string;
-      }[];
-    }[];
-    assets: { assetType: string; description: string }[];
-  } | null;
+  draft: IntakeDraft | null;
   files: {
     fileId: string;
     documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
@@ -101,7 +74,15 @@ const EDITABLE_OWNER_FIELDS = [
   "roleOnCertificate",
 ] as const;
 
-export function SubmissionDetail({ submissionId }: { readonly submissionId: string }) {
+export function SubmissionDetail({
+  submissionId,
+  currentUserEmail,
+  isAdministrator,
+}: {
+  readonly submissionId: string;
+  readonly currentUserEmail: string;
+  readonly isAdministrator: boolean;
+}) {
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -127,6 +108,14 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
   const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
   /** Giữ nguyên qua các lần bấm lại để saga tiếp tục từ checkpoint, không tạo hồ sơ chính thức mới. */
   const acceptKeyRef = useRef("");
+  const isClaimedByMe =
+    (submission?.claimedBy || "").trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
+  const workingPayload = useWorkingPayload(
+    submissionId,
+    submission?.draft ?? null,
+    submission?.version ?? 0,
+    isClaimedByMe,
+  );
   useEffect(() => {
     loadSubmission(submissionId)
       .then(setSubmission)
@@ -387,8 +376,8 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
           status={submission.status}
           claimedBy={submission.claimedBy || ""}
           claimedAt={submission.claimedAt || undefined}
-          currentUserEmail=""
-          isAdministrator={true}
+          currentUserEmail={currentUserEmail}
+          isAdministrator={isAdministrator}
           onRefresh={() => loadSubmission(submission.submissionId).then(setSubmission)}
         />
       </div>
@@ -717,6 +706,37 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
           </section>
         </div>
       ) : null}
+      {submission.status === "UNDER_REVIEW" && workingPayload.draft ? (
+        <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5 sm:p-7">
+          <h2 className="text-xl font-bold">Bản làm việc (biên tập đầy đủ)</h2>
+          <p className="mt-1 text-sm text-stone-600">
+            {isClaimedByMe
+              ? "Sửa đầy đủ giấy chứng nhận, chủ sử dụng và thửa đất. Thay đổi chỉ áp dụng cho bản làm việc của hồ sơ này."
+              : "Chỉ cán bộ đang nhận xử lý hồ sơ này mới sửa được — bạn đang xem ở chế độ chỉ đọc."}
+          </p>
+          <div className="mt-4">
+            <WorkingPayloadEditor
+              submissionId={submission.submissionId}
+              version={submission.version}
+              draft={workingPayload.draft}
+              readOnly={!isClaimedByMe}
+              onChange={workingPayload.updateDraft}
+              onSave={async (changeNote) => {
+                const ok = await workingPayload.saveWorkingPayload(changeNote);
+                if (ok) {
+                  const refreshed = await loadSubmission(submission.submissionId);
+                  setSubmission(refreshed);
+                }
+                return ok;
+              }}
+              isDirty={workingPayload.isDirty}
+              saving={workingPayload.saving}
+              saveError={workingPayload.saveError}
+              saveSuccess={workingPayload.saveSuccess}
+            />
+          </div>
+        </section>
+      ) : null}
       <p className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
         Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất theo Thông tư 08/2024/TT-BTNMT.
       </p>
@@ -741,11 +761,13 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                   Hồ sơ đã tiếp nhận chính thức
                   {submission.officialCaseId ? ` (${submission.officialCaseId})` : ""}. Lưu thay đổi
                   sẽ <strong>ghi lại luôn dữ liệu chính thức</strong> — giấy chứng nhận, chủ sử
-                  dụng, thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive
-                  giữ nguyên.
+                  dụng, thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive giữ
+                  nguyên.
                 </p>
                 <label className="block">
-                  <span className="pc-field-label">Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)</span>
+                  <span className="pc-field-label">
+                    Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)
+                  </span>
                   <textarea
                     className="pc-input"
                     onChange={(event) => setAmendmentReason(event.target.value)}
@@ -761,8 +783,8 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
               </div>
             ) : (
               <p className="mt-2 text-sm text-stone-600">
-                Chỉ sửa lỗi gõ nhỏ giúp người dân. Nếu cần người dân nộp lại giấy tờ, dùng nút
-                “Yêu cầu bổ sung”.
+                Chỉ sửa lỗi gõ nhỏ giúp người dân. Nếu cần người dân nộp lại giấy tờ, dùng nút “Yêu
+                cầu bổ sung”.
               </p>
             )}
             <section className="mt-5">

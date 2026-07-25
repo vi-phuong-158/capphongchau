@@ -157,14 +157,22 @@ export function WorkingPayloadEditor({
 
       {/* 3. Thửa đất */}
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <EditableParcelTable parcels={draft.parcels} readOnly={readOnly} onChange={handleParcelsChange} />
+        <EditableParcelTable
+          parcels={draft.parcels}
+          readOnly={readOnly}
+          onChange={handleParcelsChange}
+        />
       </div>
 
       {/* Nút lưu bản làm việc */}
       {!readOnly && (
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
           {saveError && <div className="mb-2 text-xs font-medium text-red-600">{saveError}</div>}
-          {saveSuccess && <div className="mb-2 text-xs font-medium text-green-600">Đã lưu bản làm việc thành công!</div>}
+          {saveSuccess && (
+            <div className="mb-2 text-xs font-medium text-green-600">
+              Đã lưu bản làm việc thành công!
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-4">
             <input

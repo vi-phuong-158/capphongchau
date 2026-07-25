@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { completionChecks } from "@/modules/submissions/completion-checks";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
-import { emptyLandUse, emptyOwner, emptyParcel, type IntakeDraft } from "@/modules/public-intake/types";
+import {
+  emptyLandUse,
+  emptyOwner,
+  emptyParcel,
+  type IntakeDraft,
+} from "@/modules/public-intake/types";
 
 function makeDraft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
   return {

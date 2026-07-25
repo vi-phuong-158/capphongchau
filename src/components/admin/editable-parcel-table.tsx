@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { emptyLandUse, emptyParcel, type Parcel } from "@/modules/public-intake/types";
+import { emptyParcel, type Parcel } from "@/modules/public-intake/types";
 import { OLD_WARD_OPTIONS } from "@/modules/public-intake/reference";
 
 interface EditableParcelTableProps {
@@ -10,10 +10,18 @@ interface EditableParcelTableProps {
   onChange: (parcels: Parcel[]) => void;
 }
 
-export function EditableParcelTable({ parcels, readOnly = false, onChange }: EditableParcelTableProps) {
+export function EditableParcelTable({
+  parcels,
+  readOnly = false,
+  onChange,
+}: EditableParcelTableProps) {
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(parcels[0]?.id || null);
 
-  const handleUpdateParcel = (index: number, field: keyof Parcel, value: any) => {
+  const handleUpdateParcel = <TField extends keyof Parcel>(
+    index: number,
+    field: TField,
+    value: Parcel[TField],
+  ) => {
     const updated = [...parcels];
     updated[index] = { ...updated[index], [field]: value };
     onChange(updated);
@@ -89,7 +97,9 @@ export function EditableParcelTable({ parcels, readOnly = false, onChange }: Edi
                   key={parcel.id || idx}
                   onClick={() => setSelectedParcelId(parcel.id)}
                   className={`border-b cursor-pointer transition-colors ${
-                    isSelected ? "bg-blue-50 dark:bg-blue-950/50" : "hover:bg-gray-50 dark:hover:bg-gray-900"
+                    isSelected
+                      ? "bg-blue-50 dark:bg-blue-950/50"
+                      : "hover:bg-gray-50 dark:hover:bg-gray-900"
                   }`}
                 >
                   <td className="p-2 text-center font-medium">{idx + 1}</td>
@@ -131,7 +141,8 @@ export function EditableParcelTable({ parcels, readOnly = false, onChange }: Edi
                   </td>
                   <td className="p-2">
                     {readOnly ? (
-                      OLD_WARD_OPTIONS.find((w) => w.code === parcel.oldWard)?.label || parcel.oldWard
+                      OLD_WARD_OPTIONS.find((w) => w.code === parcel.oldWard)?.label ||
+                      parcel.oldWard
                     ) : (
                       <select
                         value={parcel.oldWard}

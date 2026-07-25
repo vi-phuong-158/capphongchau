@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeInputFingerprint, computeResultFingerprint } from "@/modules/ai-extraction/fingerprints";
+import {
+  computeInputFingerprint,
+  computeResultFingerprint,
+} from "@/modules/ai-extraction/fingerprints";
 
 describe("AI Extraction fingerprints and module tests", () => {
   it("F1: computeInputFingerprint is deterministic regardless of checksum array order", () => {
