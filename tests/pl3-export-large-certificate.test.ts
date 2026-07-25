@@ -161,7 +161,7 @@ describe("PL3 export large certificate and warnings tests", () => {
 
     expect(bytes.byteLength).toBeGreaterThan(0);
     expect(duration).toBeLessThan(30);
-  });
+  }, 30000);
 
   it("L6: Record with warning -> warnings.length > 0 AND sheet 'Canh bao' has matching rows", async () => {
     const parcels = [

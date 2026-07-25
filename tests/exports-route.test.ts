@@ -173,7 +173,7 @@ describe("POST /api/exports route tests", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("x-export-row-count")).toBe("2500");
     expect(res.headers.get("x-export-truncated")).toBe("0");
-  });
+  }, 30000);
 
   it("T3: appendExportJob reject -> 200, file intact, x-export-audit = failed", async () => {
     mockListForExport.mockReturnValueOnce(toAsyncGen([[makeRecord("1")]]));

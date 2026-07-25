@@ -1,5 +1,20 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 3 — Chuẩn hóa migration trùng version (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - Đổi tên file migration trùng version `202607240001_official_acceptance.sql` thành `202607240003_official_acceptance.sql` (bằng `git mv`).
+  - Tạo `tests/migration-versions.test.ts` để kiểm tra tự động tính duy nhất của tất cả tiền tố timestamp trong `supabase/migrations/`.
+  - Bổ sung timeout 30s cho 2 test nạp 2.500 bản ghi (`T2` trong `exports-route.test.ts` và `L5` trong `pl3-export-large-certificate.test.ts`) để tránh timeout khi chạy song song toàn bộ test suite.
+  - **Kiểm tra:**
+    - `npx vitest run`: 36 file pass / 1 skip (**229 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `supabase/migrations/202607240003_official_acceptance.sql` (renamed), `tests/migration-versions.test.ts` (mới), `tests/exports-route.test.ts`, `tests/pl3-export-large-certificate.test.ts`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Hoàn thành vá lỗi P0-2 theo `IMPLEMENTATION_PLAN_ANTIGRAVITY.md`.
+- **Chưa xác minh:** Không áp dụng `supabase db push` trên production.
+
 ## [2026-07-25] Phase 2 — Sửa xuất PL3/XLSX (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)
