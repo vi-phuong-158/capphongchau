@@ -1,5 +1,17 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 8 — Hoàn thành xử lý & Kiểm tra điều kiện chính thức (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`completion-checks.ts`:** Tạo module kiểm tra tính đầy đủ và hợp lệ của dữ liệu trước khi tiếp nhận chính thức (BLOCKING: thiếu thông tin GCN, thiếu chủ/CCCD, thiếu thửa, diện tích <= 0, > 3 mục đích/thửa, ĐVHC cũ không thuộc 10 tổ/xã; WARNING: thiếu file quét).
+  - **Kiểm tra:**
+    - `npx vitest run`: 40 file pass / 1 skip (**244 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `src/modules/submissions/completion-checks.ts` (mới), `tests/completion-checks.test.ts` (mới), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Đảm bảo hồ sơ được kiểm tra kỹ lưỡng trước khi đưa vào luồng tiếp nhận chính thức.
+
 ## [2026-07-25] Phase 7 — Giao diện biên tập bản làm việc & banner claim (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)
