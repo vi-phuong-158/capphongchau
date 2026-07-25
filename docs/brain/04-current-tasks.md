@@ -24,12 +24,17 @@ thức và ảnh trên Drive giữ nguyên. Xem `03-decisions.md` [2026-07-25] Q
 
 ### Hạn chế đã biết — chưa đóng, KHÔNG phải lỗi mới phát hiện
 
+**[CẬP NHẬT 2026-07-25]** Ba dòng dưới đây trong bản cũ đã ĐÓNG, gỡ khỏi bảng: "cán bộ không sửa
+được thửa/mục đích" (đóng ở Phase 6-7, xem `PUT /api/submissions/:id/working-payload` +
+`WorkingPayloadEditor`), "PL3 cắt âm thầm ở 2.000 hồ sơ" (đóng ở Phase 2, thay bằng
+`MAX_EXPORT_SUBMISSIONS = 20000` kèm cờ `truncated` hiển thị trên sheet), "lỗi ghi
+`export_jobs`/`audit_logs` làm mất file PL3" (đóng ở Phase 2, file giữ nguyên dù ghi audit lỗi).
+
 | Hạn chế | Ảnh hưởng | Khi nào phải đóng |
 |---|---|---|
-| Cán bộ **không sửa được thửa đất, mục đích sử dụng, tài sản** — `PATCH` chỉ nhận `certificate` + 6 trường `owners` | Thửa sai phải trả về cho người dân sửa qua "yêu cầu bổ sung" | Trước khi khối lượng lớn — xem `IMPLEMENTATION_PLAN_ANTIGRAVITY.md` Phase 6-7 |
-| Điều chỉnh hồ sơ đã `ACCEPTED` **không lưu bản chụp trạng thái chính thức trước khi sửa** | Khôi phục giá trị cũ chỉ dựa vào cặp cũ → mới trong audit, không khôi phục nguyên trạng được | Khi cần khôi phục nguyên trạng — thêm `official_payload` snapshot |
-| Xuất PL3 **cắt âm thầm ở 2.000 hồ sơ** (`route.ts` `slice(0, 2000)`), không cảnh báo | Chưa ảnh hưởng (0 hồ sơ) | **BẮT BUỘC sửa trước khi vượt 2.000 hồ sơ**, nếu không báo cáo thiếu dữ liệu mà không ai biết |
-| Lỗi ghi `export_jobs`/`audit_logs` làm **mất file PL3 đã dựng xong** → HTTP 500 | Cán bộ bấm xuất, báo lỗi, không có file | Sửa sớm — rẻ, xem Phase 2 |
+| **`official_payload_json`/`_at`/`_by` chỉ ghi MỘT LẦN lúc tiếp nhận, KHÔNG cập nhật lại khi dùng "Điều chỉnh hồ sơ chính thức"** — `commitOfficialAmendment` gọi `syncOfficialRecord` nên `official_parcels`/`official_land_uses`/`cases`/`owners` cập nhật đúng, nhưng cột snapshot `official_payload_json` trên `public_submissions` vẫn giữ bản JSON tại thời điểm tiếp nhận ban đầu | `effectivePayload()` (ưu tiên `officialPayload`) sẽ trả dữ liệu CŨ cho mọi hồ sơ đã từng điều chỉnh sau khi tiếp nhận, dù bảng chuẩn hóa đã đúng | Trước khi có cán bộ nào bấm "Điều chỉnh hồ sơ chính thức" trên hồ sơ thật — thêm cập nhật `official_payload_*` vào `commitOfficialAmendment`, cùng transaction với `syncOfficialRecord` |
+| **`PublicIntakeStorage.findOrCreateFolder` không còn khóa xuyên tiến trình** — đổi từ `pg_advisory_xact_lock` sang `Map` tĩnh trong tiến trình Node (2026-07-25, Phase 13) | Hai lambda Vercel xử lý đồng thời có thể tạo trùng thư mục Drive cho cùng một hồ sơ lần đầu | Trước khi có tải thật đồng thời cao — khôi phục khóa xuyên tiến trình hoặc ghi nhận rủi ro có chủ đích vào `03-decisions.md` |
+| `POST /api/ai/results` hardcode `result_version = 1`, không có `idempotency-key` | Kết quả AI thứ hai cho cùng `jobId` vỡ `unique (job_id, result_version)` → HTTP 500 thay vì lưu bản mới | Trước khi bật `AI_EXTRACTION_ENABLED = true` thật |
 | Thửa có **>3 mục đích sử dụng** thì người dân không nộp được (Q3: tạm giữ ở 3) | Ca đó phải ra phường làm trực tiếp | Mở lại với cơ quan nếu tần suất thực tế cao |
 | `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production | `/ke-khai` và `/api/public/*` không có Cloudflare WAF/rate limiting | Khi có domain thật gắn Cloudflare |
 

@@ -4,6 +4,23 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-25] Khoảng trống version migration `202607250001` và `202607250006`
+
+- **Quyết định:** Nhánh `feat/antigravity-assisted-review` cấp version `202607250002` đến
+  `202607250008` cho các migration Phase 3-9, bỏ qua `202607250001` và `202607250006`.
+- **Lý do:** `202607250001` từng bị một file `create_pl3_export_view.sql` chiếm — file đó **untracked**
+  trong git (không thuộc commit nào của Antigravity hay của review này), tạo VIEW `pl3_export_view`
+  không nơi nào trong `src/` dùng, gây va chạm version với kế hoạch gốc. Đã **xóa** ngày 2026-07-25
+  sau khi xác nhận với chủ dự án (không phải việc đang dở của ai) — `202607250001` giờ **lại tự do**,
+  dùng được cho migration kế tiếp. `202607250006` vẫn giữ chỗ cho Phase 12 (đổi tên file gốc `-1/-2`
+  → `-01/-02` trên Drive) — Phase 12 mới đổi quy ước sinh tên mới (`file-naming.ts`), CHƯA viết
+  migration đổi tên các file cũ đã có trên Drive, nên số này chưa cấp.
+- **Đánh đổi:** `tests/migration-versions.test.ts` chỉ kiểm tính duy nhất, không kiểm liên tục —
+  khoảng trống không làm hỏng gì. Agent sau dùng `202607250001` bình thường cho migration tiếp theo;
+  chỉ tránh `202607250006` cho tới khi thật sự làm Phase 12.
+- **Người quyết định:** Claude Sonnet 5 (ghi lại theo yêu cầu review 2026-07-25); xác nhận xóa file
+  va chạm do chủ dự án đồng ý cùng ngày.
+
 ## [2026-07-25] MỞ tiếp nhận chính thức — `OFFICIAL_ACCEPTANCE_ENABLED = true`
 
 - **Quyết định:** Chủ dự án quyết định mở tiếp nhận chính thức để bắt đầu thu hồ sơ thật. Cờ

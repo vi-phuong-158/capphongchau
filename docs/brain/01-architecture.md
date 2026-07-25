@@ -18,21 +18,50 @@ Quyết định dùng Google Sheets làm kho runtime đã bị thay thế ngày 
 
 ```text
 supabase/migrations/
-├── 202607230001_supabase_schema.sql       schema/constraint/RLS
-└── 202607240001_official_acceptance.sql   case_counters + saga checkpoint
+├── 202607230001_supabase_schema.sql                       schema/constraint/RLS gốc
+├── 202607240001_repair_public_submission_identity_and_drafts.sql
+├── 202607240002_normalize_legacy_public_draft_json.sql
+├── 202607240003_official_acceptance.sql                   case_counters + saga checkpoint
+│   (đổi tên từ 202607240001 — hai file từng trùng version, xem 03-decisions.md)
+├── 202607250002_submission_payload_layers.sql              citizen/working_payload + history
+├── 202607250003_submission_official_parcels.sql            official_parcels/official_land_uses
+│   + 3 cột official_payload_* trên public_submissions
+├── 202607250004_submission_claim_guard.sql                 claim_note/claim_released_at + index
+├── 202607250005_ai_extraction_tables.sql                   ai_extraction_jobs/results
+├── 202607250007_land_uses_cascade_delete.sql                FK public_land_uses → on delete cascade
+└── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+    (202607250001 hiện TỰ DO — file untracked từng chiếm số này đã bị xóa 2026-07-25, xem
+     03-decisions.md; 202607250006 chưa cấp, dành cho Phase 12 — đổi quy ước `-1/-2` → `-01/-02`
+     ĐÃ làm ở file-naming.ts nhưng CHƯA có migration đổi tên file cũ đã có trên Drive)
 scripts/
 ├── migrate-sheets-to-supabase.ts          ETL một lần, transaction + marker
 ├── migrate-public-intake.ts                schema Sheets legacy
-└── migrate-citizen-id-pairs.ts             schema Sheets legacy
+├── migrate-citizen-id-pairs.ts             schema Sheets legacy
+└── ai/
+    ├── manifest.ts                        hằng số cấu hình gói job AI (chưa phải bộ đóng gói thật)
+    └── validator.ts                       validateAiResultPayload — đường gọi thật duy nhất nhận
+                                            JSON từ AI, gồm cả kiểm tra prompt injection
 src/modules/supabase/database.ts             PostgreSQL client + health
 src/modules/public-intake/repository.ts      repository hồ sơ Supabase
+src/modules/public-intake/payload-layers.ts  effectivePayload/payloadLayerOf (official > working >
+                                              citizen > draft)
+src/modules/submissions/official-record.ts   syncOfficialRecord — ghi cases/owners/certificates +
+                                              official_parcels/official_land_uses (Phase 8)
+src/modules/submissions/completion-checks.ts completionChecks — chặn tiếp nhận khi thiếu dữ liệu
+src/modules/ai-extraction/                   fingerprints.ts, prompt-safety.ts, types.ts
 src/modules/users/supabase-user-repository.ts allowlist/roles Supabase
 src/modules/submissions/acceptance-saga.ts   saga tiếp nhận chính thức resumable
 src/modules/public-intake/file-naming.ts     quy ước tên file gốc GCN/GT (thuần, dùng chung)
 src/modules/drive/                           StorageRepository Google Drive
-src/modules/public-intake/storage.ts         resumable upload + verify Drive
+src/modules/public-intake/storage.ts         resumable upload + verify Drive + findOrCreateFolder
+                                              (cache trong tiến trình, KHÔNG còn advisory lock —
+                                              xem cảnh báo ở "Database và bất biến")
 src/app/api/health/database/route.ts         health Supabase
 src/app/api/health/google/route.ts           health Google Drive
+agent/                                       prompt tĩnh + JSON schema cho Antigravity đọc ảnh GCN
+                                              (agent/prompts/, agent/schemas/, agent/examples/) —
+                                              CHƯA có bộ đóng gói job thật (scripts/ai/manifest.ts
+                                              chỉ là hằng số, không copy file từ Drive)
 ```
 
 ## Code Graph
@@ -69,47 +98,102 @@ src/app/ke-khai/wizard.tsx
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
     ├── list/listSummaries/findById
-    ├── commitStaffAction (transaction)
+    ├── commitStaffAction (transaction) — CLAIM/FORCE_CLAIM/RELEASE/TRANSFER (2026-07-25, Phase 5)
+    │   ├── UPDATE mang điều kiện atomic ngay trong SQL:
+    │   │   `and ($force = true or claimed_by is null or claimed_by = '' or claimed_by = $actor)`
+    │   │   — không phải kiểu SELECT-rồi-UPDATE bị cấm ở review; version conflict + claim conflict
+    │   │   phân biệt được bằng SubmissionAlreadyClaimedError → 409 ALREADY_CLAIMED
+    │   ├── mayClaim (review.ts) — CHỈ SUBMITTED/RESUBMITTED (đã bỏ UNDER_REVIEW so với thiết kế cũ)
+    │   ├── mayForceClaim/mayRelease/mayTransfer — WARD_ADMIN/SYSTEM_ADMIN mới force được
+    │   ├── nếu claim lần đầu (working_payload_json is null) → khởi tạo
+    │   │   working_payload_json = coalesce(citizen_payload_json, draft_json), ghi history WORKING
+    │   └── claim_note/claim_released_at (migration 202607250004) — CỘT CHƯA AI GHI, chỉ tồn tại
+    │       trong schema, không có code path nào set giá trị
+    ├── commitWorkingPayload (transaction) — PUT /api/submissions/:id/working-payload (Phase 6)
+    │   ├── Chỉ cán bộ đang giữ (claimedBy === actor) + status UNDER_REVIEW mới gọi được
+    │   ├── Ghi working_payload_json VÀ draft_json cùng lúc (khớp quyết định 2026-07-24 "Cho phép
+    │   │   cán bộ sửa trực tiếp draft_json" — không phải lỗi, staff edit cố ý hiển thị cho dân)
+    │   └── refreshCanonicalProjection nếu status khác DRAFT
     ├── commitOfficialAmendment (transaction) — PATCH sửa hồ sơ ĐÃ tiếp nhận (Q2, 2026-07-25)
     │   ├── mayAmendOfficialRecord — ACCEPTED + có official_case_id + (người giữ | admin)
     │   ├── bắt buộc amendmentReason >= 10 ký tự → audit OFFICIAL_RECORD_AMENDED
     │   └── syncOfficialRecord (src/modules/submissions/official-record.ts) — CÙNG transaction:
     │       upsert certificates/owners/parcels/assets theo case_id + xóa bản ghi không còn
     │       trong bản kê khai. DÙNG CHUNG với bước RECORDS_WRITTEN của saga.
-    ├── commitStaffDraftEdit (transaction) — PATCH sửa trực tiếp draft_json
+    ├── commitStaffDraftEdit (transaction) — PATCH sửa trực tiếp draft_json (phạm vi hẹp: certificate
+    │   3 trường + owner 6 trường; PUT working-payload ở trên mới sửa được thửa/mục đích)
     │   ├── mayStaffEdit (src/modules/submissions/review.ts) — chỉ người đang giữ + UNDER_REVIEW
     │   ├── isOwnerIdentityQrConfirmed — CẢNH BÁO, không còn khóa cứng (2026-07-25, Q1):
     │   │   cán bộ sửa được cả field QR_CONFIRMED, audit ghi identityOverride
     │   └── refreshCanonicalProjection — XÓA CON TRƯỚC CHA:
     │       land_uses → parcels → owners → certificates → assets
-    │       (FK public_land_uses.parcel_id không cascade; sai thứ tự = 500 từ lần sửa thứ hai)
+    │       (thứ tự code đã đúng; migration 202607250007 thêm `on delete cascade` làm lưới an toàn
+    │        tầng DB — đã CHẠY THẬT và PASS trên Postgres rehearsal, xem 03-decisions.md)
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
+src/modules/public-intake/payload-layers.ts (thuần, không I/O)
+├── effectivePayload(record) → official > working > citizen > draft
+├── payloadLayerOf(record) → "OFFICIAL" | "WORKING" | "CITIZEN" | "DRAFT"
+└── GET /api/submissions/:id trả payloadLayer/citizenPayload/workingPayload/officialPayload
+    (chỉ SUBMISSION_READ_ROLES; không API công khai nào chạm 3 cột payload)
+
 src/app/api/submissions/[submissionId]/accept/route.ts
+├── completionChecks (src/modules/submissions/completion-checks.ts) chạy TRƯỚC khi mở saga —
+│   còn BLOCKING → 400 VALIDATION_FAILED, không mở transaction nào (Phase 8)
 └── runOfficialAcceptance (src/modules/submissions/acceptance-saga.ts)
+    ⚠️ OFFICIAL_ACCEPTANCE_ENABLED = true NGAY TỪ ĐIỂM GỐC của nhánh này (b8e67a2, trước Phase 1) —
+    saga dưới đây đã LIVE suốt Phase 2-14 và hai vòng vá lỗi, không phải trạng thái "chưa bật".
     ├── Bước 0 (tx): advisory lock + request_log replay + public_acceptance_sagas
     │   + public_submissions ACCEPTING + audit/timeline (insertAudit/insertTimeline
     │   của PublicIntakeRepository, truyền transaction — KHÔNG dùng method pool)
     ├── ID_RESERVED (tx): case_counters (ON CONFLICT ... RETURNING) + id_reservations
     ├── CASE_FOLDER_READY: storage.findOrCreateFolder 02_CASES/{TDP}/{CASE_ID}/originals
-    │   (NGOÀI transaction — quy tắc pool max:1)
+    │   (NGOÀI transaction — quy tắc pool max:1; CẢNH BÁO: hàm này đã bỏ advisory lock, thay bằng
+    │   `Map` tĩnh trong tiến trình — hai lambda Vercel đồng thời có thể tạo trùng thư mục, xem
+    │   "Database và bất biến")
     ├── FILES_MOVED: drive.files.update từng file (đổi parent + đổi tên `requestBody.name`),
     │   checkpoint moved_files (NGOÀI tx) — tên sinh bởi buildOriginalFileNames
-    │   (src/modules/public-intake/file-naming.ts), issueNumber rỗng → bỏ qua đổi tên
-    ├── RECORDS_WRITTEN (tx): cases + files, rồi syncOfficialRecord cho
-    │   certificates + owners + parcels(data_json) + assets(data_json),
-    │   ID deterministic ACC:{submissionId}:{id|idx-N}, upsert + xóa dòng thừa
-    │   (thửa và mục đích sử dụng đi nguyên object vào public.parcels.data_json —
-    │    landUses lồng bên trong; bổ sung 2026-07-25, trước đó KHÔNG được ghi đâu cả)
-    └── COMPLETED (tx): public_submissions ACCEPTED + official_case_id + request_log
+    │   (src/modules/public-intake/file-naming.ts, đệm 0 `-01/-02` từ 2026-07-25), issueNumber
+    │   rỗng → bỏ qua đổi tên
+    ├── RECORDS_WRITTEN (tx): cases + files, syncOfficialRecord ghi certificates/owners/
+    │   parcels(data_json)/assets(data_json) NHƯ CŨ, cộng thêm (Phase 8, 2026-07-25):
+    │   upsert public.official_parcels + public.official_land_uses (bảng chuẩn hóa riêng, KHÔNG
+    │   phải data_json lồng nữa) — ID tất định ACC:{submissionId}:{id|idx-N}, xóa dòng thừa
+    └── COMPLETED (tx): public_submissions ACCEPTED + official_case_id +
+        official_payload_json/at/by = effectivePayload(record) tại thời điểm hoàn tất + ghi
+        public_submission_payload_history layer 'OFFICIAL' + request_log
 
 src/modules/public-intake/pl3-export.ts (thuần, không I/O)
-├── buildPl3Content(records) → tách sheet PL3 (ACCEPTED) / Ton dong (đang xử lý)
+├── buildPl3Content / createPl3Accumulator → tách sheet PL3 (ACCEPTED) / Ton dong (đang xử lý)
 ├── scannedFileNames (trường 49) → buildOriginalFileNames cùng file-naming.ts,
 │   dùng chung quy ước với bước FILES_MOVED để tên không lệch nhau
-└── POST /api/exports (route.ts) không còn lọc theo status — luôn đưa toàn bộ
-    allRecords (giới hạn 2000) vào buildPl3Content, để nó tự phân 2 sheet
+└── POST /api/exports (route.ts) — ĐÃ SỬA (Phase 2, 2026-07-25): dùng
+    repository.listForExport (keyset pagination theo legacy_row_index, batch 500), KHÔNG còn
+    `.slice(0, 2000)` ngầm. Giới hạn mới là MAX_EXPORT_SUBMISSIONS = 20000 kèm cờ `truncated` hiển
+    thị ra sheet "Canh bao" — không âm thầm cắt bớt như trước.
+
+src/modules/ai-extraction/ + scripts/ai/ + agent/ (Phase 9-11, khung sườn — CHƯA nối AI thật)
+├── src/modules/ai-extraction/fingerprints.ts
+│   computeInputFingerprint (sort checksum) / computeResultFingerprint (sort key đệ quy trước
+│   khi JSON.stringify — tránh lệch fingerprint khi model trả JSON khác thứ tự key)
+├── src/modules/ai-extraction/prompt-safety.ts
+│   detectPromptInjection / scanForPromptInjection — quét đệ quy giá trị chuỗi tìm dấu hiệu mô
+│   hình "làm theo" chỉ dẫn giấu trong ảnh thay vì trích xuất (GEMINI.md §6.2)
+├── scripts/ai/validator.ts
+│   validateAiResultPayload — ĐƯỜNG GỌI THẬT DUY NHẤT nhận JSON từ AI: kiểm certificate/parcels,
+│   gọi scanForPromptInjection (khớp → BLOCKING), kiểm unreadableFields (thiếu → WARNING)
+├── src/app/api/ai/results/route.ts (POST, worker gọi bằng header x-ai-worker-key)
+│   ├── Chặn bằng AI_EXTRACTION_ENABLED qua loadServerEnvironment() — tắt → 503
+│   │   SERVICE_UNAVAILABLE (trước 2026-07-25 vòng 2 review, cờ không chặn gì)
+│   ├── validateAiResultPayload → validationStatus PASSED/REVIEW_REQUIRED/BLOCKED
+│   └── ghi ai_extraction_results + cập nhật ai_extraction_jobs.status
+│       ⚠️ result_version hardcode 1 — kết quả thứ hai cho cùng job vỡ unique constraint (chưa vá)
+├── agent/prompts/certificate-extraction.md — prompt tĩnh, có quy tắc chống prompt injection §6.2
+└── agent/schemas/certificate-extraction-schema.json — có unreadableFields + null cho phép trên
+    trường bắt buộc (§6.4 "không suy diễn")
+    ⚠️ scripts/ai/manifest.ts chỉ là object hằng số — CHƯA có script thật đóng gói job (copy file
+    documentType=CERTIFICATE từ Drive vào ANTIGRAVITY_WORKSPACE_ROOT, loại trừ ảnh CCCD)
 
 src/app/api/health/google/route.ts
 └── Google Drive OAuth + root folder + quota
@@ -132,6 +216,15 @@ Migration SQL tạo các nhóm bảng:
 - `existing_certificates`, owners/link/import/index append-only.
 - `cases`, `certificates`, `owners`, `files`, QR scans và bảng tương thích nâng cấp.
 - `export_jobs`.
+- `public_submission_payload_history` (2026-07-25) — layer `CITIZEN`/`WORKING`/`OFFICIAL`, unique
+  `(submission_id, layer, payload_version)`. 6+3 cột `citizen_payload_*`/`working_payload_*`/
+  `official_payload_*` nằm ngay trên `public_submissions`, không phải bảng riêng.
+- `official_parcels`, `official_land_uses` (2026-07-25, Phase 8/P0-5) — bản chính thức của thửa
+  đất/mục đích sử dụng, tách khỏi `public.parcels.data_json` (vốn là JSON tự do, không truy vấn
+  được theo cột). FK `official_land_uses.official_parcel_id → official_parcels` có `on delete
+  cascade`.
+- `ai_extraction_jobs`, `ai_extraction_results` (2026-07-25, Phase 9) — hàng đợi AI đọc ảnh GCN.
+  Unique `(submission_id, input_fingerprint, prompt_version, schema_version)` chống job trùng.
 
 Bất biến quan trọng:
 
@@ -146,6 +239,21 @@ Bất biến quan trọng:
 - Nháp legacy thiếu `owners` hoặc bị lưu JSON lồng được phục hồi/chuẩn hóa có audit; repository giải mã tương thích trong thời gian chuyển đổi, còn route upload luôn kiểm shape dữ liệu trước khi gọi Drive và trả `409 INVALID_STATE` thay vì lỗi 500.
 - GCN cũ append-only; bản mới nhất theo `row_version` có hiệu lực.
 - RLS bật, không có policy/quyền cho `anon` và `authenticated`; browser không nhận database secret.
+- **CAS thay advisory lock cho claim (2026-07-25):** `commitStaffAction` chống hai cán bộ claim
+  đồng thời bằng điều kiện ngay trong câu `UPDATE` (`claimed_by is null or claimed_by = $actor or
+  $force`), không phải khóa tường minh — đủ cho luồng hiện tại nhưng phụ thuộc bất biến ngầm "mọi
+  ghi đều tăng version".
+- **CẢNH BÁO — Drive folder cache không còn an toàn xuyên tiến trình (2026-07-25):**
+  `PublicIntakeStorage.findOrCreateFolder` từng dùng `pg_advisory_xact_lock` để loại trừ lẫn nhau;
+  bản hiện tại thay bằng `Map` static trong tiến trình Node (để không gọi Google bên trong
+  transaction pool `max:1`). Trên Vercel serverless (nhiều lambda song song), hai request đồng
+  thời tạo cùng một hồ sơ lần đầu có thể cùng miss cache → tạo trùng thư mục trên Drive. Chưa vá,
+  chưa ghi quyết định chấp nhận rủi ro nào — cần xử lý trước khi có tải thật đồng thời cao.
+- **`OFFICIAL_ACCEPTANCE_ENABLED = true`** (`src/modules/submissions/acceptance.ts`) — bật từ
+  trước khi nhánh `feat/antigravity-assisted-review` tách ra (xem 03-decisions.md
+  `[2026-07-25] MỞ tiếp nhận chính thức`). Toàn bộ saga tiếp nhận chính thức đang LIVE, không phải
+  trạng thái tắt/an toàn — mọi thay đổi vào `acceptance-saga.ts`/`official-record.ts` ảnh hưởng
+  ngay tới dữ liệu chính thức thật nếu deploy.
 
 ## API liên quan hạ tầng
 
@@ -162,9 +270,16 @@ POST /api/public/submissions/current/uploads/complete
 GET /api/submissions
 GET /api/submissions/:submissionId
 PATCH /api/submissions/:submissionId
-POST /api/submissions/:submissionId/action
+PUT /api/submissions/:submissionId/working-payload   (2026-07-25, Phase 6 — sửa đầy đủ bản làm
+                                                        việc: thửa đất, mục đích sử dụng)
+POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/
+                                                        REQUEST_SUPPLEMENT/REJECT)
+POST /api/submissions/:submissionId/accept             (chạy completionChecks trước khi mở saga)
 POST /api/submissions/:submissionId/reset-access-secret
 POST /api/exports
+POST /api/ai/results                                   (2026-07-25, Phase 11 — worker AI gọi bằng
+                                                         x-ai-worker-key; 503 khi AI_EXTRACTION_
+                                                         ENABLED tắt)
 ```
 
 Lỗi API giữ cấu trúc `{ error: { code, message, requestId, details } }`, không trả stack, PII, token hoặc Drive ID/link.
@@ -185,7 +300,21 @@ SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com
 DATA_HASH_PEPPER=
 MAX_UPLOAD_MB=30
 VERCEL_REGION=sin1
+
+# AI extraction (Phase 9-11, 2026-07-25) — mặc định tắt
+AI_EXTRACTION_ENABLED=false
+AI_EXTRACTION_WORKER_TYPE=ANTIGRAVITY
+AI_EXTRACTION_PROMPT_VERSION=v1.0
+AI_EXTRACTION_SCHEMA_VERSION=v1.0
+AI_WORKER_API_KEY=            # khóa để worker gọi POST /api/ai/results
+ANTIGRAVITY_WORKSPACE_ROOT=   # PHẢI ngoài cây repo — xem .env.example
 ```
+
+Danh sách trên **chưa đầy đủ** so với `.env.example` thật — thiếu từ trước nhánh này
+(`PUBLIC_SESSION_SECRET`, `PUBLIC_ACCESS_CODE_PEPPER`, `ORIGIN_SHARED_SECRET`,
+`TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `CONSENT_NOTICE_VERSION`,
+`PUBLIC_INTAKE_MODE`, `MIN_DRIVE_FREE_GB`). Đọc `.env.example` trực tiếp để có danh sách đúng —
+mục này chỉ mới bổ sung phần AI extraction, chưa dọn lại toàn bộ.
 
 `GOOGLE_SHEETS_SPREADSHEET_ID` là tùy chọn và chỉ cần trong cửa sổ ETL legacy. Không dùng `NEXT_PUBLIC_SUPABASE_*`, service-role key hay Data API ở runtime hiện tại.
 
