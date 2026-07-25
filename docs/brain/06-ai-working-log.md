@@ -1,5 +1,21 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 7 — Giao diện biên tập bản làm việc & banner claim (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`submission-claim-banner.tsx`:** Tạo banner hiển thị trạng thái claim, cán bộ đang xử lý, và các nút thao tác `Nhận xử lý`, `Trả lại hàng chờ`, `Chuyển giao`, `Mở khóa cưỡng chế` tích hợp modal xác nhận và kiểm tra quyền.
+  - **`use-working-payload.ts`:** Tạo React Hook quản lý trạng thái nháp làm việc, dirty check và gọi API `PUT /api/submissions/:id/working-payload`.
+  - **`editable-parcel-table.tsx`:** Tạo bảng biên tập thửa đất hỗ trợ thêm, xóa, nhân bản thửa đất, sửa mục đích sử dụng.
+  - **`working-payload-editor.tsx`:** Bộ biên tập dữ liệu bản làm việc gồm GCN, chủ sử dụng, thửa đất và tài sản.
+  - **`submission-detail.tsx`:** Tích hợp `SubmissionClaimBanner` lên giao diện chi tiết hồ sơ cán bộ.
+  - **Kiểm tra:**
+    - `npx vitest run`: 39 file pass / 1 skip (**240 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `src/components/admin/submission-claim-banner.tsx` (mới), `src/components/admin/use-working-payload.ts` (mới), `src/components/admin/editable-parcel-table.tsx` (mới), `src/components/admin/working-payload-editor.tsx` (mới), `src/components/submission-detail.tsx`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Hoàn thiện giao diện làm việc trực quan cho cán bộ tiếp nhận và duyệt hồ sơ.
+
 ## [2026-07-25] Phase 6 — API sửa bản làm việc đầy đủ (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)

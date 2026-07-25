@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
+import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
 
 type Owner = {
   id: string;
@@ -379,7 +380,19 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
       <Link className="text-sm font-semibold text-emerald-800 underline" href="/submissions">
         ← Hàng chờ tiếp nhận
       </Link>
-      <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5 sm:p-7">
+      <div className="mt-5">
+        <SubmissionClaimBanner
+          submissionId={submission.submissionId}
+          version={submission.version}
+          status={submission.status}
+          claimedBy={submission.claimedBy || ""}
+          claimedAt={submission.claimedAt || undefined}
+          currentUserEmail=""
+          isAdministrator={true}
+          onRefresh={() => loadSubmission(submission.submissionId).then(setSubmission)}
+        />
+      </div>
+      <section className="mt-2 rounded-xl border border-stone-200 bg-white p-5 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-emerald-800">{submission.receiptCode}</p>
