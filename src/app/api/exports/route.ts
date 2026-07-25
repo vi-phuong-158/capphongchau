@@ -7,9 +7,15 @@ import { verifyCsrfToken } from "@/modules/auth/csrf";
 import { createApiErrorPayload } from "@/modules/common/api-error";
 import { UserRole } from "@/modules/common/domain";
 import { loadServerEnvironment } from "@/modules/common/env";
-import { buildPl3Content, renderPl3Workbook } from "@/modules/public-intake/pl3-export";
+import {
+  BACKLOG_EXPORT_STATUSES,
+  createPl3Accumulator,
+  OFFICIAL_EXPORT_STATUSES,
+  renderPl3Workbook,
+} from "@/modules/public-intake/pl3-export";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
+import type { PublicStatus } from "@/modules/public-intake/workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +23,7 @@ export const dynamic = "force-dynamic";
 const EXPORT_ROLES = [UserRole.REPORT_VIEWER, UserRole.WARD_ADMIN, UserRole.SYSTEM_ADMIN] as const;
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const MAX_EXPORT_SUBMISSIONS = 20000;
 
 function fail(
   code: "ACCESS_DENIED" | "UNAUTHENTICATED" | "INTERNAL_ERROR",
@@ -35,6 +42,20 @@ function fileTimestamp(now: Date): string {
   return `${iso.slice(0, 10).replace(/-/g, "")}-${iso.slice(11, 19).replace(/:/g, "")}`;
 }
 
+function parseStatuses(scopeParam: string | null): readonly PublicStatus[] {
+  if (scopeParam === "official") return OFFICIAL_EXPORT_STATUSES;
+  if (scopeParam === "backlog") return BACKLOG_EXPORT_STATUSES;
+  return [...OFFICIAL_EXPORT_STATUSES, ...BACKLOG_EXPORT_STATUSES];
+}
+
+function parseIsoDate(param: string | null, isEnd: boolean): string | undefined {
+  if (!param) return undefined;
+  const trimmed = param.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.includes("T")) return trimmed;
+  return isEnd ? `${trimmed}T23:59:59.999Z` : `${trimmed}T00:00:00.000Z`;
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = request.headers.get("x-request-id") ?? randomUUID();
   try {
@@ -46,11 +67,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return fail("ACCESS_DENIED", "Yêu cầu bảo mật không hợp lệ hoặc đã hết hạn.", requestId);
     }
 
-    const repository = getPublicIntakeRepository();
-    const allRecords = await repository.list();
-    const records = allRecords.slice(0, 2000);
+    const searchParams = request.nextUrl.searchParams;
+    const scopeParam = searchParams.get("scope");
+    const fromParam = searchParams.get("from");
+    const toParam = searchParams.get("to");
 
-    const content = buildPl3Content(records);
+    const statuses = parseStatuses(scopeParam);
+    const fromDate = parseIsoDate(fromParam, false);
+    const toDate = parseIsoDate(toParam, true);
+
+    const repository = getPublicIntakeRepository();
+    const accumulator = createPl3Accumulator();
+
+    let totalSubmissionsProcessed = 0;
+    let truncated = false;
+
+    for await (const chunk of repository.listForExport({
+      statuses,
+      fromDate,
+      toDate,
+      batchSize: 500,
+    })) {
+      if (totalSubmissionsProcessed + chunk.length > MAX_EXPORT_SUBMISSIONS) {
+        const takeCount = MAX_EXPORT_SUBMISSIONS - totalSubmissionsProcessed;
+        accumulator.addChunk(chunk.slice(0, takeCount));
+        totalSubmissionsProcessed += takeCount;
+        truncated = true;
+        break;
+      }
+
+      accumulator.addChunk(chunk);
+      totalSubmissionsProcessed += chunk.length;
+    }
+
+    const content = accumulator.getContent(truncated);
     const bytes = await renderPl3Workbook(content);
 
     const now = new Date();
@@ -64,46 +114,56 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       backlogRows: content.backlog.rows.length,
       officialSubmissions: content.officialSubmissionCount,
       backlogSubmissions: content.backlogSubmissionCount,
+      truncated,
     });
 
-    // Lưu trữ Drive là "best-effort": xuất phải trả được file cho cán bộ ngay cả khi Drive lỗi.
-    // Trạng thái job ghi lại việc lưu trữ có thành công hay không để truy vết.
     let driveFileId = "";
-    let jobStatus: "COMPLETED" | "ARCHIVE_FAILED" = "COMPLETED";
+    let archived = false;
     try {
       driveFileId = await getPublicIntakeStorage().uploadExport({
         fileName,
         mimeType: XLSX_MIME_TYPE,
         bytes,
       });
+      archived = true;
     } catch {
-      jobStatus = "ARCHIVE_FAILED";
+      archived = false;
     }
 
     const exportJobId = randomUUID();
     const completedAt = new Date().toISOString();
-    await repository.appendExportJob({
-      exportJobId,
-      exportType: "PL3",
-      status: jobStatus,
-      driveFileId,
-      fileName,
-      rowCount,
-      submissionCount,
-      warningCount,
-      checksumSha256: checksum,
-      actorEmail: user.email,
-      scopeJson,
-      createdAt: now.toISOString(),
-      completedAt,
-    });
-    await repository.appendAudit({
-      actorEmail: user.email,
-      action: "PL3_EXPORTED",
-      entityId: exportJobId,
-      requestId,
-      metadata: { rowCount, submissionCount, warningCount, archived: jobStatus === "COMPLETED" },
-    });
+    try {
+      await repository.appendExportJob({
+        exportJobId,
+        exportType: "PL3",
+        status: archived ? "COMPLETED" : "ARCHIVE_FAILED",
+        driveFileId,
+        fileName,
+        rowCount,
+        submissionCount,
+        warningCount,
+        checksumSha256: checksum,
+        actorEmail: user.email,
+        scopeJson,
+        createdAt: now.toISOString(),
+        completedAt,
+      });
+    } catch {
+      // db export_jobs insert failure is non-fatal
+    }
+
+    let audited = true;
+    try {
+      await repository.appendAudit({
+        actorEmail: user.email,
+        action: "PL3_EXPORTED",
+        entityId: exportJobId,
+        requestId,
+        metadata: { rowCount, submissionCount, warningCount, archived, truncated },
+      });
+    } catch {
+      audited = false;
+    }
 
     return new NextResponse(new Uint8Array(bytes), {
       status: 200,
@@ -113,8 +173,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "cache-control": "no-store",
         "x-export-job-id": exportJobId,
         "x-export-row-count": String(rowCount),
+        "x-export-submission-count": String(submissionCount),
         "x-export-warning-count": String(warningCount),
-        "x-export-archived": jobStatus === "COMPLETED" ? "1" : "0",
+        "x-export-truncated": truncated ? "1" : "0",
+        "x-export-archived": archived ? "1" : "0",
+        "x-export-audit": audited ? "success" : "failed",
       },
     });
   } catch (error) {

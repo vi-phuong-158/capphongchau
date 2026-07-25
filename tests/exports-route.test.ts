@@ -33,16 +33,27 @@ vi.mock("@/modules/common/env", () => ({
   }),
 }));
 
-const mockList = vi.fn();
+const mockListForExport = vi.fn();
 const mockAppendExportJob = vi.fn().mockResolvedValue(undefined);
 const mockAppendAudit = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/modules/public-intake/repository", () => ({
   getPublicIntakeRepository: vi.fn().mockReturnValue({
-    list: (...args: any[]) => mockList(...args),
+    listForExport: (...args: any[]) => mockListForExport(...args),
     appendExportJob: (...args: any[]) => mockAppendExportJob(...args),
     appendAudit: (...args: any[]) => mockAppendAudit(...args),
   }),
+  decodeFileSummaries: (value: unknown) => {
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return Array.isArray(value) ? value : [];
+  },
 }));
 
 const mockUploadExport = vi.fn().mockResolvedValue("drive_file_123");
@@ -52,6 +63,12 @@ vi.mock("@/modules/public-intake/storage", () => ({
     uploadExport: (...args: any[]) => mockUploadExport(...args),
   }),
 }));
+
+async function* toAsyncGen<T>(chunks: T[][]): AsyncGenerator<T[]> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
+}
 
 function makeDraft(): IntakeDraft {
   return {
@@ -93,26 +110,33 @@ function makeRecord(id: string, status: any = "ACCEPTED", overrides: Partial<Sub
     accessCodeHash: "hash",
     failedAttempts: 0,
     lockedUntil: "",
+    consentVersion: "v1",
+    consentedAt: new Date().toISOString(),
+    retentionUntil: "",
+    driveFolderId: "folder_1",
+    officialCaseId: "",
+    acceptStep: "",
+    claimedBy: "",
+    claimedAt: "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     draft: d,
-    draftJson: JSON.stringify(d),
-    rawDraftJson: JSON.stringify(d),
+    accessVersion: 1,
     fileSummaries: [
       {
         fileId: "f1",
+        ownerId: "o1",
         documentType: "CERTIFICATE",
-        fileName: "AD123456-GCN.jpg",
+        status: "UPLOADED",
+        sizeBytes: 1024,
+        checksum: "abc",
         driveFileId: "drive_1",
         mimeType: "image/jpeg",
-        sizeBytes: 1024,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       },
     ],
-    submittedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    legacyRowIndex: 1,
-    identityCardNumber: "025080001234",
-    ownerName: "Nguyễn Văn A",
+    rowIndex: 1,
     ...overrides,
   };
 }
@@ -129,7 +153,7 @@ function makeRequest(): NextRequest {
 
 describe("POST /api/exports route tests", () => {
   it("T1: 1 record ACCEPTED -> 200, magic byte PK (0x50 0x4b), x-export-row-count = 1", async () => {
-    mockList.mockResolvedValueOnce([makeRecord("1")]);
+    mockListForExport.mockReturnValueOnce(toAsyncGen([[makeRecord("1")]]));
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(200);
@@ -142,39 +166,38 @@ describe("POST /api/exports route tests", () => {
 
   it("T2: 2.500 records ACCEPTED -> x-export-row-count = 2500, x-export-truncated = 0", async () => {
     const records = Array.from({ length: 2500 }, (_, i) => makeRecord(String(i + 1)));
-    mockList.mockResolvedValueOnce(records);
+    mockListForExport.mockReturnValueOnce(toAsyncGen([records.slice(0, 1000), records.slice(1000, 2000), records.slice(2000)]));
 
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(200);
-    // TRƯỚC Phase 2, route cắt .slice(0, 2000) nên x-export-row-count trả về "2000", gây FAIL test này!
     expect(res.headers.get("x-export-row-count")).toBe("2500");
+    expect(res.headers.get("x-export-truncated")).toBe("0");
   });
 
   it("T3: appendExportJob reject -> 200, file intact, x-export-audit = failed", async () => {
-    mockList.mockResolvedValueOnce([makeRecord("1")]);
+    mockListForExport.mockReturnValueOnce(toAsyncGen([[makeRecord("1")]]));
     mockAppendExportJob.mockRejectedValueOnce(new Error("DB Connection Failed"));
 
     const res = await POST(makeRequest());
 
-    // TRƯỚC Phase 2, appendExportJob bị reject khiến toàn bộ route ném lỗi và trả HTTP 500, gây FAIL test này!
     expect(res.status).toBe(200);
     expect(res.headers.get("x-export-row-count")).toBe("1");
   });
 
   it("T4: appendAudit reject -> 200, file intact", async () => {
-    mockList.mockResolvedValueOnce([makeRecord("1")]);
+    mockListForExport.mockReturnValueOnce(toAsyncGen([[makeRecord("1")]]));
     mockAppendAudit.mockRejectedValueOnce(new Error("Audit log insert failed"));
 
     const res = await POST(makeRequest());
 
-    // TRƯỚC Phase 2, appendAudit bị reject khiến route ném lỗi và trả HTTP 500, gây FAIL test này!
     expect(res.status).toBe(200);
     expect(res.headers.get("x-export-row-count")).toBe("1");
+    expect(res.headers.get("x-export-audit")).toBe("failed");
   });
 
   it("T5: uploadExport reject -> 200, x-export-archived = 0", async () => {
-    mockList.mockResolvedValueOnce([makeRecord("1")]);
+    mockListForExport.mockReturnValueOnce(toAsyncGen([[makeRecord("1")]]));
     mockUploadExport.mockRejectedValueOnce(new Error("Drive Upload Failed"));
 
     const res = await POST(makeRequest());
@@ -187,12 +210,15 @@ describe("POST /api/exports route tests", () => {
     const rawFileSummariesJson = JSON.stringify([
       {
         fileId: "f1",
+        ownerId: "o1",
         documentType: "CERTIFICATE",
-        fileName: "AD123456-GCN.jpg",
+        status: "UPLOADED",
+        sizeBytes: 1024,
+        checksum: "abc",
         driveFileId: "drive_1",
         mimeType: "image/jpeg",
-        sizeBytes: 1024,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       },
     ]);
 
@@ -200,7 +226,7 @@ describe("POST /api/exports route tests", () => {
       fileSummaries: rawFileSummariesJson as any,
     });
 
-    mockList.mockResolvedValueOnce([recordWithJsonString]);
+    mockListForExport.mockReturnValueOnce(toAsyncGen([[recordWithJsonString]]));
 
     const res = await POST(makeRequest());
     expect(res.status).toBe(200);
@@ -208,13 +234,12 @@ describe("POST /api/exports route tests", () => {
     const buf = await res.arrayBuffer();
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
+    await wb.xlsx.load(Buffer.from(buf) as any);
 
     const sheet = wb.getWorksheet("PL3")!;
-    // Dòng 1 & 2 là Header. Dòng 3 là bản ghi đầu tiên. Cột 49 (AW) là Tệp scan.
-    const col49Value = sheet.getRow(3).getCell(49).value;
+    // Dòng 1 & 2 là Header. Dòng 3 là bản ghi đầu tiên. STT là Cell 1. Cột Tệp scan (trường 49) là Cell 50.
+    const col49Value = sheet.getRow(3).getCell(50).value;
 
-    // TRƯỚC Phase 2, fileSummaries dạng chuỗi không được decode đúng làm cho Cột 49 bị rỗng, gây FAIL test này!
-    expect(String(col49Value || "")).toContain("AD123456-GCN.jpg");
+    expect(String(col49Value || "")).toContain("AD 123456-GCN.jpg");
   });
 });

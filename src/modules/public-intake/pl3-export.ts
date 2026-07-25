@@ -174,11 +174,23 @@ function field19(parcel: Parcel, context: string, warnings: string[]): string {
  */
 export function scannedFileNames(
   issueNumber: string,
-  fileSummaries: readonly PublicFileSummary[],
+  fileSummaries: readonly PublicFileSummary[] | string | unknown,
 ): string {
-  const uploaded = fileSummaries.filter(
+  let list: readonly PublicFileSummary[] = [];
+  if (Array.isArray(fileSummaries)) {
+    list = fileSummaries;
+  } else if (typeof fileSummaries === "string") {
+    try {
+      const parsed = JSON.parse(fileSummaries);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+  }
+
+  const uploaded = list.filter(
     (file): file is PublicFileSummary & { mimeType: string } =>
-      file.status === "UPLOADED" && Boolean(file.mimeType),
+      Boolean(file) && file.status === "UPLOADED" && Boolean(file.mimeType),
   );
   return buildOriginalFileNames(issueNumber, uploaded).filter(Boolean).join("; ");
 }
@@ -331,36 +343,57 @@ export interface Pl3ExportContent {
   readonly backlog: Pl3BuildResult;
   readonly officialSubmissionCount: number;
   readonly backlogSubmissionCount: number;
+  readonly truncated?: boolean;
 }
 
-function collect(
-  records: readonly SubmissionRecord[],
-  statuses: readonly PublicStatus[],
-): {
-  result: Pl3BuildResult;
-  submissionCount: number;
-} {
-  const selected = records.filter((record) => statuses.includes(record.status));
-  const rows: string[][] = [];
-  const warnings: string[] = [];
-  for (const record of selected) {
-    const built = buildSubmissionRows(record);
-    rows.push(...built.rows);
-    warnings.push(...built.warnings);
-  }
-  return { result: { rows, warnings }, submissionCount: selected.length };
+export interface Pl3Accumulator {
+  addChunk(records: readonly SubmissionRecord[]): void;
+  getContent(truncated?: boolean): Pl3ExportContent;
+}
+
+/** Tạo accumulator để gom dữ liệu theo từng lô khi stream xuất PL3. */
+export function createPl3Accumulator(): Pl3Accumulator {
+  const officialRows: string[][] = [];
+  const officialWarnings: string[] = [];
+  let officialSubmissionCount = 0;
+
+  const backlogRows: string[][] = [];
+  const backlogWarnings: string[] = [];
+  let backlogSubmissionCount = 0;
+
+  return {
+    addChunk(records: readonly SubmissionRecord[]) {
+      for (const record of records) {
+        if (OFFICIAL_EXPORT_STATUSES.includes(record.status)) {
+          officialSubmissionCount++;
+          const built = buildSubmissionRows(record);
+          officialRows.push(...built.rows);
+          officialWarnings.push(...built.warnings);
+        } else if (BACKLOG_EXPORT_STATUSES.includes(record.status)) {
+          backlogSubmissionCount++;
+          const built = buildSubmissionRows(record);
+          backlogRows.push(...built.rows);
+          backlogWarnings.push(...built.warnings);
+        }
+      }
+    },
+    getContent(truncated = false): Pl3ExportContent {
+      return {
+        official: { rows: officialRows, warnings: officialWarnings },
+        backlog: { rows: backlogRows, warnings: backlogWarnings },
+        officialSubmissionCount,
+        backlogSubmissionCount,
+        truncated,
+      };
+    },
+  };
 }
 
 /** Phân hồ sơ thành báo cáo chính thức (đã tiếp nhận) và danh sách tồn đọng. */
 export function buildPl3Content(records: readonly SubmissionRecord[]): Pl3ExportContent {
-  const official = collect(records, OFFICIAL_EXPORT_STATUSES);
-  const backlog = collect(records, BACKLOG_EXPORT_STATUSES);
-  return {
-    official: official.result,
-    backlog: backlog.result,
-    officialSubmissionCount: official.submissionCount,
-    backlogSubmissionCount: backlog.submissionCount,
-  };
+  const acc = createPl3Accumulator();
+  acc.addChunk(records);
+  return acc.getContent();
 }
 
 function writeSheet(worksheet: ExcelJS.Worksheet, result: Pl3BuildResult): void {
@@ -376,15 +409,51 @@ function writeSheet(worksheet: ExcelJS.Worksheet, result: Pl3BuildResult): void 
   });
 }
 
+function writeWarningSheet(
+  worksheet: ExcelJS.Worksheet,
+  officialWarnings: readonly string[],
+  backlogWarnings: readonly string[],
+  truncated?: boolean,
+): void {
+  worksheet.addRow(["Nguồn", "Nội dung cảnh báo"]);
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  worksheet.getRow(1).font = { bold: true };
+
+  if (truncated) {
+    worksheet.addRow([
+      "Hệ thống",
+      "Bản kết xuất vượt quá giới hạn 20.000 hồ sơ. Dữ liệu đã bị giới hạn (truncated).",
+    ]);
+  }
+
+  officialWarnings.forEach((warning) => {
+    worksheet.addRow(["Chính thức (PL3)", warning]);
+  });
+  backlogWarnings.forEach((warning) => {
+    worksheet.addRow(["Tồn đọng (Ton dong)", warning]);
+  });
+}
+
 /**
- * Kết xuất workbook PL3: sheet `PL3` (đã tiếp nhận) + sheet `Ton dong` (đang xử lý). Trả về buffer
- * XLSX để upload Drive và/hoặc tải về.
+ * Kết xuất workbook PL3: sheet `PL3` (đã tiếp nhận) + sheet `Ton dong` (đang xử lý) + sheet `Canh bao`.
+ * Trả về buffer XLSX để upload Drive và/hoặc tải về.
  */
 export async function renderPl3Workbook(content: Pl3ExportContent): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "land-ocr-180";
   writeSheet(workbook.addWorksheet("PL3"), content.official);
   writeSheet(workbook.addWorksheet("Ton dong"), content.backlog);
+
+  const totalWarnings = content.official.warnings.length + content.backlog.warnings.length;
+  if (totalWarnings > 0 || content.truncated) {
+    writeWarningSheet(
+      workbook.addWorksheet("Canh bao"),
+      content.official.warnings,
+      content.backlog.warnings,
+      content.truncated,
+    );
+  }
+
   const buffer = await workbook.xlsx.writeBuffer();
   return new Uint8Array(buffer);
 }

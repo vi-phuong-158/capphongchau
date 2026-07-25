@@ -174,6 +174,23 @@ export function decodeSubmissionDraft(value: unknown): IntakeDraft | null {
   return draft as IntakeDraft;
 }
 
+/**
+ * Tương tự `decodeSubmissionDraft`, đọc phòng thủ `file_summary_json` từ database Supavisor
+ * khi nó bị trả về dạng chuỗi JSON thay vì mảng.
+ */
+export function decodeFileSummaries(value: unknown): PublicFileSummary[] {
+  let summaries = value;
+  if (typeof summaries === "string") {
+    try {
+      summaries = JSON.parse(summaries) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(summaries)) return [];
+  return summaries as PublicFileSummary[];
+}
+
 function mapSubmission(row: SubmissionRow): SubmissionRecord {
   return {
     submissionId: row.submission_id,
@@ -196,7 +213,7 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     updatedAt: asIso(row.updated_at),
     draft: decodeSubmissionDraft(row.draft_json),
     accessVersion: row.access_version,
-    fileSummaries: Array.isArray(row.file_summary_json) ? row.file_summary_json : [],
+    fileSummaries: decodeFileSummaries(row.file_summary_json),
     rowIndex: Number(row.legacy_row_index),
   };
 }
@@ -877,6 +894,53 @@ export class PublicIntakeRepository {
       `select ${SUBMISSION_SELECT} from public.public_submissions order by legacy_row_index`,
     );
     return rows.map(mapSubmission);
+  }
+
+  /**
+   * Đọc phân lô (keyset pagination) theo `legacy_row_index` phục vụ xuất báo cáo PL3,
+   * tránh tải toàn bộ dữ liệu vào bộ nhớ cùng lúc. Trả về AsyncGenerator theo từng lô.
+   */
+  async *listForExport(input: {
+    statuses: readonly PublicStatus[];
+    fromDate?: string;
+    toDate?: string;
+    batchSize?: number;
+  }): AsyncGenerator<SubmissionRecord[]> {
+    const database = getDatabase();
+    const batchSize = input.batchSize ?? 500;
+    let lastRowIndex = 0;
+
+    while (true) {
+      const rows = await database.unsafe<SubmissionRow[]>(
+        `select ${SUBMISSION_SELECT}
+         from public.public_submissions
+         where status = any($1)
+           and ($2::timestamptz is null or updated_at >= $2::timestamptz)
+           and ($3::timestamptz is null or updated_at < $3::timestamptz)
+           and legacy_row_index > $4
+         order by legacy_row_index
+         limit $5`,
+        [
+          input.statuses,
+          input.fromDate || null,
+          input.toDate || null,
+          lastRowIndex,
+          batchSize,
+        ],
+      );
+
+      if (rows.length === 0) {
+        break;
+      }
+
+      const records = rows.map(mapSubmission);
+      yield records;
+
+      lastRowIndex = Number(rows[rows.length - 1].legacy_row_index);
+      if (rows.length < batchSize) {
+        break;
+      }
+    }
   }
 
   async listSummaries(): Promise<SubmissionSummary[]> {

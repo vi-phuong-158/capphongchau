@@ -1,5 +1,34 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 2 — Sửa xuất PL3/XLSX (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`repository.ts`:**
+    - Thêm `decodeFileSummaries` đọc phòng thủ `file_summary_json` dạng chuỗi JSON.
+    - Thêm `listForExport` dùng keyset pagination theo `legacy_row_index` với `batchSize = 500` và bộ lọc `statuses`, `fromDate`, `toDate`.
+  - **`pl3-export.ts`:**
+    - Thêm `createPl3Accumulator` gom dữ liệu theo từng lô stream.
+    - Thêm sheet `Canh bao` render danh sách cảnh báo và thông báo khi dữ liệu vượt ngưỡng.
+    - Thêm phòng thủ trong `scannedFileNames` cho `fileSummaries` dạng string.
+  - **`route.ts` (`/api/exports`):**
+    - Viết lại route dùng `listForExport` phân lô streaming, bỏ cứng `.slice(0, 2000)`.
+    - Thêm tham số query `scope`, `from`, `to`. Giới hạn `MAX_EXPORT_SUBMISSIONS = 20000` (đánh dấu `truncated = true` khi vượt).
+    - Tách riêng 3 khối I/O phụ trợ (`uploadExport`, `appendExportJob`, `appendAudit`) trong từng `try/catch` độc lập — lỗi ghi log/drive không làm hủy file XLSX trả về cho cán bộ.
+    - Trả về các header: `x-export-job-id`, `x-export-row-count`, `x-export-submission-count`, `x-export-warning-count`, `x-export-truncated`, `x-export-archived`, `x-export-audit`.
+  - **`pl3-export-button.tsx` & `submissions/page.tsx`:**
+    - Thêm các ô chọn phạm vi, từ ngày, đến ngày trong nút xuất.
+    - Hiển thị cảnh báo màu đỏ khi `x-export-truncated = 1` và ghi chú khi `x-export-audit = failed`.
+    - Nhúng `<Pl3ExportButton />` trực tiếp tại trang `Hàng chờ tiếp nhận` (`/submissions`) cho các vai trò `REPORT_VIEWER`, `WARD_ADMIN`, `SYSTEM_ADMIN`.
+  - **`next.config.ts`:** Thêm `serverExternalPackages: ["exceljs"]`.
+  - **Kiểm tra:**
+    - `npx vitest run`: 35 file pass / 1 skip (**228 test pass / 9 skip**). Cả 5 test đỏ của Phase 1 đều chuyển sang **PASS**.
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `src/app/api/exports/route.ts`, `src/modules/public-intake/pl3-export.ts`, `src/modules/public-intake/repository.ts`, `src/components/pl3-export-button.tsx`, `src/app/submissions/page.tsx`, `next.config.ts`, `tests/exports-route.test.ts`, `tests/pl3-export-large-certificate.test.ts`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Hoàn thành toàn bộ mục tiêu của Phase 2 theo `IMPLEMENTATION_PLAN_ANTIGRAVITY.md`.
+- **Chưa xác minh:** Chưa thử nghiệm tải file thực tế trên trình duyệt production thật.
+
 ## [2026-07-25] Phase 1 — Test tái hiện lỗi PL3 (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)

@@ -20,6 +20,7 @@ const cspHeader = `
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
+  serverExternalPackages: ["exceljs"],
   async headers() {
     return [
       {

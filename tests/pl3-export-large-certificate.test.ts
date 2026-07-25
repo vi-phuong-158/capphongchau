@@ -63,16 +63,20 @@ function makeRecord(id: string, draft: IntakeDraft): SubmissionRecord {
     accessCodeHash: "hash",
     failedAttempts: 0,
     lockedUntil: "",
-    draft,
-    draftJson: JSON.stringify(draft),
-    rawDraftJson: JSON.stringify(draft),
-    fileSummaries: [],
-    submittedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    consentVersion: "v1",
+    consentedAt: new Date().toISOString(),
+    retentionUntil: "",
+    driveFolderId: "folder_1",
+    officialCaseId: "",
+    acceptStep: "",
+    claimedBy: "",
+    claimedAt: "",
     createdAt: new Date().toISOString(),
-    legacyRowIndex: 1,
-    identityCardNumber: "025080001234",
-    ownerName: draft.owners[0]?.fullName || "",
+    updatedAt: new Date().toISOString(),
+    draft,
+    accessVersion: 1,
+    fileSummaries: [],
+    rowIndex: 1,
   };
 }
 
@@ -87,7 +91,7 @@ describe("PL3 export large certificate and warnings tests", () => {
 
     const bytes = await renderPl3Workbook(content);
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(bytes);
+    await wb.xlsx.load(Buffer.from(bytes) as any);
 
     const sheet = wb.getWorksheet("PL3")!;
     expect(sheet.rowCount).toBe(22); // 2 header rows + 20 data rows
@@ -115,7 +119,7 @@ describe("PL3 export large certificate and warnings tests", () => {
     const bytes = await renderPl3Workbook(content);
 
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(bytes);
+    await wb.xlsx.load(Buffer.from(bytes) as any);
     const sheet = wb.getWorksheet("PL3")!;
     const row3 = sheet.getRow(3);
 
@@ -133,7 +137,7 @@ describe("PL3 export large certificate and warnings tests", () => {
     const bytes = await renderPl3Workbook(content);
 
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(bytes);
+    await wb.xlsx.load(Buffer.from(bytes) as any);
     const sheet = wb.getWorksheet("PL3")!;
     const row3 = sheet.getRow(3);
 
@@ -175,10 +179,9 @@ describe("PL3 export large certificate and warnings tests", () => {
 
     const bytes = await renderPl3Workbook(content);
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(bytes);
+    await wb.xlsx.load(Buffer.from(bytes) as any);
 
     const warningSheet = wb.getWorksheet("Canh bao");
-    // TRƯỚC Phase 2, sheet "Canh bao" chưa được khởi tạo/render trong workbook ExcelJS, gây FAIL test này!
     expect(warningSheet).toBeDefined();
     expect(warningSheet!.rowCount).toBeGreaterThan(1);
   });
