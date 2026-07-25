@@ -3,6 +3,9 @@
 > Ghi lại quyết định kỹ thuật quan trọng để agent sau không "phát minh lại" hoặc đảo ngược
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
+>
+> Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
+> cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
 
 ## [2026-07-25] Khoảng trống version migration `202607250001` và `202607250006`
 
@@ -20,6 +23,25 @@
   chỉ tránh `202607250006` cho tới khi thật sự làm Phase 12.
 - **Người quyết định:** Claude Sonnet 5 (ghi lại theo yêu cầu review 2026-07-25); xác nhận xóa file
   va chạm do chủ dự án đồng ý cùng ngày.
+
+## [2026-07-25] Đồng bộ snapshot chính thức và khóa tạo thư mục Drive xuyên lambda
+
+- **Quyết định:** `commitOfficialAmendment` cập nhật `draft_json` và cả
+  `official_payload_json`/`official_payload_at`/`official_payload_by` trong cùng câu `UPDATE`, trước
+  khi đồng bộ các bảng chính thức trong transaction hiện hữu. Vì vậy snapshot mà
+  `effectivePayload()` ưu tiên luôn là đúng bản vừa được điều chỉnh, cùng metadata người thực hiện
+  và thời điểm. `PublicIntakeStorage.findOrCreateFolder` tiếp tục dùng `Map` chỉ để cache, nhưng mọi
+  cache miss mở một transaction PostgreSQL riêng, lấy `pg_advisory_xact_lock` theo
+  `DRIVE_FOLDER:{parentId}:{name}`, rồi mới list/create thư mục trên Drive.
+- **Lý do:** Trước đó bảng chuẩn hóa chính thức đã được `syncOfficialRecord` cập nhật nhưng snapshot
+  JSON vẫn cũ, khiến đọc theo `effectivePayload()` sai. Cùng lúc, `Map` không chia sẻ giữa các Vercel
+  lambda nên hai request cache miss cùng tên có thể cùng tạo thư mục Drive.
+- **Đánh đổi:** Khóa folder giữ một transaction ngắn trong khi gọi Drive, nên không được gọi hàm từ
+  một `database.begin` bên ngoài (pool runtime `max: 1` sẽ tự deadlock). Đổi lại, cả process/lambda
+  dùng chung Postgres được tuần tự hóa và không cần migration hay bảng lock mới.
+- **Kiểm chứng:** rehearsal integration kiểm snapshot mới sau official amendment; unit test kiểm
+  `findOrCreateFolder` lấy advisory lock trước mọi Drive list/create.
+- **Người quyết định:** Codex, theo yêu cầu vá hai rủi ro production đang mở của chủ dự án.
 
 ## [2026-07-25] MỞ tiếp nhận chính thức — `OFFICIAL_ACCEPTANCE_ENABLED = true`
 
@@ -39,7 +61,7 @@
 - **Hai lỗi chặn phải vá CÙNG LƯỢT, không thể để lại sau:**
   - **`refreshCanonicalProjection` xóa sai thứ tự khóa ngoại** (`repository.ts`). Xóa
     `public_parcels` **trước** `public_land_uses`, mà FK `public_land_uses.parcel_id →
-    public_parcels(parcel_id)` không cascade, không deferrable → `foreign_key_violation`. Lần gửi
+public_parcels(parcel_id)` không cascade, không deferrable → `foreign_key_violation`. Lần gửi
     đầu không lộ vì bảng con còn rỗng (delete là no-op); lỗi chỉ nổ từ lần làm mới **thứ hai** —
     tức mọi lần cán bộ sửa hồ sơ đã gửi và mọi lần người dân gửi bổ sung đều HTTP 500. Đã đảo lại
     thứ tự: con trước cha.
@@ -217,8 +239,8 @@ Bảy câu hỏi nêu ở `REVIEW_CLAUDE_OPUS.md` §10. Chủ dự án trả l�
   3. **Tra cứu tổ chức trong GCN đã có:** Không làm khớp mã số thuế cho khoảng 280 dòng tổ chức
      trong kho GCN cũ (mã dạng `N/A-<mst>`); tra cứu `/tra-cuu` và luồng "không cần nộp lại" tiếp
      tục chỉ khớp cá nhân qua HMAC(CCCD).
-  Điều kiện còn lại **KHÔNG được bỏ qua**: diễn tập staging 3 kịch bản của saga (mục 1 cùng danh
-  sách) — đây là điều kiện chặn duy nhất còn lại trước khi mở `OFFICIAL_ACCEPTANCE_ENABLED`.
+     Điều kiện còn lại **KHÔNG được bỏ qua**: diễn tập staging 3 kịch bản của saga (mục 1 cùng danh
+     sách) — đây là điều kiện chặn duy nhất còn lại trước khi mở `OFFICIAL_ACCEPTANCE_ENABLED`.
 - **Lý do:** Quy mô thử nghiệm nhỏ (một phường Phong Châu, tối đa 500 hồ sơ) và có thời hạn (đợt
   chiến dịch 180 ngày, không lặp lại/không mở rộng sau đó) — chi phí làm đủ cả 3 mục không tương
   xứng lợi ích trong phạm vi và thời gian này.
@@ -268,9 +290,9 @@ Bảy câu hỏi nêu ở `REVIEW_CLAUDE_OPUS.md` §10. Chủ dự án trả l�
 
 ## [2026-07-24] Thiết kế hạ tầng Saga Tiếp nhận chính thức & Khắc phục lỗ hổng kiểm toán
 
-- **Quyết định:** 
+- **Quyết định:**
   1. Cấp mã hồ sơ chính thức theo năm qua bảng `case_counters` SQL nguyên tử (`case_counters.last_sequence`), loại bỏ phụ thuộc Google Sheets `updatedRange`. Nếu Saga bị bỏ dở giữa chừng, lỗ hổng trong dãy số được chấp nhận (không tái sử dụng số cũ).
-  2. Bảng `public_acceptance_sagas` chốt checkpoint theo các mốc `accept_step`. Thao tác Drive (`CASE_FOLDER_READY`, `FILES_MOVED`) chạy **ngoài DB transaction** để tránh deadlock do pool kết nối `max: 1`. 
+  2. Bảng `public_acceptance_sagas` chốt checkpoint theo các mốc `accept_step`. Thao tác Drive (`CASE_FOLDER_READY`, `FILES_MOVED`) chạy **ngoài DB transaction** để tránh deadlock do pool kết nối `max: 1`.
   3. Mọi bản ghi ở bước `RECORDS_WRITTEN` sinh primary key theo quy luật cố định (deterministic, ví dụ `ACC:${submissionId}:${id}`), cấm `randomUUID()` để retry `ON CONFLICT DO NOTHING` không sinh dữ liệu trùng.
   4. Mã hồ sơ `official_case_id` chỉ được ghi vào `public_submissions` ở bước cuối `COMPLETED`.
   5. Các bảng chiếu chuẩn hóa `public_certificates`, `public_owners`, `public_parcels`, `public_land_uses`, `public_assets` được tự động làm mới (refresh projection) khi người dân gửi lại `RESUBMITTED` hoặc cán bộ sửa draft.
@@ -572,10 +594,12 @@ reference.ts`) nhưng nhẹ hơn nhiều so với nguồn thô. Đã hỏi rõ t
   hay phải tách thành hai trường; câu hỏi đã soạn gửi cán bộ chuyên trách (xem `PLAN2.md` §9).
 - **Người quyết định:** Nguồn là PL3 do cơ quan ban hành; Claude Code trích xuất và đối chiếu.
 
-## [2026-07-22] Không sharding — giữ một spreadsheet, sửa ba chỗ ở tầng truy cập
+## [SUPERSEDED 2026-07-23] Không sharding — giữ một spreadsheet, sửa ba chỗ ở tầng truy cập
 
-- **Quyết định:** Bỏ phương án chia 10 spreadsheet theo tổ dân phố kèm `CONTROL_PLANE` trung tâm.
+- **Quyết định lịch sử:** Bỏ phương án chia 10 spreadsheet theo tổ dân phố kèm `CONTROL_PLANE` trung tâm.
   Giữ **một** spreadsheet, thay vào đó sửa ba chỗ trong tầng truy cập dữ liệu.
+- **Đã thay thế:** Ngày 2026-07-23, Supabase PostgreSQL thay Google Sheets làm kho dữ liệu runtime.
+  Các phân tích quota bên dưới chỉ giữ để giải thích vì sao phương án Sheets đã bị loại.
 - **Lý do — sharding không giải bài toán thật:**
   - Quota Google Sheets tính theo **project** và theo **người dùng trong project**, không theo
     spreadsheet. Cả 10 shard đều được ghi bằng một refresh token OAuth duy nhất, nên chia kho nhân

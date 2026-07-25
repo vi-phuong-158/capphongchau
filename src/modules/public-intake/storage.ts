@@ -5,6 +5,7 @@ import {
   createGoogleWorkspaceClient,
   getGoogleAccessToken,
 } from "@/modules/google/workspace-client";
+import { getDatabase } from "@/modules/supabase/database";
 
 import { CANONICAL_IMAGE_MIME_TYPES, isCanonicalImageMimeType } from "./image-format";
 
@@ -230,43 +231,60 @@ export class PublicIntakeStorage {
   }
 
   /**
-   * TUYỆT ĐỐI KHÔNG GỌI findOrCreateFolder BÊN TRONG MỘT `database.begin` ĐANG MỞ
-   * (Do connection pool max: 1, gọi Google bên trong transaction lồng sẽ gây deadlock).
+   * Tìm hoặc tạo thư mục bằng khóa advisory PostgreSQL theo `(parentId, name)`.
+   *
+   * `Map` chỉ là cache tối ưu trong một lambda; nó không thể là cơ chế đồng bộ. Khi cache miss,
+   * transaction RIÊNG này giữ khóa xuyên mọi Vercel process trong lúc query/create trên Drive, rồi
+   * kết thúc ngay. Nhờ vậy hai lambda cùng tạo một nhánh Drive chỉ có một bên thực hiện `create`.
+   *
+   * Hàm này không được gọi khi caller đã mở `database.begin`: pool Supavisor có `max: 1`, nên mở
+   * transaction lồng sẽ tự chờ chính nó. Các caller hiện tại đều gọi nó ngoài transaction nghiệp vụ.
    */
   async findOrCreateFolder(name: string, parentId: string): Promise<string> {
     const cacheKey = `${parentId}:${name}`;
     const cachedId = PublicIntakeStorage.folderCache.get(cacheKey);
     if (cachedId) return cachedId;
 
-    const drive = createGoogleWorkspaceClient(this.credentials).drive;
-    const existing = await drive.files.list({
-      q: [
-        `name = '${escapeQueryValue(name)}'`,
-        `mimeType = '${FOLDER_MIME_TYPE}'`,
-        `'${parentId}' in parents`,
-        "trashed = false",
-      ].join(" and "),
-      fields: "files(id)",
-      pageSize: 1,
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`
+        select pg_advisory_xact_lock(hashtextextended(${`DRIVE_FOLDER:${cacheKey}`}, 0))
+      `;
+
+      // Một request cùng process có thể đã hoàn tất trong lúc request này chờ advisory lock.
+      const recheckedId = PublicIntakeStorage.folderCache.get(cacheKey);
+      if (recheckedId) return recheckedId;
+
+      const drive = createGoogleWorkspaceClient(this.credentials).drive;
+      const existing = await drive.files.list({
+        q: [
+          `name = '${escapeQueryValue(name)}'`,
+          `mimeType = '${FOLDER_MIME_TYPE}'`,
+          `'${parentId}' in parents`,
+          "trashed = false",
+        ].join(" and "),
+        fields: "files(id)",
+        pageSize: 1,
+      });
+
+      const existingId = existing.data.files?.[0]?.id;
+      if (existingId) {
+        PublicIntakeStorage.folderCache.set(cacheKey, existingId);
+        return existingId;
+      }
+
+      const created = await drive.files.create({
+        requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
+        fields: "id",
+      });
+
+      const folderId = created.data.id;
+      if (!folderId) {
+        throw new Error(`Google Drive không tạo được thư mục: ${name}`);
+      }
+      PublicIntakeStorage.folderCache.set(cacheKey, folderId);
+      return folderId;
     });
-
-    const existingId = existing.data.files?.[0]?.id;
-    if (existingId) {
-      PublicIntakeStorage.folderCache.set(cacheKey, existingId);
-      return existingId;
-    }
-
-    const created = await drive.files.create({
-      requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
-      fields: "id",
-    });
-
-    const folderId = created.data.id;
-    if (!folderId) {
-      throw new Error(`Google Drive không tạo được thư mục: ${name}`);
-    }
-    PublicIntakeStorage.folderCache.set(cacheKey, folderId);
-    return folderId;
   }
 }
 

@@ -1,6 +1,11 @@
 import { CERTIFICATE_ROLE_CODES, CHANGE_REASON_CODES, OLD_WARD_OPTIONS } from "./reference";
 import type { IntakeDraft } from "./types";
-import { MAX_LAND_USES_PER_PARCEL, isOrganisationOwner, requiresCitizenId, OWNER_TYPES } from "./types";
+import {
+  MAX_LAND_USES_PER_PARCEL,
+  isOrganisationOwner,
+  requiresCitizenId,
+  OWNER_TYPES,
+} from "./types";
 
 const OLD_WARD_CODES: readonly string[] = OLD_WARD_OPTIONS.map((option) => option.code);
 
@@ -43,75 +48,87 @@ export function isValidPhone(value: string): boolean {
 
 export const draftSchema = z
   .object({
-    certificate: z.object({
-      issueNumber: z.string(),
-      issueDate: z.string(),
-      registryNumber: z.string(),
-    }).strict(),
+    certificate: z
+      .object({
+        issueNumber: z.string(),
+        issueDate: z.string(),
+        registryNumber: z.string(),
+      })
+      .strict(),
     owners: z.array(
-      z.object({
-        id: z.string(),
-        ownerType: z.enum(OWNER_TYPES as unknown as [string, ...string[]]),
-        fullName: z.string(),
-        identityNumber: z.string(),
-        dateOfBirth: z.string(),
-        gender: z.union([z.literal("NAM"), z.literal("NU"), z.literal("")]),
-        residenceAddress: z.string(),
-        identitySource: z.union([z.literal("QR"), z.literal("MANUAL"), z.literal("")]),
-        qrPayloadHash: z.string(),
-        qrDecoderVersion: z.string(),
-        qrParserVersion: z.string(),
-        identityStatus: z.union([
-          z.literal("PENDING_CONFIRMATION"),
-          z.literal("QR_CONFIRMED"),
-          z.literal("MANUAL_COMPLETE"),
-          z.literal(""),
-        ]),
-        identityConfirmedAt: z.string(),
-        roleOnCertificate: z.string(),
-        hasDistinctCurrentUser: z.boolean(),
-        currentUserName: z.string(),
-        currentUserCitizenId: z.string(),
-        currentUserAddress: z.string(),
-        changeReason: z.string(),
-      }).strict()
+      z
+        .object({
+          id: z.string(),
+          ownerType: z.enum(OWNER_TYPES as unknown as [string, ...string[]]),
+          fullName: z.string(),
+          identityNumber: z.string(),
+          dateOfBirth: z.string(),
+          gender: z.union([z.literal("NAM"), z.literal("NU"), z.literal("")]),
+          residenceAddress: z.string(),
+          identitySource: z.union([z.literal("QR"), z.literal("MANUAL"), z.literal("")]),
+          qrPayloadHash: z.string(),
+          qrDecoderVersion: z.string(),
+          qrParserVersion: z.string(),
+          identityStatus: z.union([
+            z.literal("PENDING_CONFIRMATION"),
+            z.literal("QR_CONFIRMED"),
+            z.literal("MANUAL_COMPLETE"),
+            z.literal(""),
+          ]),
+          identityConfirmedAt: z.string(),
+          roleOnCertificate: z.string(),
+          hasDistinctCurrentUser: z.boolean(),
+          currentUserName: z.string(),
+          currentUserCitizenId: z.string(),
+          currentUserAddress: z.string(),
+          changeReason: z.string(),
+        })
+        .strict(),
     ),
     parcels: z.array(
-      z.object({
-        id: z.string(),
-        parcelIdCode: z.string(),
-        mapSheetNumber: z.string(),
-        parcelNumber: z.string(),
-        addressOnCertificate: z.string(),
-        addressTwoLevel: z.string(),
-        oldWard: z.string(),
-        area: z.string(),
-        landUses: z.array(
-          z.object({
-            id: z.string(),
-            purposeCode: z.string(),
-            purposeFreeText: z.string(),
-            originCode: z.string(),
-            formCode: z.string(),
-            termCode: z.string(),
-            area: z.string(),
-          }).strict()
-        ),
-      }).strict()
+      z
+        .object({
+          id: z.string(),
+          parcelIdCode: z.string(),
+          mapSheetNumber: z.string(),
+          parcelNumber: z.string(),
+          addressOnCertificate: z.string(),
+          addressTwoLevel: z.string(),
+          oldWard: z.string(),
+          area: z.string(),
+          landUses: z.array(
+            z
+              .object({
+                id: z.string(),
+                purposeCode: z.string(),
+                purposeFreeText: z.string(),
+                originCode: z.string(),
+                formCode: z.string(),
+                termCode: z.string(),
+                area: z.string(),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
     ),
     assets: z.array(
-      z.object({
-        id: z.string(),
-        assetType: z.string(),
-        description: z.string(),
-      }).strict()
+      z
+        .object({
+          id: z.string(),
+          assetType: z.string(),
+          description: z.string(),
+        })
+        .strict(),
     ),
     certificateFileMetadata: z
       .array(
-        z.object({
-          fileId: z.string(),
-          pageLabel: z.string(),
-        }).strict()
+        z
+          .object({
+            fileId: z.string(),
+            pageLabel: z.string(),
+          })
+          .strict(),
       )
       .optional(),
     phone: z.string(),

@@ -55,9 +55,7 @@ describe("Diễn tập Kịch bản Staging 1: Đứt mạng giữa chừng (Net
   });
 
   it("TC 1.2: Ngắt mạng quá số lần giới hạn (Max Attempts) thì dừng an toàn và ném UploadFailedError", async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockRejectedValue(new TypeError("Network unreachable"));
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError("Network unreachable"));
 
     await expect(
       uploadWithResume({
@@ -170,12 +168,19 @@ describe("Diễn tập Kịch bản Staging 3: Bấm lại sau khi xong (Idempot
       return JSON.stringify(data);
     }
 
-    async function handleSubmission(idempotencyKey: string, payload: { phone: string; name?: string }) {
+    async function handleSubmission(
+      idempotencyKey: string,
+      payload: { phone: string; name?: string },
+    ) {
       const currentHash = hashPayload(payload);
       if (requestStore.has(idempotencyKey)) {
         const stored = requestStore.get(idempotencyKey)!;
         if (stored.payloadHash !== currentHash) {
-          return { status: 409, code: "IDEMPOTENCY_CONFLICT", message: "Key đã dùng cho dữ liệu khác" };
+          return {
+            status: 409,
+            code: "IDEMPOTENCY_CONFLICT",
+            message: "Key đã dùng cho dữ liệu khác",
+          };
         }
         return { status: 200, receiptCode: stored.receiptCode };
       }
@@ -186,7 +191,7 @@ describe("Diễn tập Kịch bản Staging 3: Bấm lại sau khi xong (Idempot
     }
 
     const key = "idempotency-uuid-v4-0002";
-    
+
     // Request 1: Gửi thông tin ban đầu
     const res1 = await handleSubmission(key, { phone: "0912345678" });
     expect(res1.status).toBe(200);

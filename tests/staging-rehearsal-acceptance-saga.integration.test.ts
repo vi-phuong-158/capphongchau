@@ -79,7 +79,8 @@ const drive = vi.hoisted(() => {
       const name = escapeQueryValue(nameMatch?.[1] ?? "");
       const parentId = parentMatch?.[1] ?? "";
       const found = [...nodes.values()].find(
-        (node) => node.mimeType === FOLDER_MIME && node.name === name && node.parents.includes(parentId),
+        (node) =>
+          node.mimeType === FOLDER_MIME && node.name === name && node.parents.includes(parentId),
       );
       return { data: { files: found ? [{ id: found.id }] : [] } };
     },
@@ -347,9 +348,24 @@ describe.skipIf(!hasTestDb)(
       `;
 
       const fileSpecs = [
-        { fileId: `file-${randomUUID()}`, driveFileId: `drive-front-${randomUUID()}`, documentType: "CITIZEN_ID_FRONT", ownerId: "owner-1" },
-        { fileId: `file-${randomUUID()}`, driveFileId: `drive-back-${randomUUID()}`, documentType: "CITIZEN_ID_BACK", ownerId: "owner-1" },
-        { fileId: `file-${randomUUID()}`, driveFileId: `drive-cert-${randomUUID()}`, documentType: "CERTIFICATE", ownerId: "" },
+        {
+          fileId: `file-${randomUUID()}`,
+          driveFileId: `drive-front-${randomUUID()}`,
+          documentType: "CITIZEN_ID_FRONT",
+          ownerId: "owner-1",
+        },
+        {
+          fileId: `file-${randomUUID()}`,
+          driveFileId: `drive-back-${randomUUID()}`,
+          documentType: "CITIZEN_ID_BACK",
+          ownerId: "owner-1",
+        },
+        {
+          fileId: `file-${randomUUID()}`,
+          driveFileId: `drive-cert-${randomUUID()}`,
+          documentType: "CERTIFICATE",
+          ownerId: "",
+        },
       ] as const;
 
       for (const file of fileSpecs) {
@@ -393,7 +409,9 @@ describe.skipIf(!hasTestDb)(
         drive.state.failOnFileId = fileSpecs[1].driveFileId;
         await expect(runOfficialAcceptance(input)).rejects.toBeInstanceOf(AcceptanceRetryableError);
 
-        const [sagaAfterCrash] = await bootstrapSql<{ moved_files: Record<string, string> | string; step: string }[]>`
+        const [sagaAfterCrash] = await bootstrapSql<
+          { moved_files: Record<string, string> | string; step: string }[]
+        >`
           select moved_files, step from public.public_acceptance_sagas where submission_id = ${record.submissionId}
         `;
         // Supavisor transaction-mode pooler đôi khi trả jsonb dạng chuỗi thô cho raw query của
@@ -489,7 +507,8 @@ describe.skipIf(!hasTestDb)(
         expect(firstParcel.parcelNumber).toBe("144");
         expect(firstParcel.sortOrder).toBe(0);
 
-        const assetRows = await bootstrapSql`select asset_id from public.assets where case_id = ${result.officialCaseId}`;
+        const assetRows =
+          await bootstrapSql`select asset_id from public.assets where case_id = ${result.officialCaseId}`;
         expect(assetRows).toHaveLength(1);
 
         // Replay cùng key: idempotent, không sinh dòng thứ ba.
@@ -556,7 +575,10 @@ describe.skipIf(!hasTestDb)(
         const second = await repository.commitStaffDraftEdit({
           record: reloaded,
           expectedVersion: first.version,
-          draft: { ...reloaded.draft, certificate: { ...reloaded.draft.certificate, registryNumber: "CS01000" } },
+          draft: {
+            ...reloaded.draft,
+            certificate: { ...reloaded.draft.certificate, registryNumber: "CS01000" },
+          },
           actorEmail: "officer@example.com",
           auditMetadata: { "certificate.registryNumber": "CS00999 → CS01000" },
           timelineEvent: newTimelineEvent({ eventType: "STAFF_EDITED", label: "Cán bộ sửa lần 2" }),
@@ -663,6 +685,11 @@ describe.skipIf(!hasTestDb)(
         expect(amended.officialCaseId).toBe(accepted.officialCaseId);
         expect(amended.status).toBe("ACCEPTED");
         expect(amended.version).toBeGreaterThan(afterAccept.version);
+        // Snapshot hiệu lực phải đi cùng bản chính thức vừa đồng bộ. Nếu không, effectivePayload()
+        // sẽ tiếp tục trả JSON cũ dù các bảng certificates/parcels đã đúng.
+        expect(amended.officialPayload?.certificate.registryNumber).toBe("CS99999");
+        expect(amended.officialPayloadAt).not.toBe("");
+        expect(amended.officialPayloadBy).toBe("officer@example.com");
 
         // Bảng chính thức đã theo bản mới, không còn giá trị cũ.
         const [certificateRow] = await bootstrapSql<{ registry_number: string }[]>`
@@ -706,12 +733,20 @@ describe.skipIf(!hasTestDb)(
 
         drive.state.failOnFileId = fileSpecs[1].driveFileId;
         await expect(
-          runOfficialAcceptance({ ...baseInput(record), idempotencyKey: keyA, mutationHash: "hash-a" }),
+          runOfficialAcceptance({
+            ...baseInput(record),
+            idempotencyKey: keyA,
+            mutationHash: "hash-a",
+          }),
         ).rejects.toBeInstanceOf(AcceptanceRetryableError);
 
         const keyB = `key-b-${randomUUID()}`;
         await expect(
-          runOfficialAcceptance({ ...baseInput(record), idempotencyKey: keyB, mutationHash: "hash-b" }),
+          runOfficialAcceptance({
+            ...baseInput(record),
+            idempotencyKey: keyB,
+            mutationHash: "hash-b",
+          }),
         ).rejects.toBeInstanceOf(AcceptanceInProgressError);
 
         const sagaRows = await bootstrapSql<{ idempotency_key: string }[]>`

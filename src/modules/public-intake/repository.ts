@@ -889,11 +889,20 @@ export class PublicIntakeRepository {
       // có thể đổi trạng thái giữa lúc route đọc và lúc ghi.
       const rows = await transaction.unsafe<SubmissionRow[]>(
         `update public.public_submissions set
-           draft_json = $3::jsonb, version = version + 1, updated_at = now()
+           draft_json = $3::jsonb,
+           official_payload_json = $3::jsonb,
+           official_payload_at = now(),
+           official_payload_by = $4,
+           version = version + 1, updated_at = now()
          where submission_id = $1 and version = $2 and status = 'ACCEPTED'
            and coalesce(official_case_id, '') <> ''
          returning ${SUBMISSION_SELECT}`,
-        [input.record.submissionId, input.expectedVersion, JSON.stringify(input.draft)],
+        [
+          input.record.submissionId,
+          input.expectedVersion,
+          JSON.stringify(input.draft),
+          input.actorEmail,
+        ],
       );
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);

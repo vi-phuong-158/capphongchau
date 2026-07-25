@@ -2,10 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import {
-  formatOfficialCaseId,
-  vietnamBusinessYear,
-} from "@/modules/submissions/acceptance";
+import { formatOfficialCaseId, vietnamBusinessYear } from "@/modules/submissions/acceptance";
 import {
   AcceptanceInProgressError,
   AcceptanceNotAllowedError,
@@ -42,22 +39,29 @@ describe("acceptance saga suite", () => {
 
   it("A2 Schema Audit: verifies SQL insert column names in acceptance-saga.ts 1-to-1 match migration schema", () => {
     const rootDir = process.cwd();
-    const schemaPath = path.join(
-      rootDir,
-      "supabase/migrations/202607230001_supabase_schema.sql",
-    );
+    const schemaPath = path.join(rootDir, "supabase/migrations/202607230001_supabase_schema.sql");
     const sagaPath = path.join(rootDir, "src/modules/submissions/acceptance-saga.ts");
 
     const schemaSql = fs.readFileSync(schemaPath, "utf8");
     const sagaCode = fs.readFileSync(sagaPath, "utf8");
 
     function parseTableColumns(table: string): Set<string> {
-      const match = schemaSql.match(new RegExp(`create table public\\.${table} \\(([\\s\\S]*?)\\);`));
+      const match = schemaSql.match(
+        new RegExp(`create table public\\.${table} \\(([\\s\\S]*?)\\);`),
+      );
       if (!match) throw new Error(`Could not find table public.${table} in migration schema`);
-      const lines = match[1].split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+      const lines = match[1]
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
       const cols = new Set<string>();
       for (const line of lines) {
-        if (line.startsWith("primary key") || line.startsWith("foreign key") || line.startsWith("constraint")) continue;
+        if (
+          line.startsWith("primary key") ||
+          line.startsWith("foreign key") ||
+          line.startsWith("constraint")
+        )
+          continue;
         const parts = line.split(/\s+/);
         if (parts[0]) cols.add(parts[0]);
       }
@@ -65,8 +69,11 @@ describe("acceptance saga suite", () => {
     }
 
     function parseInsertColumns(table: string): string[] {
-      const match = sagaCode.match(new RegExp(`insert into public\\.${table}\\s*\\(([\\s\\S]*?)\\)\\s*values`));
-      if (!match) throw new Error(`Could not find insert statement into public.${table} in saga code`);
+      const match = sagaCode.match(
+        new RegExp(`insert into public\\.${table}\\s*\\(([\\s\\S]*?)\\)\\s*values`),
+      );
+      if (!match)
+        throw new Error(`Could not find insert statement into public.${table} in saga code`);
       return match[1]
         .split(",")
         .map((c) => c.trim())

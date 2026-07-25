@@ -33,18 +33,18 @@
 
 ## Không làm
 
-- Không tự ý thêm database hoặc cloud storage ngoài kiến trúc đã chốt (Google Sheets + Google My Drive + Vercel) mà không cập nhật `03-decisions.md`.
+- Không tự ý thêm database hoặc cloud storage ngoài kiến trúc đã chốt (Supabase PostgreSQL + Google My Drive + Vercel) mà không cập nhật `03-decisions.md`.
 - Không xóa dòng/cột/sheet/file dữ liệu đang dùng. Đổi schema phải có migration, cập nhật tài liệu, bảo toàn dữ liệu cũ.
-- Không gọi Google Drive/Sheets API trực tiếp từ frontend component hoặc business service — luôn qua `DataRepository`/`StorageRepository`.
+- Không gọi Google Drive/Google Sheets API trực tiếp từ frontend component hoặc business service — luôn qua `DataRepository`/`StorageRepository`; Sheets chỉ dành cho script legacy/ETL.
 - Không proxy ảnh gốc qua body của Vercel Function.
-- Không triển khai OCR, đối soát dân cư, PostgreSQL ở giai đoạn thử nghiệm này (xem `03-decisions.md` và `00-project-overview.md`).
+- Không triển khai OCR CCCD, đối soát dân cư hoặc tích hợp CSDL đất đai quốc gia ở giai đoạn thử nghiệm này (xem `03-decisions.md` và `00-project-overview.md`). Supabase PostgreSQL đã là kho dữ liệu runtime.
 
 ## Test
 
 Vitest (`npm run test`) và Playwright (`npm run test:e2e`) đã chạy được; hiện có 82 unit test. Phạm vi tối thiểu cần đạt (theo `AGENTS.md` §7 và `PLAN.md`):
 
 - Unit: parser QR, chuẩn hóa CCCD/ngày, che/HMAC CCCD, case ID, transition trạng thái, phân quyền, version conflict.
-- Integration: refresh token OAuth, Drive folders, Sheets batch writes, resumable upload, retry, idempotency, lỗi từng phần.
+- Integration: refresh token OAuth, Drive folders, Supabase transactions, resumable upload, retry, idempotency, lỗi từng phần. Các script Sheets legacy/ETL kiểm riêng theo phạm vi script.
 - E2E: tạo hồ sơ, upload 1 CCCD + nhiều GCN, QR thành công/thất bại, sửa dữ liệu, verify, tìm kiếm, dashboard, export, audit log.
 - Test thủ công: Android Chrome, iPhone Safari, Wi-Fi và 4G yếu.
 - Chỉ dùng dữ liệu giả/ẩn danh cho test tự động và môi trường Preview — không bao giờ dùng CCCD/GCN thật.

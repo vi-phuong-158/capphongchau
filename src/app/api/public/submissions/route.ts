@@ -33,7 +33,6 @@ import { emptyDraft } from "@/modules/public-intake/types";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-
 interface CreationResult {
   readonly submissionId: string;
   readonly receiptCode: string;

@@ -20,14 +20,20 @@ export default function HomePage() {
             className="h-24 w-24 sm:h-28 sm:w-28 object-contain drop-shadow-sm"
           />
           <div className="space-y-1">
-            <p className="text-xs sm:text-sm font-bold tracking-[0.2em] uppercase" style={{ color: "var(--accent)" }}>
+            <p
+              className="text-xs sm:text-sm font-bold tracking-[0.2em] uppercase"
+              style={{ color: "var(--accent)" }}
+            >
               Phường Phong Châu
             </p>
             <h1 className="max-w-2xl text-3xl font-extrabold tracking-tight sm:text-5xl leading-tight">
               CSDL Đất đai
             </h1>
           </div>
-          <p className="max-w-lg mx-auto text-base sm:text-lg mt-2" style={{ color: "var(--text-secondary)" }}>
+          <p
+            className="max-w-lg mx-auto text-base sm:text-lg mt-2"
+            style={{ color: "var(--text-secondary)" }}
+          >
             {appMetadata.description}
           </p>
         </div>
@@ -45,11 +51,15 @@ export default function HomePage() {
                 Dành cho công dân
               </span>
               <h2 className="text-2xl sm:text-3xl font-bold">Kê khai trực tuyến</h2>
-              <p className="text-sm sm:text-base max-w-md mx-auto" style={{ color: "var(--text-secondary)" }}>
-                Thực hiện nộp hồ sơ, giấy chứng nhận trực tuyến nhanh chóng. Không yêu cầu đăng ký tài khoản.
+              <p
+                className="text-sm sm:text-base max-w-md mx-auto"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Thực hiện nộp hồ sơ, giấy chứng nhận trực tuyến nhanh chóng. Không yêu cầu đăng ký
+                tài khoản.
               </p>
             </div>
-            
+
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
               <Link
                 href="/ke-khai"
@@ -73,14 +83,20 @@ export default function HomePage() {
 
         <div className="relative py-4">
           <div className="absolute inset-0 flex items-center" aria-hidden="true">
-            <div className="w-full border-t border-dashed" style={{ borderColor: "var(--border-strong)" }}></div>
+            <div
+              className="w-full border-t border-dashed"
+              style={{ borderColor: "var(--border-strong)" }}
+            ></div>
           </div>
         </div>
 
         <div className="mx-auto max-w-sm">
           <div className="flex flex-col items-center gap-3 text-center opacity-80 hover:opacity-100 transition-opacity">
             <div className="space-y-1">
-              <h2 className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+              <h2
+                className="text-xs font-semibold uppercase tracking-widest"
+                style={{ color: "var(--text-muted)" }}
+              >
                 Khu vực nội bộ
               </h2>
             </div>
@@ -91,13 +107,13 @@ export default function HomePage() {
               }}
               className="w-full"
             >
-              <button 
-                className="pc-button-quiet w-full text-sm py-2" 
-                style={{ 
-                  color: "var(--text-secondary)", 
+              <button
+                className="pc-button-quiet w-full text-sm py-2"
+                style={{
+                  color: "var(--text-secondary)",
                   borderColor: "transparent",
-                  backgroundColor: "var(--neutral-soft)"
-                }} 
+                  backgroundColor: "var(--neutral-soft)",
+                }}
                 type="submit"
               >
                 Đăng nhập dành cho cán bộ
@@ -105,7 +121,6 @@ export default function HomePage() {
             </form>
           </div>
         </div>
-
       </section>
     </main>
   );

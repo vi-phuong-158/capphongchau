@@ -54,8 +54,8 @@ src/modules/submissions/acceptance-saga.ts   saga tiếp nhận chính thức re
 src/modules/public-intake/file-naming.ts     quy ước tên file gốc GCN/GT (thuần, dùng chung)
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive + findOrCreateFolder
-                                              (cache trong tiến trình, KHÔNG còn advisory lock —
-                                              xem cảnh báo ở "Database và bất biến")
+                                              (cache trong tiến trình + PostgreSQL advisory lock
+                                              xuyên tiến trình khi cache miss)
 src/app/api/health/database/route.ts         health Supabase
 src/app/api/health/google/route.ts           health Google Drive
 agent/                                       prompt tĩnh + JSON schema cho Antigravity đọc ảnh GCN
@@ -117,9 +117,9 @@ src/app/submissions/page.tsx / [submissionId]
     ├── commitOfficialAmendment (transaction) — PATCH sửa hồ sơ ĐÃ tiếp nhận (Q2, 2026-07-25)
     │   ├── mayAmendOfficialRecord — ACCEPTED + có official_case_id + (người giữ | admin)
     │   ├── bắt buộc amendmentReason >= 10 ký tự → audit OFFICIAL_RECORD_AMENDED
-    │   └── syncOfficialRecord (src/modules/submissions/official-record.ts) — CÙNG transaction:
-    │       upsert certificates/owners/parcels/assets theo case_id + xóa bản ghi không còn
-    │       trong bản kê khai. DÙNG CHUNG với bước RECORDS_WRITTEN của saga.
+    │   └── CÙNG transaction: cập nhật draft_json + official_payload_json/at/by và
+    │       syncOfficialRecord (src/modules/submissions/official-record.ts) upsert
+    │       certificates/owners/parcels/assets theo case_id + xóa bản ghi không còn.
     ├── commitStaffDraftEdit (transaction) — PATCH sửa trực tiếp draft_json (phạm vi hẹp: certificate
     │   3 trường + owner 6 trường; PUT working-payload ở trên mới sửa được thửa/mục đích)
     │   ├── mayStaffEdit (src/modules/submissions/review.ts) — chỉ người đang giữ + UNDER_REVIEW
@@ -149,9 +149,9 @@ src/app/api/submissions/[submissionId]/accept/route.ts
     │   của PublicIntakeRepository, truyền transaction — KHÔNG dùng method pool)
     ├── ID_RESERVED (tx): case_counters (ON CONFLICT ... RETURNING) + id_reservations
     ├── CASE_FOLDER_READY: storage.findOrCreateFolder 02_CASES/{TDP}/{CASE_ID}/originals
-    │   (NGOÀI transaction — quy tắc pool max:1; CẢNH BÁO: hàm này đã bỏ advisory lock, thay bằng
-    │   `Map` tĩnh trong tiến trình — hai lambda Vercel đồng thời có thể tạo trùng thư mục, xem
-    │   "Database và bất biến")
+    │   (ngoài transaction nghiệp vụ; mỗi cache miss mở transaction RIÊNG, giữ
+    │   pg_advisory_xact_lock theo parent/name bao quanh thao tác Drive, nên nhiều lambda không
+    │   thể tạo trùng thư mục)
     ├── FILES_MOVED: drive.files.update từng file (đổi parent + đổi tên `requestBody.name`),
     │   checkpoint moved_files (NGOÀI tx) — tên sinh bởi buildOriginalFileNames
     │   (src/modules/public-intake/file-naming.ts, đệm 0 `-01/-02` từ 2026-07-25), issueNumber
@@ -222,7 +222,7 @@ Migration SQL tạo các nhóm bảng:
 - `official_parcels`, `official_land_uses` (2026-07-25, Phase 8/P0-5) — bản chính thức của thửa
   đất/mục đích sử dụng, tách khỏi `public.parcels.data_json` (vốn là JSON tự do, không truy vấn
   được theo cột). FK `official_land_uses.official_parcel_id → official_parcels` có `on delete
-  cascade`.
+cascade`.
 - `ai_extraction_jobs`, `ai_extraction_results` (2026-07-25, Phase 9) — hàng đợi AI đọc ảnh GCN.
   Unique `(submission_id, input_fingerprint, prompt_version, schema_version)` chống job trùng.
 
@@ -235,20 +235,22 @@ Bất biến quan trọng:
 - `case_counters` cấp số theo năm nguyên tử; lỗ hổng dãy số khi saga bỏ dở được chấp nhận.
 - `id_reservations` có thêm `sequence_number`, `official_case_id`, `submission_id`; unique `(year, sequence_number)`; idempotent theo `request_id`.
 - Quy tắc pool `max: 1`: không gọi method repository/storage dùng pool bên trong `database.begin`; thao tác Drive luôn nằm ngoài transaction.
+- `findOrCreateFolder` là ngoại lệ được kiểm soát: bản thân nó mở **một transaction riêng** chỉ để
+  giữ advisory lock `DRIVE_FOLDER:{parentId}:{name}` trong lúc list/create trên Drive. Không được
+  gọi nó từ một transaction đã mở; `folderCache` chỉ giảm số lần lấy khóa, không là cơ chế đồng bộ.
 - `legacy_row_index` chỉ giữ tương thích cookie session v2 trong giai đoạn migration. ETL chèn giá trị legacy phải đồng bộ identity sequence trong cùng transaction để bản ghi mới không va chạm khóa unique.
 - Nháp legacy thiếu `owners` hoặc bị lưu JSON lồng được phục hồi/chuẩn hóa có audit; repository giải mã tương thích trong thời gian chuyển đổi, còn route upload luôn kiểm shape dữ liệu trước khi gọi Drive và trả `409 INVALID_STATE` thay vì lỗi 500.
 - GCN cũ append-only; bản mới nhất theo `row_version` có hiệu lực.
 - RLS bật, không có policy/quyền cho `anon` và `authenticated`; browser không nhận database secret.
 - **CAS thay advisory lock cho claim (2026-07-25):** `commitStaffAction` chống hai cán bộ claim
   đồng thời bằng điều kiện ngay trong câu `UPDATE` (`claimed_by is null or claimed_by = $actor or
-  $force`), không phải khóa tường minh — đủ cho luồng hiện tại nhưng phụ thuộc bất biến ngầm "mọi
+$force`), không phải khóa tường minh — đủ cho luồng hiện tại nhưng phụ thuộc bất biến ngầm "mọi
   ghi đều tăng version".
-- **CẢNH BÁO — Drive folder cache không còn an toàn xuyên tiến trình (2026-07-25):**
-  `PublicIntakeStorage.findOrCreateFolder` từng dùng `pg_advisory_xact_lock` để loại trừ lẫn nhau;
-  bản hiện tại thay bằng `Map` static trong tiến trình Node (để không gọi Google bên trong
-  transaction pool `max:1`). Trên Vercel serverless (nhiều lambda song song), hai request đồng
-  thời tạo cùng một hồ sơ lần đầu có thể cùng miss cache → tạo trùng thư mục trên Drive. Chưa vá,
-  chưa ghi quyết định chấp nhận rủi ro nào — cần xử lý trước khi có tải thật đồng thời cao.
+- **Đồng bộ Drive folder xuyên tiến trình (2026-07-25):** cache miss trong
+  `PublicIntakeStorage.findOrCreateFolder` khóa PostgreSQL bằng `pg_advisory_xact_lock` theo
+  `(parentId, name)` trước khi list/create Drive, rồi re-check cache/Drive trong cùng transaction.
+  Vì advisory lock là cấp database, các lambda Vercel khác nhau được tuần tự hóa; `Map` static chỉ
+  là cache tối ưu và không còn quyết định tính đúng đắn.
 - **`OFFICIAL_ACCEPTANCE_ENABLED = true`** (`src/modules/submissions/acceptance.ts`) — bật từ
   trước khi nhánh `feat/antigravity-assisted-review` tách ra (xem 03-decisions.md
   `[2026-07-25] MỞ tiếp nhận chính thức`). Toàn bộ saga tiếp nhận chính thức đang LIVE, không phải
@@ -330,7 +332,7 @@ Browser kiểm tra/chuyển HEIC
 
 File gốc không đi qua Vercel body. Xóa là soft delete; thay CCCD/GCN phải verify file mới trước khi chuyển file cũ sang `REPLACED`.
 
-## Migration/cutover
+## Migration/cutover (đã hoàn tất 2026-07-24)
 
 ```text
 Apply supabase/migrations
@@ -344,6 +346,8 @@ Apply supabase/migrations
 ```
 
 ETL fail-closed: dữ liệu trùng/không hợp lệ làm rollback toàn bộ. Marker theo hash spreadsheet chặn chạy lại sau lần thành công.
+Runtime production không còn đọc/ghi Google Sheets. Sheet cũ chỉ giữ read-only/restricted làm nguồn
+legacy/rollback; không chạy lại ETL nếu không có kế hoạch phục hồi được phê duyệt.
 
 ## Vận hành
 

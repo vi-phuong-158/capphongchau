@@ -61,7 +61,12 @@ describe("POST /api/public/certificate-lookup", () => {
 
   it("trả về che số GCN khi tìm thấy khớp, không lộ số đầy đủ", async () => {
     mocks.findExistingCertificates.mockResolvedValue([
-      { existingRecordId: "r1", issueNumber: "CH01234567", issueDate: "2020-01-01", registryNumber: "CS123" },
+      {
+        existingRecordId: "r1",
+        issueNumber: "CH01234567",
+        issueDate: "2020-01-01",
+        registryNumber: "CS123",
+      },
     ]);
 
     const response = await POST(

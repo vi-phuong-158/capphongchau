@@ -52,6 +52,10 @@ Các nhóm bảng chính trong `supabase/migrations/202607230001_supabase_schema
 - Update có điều kiện `WHERE version = expectedVersion`; không khớp trả `409 VERSION_CONFLICT`.
 - Unique partial index chặn hai ảnh CCCD cùng mặt đang `UPLOADED` cho cùng người. Ảnh mới phải xác minh trước, sau đó ảnh cũ chuyển `REPLACED` trong transaction.
 - Dữ liệu GCN cũ append-only; reader chọn `row_version` mới nhất cho mỗi `existing_record_id`.
+- Cache miss khi tạo thư mục Drive được tuần tự hóa bằng `pg_advisory_xact_lock` theo `(parentId, name)`
+  trong một transaction riêng; cache bộ nhớ chỉ là tối ưu, không phải khóa xuyên lambda.
+- Một lần điều chỉnh hồ sơ đã tiếp nhận cập nhật `official_payload_*` cùng transaction với
+  `draft_json` và các bảng chính thức, nên snapshot hiệu lực không thể cũ hơn dữ liệu chuẩn hóa.
 
 ## Xác thực, phân quyền và RLS
 

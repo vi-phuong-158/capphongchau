@@ -160,7 +160,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: true, fileId: summary.fileId, sizeBytes: verified.sizeBytes });
   } catch (error) {
     if (error instanceof SubmissionIdempotencyConflictError) {
-      return publicError("IDEMPOTENCY_CONFLICT", "Yêu cầu hoàn tất tải lên bị xung đột.", requestId);
+      return publicError(
+        "IDEMPOTENCY_CONFLICT",
+        "Yêu cầu hoàn tất tải lên bị xung đột.",
+        requestId,
+      );
     }
     throw error;
   }

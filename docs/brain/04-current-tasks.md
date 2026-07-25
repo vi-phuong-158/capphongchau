@@ -24,19 +24,20 @@ thức và ảnh trên Drive giữ nguyên. Xem `03-decisions.md` [2026-07-25] Q
 
 ### Hạn chế đã biết — chưa đóng, KHÔNG phải lỗi mới phát hiện
 
-**[CẬP NHẬT 2026-07-25]** Ba dòng dưới đây trong bản cũ đã ĐÓNG, gỡ khỏi bảng: "cán bộ không sửa
+**[CẬP NHẬT 2026-07-25]** Năm dòng trong bản cũ đã ĐÓNG, gỡ khỏi bảng: "cán bộ không sửa
 được thửa/mục đích" (đóng ở Phase 6-7, xem `PUT /api/submissions/:id/working-payload` +
 `WorkingPayloadEditor`), "PL3 cắt âm thầm ở 2.000 hồ sơ" (đóng ở Phase 2, thay bằng
 `MAX_EXPORT_SUBMISSIONS = 20000` kèm cờ `truncated` hiển thị trên sheet), "lỗi ghi
-`export_jobs`/`audit_logs` làm mất file PL3" (đóng ở Phase 2, file giữ nguyên dù ghi audit lỗi).
+`export_jobs`/`audit_logs` làm mất file PL3" (đóng ở Phase 2, file giữ nguyên dù ghi audit lỗi),
+snapshot `official_payload_*` cũ sau điều chỉnh (đóng bằng một update cùng transaction với
+`syncOfficialRecord`) và race tạo folder Drive xuyên lambda (đóng bằng advisory lock PostgreSQL
+theo `(parentId, name)`).
 
-| Hạn chế | Ảnh hưởng | Khi nào phải đóng |
-|---|---|---|
-| **`official_payload_json`/`_at`/`_by` chỉ ghi MỘT LẦN lúc tiếp nhận, KHÔNG cập nhật lại khi dùng "Điều chỉnh hồ sơ chính thức"** — `commitOfficialAmendment` gọi `syncOfficialRecord` nên `official_parcels`/`official_land_uses`/`cases`/`owners` cập nhật đúng, nhưng cột snapshot `official_payload_json` trên `public_submissions` vẫn giữ bản JSON tại thời điểm tiếp nhận ban đầu | `effectivePayload()` (ưu tiên `officialPayload`) sẽ trả dữ liệu CŨ cho mọi hồ sơ đã từng điều chỉnh sau khi tiếp nhận, dù bảng chuẩn hóa đã đúng | Trước khi có cán bộ nào bấm "Điều chỉnh hồ sơ chính thức" trên hồ sơ thật — thêm cập nhật `official_payload_*` vào `commitOfficialAmendment`, cùng transaction với `syncOfficialRecord` |
-| **`PublicIntakeStorage.findOrCreateFolder` không còn khóa xuyên tiến trình** — đổi từ `pg_advisory_xact_lock` sang `Map` tĩnh trong tiến trình Node (2026-07-25, Phase 13) | Hai lambda Vercel xử lý đồng thời có thể tạo trùng thư mục Drive cho cùng một hồ sơ lần đầu | Trước khi có tải thật đồng thời cao — khôi phục khóa xuyên tiến trình hoặc ghi nhận rủi ro có chủ đích vào `03-decisions.md` |
+| Hạn chế                                                                          | Ảnh hưởng                                                                                               | Khi nào phải đóng                                 |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `POST /api/ai/results` hardcode `result_version = 1`, không có `idempotency-key` | Kết quả AI thứ hai cho cùng `jobId` vỡ `unique (job_id, result_version)` → HTTP 500 thay vì lưu bản mới | Trước khi bật `AI_EXTRACTION_ENABLED = true` thật |
-| Thửa có **>3 mục đích sử dụng** thì người dân không nộp được (Q3: tạm giữ ở 3) | Ca đó phải ra phường làm trực tiếp | Mở lại với cơ quan nếu tần suất thực tế cao |
-| `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production | `/ke-khai` và `/api/public/*` không có Cloudflare WAF/rate limiting | Khi có domain thật gắn Cloudflare |
+| Thửa có **>3 mục đích sử dụng** thì người dân không nộp được (Q3: tạm giữ ở 3)   | Ca đó phải ra phường làm trực tiếp                                                                      | Mở lại với cơ quan nếu tần suất thực tế cao       |
+| `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production               | `/ke-khai` và `/api/public/*` không có Cloudflare WAF/rate limiting                                     | Khi có domain thật gắn Cloudflare                 |
 
 ### Việc phải làm ngay trong ngày đầu thu hồ sơ thật
 
@@ -51,10 +52,10 @@ thức và ảnh trên Drive giữ nguyên. Xem `03-decisions.md` [2026-07-25] Q
    nằm lại `ACCEPTING` an toàn.
 
 ---
+
 ### ETL status update (2026-07-23)
 
-Schema and data ETL have completed successfully after the Google Sheets backup. Supabase verification found the expected legacy tables and one `LEGACY_SHEETS_IMPORT:*` marker. Do not rerun the import; keep the Sheet read-only during cutover.
-
+Schema and data ETL have completed successfully after the Google Sheets backup. Supabase verification found the expected legacy tables and one `LEGACY_SHEETS_IMPORT:*` marker. **Cutover đã hoàn tất**; không chạy lại ETL và giữ Sheet cũ ở chế độ read-only/restricted.
 
 ## [2026-07-24] Chỉnh sửa trực tiếp cho cán bộ (xong) + Saga tiếp nhận chính thức (hoãn)
 
@@ -139,7 +140,7 @@ Quyết định “giữ Sheets, không PostgreSQL” trong `PLAN2.md` và mục
 Xem quyết định cùng ngày trong `03-decisions.md` và bảng đối chiếu đầy đủ ở Phụ lục `PLAN2.md`.
 
 **Quy mô mục tiêu nâng lên 20.000 hồ sơ** (trước là 500). Đã có phương án: **không sharding**, giữ
-một spreadsheet và sửa ba chỗ ở tầng truy cập dữ liệu — xem `03-decisions.md`.
+một Supabase PostgreSQL database và tối ưu tầng truy cập dữ liệu — xem `03-decisions.md`.
 
 **Duyệt hồ sơ sẽ có Gemini đối chiếu** (so lệch hai nguồn, không điền sẵn). Chưa xây.
 
@@ -158,11 +159,11 @@ nhận có tác dụng: `/ke-khai` từ 404 chuyển sang 200 sau khi bật + re
 
 M2 đã hoàn thành và được kiểm tra build.
 
-**Cổng kê khai công khai `/ke-khai` đang chạy bản legacy**: tạo nháp, autosave và upload thật. Code Supabase đã sẵn sàng nhưng production chưa cutover; không deploy repository mới trước khi hoàn thành runbook migration ở trên. Các tab intake ban đầu đã được tạo;
-Gói A bổ sung timeline, yêu cầu bổ sung, dữ liệu GCN cũ và chỉ mục HMAC qua migration append-only
-bằng `npm run migrate:public-intake` (idempotent, chỉ thêm tab hoặc nối header ở cuối — **không**
-đụng cột của `CASES`/`CERTIFICATES`/`OWNERS`). Xem `PLAN2.md` và entry log
-[2026-07-21] trong `06-ai-working-log.md`.
+**Cổng kê khai công khai `/ke-khai` production đã chạy trên runtime Supabase**: tạo nháp, autosave,
+upload và submit ghi dữ liệu cấu trúc vào Supabase PostgreSQL; file vẫn đi thẳng Google Drive.
+Google Sheets chỉ còn là nguồn legacy/read-only và công cụ ETL; không có đồng bộ hai chiều. Các
+script `migrate:public-intake`/`migrate:citizen-id-pairs` chỉ dùng khi phục hồi hoặc xử lý một
+môi trường Sheets legacy riêng, không chạy trong request runtime production.
 
 **Lớp biên — phần code đã xong (2026-07-22, nhánh `feat/edge-protection`):** Turnstile fail-closed
 ở hai hành động `create`/`submit`, và chốt chặn `ORIGIN_SHARED_SECRET` ở `/api/public/*` +

@@ -1,5 +1,42 @@
 # 06 — AI Working Log
 
+> Các entry bên dưới là nhật ký theo thời điểm. Khi có mô tả cũ nói runtime còn là Google Sheets,
+> trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
+> read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
+
+## [2026-07-25] Đồng bộ tài liệu sau cutover Supabase
+
+- **Agent:** Codex
+- **Thay đổi:** Sửa các đoạn còn mô tả production dùng Sheets hoặc đang chờ cutover; xác nhận
+  Supabase PostgreSQL là kho runtime, ETL đã hoàn tất, Google Sheets chỉ còn read-only/legacy ETL.
+  Đánh dấu các quyết định Sheets cũ là `SUPERSEDED` và chuyển runbook cutover sang trạng thái đã
+  hoàn tất.
+- **File đã sửa:** `docs/brain/01-architecture.md`, `docs/brain/02-coding-rules.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md`,
+  `docs/brain/05-testing-and-deploy.md`, `docs/brain/06-ai-working-log.md`.
+- **Kiểm tra:** rà `rg` toàn bộ `docs/brain` cho các cụm cutover/runtime/legacy; các mô tả còn lại
+  về Sheets runtime đều nằm trong entry lịch sử hoặc phạm vi script legacy, không phải trạng thái
+  triển khai hiện hành.
+
+## [2026-07-25] Đóng hai rủi ro production: snapshot official cũ và race folder Drive
+
+- **Agent:** Codex
+- **Thay đổi:** `commitOfficialAmendment` nay ghi lại `official_payload_json`, thời điểm và cán bộ
+  thực hiện trong cùng transaction với `draft_json`, `syncOfficialRecord`, audit, timeline và
+  idempotency result. `PublicIntakeStorage.findOrCreateFolder` nay giữ advisory lock PostgreSQL
+  theo `(parentId, name)` trong transaction riêng khi cache miss; sau khi lấy lock, hàm re-check
+  cache rồi mới list/create Drive. `Map` static được giữ lại chỉ để tối ưu trong một lambda.
+- **File đã sửa:** `src/modules/public-intake/repository.ts`,
+  `src/modules/public-intake/storage.ts`,
+  `tests/staging-rehearsal-acceptance-saga.integration.test.ts`,
+  `tests/storage-distributed-lock.test.ts`, `docs/architecture.md`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md`,
+  `docs/brain/05-testing-and-deploy.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** `effectivePayload()` ưu tiên snapshot official nên không được trả JSON trước điều
+  chỉnh; Map trong một Vercel process không bảo vệ được lúc hai lambda cùng tạo thư mục Drive.
+- **Kiểm tra:** unit test xác nhận advisory lock xảy ra trước Drive list/create; rehearsal test bổ
+  sung assertion snapshot official sau điều chỉnh. Bộ kiểm tra đầy đủ được chạy sau khi format.
+
 ## [2026-07-25] Vá 4 lỗi chặn của review vòng 2 trên commit `649003e` (Claude Sonnet 5)
 
 - **Agent:** Claude Sonnet 5
@@ -45,9 +82,8 @@
   `npx prettier --write <file đã sửa>` → PASS;
   `ACCEPTANCE_SAGA_TEST_DATABASE_URL=<rehearsal> npx vitest run tests/canonical-projection.integration.test.ts`
   → **1/1 PASS trên Postgres thật** (đọc từ `.env.rehearsal.local`, không phải giả lập).
-- **Chưa làm** (ngoài phạm vi 4 lỗi chặn lần này, vẫn còn từ review trước): advisory lock Drive
-  folder bị thay bằng `Map` trong tiến trình (rủi ro trùng thư mục trên serverless đa tiến trình);
-  `result_version` hardcode `1` ở `/api/ai/results` (không idempotency-key); `modelName` mặc định
+- **Chưa làm** (ngoài phạm vi 4 lỗi chặn lần này, vẫn còn từ review trước): `result_version`
+  hardcode `1` ở `/api/ai/results` (không idempotency-key); `modelName` mặc định
   hardcode thay vì bắt buộc lấy từ runtime; migration Phase 12
   (`202607250006_public_files_naming_metadata`); cập nhật `01-architecture.md`/`03-decisions.md`.
 
@@ -313,7 +349,7 @@
   `ap-northeast-2`, khác production `ap-southeast-1`) — trước đó các kịch bản này mới chỉ chạy qua
   typecheck/mock, chưa từng chạm PostgreSQL thật.
   - **Lần chạy đầu: 2/9 fail** — `null value in column "owner_type"/"role_on_certificate"/
-    "qr_payload_hash" of relation "public_owners" violates not-null constraint`. Nguyên nhân: fixture
+"qr_payload_hash" of relation "public_owners" violates not-null constraint`. Nguyên nhân: fixture
     `seedSubmission()` trong chính test dùng owner/parcel/landUse thiếu nhiều trường. Xác minh trước
     khi kết luận: `ownerType`/`roleOnCertificate` là trường **bắt buộc** trong `draftSchema` thật
     (`validation.ts`) và cột tương ứng trong Postgres là `not null` — dữ liệu thiếu các trường này
@@ -337,7 +373,7 @@
   `OFFICIAL_ACCEPTANCE_ENABLED = true` nên đây là dữ liệu thật), bắt buộc kiểm chứng hai lỗi P0 đã
   vá và luồng điều chỉnh hồ sơ trên PostgreSQL thật — không chỉ tin vào typecheck/mock.
 - **Kiểm tra:** `ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run
-  tests/staging-rehearsal-acceptance-saga.integration.test.ts` → 9/9 PASS. Connection string thử
+tests/staging-rehearsal-acceptance-saga.integration.test.ts` → 9/9 PASS. Connection string thử
   nghiệm được truyền qua biến môi trường nạp từ file tạm ngoài repo (không phải qua tham số dòng
   lệnh, không ghi vào bất kỳ file nào trong repo, đã xóa file tạm ngay sau khi dùng xong).
 - **Chưa xác minh:** `npm run test:e2e`, `npm run test:python` vẫn chưa chạy trong phiên này.
@@ -646,9 +682,9 @@
 - **Kiểm tra:** `npm test` (30 test files / 188 tests passed), `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors, 0 warnings).
 
 - **Agent:** Antigravity (Gemini 3.6 Flash / Claude 4.6 Opus)
-- **Thay đổi:** 
+- **Thay đổi:**
   - Đẩy phần "Nộp kê khai" và "Kiểm tra CCCD" lên đầu trang chủ, dời "Khu vực nội bộ" xuống cuối.
-  - Làm đẹp và nhấn mạnh nút "Kiểm tra" và "Kê khai" ở trang chủ. 
+  - Làm đẹp và nhấn mạnh nút "Kiểm tra" và "Kê khai" ở trang chủ.
   - Nâng cấp Dropzone tải ảnh CCCD và GCN trong `wizard.tsx`, thêm loading spinner ("Đang xử lý ảnh...") đồng bộ với trạng thái `busy`.
   - Làm đẹp nút "Thay ảnh" (GCN) và hộp trạng thái `uploadNote` ở dưới cùng.
   - Bypass Edge Guard cho môi trường local (`PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE`).

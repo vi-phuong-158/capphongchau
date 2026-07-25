@@ -1893,11 +1893,14 @@ export function IntakeWizard() {
                                       />
                                     </div>
                                   ) : null}
-                                  <label 
+                                  <label
                                     className={`relative flex flex-col items-center justify-center border-2 border-dashed rounded-xl cursor-pointer transition-all ${
                                       busy ? "opacity-50 pointer-events-none" : "hover:bg-black/5"
-                                    } ${uploaded ? "p-3 mt-2" : "p-6 sm:p-8"}`} 
-                                    style={{ borderColor: "var(--border-strong)", background: "var(--surface)" }}
+                                    } ${uploaded ? "p-3 mt-2" : "p-6 sm:p-8"}`}
+                                    style={{
+                                      borderColor: "var(--border-strong)",
+                                      background: "var(--surface)",
+                                    }}
                                   >
                                     <input
                                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
@@ -1916,29 +1919,95 @@ export function IntakeWizard() {
                                       {busy ? (
                                         <>
                                           <div className="p-2">
-                                            <svg className="w-6 h-6 animate-spin text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                            <svg
+                                              className="w-6 h-6 animate-spin text-gray-500"
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              fill="none"
+                                              viewBox="0 0 24 24"
+                                            >
+                                              <circle
+                                                className="opacity-25"
+                                                cx="12"
+                                                cy="12"
+                                                r="10"
+                                                stroke="currentColor"
+                                                strokeWidth="4"
+                                              ></circle>
+                                              <path
+                                                className="opacity-75"
+                                                fill="currentColor"
+                                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                              ></path>
+                                            </svg>
                                           </div>
                                           <p className="font-semibold text-sm">Đang xử lý ảnh...</p>
                                         </>
                                       ) : uploaded ? (
                                         <div className="flex items-center gap-2">
-                                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--accent)" }}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                          <svg
+                                            className="w-5 h-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth={1.5}
+                                            style={{ color: "var(--accent)" }}
+                                          >
+                                            <path
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                              d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+                                            />
+                                            <path
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                              d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
+                                            />
                                           </svg>
-                                          <p className="font-medium text-sm" style={{ color: "var(--text-secondary)" }}>Chạm để tải ảnh khác thay thế</p>
+                                          <p
+                                            className="font-medium text-sm"
+                                            style={{ color: "var(--text-secondary)" }}
+                                          >
+                                            Chạm để tải ảnh khác thay thế
+                                          </p>
                                         </div>
                                       ) : (
                                         <>
-                                          <div className="p-3 rounded-full shadow-sm" style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}>
-                                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                          <div
+                                            className="p-3 rounded-full shadow-sm"
+                                            style={{
+                                              background: "var(--gold-100)",
+                                              color: "var(--gold-800)",
+                                            }}
+                                          >
+                                            <svg
+                                              className="w-6 h-6"
+                                              fill="none"
+                                              viewBox="0 0 24 24"
+                                              stroke="currentColor"
+                                              strokeWidth={1.5}
+                                            >
+                                              <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+                                              />
+                                              <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
+                                              />
                                             </svg>
                                           </div>
                                           <div>
-                                            <p className="font-bold text-sm sm:text-base">Chạm để chụp ảnh / Chọn tệp</p>
-                                            <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>Ảnh rõ nét, không lóa</p>
+                                            <p className="font-bold text-sm sm:text-base">
+                                              Chạm để chụp ảnh / Chọn tệp
+                                            </p>
+                                            <p
+                                              className="text-xs mt-1"
+                                              style={{ color: "var(--text-secondary)" }}
+                                            >
+                                              Ảnh rõ nét, không lóa
+                                            </p>
                                           </div>
                                         </>
                                       )}
@@ -2166,16 +2235,48 @@ export function IntakeWizard() {
               + Thêm chủ sử dụng (tối đa {MAX_INDIVIDUAL_OWNERS} người)
             </button>
             {uploadNote ? (
-              <div 
+              <div
                 className="mt-6 flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border shadow-sm transition-all pc-fade-in"
-                style={{ background: "var(--surface)", borderColor: "var(--accent)", borderLeftWidth: "4px" }}
+                style={{
+                  background: "var(--surface)",
+                  borderColor: "var(--accent)",
+                  borderLeftWidth: "4px",
+                }}
                 aria-live="polite"
               >
                 <div className="flex items-center gap-3">
                   {busy ? (
-                    <svg className="w-5 h-5 animate-spin" style={{ color: "var(--accent)" }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <svg
+                      className="w-5 h-5 animate-spin"
+                      style={{ color: "var(--accent)" }}
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
                   ) : (
-                    <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    <svg
+                      className="w-5 h-5 text-emerald-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
                   )}
                   <p className="font-medium text-sm sm:text-base">
                     {uploadNote}
@@ -2183,7 +2284,12 @@ export function IntakeWizard() {
                   </p>
                 </div>
                 {busy ? (
-                  <button type="button" className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: "var(--danger)" }} onClick={cancelUpload}>
+                  <button
+                    type="button"
+                    className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors"
+                    style={{ color: "var(--danger)" }}
+                    onClick={cancelUpload}
+                  >
                     Hủy tải ảnh
                   </button>
                 ) : null}
@@ -2589,10 +2695,12 @@ export function IntakeWizard() {
                   error={errors.certificatePhotos}
                   hint={`Từ 1 đến ${MAX_CERTIFICATE_PHOTOS} ảnh, chụp đủ các trang có thông tin.`}
                 >
-                  <label 
+                  <label
                     className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
-                      busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS ? "opacity-50 pointer-events-none" : "hover:bg-black/5"
-                    }`} 
+                      busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS
+                        ? "opacity-50 pointer-events-none"
+                        : "hover:bg-black/5"
+                    }`}
                     style={{ borderColor: "var(--border-strong)", background: "var(--surface)" }}
                   >
                     <input
@@ -2614,20 +2722,54 @@ export function IntakeWizard() {
                       {busy ? (
                         <>
                           <div className="p-3">
-                            <svg className="w-8 h-8 animate-spin text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <svg
+                              className="w-8 h-8 animate-spin text-gray-500"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              ></circle>
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              ></path>
+                            </svg>
                           </div>
                           <p className="font-bold text-lg">Đang xử lý ảnh...</p>
                         </>
                       ) : (
                         <>
-                          <div className="p-4 rounded-full shadow-sm" style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}>
-                            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          <div
+                            className="p-4 rounded-full shadow-sm"
+                            style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}
+                          >
+                            <svg
+                              className="w-8 h-8"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={1.5}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                              />
                             </svg>
                           </div>
                           <div>
                             <p className="font-bold text-lg">Chạm để chụp ảnh / Chọn nhiều tệp</p>
-                            <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>Có thể chọn nhiều ảnh cùng lúc</p>
+                            <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
+                              Có thể chọn nhiều ảnh cùng lúc
+                            </p>
                           </div>
                         </>
                       )}
@@ -2683,11 +2825,24 @@ export function IntakeWizard() {
                               </button>
                               <label
                                 className="pc-button-quiet"
-                                style={{ cursor: busy ? "default" : "pointer", color: "var(--accent)" }}
+                                style={{
+                                  cursor: busy ? "default" : "pointer",
+                                  color: "var(--accent)",
+                                }}
                               >
                                 <div className="flex items-center gap-1.5">
-                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                  <svg
+                                    className="w-4 h-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                                    />
                                   </svg>
                                   <span className="font-medium">Thay ảnh</span>
                                 </div>
@@ -2722,16 +2877,48 @@ export function IntakeWizard() {
                 ) : null}
 
                 {uploadNote ? (
-                  <div 
+                  <div
                     className="mt-6 flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border shadow-sm transition-all pc-fade-in"
-                    style={{ background: "var(--surface)", borderColor: "var(--accent)", borderLeftWidth: "4px" }}
+                    style={{
+                      background: "var(--surface)",
+                      borderColor: "var(--accent)",
+                      borderLeftWidth: "4px",
+                    }}
                     aria-live="polite"
                   >
                     <div className="flex items-center gap-3">
                       {busy ? (
-                        <svg className="w-5 h-5 animate-spin" style={{ color: "var(--accent)" }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <svg
+                          className="w-5 h-5 animate-spin"
+                          style={{ color: "var(--accent)" }}
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
                       ) : (
-                        <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        <svg
+                          className="w-5 h-5 text-emerald-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
                       )}
                       <p className="font-medium text-sm sm:text-base">
                         {uploadNote}
@@ -2739,7 +2926,12 @@ export function IntakeWizard() {
                       </p>
                     </div>
                     {busy ? (
-                      <button type="button" className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: "var(--danger)" }} onClick={cancelUpload}>
+                      <button
+                        type="button"
+                        className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors"
+                        style={{ color: "var(--danger)" }}
+                        onClick={cancelUpload}
+                      >
                         Hủy tải ảnh
                       </button>
                     ) : null}

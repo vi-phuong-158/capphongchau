@@ -25,7 +25,9 @@ describe("Audit Fixes Verification Suite", () => {
     const subId = "sub_test_123";
 
     const uploadKey = `PUBLIC_UPLOAD_COMPLETE:${subId}:${rawKey}`;
-    expect(uploadKey).toBe(`PUBLIC_UPLOAD_COMPLETE:sub_test_123:12345678-1234-4000-8000-1234567890ab`);
+    expect(uploadKey).toBe(
+      `PUBLIC_UPLOAD_COMPLETE:sub_test_123:12345678-1234-4000-8000-1234567890ab`,
+    );
 
     const noActionKey = `PUBLIC_NO_ACTION:${subId}:${rawKey}`;
     expect(noActionKey).toBe(`PUBLIC_NO_ACTION:sub_test_123:12345678-1234-4000-8000-1234567890ab`);

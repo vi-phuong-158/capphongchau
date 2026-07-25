@@ -2,8 +2,9 @@
 
 > Runbook hiện hành cho kiến trúc Supabase PostgreSQL + Google My Drive.
 >
-> **Trạng thái 2026-07-23:** code migration đã hoàn tất; Supabase production, SQL migration, ETL dữ
-> liệu thật và biến Vercel chưa được cấu hình. Không deploy repository mới trước khi hoàn tất cutover.
+> **Trạng thái hiện hành 2026-07-25:** Supabase PostgreSQL đã cutover làm kho runtime; schema và ETL
+> dữ liệu thật đã chạy; code production đã dùng repository Supabase. Việc còn lại là xác nhận env/
+> health trên Vercel, backup độc lập và giữ Google Sheet cũ read-only.
 
 ## Cài đặt local
 
@@ -63,9 +64,12 @@ token. `GET /api/health/google` kiểm tra OAuth Drive, root folder và quota, k
 `.bootstrap-state.json` và `.bootstrap-secrets.json` bị Git bỏ qua. Xóa file secret tạm sau khi chuyển
 refresh token vào secret store.
 
-## Cutover Google Sheets → Supabase
+## Cutover Google Sheets → Supabase (đã hoàn tất)
 
-### Trước cửa sổ bảo trì
+Quy trình dưới đây là runbook lịch sử đã thực hiện. Không chạy lại ETL trên production; chỉ dùng khi
+phục hồi có kiểm soát hoặc dựng môi trường legacy riêng.
+
+### Các bước đã thực hiện trước cửa sổ bảo trì
 
 - [ ] Tạo backup restricted của spreadsheet và ghi checksum/thời điểm.
 - [ ] Áp dụng SQL migration trên Supabase đích.
@@ -79,7 +83,7 @@ npm run migrate:sheets-to-supabase -- --dry-run
 
 Dry-run chỉ đọc Sheets, kiểm tra parse và báo số dòng theo tab; không ghi PostgreSQL.
 
-### Trong cửa sổ bảo trì
+### Các bước đã thực hiện trong cửa sổ bảo trì
 
 1. Tạm dừng cổng ghi/autosave và xác nhận không còn request đang chạy.
 2. Chạy ETL thật đúng một lần:
@@ -100,7 +104,8 @@ liệu hỏng làm rollback toàn bộ. Sau thành công, cùng spreadsheet bị
 - user allowlist/roles/active;
 - `legacy_row_index` của submission khớp locator phiên v2 cũ.
 
-4. Gọi `/api/health/database` và `/api/health/google`, rồi deploy code Supabase.
+4. Đã gọi health checks và deploy code dùng Supabase; việc kiểm tra lại health trên Vercel Production
+   vẫn là checklist vận hành định kỳ.
 5. Smoke test tạo nháp, autosave, upload, submit, tra cứu, staff action, reset secret, export và khóa user.
 6. Giữ spreadsheet restricted/read-only trong cửa sổ rollback đã phê duyệt. Không xóa nguồn ngay.
 
@@ -129,6 +134,9 @@ Checklist trước deploy:
 - [ ] Không log connection string, PII, QR raw, CCCD đầy đủ, token hoặc Drive link/ID.
 - [ ] Unique constraint chặn hai ảnh CCCD cùng mặt active; replace xác minh file mới trước.
 - [ ] Response bị mất rồi retry create/submit/staff action không tạo bản ghi trùng.
+- [ ] Cache miss tạo thư mục Drive đã được kiểm bằng advisory lock theo `(parentId, name)`; không gọi
+      `findOrCreateFolder` bên trong một transaction database đang mở.
+- [ ] Điều chỉnh hồ sơ `ACCEPTED` cập nhật đồng thời `official_payload_*` và các bảng chính thức.
 - [ ] Email ngoài `users` bị từ chối dù Google Sign-In thành công.
 - [ ] QR thất bại không làm mất draft.
 - [ ] Ảnh gốc không đi qua body Vercel Function.

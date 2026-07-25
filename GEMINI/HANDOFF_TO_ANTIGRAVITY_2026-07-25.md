@@ -86,6 +86,7 @@ Tôi đã tự vá 5 nhóm lỗi chặn phát hiện khi review Phase 5–7, đ�
 
 Phần server (claim atomic, `mayClaim` bỏ `UNDER_REVIEW`, `SubmissionAlreadyClaimedError` → 409) đúng
 và chắc tay nhất trong cả 14 phase. Hai lưu ý nhỏ, sửa nếu tiện chứ không bắt buộc:
+
 - Cột `claim_note`/`claim_released_at` (migration `202607250004`) được thêm nhưng **không ai ghi vào**
   — hoặc dùng chúng khi `RELEASE` (ghi `reason` vào `claim_note`, `now()` vào `claim_released_at`),
   hoặc xóa cột nếu quyết định không cần.
@@ -126,19 +127,19 @@ chạy được, cần Postgres thử nghiệm" — không được suy đoán l
 Đây là phần lớn nhất còn thiếu. Kiểm tra thực tế trên nhánh hiện tại — **không có gì trong danh sách
 dưới đây tồn tại**:
 
-| Việc | Theo phase nào | Trạng thái |
-|---|---|---|
-| `agent/` (prompt, schema, ví dụ sanitized-job) | 10 | Không tồn tại |
-| `scripts/ai/` (manifest, validator, so sánh) | 10 | Không tồn tại |
-| `POST /api/ai/results` | 11 | Không tồn tại |
-| `tests/ai-prompt-injection.test.ts` | 10 | Không tồn tại |
-| Đổi quy ước tên tệp `-1`/`-2` → `-01`/`-02` + migration `202607250006` | 12 | Chưa làm |
-| Sửa `storage.findOrCreateFolder` gọi mạng bên trong transaction `max:1` | 13 | Chưa sửa |
-| E2E ≥ 11 bước, seed data, `storageState` đăng nhập cán bộ | 14 | `tests/e2e/` vẫn chỉ có
-`home.spec.ts` |
-| 8 biến môi trường AI trong `.env.example` (`AI_EXTRACTION_WORKER_TYPE`,
-`AI_EXTRACTION_PROMPT_VERSION`, `AI_WORKER_API_KEY`, `ANTIGRAVITY_WORKSPACE_ROOT`, ...) | 0.5 | Chỉ có
-`AI_EXTRACTION_ENABLED` |
+| Việc                                                                                    | Theo phase nào | Trạng thái              |
+| --------------------------------------------------------------------------------------- | -------------- | ----------------------- |
+| `agent/` (prompt, schema, ví dụ sanitized-job)                                          | 10             | Không tồn tại           |
+| `scripts/ai/` (manifest, validator, so sánh)                                            | 10             | Không tồn tại           |
+| `POST /api/ai/results`                                                                  | 11             | Không tồn tại           |
+| `tests/ai-prompt-injection.test.ts`                                                     | 10             | Không tồn tại           |
+| Đổi quy ước tên tệp `-1`/`-2` → `-01`/`-02` + migration `202607250006`                  | 12             | Chưa làm                |
+| Sửa `storage.findOrCreateFolder` gọi mạng bên trong transaction `max:1`                 | 13             | Chưa sửa                |
+| E2E ≥ 11 bước, seed data, `storageState` đăng nhập cán bộ                               | 14             | `tests/e2e/` vẫn chỉ có |
+| `home.spec.ts`                                                                          |
+| 8 biến môi trường AI trong `.env.example` (`AI_EXTRACTION_WORKER_TYPE`,                 |
+| `AI_EXTRACTION_PROMPT_VERSION`, `AI_WORKER_API_KEY`, `ANTIGRAVITY_WORKSPACE_ROOT`, ...) | 0.5            | Chỉ có                  |
+| `AI_EXTRACTION_ENABLED`                                                                 |
 
 Làm theo đúng thứ tự Phase 10 → 11 → 12 → 13 → 14 trong plan gốc — **mỗi phase một commit**, báo cáo
 và **chờ người dùng xác nhận** trước khi sang phase kế (đây là quy tắc §0 của plan gốc, không phải quy
