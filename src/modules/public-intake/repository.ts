@@ -555,6 +555,7 @@ export class PublicIntakeRepository {
     status: PublicStatus;
     claimedBy?: string;
     claimedAt?: string;
+    force?: boolean;
     supplementRequest?: SupplementRequest;
     actorEmail: string;
     auditAction: string;
@@ -581,6 +582,7 @@ export class PublicIntakeRepository {
         return mapSubmission(replayRows[0]);
       }
 
+      const isForce = Boolean(input.force);
       const rows = await transaction.unsafe<SubmissionRow[]>(
         `update public.public_submissions set
            status = $3, version = version + 1,
@@ -600,6 +602,7 @@ export class PublicIntakeRepository {
            end,
            updated_at = now()
          where submission_id = $1 and version = $2
+           and ($7::boolean = true or claimed_by is null or claimed_by = '' or claimed_by = $6)
          returning ${SUBMISSION_SELECT}`,
         [
           input.record.submissionId,
@@ -608,9 +611,19 @@ export class PublicIntakeRepository {
           input.claimedBy ?? null,
           input.claimedAt || null,
           input.actorEmail,
+          isForce,
         ],
       );
-      if (!rows[0]) throw new SubmissionVersionConflictError();
+      if (!rows[0]) {
+        const current = await transaction.unsafe<SubmissionRow[]>(
+          `select claimed_by from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (current[0] && current[0].claimed_by && current[0].claimed_by !== input.actorEmail && !isForce) {
+          throw new SubmissionAlreadyClaimedError();
+        }
+        throw new SubmissionVersionConflictError();
+      }
       const next = mapSubmission(rows[0]);
 
       if (!input.record.workingPayload && next.workingPayload) {
@@ -1667,5 +1680,12 @@ export class SubmissionIdempotencyConflictError extends Error {
   constructor() {
     super("Idempotency key đã được dùng cho một thao tác khác.");
     this.name = "SubmissionIdempotencyConflictError";
+  }
+}
+
+export class SubmissionAlreadyClaimedError extends Error {
+  constructor() {
+    super("Hồ sơ đang do cán bộ khác nhận xử lý.");
+    this.name = "SubmissionAlreadyClaimedError";
   }
 }

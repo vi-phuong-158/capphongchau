@@ -24,7 +24,19 @@ export function isClaimedBy(record: SubmissionRecord, email: string): boolean {
 }
 
 export function mayClaim(status: PublicStatus): boolean {
-  return status === "SUBMITTED" || status === "RESUBMITTED" || status === "UNDER_REVIEW";
+  return status === "SUBMITTED" || status === "RESUBMITTED";
+}
+
+export function mayForceClaim(roles: readonly string[]): boolean {
+  return roles.includes(UserRole.WARD_ADMIN) || roles.includes(UserRole.SYSTEM_ADMIN);
+}
+
+export function mayRelease(record: SubmissionRecord, email: string, roles: readonly string[]): boolean {
+  return isClaimedBy(record, email) || mayForceClaim(roles);
+}
+
+export function mayTransfer(record: SubmissionRecord, email: string, roles: readonly string[]): boolean {
+  return isClaimedBy(record, email) || mayForceClaim(roles);
 }
 
 export function mayRequestSupplement(record: SubmissionRecord, email: string): boolean {

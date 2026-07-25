@@ -10,6 +10,7 @@ import { UserRole } from "@/modules/common/domain";
 import { loadServerEnvironment } from "@/modules/common/env";
 import {
   getPublicIntakeRepository,
+  SubmissionAlreadyClaimedError,
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
 import {
@@ -21,8 +22,11 @@ import {
 import {
   isClaimedBy,
   mayClaim,
+  mayForceClaim,
   mayReject,
+  mayRelease,
   mayRequestSupplement,
+  mayTransfer,
   SUBMISSION_DECISION_ROLES,
   SUBMISSION_READ_ROLES,
 } from "@/modules/submissions/review";
@@ -30,8 +34,10 @@ import {
 export const runtime = "nodejs";
 
 const schema = z.object({
-  action: z.enum(["CLAIM", "REQUEST_SUPPLEMENT", "REJECT"]),
+  action: z.enum(["CLAIM", "FORCE_CLAIM", "RELEASE", "TRANSFER", "REQUEST_SUPPLEMENT", "REJECT"]),
   version: z.number().int().positive(),
+  reason: z.string().trim().min(5).max(500).optional(),
+  toEmail: z.string().trim().email().optional(),
   reasonCode: z.enum(SUPPLEMENT_REASON_CODES).optional(),
   message: z.string().trim().max(1000).optional(),
   items: z
@@ -66,6 +72,7 @@ function fail(
     | "NOT_FOUND"
     | "VERSION_CONFLICT"
     | "IDEMPOTENCY_CONFLICT"
+    | "ALREADY_CLAIMED"
     | "INTERNAL_ERROR",
   message: string,
   requestId: string,
@@ -93,7 +100,12 @@ export async function POST(
         400,
       );
     }
-    const roles = body.data.action === "CLAIM" ? SUBMISSION_READ_ROLES : SUBMISSION_DECISION_ROLES;
+
+    const action = body.data.action;
+    const roles =
+      action === "CLAIM" || action === "FORCE_CLAIM" || action === "RELEASE" || action === "TRANSFER"
+        ? SUBMISSION_READ_ROLES
+        : SUBMISSION_DECISION_ROLES;
     const user = await requireActiveUser(roles);
     const environment = loadServerEnvironment();
     if (
@@ -109,14 +121,17 @@ export async function POST(
         JSON.stringify({
           submissionId,
           actorEmail: user.email,
-          action: body.data.action,
+          action,
           version: body.data.version,
+          reason: body.data.reason ?? "",
+          toEmail: body.data.toEmail ?? "",
           reasonCode: body.data.reasonCode ?? "",
           message: body.data.message ?? "",
           items: body.data.items ?? [],
         }),
       )
       .digest("hex");
+
     const replay = await repository.findStoredMutation(scopedIdempotencyKey, "STAFF_ACTION");
     if (replay) {
       if (replay.mutationHash !== mutationHash) {
@@ -150,24 +165,20 @@ export async function POST(
         { headers: { "cache-control": "no-store" } },
       );
     }
+
     const record = await repository.findById(submissionId);
     if (!record) return fail("NOT_FOUND", "Không tìm thấy bản kê khai.", requestId, 404);
     if (record.version !== body.data.version) {
       return fail("VERSION_CONFLICT", "Hồ sơ đã thay đổi. Hãy tải lại trang.", requestId, 409);
     }
 
-    if (body.data.action === "CLAIM") {
-      if (!mayClaim(record.status))
-        return fail(
-          "VALIDATION_FAILED",
-          "Hồ sơ không ở trạng thái có thể nhận xử lý.",
-          requestId,
-          400,
-        );
-      const force =
-        user.roles.includes(UserRole.WARD_ADMIN) || user.roles.includes(UserRole.SYSTEM_ADMIN);
-      if (record.claimedBy && !isClaimedBy(record, user.email) && !force) {
-        return fail("ACCESS_DENIED", "Hồ sơ đang do cán bộ khác xử lý.", requestId, 403);
+    // 1. CLAIM
+    if (action === "CLAIM") {
+      if (!mayClaim(record.status)) {
+        return fail("VALIDATION_FAILED", "Hồ sơ không ở trạng thái có thể nhận xử lý.", requestId, 400);
+      }
+      if (record.claimedBy && !isClaimedBy(record, user.email)) {
+        return fail("ACCESS_DENIED", "Hồ sơ đang do cán bộ khác nhận xử lý.", requestId, 403);
       }
       const updated = await repository.commitStaffAction({
         record,
@@ -175,9 +186,10 @@ export async function POST(
         status: "UNDER_REVIEW",
         claimedBy: user.email,
         claimedAt: new Date().toISOString(),
+        force: false,
         actorEmail: user.email,
         auditAction: "SUBMISSION_CLAIMED",
-        auditMetadata: { forced: force },
+        auditMetadata: { forced: false },
         timelineEvent: newTimelineEvent({
           eventType: "UNDER_REVIEW",
           label: "Đang kiểm tra",
@@ -188,18 +200,114 @@ export async function POST(
         mutationHash,
       });
       return NextResponse.json(
-        {
-          submission: {
-            status: updated.status,
-            version: updated.version,
-            claimedBy: updated.claimedBy,
-          },
-          requestId,
-        },
+        { submission: { status: updated.status, version: updated.version, claimedBy: updated.claimedBy }, requestId },
         { headers: { "cache-control": "no-store" } },
       );
     }
 
+    // 2. FORCE_CLAIM
+    if (action === "FORCE_CLAIM") {
+      if (!mayForceClaim(user.roles)) {
+        return fail("ACCESS_DENIED", "Chỉ quản trị viên mới có quyền mở khóa cưỡng chế.", requestId, 403);
+      }
+      if (!body.data.reason) {
+        return fail("VALIDATION_FAILED", "Bắt buộc nhập lý do mở khóa cưỡng chế.", requestId, 400);
+      }
+      const updated = await repository.commitStaffAction({
+        record,
+        expectedVersion: body.data.version,
+        status: "UNDER_REVIEW",
+        claimedBy: user.email,
+        claimedAt: new Date().toISOString(),
+        force: true,
+        actorEmail: user.email,
+        auditAction: "SUBMISSION_FORCE_CLAIMED",
+        auditMetadata: { previousAssignee: record.claimedBy, reason: body.data.reason },
+        timelineEvent: newTimelineEvent({
+          eventType: "FORCE_CLAIMED",
+          label: "Mở khóa cưỡng chế",
+          actorDisplayName: user.displayName,
+          message: `Quản trị viên cưỡng chế nhận xử lý thay cán bộ ${record.claimedBy}. Lý do: ${body.data.reason}`,
+        }),
+        requestId,
+        idempotencyKey: scopedIdempotencyKey,
+        mutationHash,
+      });
+      return NextResponse.json(
+        { submission: { status: updated.status, version: updated.version, claimedBy: updated.claimedBy }, requestId },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+
+    // 3. RELEASE
+    if (action === "RELEASE") {
+      if (!mayRelease(record, user.email, user.roles)) {
+        return fail("ACCESS_DENIED", "Bạn không có quyền trả lại hồ sơ này vào hàng chờ.", requestId, 403);
+      }
+      if (!body.data.reason) {
+        return fail("VALIDATION_FAILED", "Bắt buộc nhập lý do trả lại hàng chờ.", requestId, 400);
+      }
+      const updated = await repository.commitStaffAction({
+        record,
+        expectedVersion: body.data.version,
+        status: "SUBMITTED",
+        claimedBy: "",
+        claimedAt: "",
+        force: true,
+        actorEmail: user.email,
+        auditAction: "SUBMISSION_CLAIM_RELEASED",
+        auditMetadata: { reason: body.data.reason },
+        timelineEvent: newTimelineEvent({
+          eventType: "CLAIM_RELEASED",
+          label: "Trả lại hàng chờ",
+          actorDisplayName: user.displayName,
+          message: `Cán bộ ${user.displayName} trả lại hồ sơ vào hàng chờ. Lý do: ${body.data.reason}`,
+        }),
+        requestId,
+        idempotencyKey: scopedIdempotencyKey,
+        mutationHash,
+      });
+      return NextResponse.json(
+        { submission: { status: updated.status, version: updated.version, claimedBy: "" }, requestId },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+
+    // 4. TRANSFER
+    if (action === "TRANSFER") {
+      if (!mayTransfer(record, user.email, user.roles)) {
+        return fail("ACCESS_DENIED", "Bạn không có quyền chuyển giao hồ sơ này.", requestId, 403);
+      }
+      if (!body.data.toEmail || !body.data.reason) {
+        return fail("VALIDATION_FAILED", "Bắt buộc chọn người nhận và nhập lý do chuyển giao.", requestId, 400);
+      }
+      const updated = await repository.commitStaffAction({
+        record,
+        expectedVersion: body.data.version,
+        status: "UNDER_REVIEW",
+        claimedBy: body.data.toEmail,
+        claimedAt: new Date().toISOString(),
+        force: true,
+        actorEmail: user.email,
+        auditAction: "SUBMISSION_TRANSFERRED",
+        auditMetadata: { fromEmail: record.claimedBy, toEmail: body.data.toEmail, reason: body.data.reason },
+        timelineEvent: newTimelineEvent({
+          eventType: "TRANSFERRED",
+          label: "Chuyển giao xử lý",
+          actorDisplayName: user.displayName,
+          message: `Chuyển giao xử lý cho ${body.data.toEmail}. Lý do: ${body.data.reason}`,
+        }),
+        requestId,
+        idempotencyKey: scopedIdempotencyKey,
+        mutationHash,
+      });
+      return NextResponse.json(
+        { submission: { status: updated.status, version: updated.version, claimedBy: updated.claimedBy }, requestId },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+
+    // 5. REQUEST_SUPPLEMENT & REJECT
     if (
       !isClaimedBy(record, user.email) &&
       !user.roles.includes(UserRole.WARD_ADMIN) &&
@@ -208,17 +316,14 @@ export async function POST(
       return fail("ACCESS_DENIED", "Bạn cần nhận xử lý hồ sơ trước khi thao tác.", requestId, 403);
     }
     const allowed =
-      body.data.action === "REQUEST_SUPPLEMENT"
-        ? mayRequestSupplement(record, user.email) ||
-          user.roles.includes(UserRole.WARD_ADMIN) ||
-          user.roles.includes(UserRole.SYSTEM_ADMIN)
-        : mayReject(record, user.email) ||
-          user.roles.includes(UserRole.WARD_ADMIN) ||
-          user.roles.includes(UserRole.SYSTEM_ADMIN);
+      action === "REQUEST_SUPPLEMENT"
+        ? mayRequestSupplement(record, user.email) || mayForceClaim(user.roles)
+        : mayReject(record, user.email) || mayForceClaim(user.roles);
     if (!allowed)
       return fail("VALIDATION_FAILED", "Hồ sơ không ở trạng thái có thể xử lý.", requestId, 400);
+
     if (
-      body.data.action === "REQUEST_SUPPLEMENT" &&
+      action === "REQUEST_SUPPLEMENT" &&
       (!body.data.reasonCode || !body.data.message || !body.data.items?.length)
     ) {
       return fail(
@@ -228,9 +333,10 @@ export async function POST(
         400,
       );
     }
-    const status = body.data.action === "REQUEST_SUPPLEMENT" ? "NEEDS_SUPPLEMENT" : "REJECTED";
+
+    const status = action === "REQUEST_SUPPLEMENT" ? "NEEDS_SUPPLEMENT" : "REJECTED";
     let supplementRequest: SupplementRequest | undefined;
-    if (body.data.action === "REQUEST_SUPPLEMENT") {
+    if (action === "REQUEST_SUPPLEMENT") {
       const supplementRequestId = randomUUID();
       const createdAt = new Date().toISOString();
       supplementRequest = {
@@ -262,7 +368,7 @@ export async function POST(
       supplementRequest,
       actorEmail: user.email,
       auditAction:
-        body.data.action === "REQUEST_SUPPLEMENT"
+        action === "REQUEST_SUPPLEMENT"
           ? "SUBMISSION_NEEDS_SUPPLEMENT"
           : "SUBMISSION_REJECTED",
       timelineEvent: newTimelineEvent({
@@ -287,6 +393,8 @@ export async function POST(
         requestId,
         error.kind === "UNAUTHENTICATED" ? 401 : 403,
       );
+    if (error instanceof SubmissionAlreadyClaimedError)
+      return fail("ALREADY_CLAIMED", error.message, requestId, 409);
     if (error instanceof SubmissionVersionConflictError)
       return fail("VERSION_CONFLICT", error.message, requestId, 409);
     return fail("INTERNAL_ERROR", "Không thể cập nhật hồ sơ.", requestId, 500);

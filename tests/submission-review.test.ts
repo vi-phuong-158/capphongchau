@@ -55,7 +55,7 @@ describe("submission review helpers", () => {
   it("allows claims only for submitted, resubmitted or currently reviewed records", () => {
     expect(mayClaim("SUBMITTED")).toBe(true);
     expect(mayClaim("RESUBMITTED")).toBe(true);
-    expect(mayClaim("UNDER_REVIEW")).toBe(true);
+    expect(mayClaim("UNDER_REVIEW")).toBe(false);
     expect(mayClaim("ACCEPTED")).toBe(false);
   });
 

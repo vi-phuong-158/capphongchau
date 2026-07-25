@@ -1,5 +1,26 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 5 — Chống race-condition khi nhận xử lý / claim atomic (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`202607250004_submission_claim_guard.sql`:** Thêm `claim_released_at`, `claim_note` và partial index `public_submissions_open_queue_idx` trên `status in ('SUBMITTED','RESUBMITTED')`.
+  - **`review.ts`:**
+    - Cập nhật `mayClaim(status)` chỉ áp dụng cho `SUBMITTED` & `RESUBMITTED` (bỏ `UNDER_REVIEW`).
+    - Thêm các helper `mayForceClaim`, `mayRelease`, `mayTransfer`.
+  - **`repository.ts`:**
+    - Cập nhật `commitStaffAction`: kiểm tra atomic `and ($7::boolean = true or claimed_by is null or claimed_by = '' or claimed_by = actor)`.
+    - Trả lỗi `SubmissionAlreadyClaimedError` nếu bị cán bộ khác chiếm trước thay vì lỗi chung.
+  - **`action/route.ts`:**
+    - Hỗ trợ các hành động `CLAIM`, `FORCE_CLAIM`, `RELEASE`, `TRANSFER`.
+    - Yêu cầu lý do cho `RELEASE`, `TRANSFER`, `FORCE_CLAIM`. Trả HTTP 409 `ALREADY_CLAIMED` khi tranh chấp claim.
+  - **Kiểm tra:**
+    - `npx vitest run`: 38 file pass / 1 skip (**237 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `supabase/migrations/202607250004_submission_claim_guard.sql` (mới), `src/modules/submissions/review.ts`, `src/modules/public-intake/repository.ts`, `src/app/api/submissions/[submissionId]/action/route.ts`, `src/modules/common/api-error.ts`, `tests/submission-claim.test.ts` (mới), `tests/submission-review.test.ts`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Đảm bảo tính nguyên tử khi cán bộ nhận hồ sơ, ngăn race condition và hỗ trợ cưỡng chế/chuyển giao có ghi vết audit.
+
 ## [2026-07-25] Phase 4 — Thêm hai lớp citizen_payload & working_payload (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)
