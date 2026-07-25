@@ -1,5 +1,34 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 1 — Test tái hiện lỗi PL3 (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - Thêm 2 file test mới để tái hiện các lỗi xuất PL3:
+    - `tests/exports-route.test.ts`: test route `POST /api/exports` (các trường hợp T1-T6).
+    - `tests/pl3-export-large-certificate.test.ts`: test bộ tạo dữ liệu PL3 với GCN lớn và cảnh báo (L1-L6).
+  - Chạy `npx vitest run tests/exports-route.test.ts tests/pl3-export-large-certificate.test.ts`:
+    - Tổng cộng: **12 tests (7 PASS / 5 FAIL)**.
+    - Đúng chính xác **5 test FAIL** có chủ đích: T2 (cắt 2.000 dòng), T3 (`appendExportJob` làm chết file), T4 (`appendAudit` làm chết file), T6 (`file_summary_json` string làm rỗng cột 49), L6 (thiếu sheet 'Canh bao').
+- **File đã tạo/sửa:** `tests/exports-route.test.ts`, `tests/pl3-export-large-certificate.test.ts`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Hoàn thành bộ test đỏ đúng theo tiêu chí của Phase 1 trong `IMPLEMENTATION_PLAN_ANTIGRAVITY.md` trước khi sửa ở Phase 2.
+- **Chưa xác minh:** Các test đỏ sẽ được chuyển xanh tại Phase 2.
+
+## [2026-07-25] Phase 0 — Baseline & Chẩn đoán xuất PL3 (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - Khởi tạo nhánh `feat/antigravity-assisted-review` từ commit `b8e67a2` trên `main`.
+  - Đo và xác minh baseline Quality Gate thành công:
+    - `npm run typecheck`: PASS (0 lỗi TS).
+    - `npm run lint`: PASS (yêu cầu `NODE_OPTIONS="--max-old-space-size=8192"` do dung lượng heap).
+    - `npm test` (`npx vitest run`): PASS — 33 file pass / 1 skip; **216 test pass / 9 test skip** (khớp 100% với baseline).
+    - `npm run build` (`npx next build`): PASS (32 routes compiled, static generation clean).
+  - Lập ma trận chẩn đoán 4 nhánh nguyên nhân độc lập gây ra sự cố xuất PL3 (phân tích từ `REVIEW_CLAUDE_OPUS.md` và `IMPLEMENTATION_PLAN_ANTIGRAVITY.md`).
+- **File đã sửa:** `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Đạt điều kiện BƯỚC 0 và hoàn thành Phase 0 theo `IMPLEMENTATION_PLAN_ANTIGRAVITY.md`.
+- **Chưa xác minh:** Chưa có log HTTP DevTools/Vercel hoặc dữ liệu Supabase SQL Editor từ môi trường Production của người dùng. Sẽ vá toàn bộ các nhánh lỗi (b, c, d, e, f, g) tại Phase 2 theo kế hoạch.
+
 ## [2026-07-25] Diễn tập trên Postgres thật xác nhận bản vá P0-1/P0-5/Q2 — tìm và sửa fixture test sai
 
 - **Agent:** Claude Code
