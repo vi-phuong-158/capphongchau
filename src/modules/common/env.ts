@@ -31,6 +31,7 @@ const serverEnvironmentSchema = z.object({
   MAX_DRAFT_JSON_BYTES: z.coerce.number().int().positive().default(45000),
   MIN_DRIVE_FREE_GB: z.coerce.number().int().positive().default(650),
   PUBLIC_INTAKE_MODE: z.enum(["LIVE", "PAUSED"]).default("LIVE"),
+  AI_EXTRACTION_ENABLED: z.string().optional().transform((val) => val === "true").default(false),
 });
 
 const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({

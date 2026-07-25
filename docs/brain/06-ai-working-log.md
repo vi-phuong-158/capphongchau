@@ -1,5 +1,17 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 10–14 — Bật cờ môi trường, Bảo mật & Kiểm thử tổng thể (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`env.ts`:** Thêm biến môi trường `AI_EXTRACTION_ENABLED` với giá trị mặc định `false`.
+  - **Kiểm thử & Chất lượng (Quality Gate):**
+    - `npx vitest run`: 41 file pass / 1 skip (**246 test pass / 9 skip**).
+    - `npm run typecheck`: PASS (0 lỗi).
+    - `npm run build`: PASS (Build thành công toàn bộ ứng dụng Next.js PWA).
+- **File đã sửa:** `src/modules/common/env.ts`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Đảm bảo toàn bộ luồng quy trình, API và giao diện hoạt động ổn định và hoàn thành toàn bộ các Phase được giao.
+
 ## [2026-07-25] Phase 9 — Schema hàng đợi AI Extraction (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)
