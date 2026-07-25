@@ -38,6 +38,12 @@ export interface SubmissionRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly draft: IntakeDraft | null;
+  readonly citizenPayload?: IntakeDraft | null;
+  readonly citizenPayloadVersion?: number;
+  readonly citizenPayloadAt?: string;
+  readonly workingPayload?: IntakeDraft | null;
+  readonly workingPayloadAt?: string;
+  readonly workingPayloadBy?: string;
   readonly accessVersion: number;
   readonly fileSummaries: readonly PublicFileSummary[];
   /** Locator ổn định, giữ tên cũ để cookie phiên v2 tiếp tục tương thích sau migration. */
@@ -125,6 +131,12 @@ interface SubmissionRow {
   readonly created_at: Date;
   readonly updated_at: Date;
   readonly draft_json: unknown;
+  readonly citizen_payload_json: unknown;
+  readonly citizen_payload_version: number | null;
+  readonly citizen_payload_at: Date | null;
+  readonly working_payload_json: unknown;
+  readonly working_payload_at: Date | null;
+  readonly working_payload_by: string | null;
   readonly access_version: number;
   readonly file_summary_json: PublicFileSummary[] | null;
   readonly legacy_row_index: string | number;
@@ -149,7 +161,9 @@ const SUBMISSION_SELECT = `
   submission_id, receipt_code::text, status, phone, version, access_code_hash,
   failed_attempts, locked_until, consent_version, consented_at, retention_until,
   official_case_id, drive_folder_id, accept_step, claimed_by, claimed_at,
-  created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index
+  created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
+  citizen_payload_json, citizen_payload_version, citizen_payload_at,
+  working_payload_json, working_payload_at, working_payload_by
 `;
 
 function asIso(value: Date | null): string {
@@ -212,6 +226,12 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
     draft: decodeSubmissionDraft(row.draft_json),
+    citizenPayload: decodeSubmissionDraft(row.citizen_payload_json),
+    citizenPayloadVersion: Number(row.citizen_payload_version ?? 0),
+    citizenPayloadAt: asIso(row.citizen_payload_at),
+    workingPayload: decodeSubmissionDraft(row.working_payload_json),
+    workingPayloadAt: asIso(row.working_payload_at),
+    workingPayloadBy: row.working_payload_by ?? "",
     accessVersion: row.access_version,
     fileSummaries: decodeFileSummaries(row.file_summary_json),
     rowIndex: Number(row.legacy_row_index),
@@ -565,7 +585,20 @@ export class PublicIntakeRepository {
         `update public.public_submissions set
            status = $3, version = version + 1,
            claimed_by = coalesce($4, claimed_by),
-           claimed_at = coalesce($5::timestamptz, claimed_at), updated_at = now()
+           claimed_at = coalesce($5::timestamptz, claimed_at),
+           working_payload_json = case
+             when working_payload_json is null then coalesce(citizen_payload_json, draft_json)
+             else working_payload_json
+           end,
+           working_payload_at = case
+             when working_payload_json is null then now()
+             else working_payload_at
+           end,
+           working_payload_by = case
+             when working_payload_json is null then $6
+             else working_payload_by
+           end,
+           updated_at = now()
          where submission_id = $1 and version = $2
          returning ${SUBMISSION_SELECT}`,
         [
@@ -574,10 +607,22 @@ export class PublicIntakeRepository {
           input.status,
           input.claimedBy ?? null,
           input.claimedAt || null,
+          input.actorEmail,
         ],
       );
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
+
+      if (!input.record.workingPayload && next.workingPayload) {
+        await transaction`
+          insert into public.public_submission_payload_history
+            (submission_id, layer, payload_version, payload_json, actor_email)
+          values (
+            ${input.record.submissionId}, 'WORKING', 1, ${JSON.stringify(next.workingPayload)}::jsonb, ${input.actorEmail}
+          )
+          on conflict (submission_id, layer, payload_version) do nothing
+        `;
+      }
 
       if (input.supplementRequest) {
         await this.insertSupplementRequest(
@@ -1324,15 +1369,27 @@ export class PublicIntakeRepository {
         return;
       }
 
-      const updated = await transaction<{ version: number }[]>`
+      const updated = await transaction<{ version: number; citizen_payload_version: number }[]>`
         update public.public_submissions set
           status = ${input.status}, phone = ${input.draft.phone || input.record.phone},
           version = version + 1, draft_json = ${JSON.stringify(input.draft)}::jsonb,
+          citizen_payload_json = ${JSON.stringify(input.draft)}::jsonb,
+          citizen_payload_version = citizen_payload_version + 1,
+          citizen_payload_at = now(),
           accept_step = null, claimed_by = null, claimed_at = null, updated_at = now()
         where submission_id = ${input.record.submissionId} and version = ${input.record.version}
-        returning version
+        returning version, citizen_payload_version
       `;
       if (!updated[0]) throw new SubmissionVersionConflictError();
+
+      await transaction`
+        insert into public.public_submission_payload_history
+          (submission_id, layer, payload_version, payload_json, actor_email)
+        values (
+          ${input.record.submissionId}, 'CITIZEN', ${updated[0].citizen_payload_version}, ${JSON.stringify(input.draft)}::jsonb, ${input.actorEmail}
+        )
+        on conflict (submission_id, layer, payload_version) do nothing
+      `;
 
       await this.refreshCanonicalProjection(
         transaction,

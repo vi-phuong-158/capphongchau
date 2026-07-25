@@ -1,5 +1,27 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 4 — Thêm hai lớp citizen_payload & working_payload (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`202607250002_submission_payload_layers.sql`:**
+    - Thêm các cột `citizen_payload_json`, `citizen_payload_version`, `citizen_payload_at`, `working_payload_json`, `working_payload_at`, `working_payload_by` vào bảng `public_submissions`.
+    - Tạo bảng lịch sử `public_submission_payload_history` lưu truy vết thay đổi các lớp payload.
+    - Cập nhật backfill cho hồ sơ cũ đã nộp (`status` hợp lệ): sao chép `draft_json` sang `citizen_payload_json`.
+  - **`payload-layers.ts`:**
+    - Định nghĩa helper `effectivePayload` (`workingPayload` > `citizenPayload` > `draft`) và `payloadLayerOf`.
+  - **`repository.ts`:**
+    - Cập nhật `SubmissionRecord` & `SubmissionRow` và `SUBMISSION_SELECT` để nạp 6 cột mới.
+    - Cập nhật `submit()`: lưu `citizen_payload_json` và ghi history `CITIZEN`.
+    - Cập nhật `commitStaffAction()`: khi cán bộ nhận xử lý (claim), tự động khởi tạo `working_payload_json` từ `citizen_payload_json` (hoặc `draft_json`) và ghi history `WORKING`.
+  - **Kiểm tra:**
+    - `npx vitest run`: 37 file pass / 1 skip (**233 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS.
+- **File đã sửa:** `supabase/migrations/202607250002_submission_payload_layers.sql` (mới), `src/modules/public-intake/payload-layers.ts` (mới), `src/modules/public-intake/repository.ts`, `tests/payload-layers.test.ts` (mới), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Tách bạch lớp dữ liệu do người dân gửi và lớp dữ liệu do cán bộ biên tập theo yêu cầu phạm vi thu hẹp của Phase 4.
+- **Chưa xác minh:** Chưa chạy migration trên Supabase production thật.
+
 ## [2026-07-25] Phase 3 — Chuẩn hóa migration trùng version (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)
