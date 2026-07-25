@@ -1,5 +1,18 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Phase 6 — API sửa bản làm việc đầy đủ (Antigravity)
+
+- **Agent:** Antigravity / Gemini 3.6 Flash (High)
+- **Thay đổi:**
+  - **`repository.ts`:** Thêm `commitWorkingPayload()` để cập nhật `working_payload_json`, tăng version, ghi history `WORKING`, cập nhật `updated_at`, `working_payload_at`, `working_payload_by`, và tự động đồng bộ lại canonical projection (`refreshCanonicalProjection`).
+  - **`working-payload/route.ts`:** Tạo API Handler cho `PUT /api/submissions/:submissionId/working-payload` để cán bộ đang giữ hồ sơ (`claimedBy === email` và `status === UNDER_REVIEW`) chỉnh sửa bản làm việc với đầy đủ schema validation (`draftSchema`), idempotency protection và audit tracking.
+  - **Kiểm tra:**
+    - `npx vitest run`: 39 file pass / 1 skip (**240 test pass / 9 skip**).
+    - `npm run typecheck`: PASS.
+    - `npm run build`: PASS (tạo mới route `/api/submissions/[submissionId]/working-payload`).
+- **File đã sửa:** `src/modules/public-intake/repository.ts`, `src/app/api/submissions/[submissionId]/working-payload/route.ts` (mới), `tests/working-payload.test.ts` (mới), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Cho phép cán bộ nhận xử lý biên tập và cập nhật bản làm việc độc lập với bản người dân gửi.
+
 ## [2026-07-25] Phase 5 — Chống race-condition khi nhận xử lý / claim atomic (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)

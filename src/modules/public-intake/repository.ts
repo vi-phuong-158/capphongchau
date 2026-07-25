@@ -746,6 +746,82 @@ export class PublicIntakeRepository {
     });
   }
 
+  async commitWorkingPayload(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    draft: IntakeDraft;
+    actorEmail: string;
+    changeNote?: string;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           working_payload_json = $3::jsonb,
+           working_payload_at = now(),
+           working_payload_by = $4,
+           draft_json = $3::jsonb,
+           version = version + 1,
+           updated_at = now()
+         where submission_id = $1 and version = $2
+         returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.expectedVersion, JSON.stringify(input.draft), input.actorEmail],
+      );
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const next = mapSubmission(rows[0]);
+
+      await transaction`
+        insert into public.public_submission_payload_history
+          (submission_id, layer, payload_version, payload_json, actor_email)
+        values (
+          ${input.record.submissionId}, 'WORKING', ${next.version}, ${JSON.stringify(input.draft)}::jsonb, ${input.actorEmail}
+        )
+        on conflict (submission_id, layer, payload_version) do nothing
+      `;
+
+      if (input.record.status !== "DRAFT") {
+        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+      }
+
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_WORKING_PAYLOAD_EDITED",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: { changeNote: input.changeNote || "" },
+      });
+
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'WORKING_PAYLOAD_EDIT', ${input.mutationHash},
+          ${JSON.stringify({ version: next.version })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
+    });
+  }
+
   /**
    * Điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức.
    *
