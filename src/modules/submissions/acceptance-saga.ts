@@ -11,6 +11,7 @@ import {
 } from "@/modules/public-intake/repository";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
+import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { getDatabase } from "@/modules/supabase/database";
 import {
   canStartOfficialAcceptance,
@@ -405,37 +406,19 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         ) on conflict (case_id) do nothing
       `;
 
-      // 2. Insert public.owners (idempotent - đúng schema: case_id, citizen_id, date_of_birth, gender, address, source)
-      const owners = Array.isArray(draft?.owners) ? draft.owners : [];
-      for (const owner of owners) {
-        const deterministicOwnerId = `ACC:${input.record.submissionId}:${owner.id}`;
-        await transaction`
-          insert into public.owners (
-            owner_id, case_id, full_name, citizen_id, date_of_birth, gender, address, source
-          ) values (
-            ${deterministicOwnerId}, ${currentSaga.official_case_id}, ${owner.fullName || ""},
-            ${owner.identityNumber || ""}, ${owner.dateOfBirth || ""}, ${owner.gender || ""},
-            ${owner.residenceAddress || ""}, ${owner.identitySource || "MANUAL"}
-          ) on conflict (owner_id) do nothing
-        `;
-      }
+      // 2-4. Ghi chủ sử dụng, giấy chứng nhận, thửa đất và tài sản.
+      //
+      // Dùng chung `syncOfficialRecord` với đường điều chỉnh hồ sơ đã tiếp nhận
+      // (`commitOfficialAmendment`), để hai đường không bao giờ định nghĩa "dữ liệu chính thức"
+      // khác nhau. Hàm là upsert + xóa bản ghi không còn trong bản kê khai, nên chạy lại vẫn cho
+      // đúng một kết quả — giữ nguyên tính idempotent mà saga cần.
+      const counts = await syncOfficialRecord(transaction, {
+        caseId: currentSaga.official_case_id,
+        submissionId: input.record.submissionId,
+        draft,
+      });
 
-      // 3. Insert public.certificates (idempotent - đúng schema: case_id, issue_number, issue_date, registry_number, land_user_name, notes)
-      const cert = draft?.certificate;
-      if (cert) {
-        const deterministicCertId = `ACC:${input.record.submissionId}:CERT`;
-        const landUserName = owners[0]?.fullName || "";
-        await transaction`
-          insert into public.certificates (
-            certificate_id, case_id, issue_number, issue_date, registry_number, land_user_name, notes
-          ) values (
-            ${deterministicCertId}, ${currentSaga.official_case_id}, ${cert.issueNumber || ""},
-            ${cert.issueDate || ""}, ${cert.registryNumber || ""}, ${landUserName}, ${""}
-          ) on conflict (certificate_id) do nothing
-        `;
-      }
-
-      // 4. Insert public.files (idempotent - đúng schema: checksum_sha256)
+      // 5. Insert public.files (idempotent - đúng schema: checksum_sha256)
       for (const file of activeFiles) {
         const deterministicFileId = `ACC:${input.record.submissionId}:${file.fileId}`;
         const deterministicOwnerId = file.ownerId ? `ACC:${input.record.submissionId}:${file.ownerId}` : null;
@@ -469,7 +452,14 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
         action: "OFFICIAL_ACCEPTANCE_RECORDS_WRITTEN",
         entityId: input.record.submissionId,
         requestId: input.requestId,
-        metadata: { officialCaseId: currentSaga.official_case_id },
+        // Chỉ đếm, không ghi giá trị — audit_logs là append-only, không để PII lọt vào.
+        metadata: {
+          officialCaseId: currentSaga.official_case_id,
+          ownerCount: counts.ownerCount,
+          parcelCount: counts.parcelCount,
+          assetCount: counts.assetCount,
+          fileCount: activeFiles.length,
+        },
       });
 
       return mapSagaRow(updated[0]);

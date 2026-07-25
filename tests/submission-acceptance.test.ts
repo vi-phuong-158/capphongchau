@@ -55,7 +55,10 @@ describe("official acceptance guards", () => {
     expect(vietnamBusinessYear(new Date("2026-12-31T18:00:00.000Z"))).toBe("2027");
   });
 
-  it("keeps the official acceptance hard stop OFF until the staging rehearsal gate is done — flip only with explicit review, never silently", () => {
-    expect(OFFICIAL_ACCEPTANCE_ENABLED).toBe(false);
+  // Trip-wire hai chiều. Cờ được chủ dự án mở ngày 2026-07-25 (03-decisions.md [2026-07-25] "Mở
+  // tiếp nhận chính thức") sau khi đóng hết điều kiện gác cổng và vá 2 lỗi chặn. Đóng lại là công
+  // tắc dừng khẩn hợp lệ — nhưng phải là quyết định có ghi chép, không phải một lần sửa lướt qua.
+  it("keeps the official acceptance flag ON — flipping it back is an emergency stop that must be a recorded decision, never a silent edit", () => {
+    expect(OFFICIAL_ACCEPTANCE_ENABLED).toBe(true);
   });
 });

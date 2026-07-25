@@ -70,8 +70,19 @@ src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
     ├── list/listSummaries/findById
     ├── commitStaffAction (transaction)
-    ├── commitStaffDraftEdit (transaction) — PATCH sửa trực tiếp draft_json, khóa field QR_CONFIRMED
-    │   └── mayStaffEdit / isOwnerIdentityLocked (src/modules/submissions/review.ts)
+    ├── commitOfficialAmendment (transaction) — PATCH sửa hồ sơ ĐÃ tiếp nhận (Q2, 2026-07-25)
+    │   ├── mayAmendOfficialRecord — ACCEPTED + có official_case_id + (người giữ | admin)
+    │   ├── bắt buộc amendmentReason >= 10 ký tự → audit OFFICIAL_RECORD_AMENDED
+    │   └── syncOfficialRecord (src/modules/submissions/official-record.ts) — CÙNG transaction:
+    │       upsert certificates/owners/parcels/assets theo case_id + xóa bản ghi không còn
+    │       trong bản kê khai. DÙNG CHUNG với bước RECORDS_WRITTEN của saga.
+    ├── commitStaffDraftEdit (transaction) — PATCH sửa trực tiếp draft_json
+    │   ├── mayStaffEdit (src/modules/submissions/review.ts) — chỉ người đang giữ + UNDER_REVIEW
+    │   ├── isOwnerIdentityQrConfirmed — CẢNH BÁO, không còn khóa cứng (2026-07-25, Q1):
+    │   │   cán bộ sửa được cả field QR_CONFIRMED, audit ghi identityOverride
+    │   └── refreshCanonicalProjection — XÓA CON TRƯỚC CHA:
+    │       land_uses → parcels → owners → certificates → assets
+    │       (FK public_land_uses.parcel_id không cascade; sai thứ tự = 500 từ lần sửa thứ hai)
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
@@ -86,8 +97,11 @@ src/app/api/submissions/[submissionId]/accept/route.ts
     ├── FILES_MOVED: drive.files.update từng file (đổi parent + đổi tên `requestBody.name`),
     │   checkpoint moved_files (NGOÀI tx) — tên sinh bởi buildOriginalFileNames
     │   (src/modules/public-intake/file-naming.ts), issueNumber rỗng → bỏ qua đổi tên
-    ├── RECORDS_WRITTEN (tx): cases + owners + certificates + files,
-    │   ID deterministic ACC:{submissionId}:{id}, ON CONFLICT DO NOTHING
+    ├── RECORDS_WRITTEN (tx): cases + files, rồi syncOfficialRecord cho
+    │   certificates + owners + parcels(data_json) + assets(data_json),
+    │   ID deterministic ACC:{submissionId}:{id|idx-N}, upsert + xóa dòng thừa
+    │   (thửa và mục đích sử dụng đi nguyên object vào public.parcels.data_json —
+    │    landUses lồng bên trong; bổ sung 2026-07-25, trước đó KHÔNG được ghi đâu cả)
     └── COMPLETED (tx): public_submissions ACCEPTED + official_case_id + request_log
 
 src/modules/public-intake/pl3-export.ts (thuần, không I/O)

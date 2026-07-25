@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
-import { isOwnerIdentityLocked } from "@/modules/submissions/review";
+import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 
 type Owner = {
   id: string;
@@ -115,19 +115,26 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [newAccessSecret, setNewAccessSecret] = useState("");
   const [editOpen, setEditOpen] = useState(false);
+  /** Bật khi mở chế độ điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức — buộc nhập lý do trước khi lưu. */
+  const [amendMode, setAmendMode] = useState(false);
+  const [amendmentReason, setAmendmentReason] = useState("");
   const [editCertificate, setEditCertificate] = useState({
     issueNumber: "",
     issueDate: "",
     registryNumber: "",
   });
   const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
+  /** Giữ nguyên qua các lần bấm lại để saga tiếp tục từ checkpoint, không tạo hồ sơ chính thức mới. */
+  const acceptKeyRef = useRef("");
   useEffect(() => {
     loadSubmission(submissionId)
       .then(setSubmission)
       .catch(() => setMessage("Không thể tải hồ sơ."));
   }, [submissionId]);
-  function openEdit() {
+  function openEdit(mode: "EDIT" | "AMEND" = "EDIT") {
     if (!submission?.draft) return;
+    setAmendMode(mode === "AMEND");
+    setAmendmentReason("");
     setEditCertificate({ ...submission.draft.certificate });
     setEditOwners(
       submission.draft.owners.map((owner) => ({
@@ -171,6 +178,10 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
       setMessage("Không có thay đổi nào để lưu.");
       return;
     }
+    if (amendMode && amendmentReason.trim().length < 10) {
+      setMessage("Điều chỉnh hồ sơ đã tiếp nhận phải có lý do ít nhất 10 ký tự.");
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -186,6 +197,7 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
           version: submission.version,
           ...(Object.keys(certificatePatch).length ? { certificate: certificatePatch } : {}),
           ...(ownersPatch.length ? { owners: ownersPatch } : {}),
+          ...(amendMode ? { amendmentReason: amendmentReason.trim() } : {}),
         }),
       });
       const data = (await response.json()) as {
@@ -197,7 +209,11 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
       const refreshed = await loadSubmission(submission.submissionId);
       setSubmission(refreshed);
       setEditOpen(false);
-      setMessage("Đã lưu thông tin chỉnh sửa.");
+      setMessage(
+        amendMode
+          ? "Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới."
+          : "Đã lưu thông tin chỉnh sửa.",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể lưu thay đổi.");
     } finally {
@@ -263,6 +279,57 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  /**
+   * Tiếp nhận chính thức: sinh mã hồ sơ, chuyển file sang `02_CASES`, ghi CASES/OWNERS/
+   * CERTIFICATES/PARCELS/ASSETS/FILES. Saga có checkpoint nên bấm lại sau khi lỗi mạng là an toàn —
+   * nhưng phải **giữ nguyên `idempotency-key`** thì mới đi tiếp từ checkpoint thay vì tạo hồ sơ mới,
+   * nên key được giữ trong ref suốt vòng đời một lần tiếp nhận, không sinh lại mỗi lần bấm.
+   */
+  async function acceptOfficially() {
+    if (!submission) return;
+    if (
+      !window.confirm(
+        `Tiếp nhận chính thức hồ sơ ${submission.receiptCode}?\n\n` +
+          "Thao tác này sinh mã hồ sơ chính thức, chuyển ảnh sang thư mục hồ sơ và ghi dữ liệu " +
+          "chính thức. Không có nút hoàn tác — sai sót phải xử lý bằng quy trình điều chỉnh.",
+      )
+    )
+      return;
+    if (!acceptKeyRef.current) acceptKeyRef.current = crypto.randomUUID();
+    setBusy(true);
+    setMessage(null);
+    try {
+      const token = await csrfToken();
+      const response = await fetch(`/api/submissions/${submission.submissionId}/accept`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": acceptKeyRef.current,
+        },
+        body: JSON.stringify({ version: submission.version }),
+      });
+      const data = (await response.json()) as {
+        submission?: { officialCaseId: string; status: string; version: number };
+        error?: { message?: string };
+      };
+      if (!response.ok || !data.submission)
+        throw new Error(data.error?.message ?? "Không thể tiếp nhận chính thức.");
+      const accepted = data.submission;
+      setSubmission((current) => (current ? { ...current, ...accepted } : current));
+      acceptKeyRef.current = "";
+      setMessage(`Đã tiếp nhận chính thức. Mã hồ sơ: ${accepted.officialCaseId}`);
+    } catch (error) {
+      // Giữ nguyên idempotency-key để lần bấm lại tiếp tục đúng saga đang dở.
+      setMessage(
+        error instanceof Error
+          ? `${error.message} Nếu do mạng, bấm lại nút này — hệ thống sẽ tiếp tục từ bước dở dang.`
+          : "Không thể tiếp nhận chính thức.",
+      );
     } finally {
       setBusy(false);
     }
@@ -333,18 +400,41 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
             <button
               className="rounded-lg border border-sky-700 px-4 py-2 font-semibold text-sky-800 disabled:opacity-50"
               disabled={busy || submission.status !== "UNDER_REVIEW" || !submission.draft}
-              onClick={openEdit}
+              onClick={() => openEdit("EDIT")}
               type="button"
             >
               Chỉnh sửa thông tin
             </button>
+            {submission.status === "ACCEPTED" ? (
+              <button
+                className="rounded-lg border border-orange-700 px-4 py-2 font-semibold text-orange-800 disabled:opacity-50"
+                disabled={busy || !submission.draft}
+                onClick={() => openEdit("AMEND")}
+                title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
+                type="button"
+              >
+                Điều chỉnh hồ sơ chính thức
+              </button>
+            ) : null}
             <button
               className="rounded-lg border border-emerald-800 px-4 py-2 font-semibold text-emerald-900 disabled:opacity-50"
-              disabled
-              title="Đang hoàn thiện migration hồ sơ chính thức"
+              disabled={
+                busy ||
+                !submission.draft ||
+                Boolean(submission.officialCaseId) ||
+                (submission.status !== "UNDER_REVIEW" && submission.status !== "ACCEPTING")
+              }
+              onClick={acceptOfficially}
+              title={
+                submission.officialCaseId
+                  ? `Đã có mã hồ sơ chính thức ${submission.officialCaseId}`
+                  : submission.status === "ACCEPTING"
+                    ? "Lần tiếp nhận trước đang dở — bấm để chạy tiếp từ bước dở dang"
+                    : "Sinh mã hồ sơ, chuyển ảnh sang 02_CASES và ghi dữ liệu chính thức"
+              }
               type="button"
             >
-              Tiếp nhận chính thức
+              {submission.status === "ACCEPTING" ? "Tiếp tục tiếp nhận" : "Tiếp nhận chính thức"}
             </button>
             <button
               className="rounded-lg border border-amber-700 px-4 py-2 font-semibold text-amber-800 disabled:opacity-50"
@@ -390,6 +480,18 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
               {submission.updatedAt ? new Date(submission.updatedAt).toLocaleString("vi-VN") : "-"}
             </dd>
           </div>
+          {submission.officialCaseId ? (
+            <div>
+              <dt className="text-sm text-stone-500">Mã hồ sơ chính thức</dt>
+              <dd className="font-semibold text-emerald-900">{submission.officialCaseId}</dd>
+            </div>
+          ) : null}
+          {submission.status === "ACCEPTING" && submission.acceptStep ? (
+            <div>
+              <dt className="text-sm text-stone-500">Bước tiếp nhận dở dang</dt>
+              <dd className="font-semibold text-amber-800">{submission.acceptStep}</dd>
+            </div>
+          ) : null}
         </dl>
       </section>
       {submission.status === "UNDER_REVIEW" ? (
@@ -602,15 +704,16 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
           </section>
         </div>
       ) : null}
-      <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất demo dùng mã từ Thông tư
-        08/2024/TT-BTNMT; tiếp nhận chính thức sẽ được mở cùng migration hồ sơ chuẩn hóa. phê duyệt.
+      <p className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
+        Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất theo Thông tư 08/2024/TT-BTNMT.
       </p>
       {editOpen && submission.draft ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10">
           <div className="w-full max-w-2xl rounded-xl bg-white p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
-              <h2 className="text-xl font-bold">Chỉnh sửa thông tin hồ sơ</h2>
+              <h2 className="text-xl font-bold">
+                {amendMode ? "Điều chỉnh hồ sơ chính thức" : "Chỉnh sửa thông tin hồ sơ"}
+              </h2>
               <button
                 className="text-sm font-semibold text-stone-500"
                 onClick={() => setEditOpen(false)}
@@ -619,10 +722,36 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                 Đóng
               </button>
             </div>
-            <p className="mt-2 text-sm text-stone-600">
-              Chỉ sửa lỗi gõ nhỏ giúp người dân. Thông tin đã xác thực bằng QR CCCD bị khóa — dùng
-              nút “Yêu cầu bổ sung” nếu cần đổi thông tin đó.
-            </p>
+            {amendMode ? (
+              <div className="mt-3 space-y-3 rounded-lg border border-orange-300 bg-orange-50 p-4">
+                <p className="text-sm text-orange-900">
+                  Hồ sơ đã tiếp nhận chính thức
+                  {submission.officialCaseId ? ` (${submission.officialCaseId})` : ""}. Lưu thay đổi
+                  sẽ <strong>ghi lại luôn dữ liệu chính thức</strong> — giấy chứng nhận, chủ sử
+                  dụng, thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive
+                  giữ nguyên.
+                </p>
+                <label className="block">
+                  <span className="pc-field-label">Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)</span>
+                  <textarea
+                    className="pc-input"
+                    onChange={(event) => setAmendmentReason(event.target.value)}
+                    placeholder="Ví dụ: Đối chiếu lại bìa gốc, số vào sổ ghi nhầm CS00123 thành CS00132."
+                    rows={3}
+                    value={amendmentReason}
+                  />
+                </label>
+                <p className="text-xs text-orange-800">
+                  Lý do được ghi vào nhật ký kiểm toán cùng danh sách trường đã đổi. Đây là dấu vết
+                  duy nhất giải thích vì sao dữ liệu chính thức khác lúc tiếp nhận.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-stone-600">
+                Chỉ sửa lỗi gõ nhỏ giúp người dân. Nếu cần người dân nộp lại giấy tờ, dùng nút
+                “Yêu cầu bổ sung”.
+              </p>
+            )}
             <section className="mt-5">
               <h3 className="font-semibold">Giấy chứng nhận</h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -670,7 +799,7 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
             <section className="mt-5 space-y-4">
               <h3 className="font-semibold">Chủ sử dụng</h3>
               {editOwners.map((owner, index) => {
-                const locked = isOwnerIdentityLocked(owner.identityStatus);
+                const qrConfirmed = isOwnerIdentityQrConfirmed(owner.identityStatus);
                 function updateOwner(patch: Partial<EditableOwner>) {
                   setEditOwners((current) =>
                     current.map((item, itemIndex) =>
@@ -680,9 +809,10 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                 }
                 return (
                   <div className="rounded-lg border border-stone-200 p-4" key={owner.id}>
-                    {locked ? (
-                      <p className="mb-2 text-xs font-semibold text-emerald-700">
-                        Đã xác thực bằng QR CCCD — không sửa được thông tin định danh.
+                    {qrConfirmed ? (
+                      <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
+                        Đọc từ chip CCCD qua QR. Sửa được, nhưng mỗi lần ghi đè đều được ghi nhận
+                        riêng trong nhật ký — chỉ sửa khi đối chiếu bìa/thẻ thấy sai thật.
                       </p>
                     ) : null}
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -690,7 +820,6 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                         <span className="pc-field-label">Họ tên</span>
                         <input
                           className="pc-input"
-                          disabled={locked}
                           onChange={(event) => updateOwner({ fullName: event.target.value })}
                           value={owner.fullName}
                         />
@@ -699,7 +828,6 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                         <span className="pc-field-label">CCCD/định danh</span>
                         <input
                           className="pc-input"
-                          disabled={locked}
                           onChange={(event) => updateOwner({ identityNumber: event.target.value })}
                           value={owner.identityNumber}
                         />
@@ -708,7 +836,6 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                         <span className="pc-field-label">Ngày sinh (YYYY-MM-DD)</span>
                         <input
                           className="pc-input"
-                          disabled={locked}
                           onChange={(event) => updateOwner({ dateOfBirth: event.target.value })}
                           value={owner.dateOfBirth}
                         />
@@ -717,7 +844,6 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                         <span className="pc-field-label">Giới tính</span>
                         <select
                           className="pc-select"
-                          disabled={locked}
                           onChange={(event) => updateOwner({ gender: event.target.value })}
                           value={owner.gender}
                         >
@@ -730,7 +856,6 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                         <span className="pc-field-label">Thường trú</span>
                         <input
                           className="pc-input"
-                          disabled={locked}
                           onChange={(event) =>
                             updateOwner({ residenceAddress: event.target.value })
                           }
@@ -769,12 +894,16 @@ export function SubmissionDetail({ submissionId }: { readonly submissionId: stri
                 Hủy
               </button>
               <button
-                className="rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
-                disabled={busy}
+                className={
+                  amendMode
+                    ? "rounded-lg bg-orange-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+                    : "rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
+                }
+                disabled={busy || (amendMode && amendmentReason.trim().length < 10)}
                 onClick={() => void saveEdit()}
                 type="button"
               >
-                Lưu thay đổi
+                {amendMode ? "Lưu điều chỉnh chính thức" : "Lưu thay đổi"}
               </button>
             </div>
           </div>

@@ -4,6 +4,126 @@
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 
+## [2026-07-25] MỞ tiếp nhận chính thức — `OFFICIAL_ACCEPTANCE_ENABLED = true`
+
+- **Quyết định:** Chủ dự án quyết định mở tiếp nhận chính thức để bắt đầu thu hồ sơ thật. Cờ
+  `OFFICIAL_ACCEPTANCE_ENABLED` trong `src/modules/submissions/acceptance.ts` đảo từ `false` sang
+  `true`, và nút "Tiếp nhận chính thức" trong `submission-detail.tsx` được nối vào route thật
+  (trước đó nút bị `disabled` cứng, không có `onClick`, nên đảo cờ không thôi thì cán bộ vẫn không
+  bấm được).
+- **Điều kiện gác cổng — đã đóng toàn bộ:**
+  1. **Diễn tập staging 3 kịch bản saga** — PASS 6/6 trên Postgres thử nghiệm (2026-07-24, entry
+     ngay dưới đây).
+  2. **Danh mục trường 12/13** — đã chốt từ dropdown PL3 (2026-07-22/2026-07-23). Dòng "chờ danh
+     mục trường 12 chính thức" trong `04-current-tasks.md` là tài liệu lỗi thời, nay đã gỡ.
+  3. **Thông báo bảo vệ dữ liệu · `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` · khớp tổ chức trong tra
+     cứu GCN** — chủ dự án chấp nhận rủi ro có ghi nhận (2026-07-24).
+  4. **Điều khoản xử lý dữ liệu Gemini/Antigravity** — chủ dự án quyết định thực hiện (Q5 dưới).
+- **Hai lỗi chặn phải vá CÙNG LƯỢT, không thể để lại sau:**
+  - **`refreshCanonicalProjection` xóa sai thứ tự khóa ngoại** (`repository.ts`). Xóa
+    `public_parcels` **trước** `public_land_uses`, mà FK `public_land_uses.parcel_id →
+    public_parcels(parcel_id)` không cascade, không deferrable → `foreign_key_violation`. Lần gửi
+    đầu không lộ vì bảng con còn rỗng (delete là no-op); lỗi chỉ nổ từ lần làm mới **thứ hai** —
+    tức mọi lần cán bộ sửa hồ sơ đã gửi và mọi lần người dân gửi bổ sung đều HTTP 500. Đã đảo lại
+    thứ tự: con trước cha.
+  - **Bước `RECORDS_WRITTEN` không ghi thửa đất và mục đích sử dụng** (`acceptance-saga.ts`). Saga
+    chỉ ghi `cases`/`owners`/`certificates`/`files`. Sau khi "tiếp nhận chính thức" xong, dữ liệu
+    thửa vẫn chỉ nằm trong `draft_json` — cùng cột mà cán bộ và người dân đều ghi đè được, tức hồ
+    sơ chính thức **không có bản chốt bất biến**. Đã ghi bổ sung vào `public.parcels` và
+    `public.assets` (bảng `data_json jsonb` gắn `case_id`, **đã có sẵn** trong schema
+    `202607230001` — không cần migration mới), ID tất định `ACC:{submissionId}:{id}` +
+    `on conflict do nothing` để giữ tính idempotent của saga.
+- **Vì sao mở được ngay mà rủi ro thấp:** chưa có hồ sơ thật nào trong hệ thống (Q6) — thu hồ sơ
+  thật bắt đầu sau 2026-07-25. Hai lỗi trên chưa từng gây thiệt hại, nhưng sẽ nổ ngay từ hồ sơ thật
+  đầu tiên nếu mở cờ mà không vá.
+- **Đánh đổi:** mở trước khi có bộ E2E cho luồng cán bộ, và trước khi có chức năng "điều chỉnh hồ sơ
+  chính thức" (Q2). Chấp nhận vì công tắc dừng khẩn vẫn còn: đảo `OFFICIAL_ACCEPTANCE_ENABLED` về
+  `false` thì hồ sơ đang dở nằm lại `ACCEPTING`, retry cùng `idempotency-key` sẽ đi tiếp từ
+  checkpoint khi mở lại — không mất dữ liệu, không hồ sơ nào kẹt vĩnh viễn.
+- **Kiểm chứng:** `tests/submission-acceptance.test.ts` giữ trip-wire **hai chiều** (giờ khẳng định
+  `true`) — đóng lại phải là quyết định có ghi chép, không phải một lần sửa lướt qua. Hai kịch bản
+  tích hợp mới trong `tests/staging-rehearsal-acceptance-saga.integration.test.ts`: "Kịch bản 1b"
+  (GCN nhiều thửa nhiều mục đích → `public.parcels`/`public.assets` đủ dòng, replay không nhân đôi)
+  và "Kịch bản 1c" (làm mới hình chiếu hai lần liên tiếp không vi phạm khóa ngoại).
+
+## [2026-07-25] Trả lời 7 câu hỏi treo của review kiến trúc
+
+Bảy câu hỏi nêu ở `REVIEW_CLAUDE_OPUS.md` §10. Chủ dự án trả lời 2026-07-25.
+
+- **Q1 — Cán bộ có được sửa số định danh của chủ đã `QR_CONFIRMED` không? → ĐƯỢC, sửa toàn trường.**
+  - **Lý do:** QR đọc nhầm, hoặc bìa GCN ghi khác thẻ CCCD, thì hồ sơ bế tắc không có đường đi tiếp.
+    Cán bộ là người quyết định cuối cùng.
+  - **Đã làm:** `isOwnerIdentityLocked` đổi tên thành `isOwnerIdentityQrConfirmed` và **hạ cấp từ
+    khóa cứng xuống cảnh báo**. `PATCH /api/submissions/:id` không còn trả 400 khi chạm trường định
+    danh của chủ `QR_CONFIRMED`; các ô nhập trong giao diện không còn `disabled`.
+  - **Đổi lại:** mỗi lần ghi đè để lại dấu vết riêng trong `audit_logs`
+    (`identityOverride: "true"` + `identityOverrideOwnerCount`), và giao diện hiện cảnh báo màu hổ
+    phách "đọc từ chip CCCD, chỉ sửa khi đối chiếu thấy sai thật". Đi ngược lại dữ liệu chip đáng
+    tin hơn mắt người thì phải tra lại được.
+
+- **Q2 — Hồ sơ đã hoàn thành xử lý rồi phát hiện sai thì sửa thế nào? → Cho cán bộ chỉnh sửa; cán
+  bộ là người quyết định cuối cùng. ĐÃ THI CÔNG.**
+  - **Cách giải: đồng bộ lại dữ liệu chính thức trong CÙNG transaction với lần sửa.** Không tách
+    thành hai bước, không có cửa sổ thời gian nào mà `draft_json` và bảng chính thức khác nhau.
+  - **`syncOfficialRecord`** (`src/modules/submissions/official-record.ts`) — một hàm duy nhất định
+    nghĩa "dữ liệu chính thức trông như thế nào", **dùng chung** bởi saga tiếp nhận (lần ghi đầu) và
+    `commitOfficialAmendment` (ghi lại sau khi sửa). Nếu để hai đường tự viết SQL riêng thì sớm muộn
+    chúng lệch nhau, và lúc đó hồ sơ chính thức sẽ khác nhau tùy nó đi qua đường nào.
+  - Ngữ nghĩa là **đồng bộ**, không phải chèn thêm: bản ghi còn trong bản kê khai thì upsert; bản
+    ghi đã bị xóa khỏi bản kê khai thì **xóa khỏi bảng chính thức**. Cán bộ xóa một thửa thì thửa
+    đó biến mất khỏi hồ sơ chính thức, không để lại dòng mồ côi.
+  - **Điều chỉnh là hành động cố ý, không phải sửa nhầm:** nút riêng "Điều chỉnh hồ sơ chính thức"
+    (màu cam, chỉ hiện khi `ACCEPTED`), **bắt buộc lý do ≥ 10 ký tự**, và `PATCH` từ chối nếu chế độ
+    suy ra từ yêu cầu không khớp trạng thái thật của hồ sơ.
+  - **Dấu vết đối soát:** audit `OFFICIAL_RECORD_AMENDED` ghi lý do + danh sách trường đã đổi (cũ →
+    mới, CCCD đã che) + `officialCaseId` + số lượng chủ/thửa/tài sản sau khi đồng bộ. Cộng một mốc
+    trên dòng thời gian người dân nhìn thấy.
+  - **Đã đóng luôn lỗ hổng P0-4:** nhánh `|| isAdministrator` ở `PATCH` trước đây cho quản trị viên
+    sửa hồ sơ ở **bất kỳ trạng thái nào**, kể cả `ACCEPTED`, mà **không** đồng bộ bảng chính thức và
+    **không** cần lý do. Đó chính là đường làm dữ liệu lệch nhau vĩnh viễn. Nhánh đó đã bị gỡ.
+  - **Bất biến được giữ:** mã hồ sơ chính thức **không đổi** (điều chỉnh là sửa nội dung, không phải
+    tiếp nhận lại), ảnh trên Drive không bị đụng, không sinh `case` thứ hai. Điều kiện
+    `status = 'ACCEPTED'` nằm trong chính câu UPDATE chứ không chỉ kiểm ở route — hồ sơ có thể đổi
+    trạng thái giữa lúc route đọc và lúc ghi.
+  - **An toàn khóa ngoại:** bốn bảng chính thức (`certificates`/`owners`/`parcels`/`assets`) chỉ
+    tham chiếu `cases(case_id)`, **không tham chiếu lẫn nhau**, và `files.owner_id` là text không có
+    ràng buộc — nên thứ tự xóa giữa chúng không quan trọng. Khác hẳn cặp
+    `public_land_uses → public_parcels` phía bản kê khai, nơi thứ tự là bắt buộc.
+  - **Chưa đóng:** vẫn chưa có bản chụp trạng thái chính thức TRƯỚC mỗi lần điều chỉnh, nên không
+    khôi phục lại được giá trị cũ ngoài những gì audit đã ghi. Đủ dùng vì audit lưu cặp cũ → mới cho
+    từng trường; nếu sau này cần khôi phục nguyên trạng thì thêm `official_payload` snapshot.
+
+- **Q3 — Thửa có hơn 3 mục đích sử dụng? → Tạm giữ ở 3 mục đích.**
+  - Giữ nguyên `MAX_LAND_USES_PER_PARCEL = 3`. Đúng với biểu mẫu PL3 (chỉ có ba bộ cột 25–29 /
+    30–34 / 35–39). Không thay đổi code.
+  - **Hạn chế đã biết, chưa đóng:** người dân có thửa >3 mục đích hiện **không nộp được** hồ sơ
+    (`validation.ts` chặn cứng lúc khai). Ca đó phải ra phường làm trực tiếp. Nếu tần suất thực tế
+    cao thì mở lại câu hỏi này với cơ quan.
+
+- **Q4 — Trường 21, 22 và hai cột O, P? → Bỏ trường 21/22; VẪN thu cột O, P.**
+  - **Lý do:** nguồn dữ liệu hiện dùng là loại đưa vào sử dụng ngay nên bỏ được trường 21/22; nhưng
+    khâu **thu thập** vẫn phải có O, P vì nhiều trường hợp chủ trên GCN đã mất.
+  - **KHÔNG cần sửa code — hiện trạng đã đúng y như vậy.** `PL3_COLUMNS` trong `pl3-export.ts` nhảy
+    thẳng từ trường 20 sang 23 (không có 21/22), và có đúng hai cột `field: null` là "Tên người sử
+    dụng hiện tại" / "Số định danh người sử dụng hiện tại". Nhóm này đã được thu qua
+    `hasDistinctCurrentUser` + `currentUserName`/`currentUserCitizenId`/`currentUserAddress` +
+    `changeReason` từ quyết định [2026-07-23] "Thu Người sử dụng đất hiện tại".
+  - Câu hỏi treo trong `04-current-tasks.md` nay đã đóng.
+
+- **Q5 — Điều khoản xử lý dữ liệu Gemini/Antigravity? → Cứ cho thực hiện.**
+  - Chủ dự án quyết định tiến hành. Gỡ bỏ tư cách "điều kiện chặn cứng" của mục này.
+  - **Ràng buộc kỹ thuật KHÔNG đổi, vẫn là bất biến:** **ảnh CCCD tuyệt đối không gửi sang mô
+    hình.** Job chỉ chứa file `documentType = 'CERTIFICATE'`, và đó là ràng buộc ở khâu đóng gói
+    (ảnh CCCD không được sao chép ra khỏi Drive) chứ không phải quy ước trông vào Agent nhớ.
+
+- **Q6 — Có bao nhiêu hồ sơ thật? → Chưa có hồ sơ thật nào; thu hồ sơ thật bắt đầu sau 2026-07-25.**
+  - Đây là lý do mở cờ ngay bây giờ là an toàn: hai lỗi P0 vá cùng lượt chưa kịp gây thiệt hại.
+  - **Hệ quả cho ưu tiên:** giới hạn 2.000 dòng của xuất PL3 và `repository.list()` quét toàn bảng
+    (P0-3(b)(d), P1-8) **chưa cấp bách** — nhưng phải sửa trước khi vượt 2.000 hồ sơ, nếu không báo
+    cáo sẽ âm thầm thiếu dữ liệu mà không ai biết.
+
+- **Q7 — Đảo `OFFICIAL_ACCEPTANCE_ENABLED`? → ĐẢO SANG `true`.** Đã thực hiện — xem entry ngay trên.
+
 ## [2026-07-24 — Diễn tập staging] Saga tiếp nhận chính thức chạy thật, PASS 6/6, vá 1 bug thật
 
 - **Quyết định:** Viết `tests/staging-rehearsal-acceptance-saga.integration.test.ts` — gọi trực

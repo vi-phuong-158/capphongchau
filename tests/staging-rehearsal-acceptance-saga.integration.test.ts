@@ -157,6 +157,7 @@ import {
   SubmissionIdempotencyConflictError,
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
+import { newTimelineEvent } from "@/modules/public-intake/workflow";
 
 const TEST_DB_URL = process.env.ACCEPTANCE_SAGA_TEST_DATABASE_URL;
 const hasTestDb = Boolean(TEST_DB_URL && TEST_DB_URL.trim().length > 0);
@@ -279,29 +280,60 @@ describe.skipIf(!hasTestDb)(
     });
 
     /** Mỗi hồ sơ có 3 file (2 CCCD + 1 GCN) sẵn sàng để saga di chuyển. */
-    async function seedSubmission() {
+    async function seedSubmission(draftOverrides: Record<string, unknown> = {}) {
       const submissionId = `sub-${randomUUID()}`;
       const receiptCode = `PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
       const draft = {
         phone: "0912345678",
         owners: [
           {
+            // Owner đầy đủ đúng shape `Owner` (types.ts) — mọi cột của public_owners là NOT NULL
+            // và code luôn liệt kê đủ tên cột trong INSERT, nên thiếu MỘT trường cũng khiến
+            // postgres.js gửi NULL tường minh (ghi đè default '') thay vì bỏ qua cột. Dữ liệu qua
+            // API thật không bao giờ thiếu, vì draftSchema (validation.ts) bắt buộc đủ các trường
+            // này; thiếu ở fixture chỉ che mất kết quả thật của bản vá P0-1/Q2 đang cần kiểm chứng.
             id: "owner-1",
+            ownerType: "CA_NHAN",
             fullName: "Nguyễn Văn A",
             identityNumber: "012345678901",
             dateOfBirth: "1990-01-01",
-            gender: "Nam",
+            gender: "NAM",
             residenceAddress: "Tổ dân phố Hà Thạch",
             identitySource: "MANUAL",
+            qrPayloadHash: "",
+            qrDecoderVersion: "",
+            qrParserVersion: "",
+            identityStatus: "MANUAL_COMPLETE",
+            identityConfirmedAt: "",
+            roleOnCertificate: "CA_NHAN",
+            hasDistinctCurrentUser: false,
+            currentUserName: "",
+            currentUserCitizenId: "",
+            currentUserAddress: "",
+            changeReason: "",
           },
         ],
-        parcels: [{ id: "parcel-1", oldWard: "HA_THACH" }],
+        // Đủ mọi cột NOT NULL của public_parcels — cùng lý do như owner ở trên: thiếu một trường
+        // khiến postgres.js gửi NULL tường minh, ghi đè default '' của cột.
+        parcels: [
+          {
+            id: "parcel-1",
+            parcelIdCode: "",
+            oldWard: "HA_THACH",
+            mapSheetNumber: "",
+            parcelNumber: "",
+            addressOnCertificate: "",
+            addressTwoLevel: "",
+            area: "",
+          },
+        ],
         certificate: {
           issueNumber: "AB123456",
           issueDate: "2020-01-01",
           registryNumber: "CS00123",
         },
         assets: [],
+        ...draftOverrides,
       };
 
       await bootstrapSql`
@@ -400,6 +432,267 @@ describe.skipIf(!hasTestDb)(
         expect(filesRows).toHaveLength(3);
         const reservationRows = await bootstrapSql`select * from public.id_reservations`;
         expect(reservationRows).toHaveLength(1);
+      },
+      30_000,
+    );
+
+    it(
+      "Kịch bản 1b: GCN nhiều thửa nhiều mục đích → public.parcels và public.assets được ghi đủ, " +
+        "chạy lại cùng key KHÔNG nhân đôi dòng (bằng chứng cho bản vá P0-5, 2026-07-25)",
+      async () => {
+        const parcels = [
+          {
+            id: "parcel-1",
+            oldWard: "HA_THACH",
+            mapSheetNumber: "12",
+            parcelNumber: "144",
+            addressOnCertificate: "Khu 5, Hà Thạch",
+            area: "96,1",
+            landUses: [
+              { id: "lu-1", purposeCode: "ODT", area: "96,1" },
+              { id: "lu-2", purposeCode: "CLN", area: "40,0" },
+            ],
+          },
+          {
+            id: "parcel-2",
+            oldWard: "PHU_HO",
+            mapSheetNumber: "7",
+            parcelNumber: "58",
+            addressOnCertificate: "Khu 2, Phú Hộ",
+            area: "250,5",
+            landUses: [{ id: "lu-3", purposeCode: "LUC", area: "250,5" }],
+          },
+        ];
+        const assets = [{ id: "asset-1", assetType: "NHA_O", description: "Nhà cấp 4" }];
+        const { record } = await seedSubmission({ parcels, assets });
+        const idempotencyKey = `key-${randomUUID()}`;
+        const input = { ...baseInput(record), idempotencyKey, mutationHash: "hash-parcels" };
+
+        const result = await runOfficialAcceptance(input);
+        expect(result.status).toBe("ACCEPTED");
+
+        const parcelRows = await bootstrapSql<
+          { parcel_id: string; data_json: Record<string, unknown> | string }[]
+        >`select parcel_id, data_json from public.parcels where case_id = ${result.officialCaseId} order by parcel_id`;
+        expect(parcelRows).toHaveLength(2);
+        expect(parcelRows.map((row) => row.parcel_id)).toEqual([
+          `ACC:${record.submissionId}:parcel-1`,
+          `ACC:${record.submissionId}:parcel-2`,
+        ]);
+
+        // Mục đích sử dụng phải đi theo thửa vào bản chính thức, không được rơi lại trong draft_json.
+        const firstParcel =
+          typeof parcelRows[0].data_json === "string"
+            ? (JSON.parse(parcelRows[0].data_json) as Record<string, unknown>)
+            : parcelRows[0].data_json;
+        expect((firstParcel.landUses as unknown[]).length).toBe(2);
+        expect(firstParcel.parcelNumber).toBe("144");
+        expect(firstParcel.sortOrder).toBe(0);
+
+        const assetRows = await bootstrapSql`select asset_id from public.assets where case_id = ${result.officialCaseId}`;
+        expect(assetRows).toHaveLength(1);
+
+        // Replay cùng key: idempotent, không sinh dòng thứ ba.
+        const replay = await runOfficialAcceptance(input);
+        expect(replay.officialCaseId).toBe(result.officialCaseId);
+        const parcelRowsAfterReplay = await bootstrapSql`select parcel_id from public.parcels`;
+        expect(parcelRowsAfterReplay).toHaveLength(2);
+      },
+      30_000,
+    );
+
+    it(
+      "Kịch bản 1c: làm mới hình chiếu chuẩn hóa hai lần liên tiếp không vi phạm khóa ngoại " +
+        "public_land_uses → public_parcels (bằng chứng cho bản vá P0-1, 2026-07-25)",
+      async () => {
+        const { record } = await seedSubmission({
+          parcels: [
+            {
+              id: "parcel-1",
+              parcelIdCode: "",
+              oldWard: "HA_THACH",
+              mapSheetNumber: "12",
+              parcelNumber: "144",
+              addressOnCertificate: "Khu 5, Hà Thạch",
+              addressTwoLevel: "",
+              area: "96,1",
+              landUses: [
+                {
+                  id: "lu-1",
+                  purposeCode: "ODT",
+                  purposeFreeText: "",
+                  originCode: "NHAN_CHUYEN_QUYEN",
+                  formCode: "SU_DUNG_RIENG",
+                  termCode: "SU_DUNG_ON_DINH_LAU_DAI",
+                  area: "96,1",
+                },
+              ],
+            },
+          ],
+        });
+        const repository = getPublicIntakeRepository();
+        const draft = record.draft;
+        if (!draft) throw new Error("Seed thiếu draft.");
+
+        // Lần 1: bảng con còn rỗng nên thứ tự xóa sai vẫn chạy được — đây là lý do lỗi lọt qua CI.
+        const first = await repository.commitStaffDraftEdit({
+          record,
+          expectedVersion: record.version,
+          draft: { ...draft, certificate: { ...draft.certificate, registryNumber: "CS00999" } },
+          actorEmail: "officer@example.com",
+          auditMetadata: { "certificate.registryNumber": "CS00123 → CS00999" },
+          timelineEvent: newTimelineEvent({ eventType: "STAFF_EDITED", label: "Cán bộ sửa lần 1" }),
+          requestId: `req-${randomUUID()}`,
+          idempotencyKey: `STAFF_EDIT:${record.submissionId}:${randomUUID()}`,
+          mutationHash: "hash-edit-1",
+        });
+        const landUsesAfterFirst =
+          await bootstrapSql`select land_use_id from public.public_land_uses where submission_id = ${record.submissionId}`;
+        expect(landUsesAfterFirst).toHaveLength(1);
+
+        // Lần 2 là lần thật sự phải xóa dữ liệu cũ. Trước bản vá, câu này ném foreign_key_violation.
+        const reloaded = await repository.findById(record.submissionId);
+        if (!reloaded?.draft) throw new Error("Không đọc lại được hồ sơ.");
+        const second = await repository.commitStaffDraftEdit({
+          record: reloaded,
+          expectedVersion: first.version,
+          draft: { ...reloaded.draft, certificate: { ...reloaded.draft.certificate, registryNumber: "CS01000" } },
+          actorEmail: "officer@example.com",
+          auditMetadata: { "certificate.registryNumber": "CS00999 → CS01000" },
+          timelineEvent: newTimelineEvent({ eventType: "STAFF_EDITED", label: "Cán bộ sửa lần 2" }),
+          requestId: `req-${randomUUID()}`,
+          idempotencyKey: `STAFF_EDIT:${record.submissionId}:${randomUUID()}`,
+          mutationHash: "hash-edit-2",
+        });
+        expect(second.version).toBeGreaterThan(first.version);
+
+        const landUsesAfterSecond =
+          await bootstrapSql`select land_use_id from public.public_land_uses where submission_id = ${record.submissionId}`;
+        expect(landUsesAfterSecond).toHaveLength(1);
+        const parcelsAfterSecond =
+          await bootstrapSql`select parcel_id from public.public_parcels where submission_id = ${record.submissionId}`;
+        expect(parcelsAfterSecond).toHaveLength(1);
+      },
+      30_000,
+    );
+
+    it(
+      "Kịch bản 1d: điều chỉnh hồ sơ ĐÃ tiếp nhận → dữ liệu chính thức được ghi lại trong cùng " +
+        "transaction, mã hồ sơ giữ nguyên (bằng chứng cho Q2, 2026-07-25)",
+      async () => {
+        const { record } = await seedSubmission({
+          parcels: [
+            {
+              id: "parcel-1",
+              parcelIdCode: "",
+              oldWard: "HA_THACH",
+              mapSheetNumber: "12",
+              parcelNumber: "144",
+              addressOnCertificate: "Khu 5, Hà Thạch",
+              addressTwoLevel: "",
+              area: "96,1",
+              landUses: [
+                {
+                  id: "lu-1",
+                  purposeCode: "ODT",
+                  purposeFreeText: "",
+                  originCode: "NHAN_CHUYEN_QUYEN",
+                  formCode: "SU_DUNG_RIENG",
+                  termCode: "SU_DUNG_ON_DINH_LAU_DAI",
+                  area: "96,1",
+                },
+              ],
+            },
+            {
+              id: "parcel-2",
+              parcelIdCode: "",
+              oldWard: "PHU_HO",
+              mapSheetNumber: "7",
+              parcelNumber: "58",
+              addressOnCertificate: "Khu 2, Phú Hộ",
+              addressTwoLevel: "",
+              area: "250,5",
+              landUses: [
+                {
+                  id: "lu-2",
+                  purposeCode: "LUC",
+                  purposeFreeText: "",
+                  originCode: "NHAN_CHUYEN_QUYEN",
+                  formCode: "SU_DUNG_RIENG",
+                  termCode: "SU_DUNG_ON_DINH_LAU_DAI",
+                  area: "250,5",
+                },
+              ],
+            },
+          ],
+        });
+        const accepted = await runOfficialAcceptance({
+          ...baseInput(record),
+          idempotencyKey: `key-${randomUUID()}`,
+          mutationHash: "hash-before-amend",
+        });
+        expect(accepted.status).toBe("ACCEPTED");
+
+        const repository = getPublicIntakeRepository();
+        const afterAccept = await repository.findById(record.submissionId);
+        if (!afterAccept?.draft) throw new Error("Không đọc lại được hồ sơ sau khi tiếp nhận.");
+
+        // Cán bộ phát hiện số vào sổ ghi nhầm VÀ một thửa bị khai thừa → sửa rồi lưu điều chỉnh.
+        const amendedDraft = {
+          ...afterAccept.draft,
+          certificate: { ...afterAccept.draft.certificate, registryNumber: "CS99999" },
+          parcels: afterAccept.draft.parcels.slice(0, 1),
+        };
+        const amended = await repository.commitOfficialAmendment({
+          record: afterAccept,
+          expectedVersion: afterAccept.version,
+          draft: amendedDraft,
+          actorEmail: "officer@example.com",
+          amendmentReason: "Đối chiếu bìa gốc: số vào sổ ghi nhầm và thửa 58 không thuộc GCN này.",
+          auditMetadata: { "certificate.registryNumber": "CS00123 → CS99999" },
+          timelineEvent: newTimelineEvent({
+            eventType: "OFFICIAL_RECORD_AMENDED",
+            label: "Cán bộ điều chỉnh hồ sơ đã tiếp nhận",
+          }),
+          requestId: `req-${randomUUID()}`,
+          idempotencyKey: `OFFICIAL_AMENDMENT:${record.submissionId}:${randomUUID()}`,
+          mutationHash: "hash-amend-1",
+        });
+
+        // Mã hồ sơ chính thức KHÔNG đổi — điều chỉnh là sửa nội dung, không phải tiếp nhận lại.
+        expect(amended.officialCaseId).toBe(accepted.officialCaseId);
+        expect(amended.status).toBe("ACCEPTED");
+        expect(amended.version).toBeGreaterThan(afterAccept.version);
+
+        // Bảng chính thức đã theo bản mới, không còn giá trị cũ.
+        const [certificateRow] = await bootstrapSql<{ registry_number: string }[]>`
+          select registry_number from public.certificates where case_id = ${accepted.officialCaseId}
+        `;
+        expect(certificateRow.registry_number).toBe("CS99999");
+
+        // Thửa bị xóa khỏi bản kê khai phải biến mất khỏi hồ sơ chính thức, không để lại dòng mồ côi.
+        const parcelRows = await bootstrapSql<{ parcel_id: string }[]>`
+          select parcel_id from public.parcels where case_id = ${accepted.officialCaseId}
+        `;
+        expect(parcelRows).toHaveLength(1);
+        expect(parcelRows[0].parcel_id).toBe(`ACC:${record.submissionId}:parcel-1`);
+
+        // Vẫn đúng một hồ sơ chính thức, không sinh case thứ hai.
+        const casesRows = await bootstrapSql`select case_id from public.cases`;
+        expect(casesRows).toHaveLength(1);
+
+        // Lý do điều chỉnh phải nằm trong nhật ký kiểm toán — đây là dấu vết đối soát duy nhất.
+        const auditRows = await bootstrapSql<{ metadata: Record<string, unknown> | string }[]>`
+          select metadata from public.audit_logs
+          where entity_id = ${record.submissionId} and action = 'OFFICIAL_RECORD_AMENDED'
+        `;
+        expect(auditRows).toHaveLength(1);
+        const auditMetadata =
+          typeof auditRows[0].metadata === "string"
+            ? (JSON.parse(auditRows[0].metadata) as Record<string, unknown>)
+            : auditRows[0].metadata;
+        expect(auditMetadata.amendmentReason).toContain("số vào sổ ghi nhầm");
+        expect(auditMetadata.officialCaseId).toBe(accepted.officialCaseId);
       },
       30_000,
     );

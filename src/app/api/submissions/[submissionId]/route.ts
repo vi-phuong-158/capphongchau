@@ -23,7 +23,8 @@ import {
 } from "@/modules/public-intake/validation";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
 import {
-  isOwnerIdentityLocked,
+  isOwnerIdentityQrConfirmed,
+  mayAmendOfficialRecord,
   mayStaffEdit,
   SUBMISSION_DECISION_ROLES,
   SUBMISSION_READ_ROLES,
@@ -77,6 +78,11 @@ const patchSchema = z.object({
     })
     .optional(),
   owners: z.array(ownerPatchSchema).max(10).optional(),
+  /**
+   * Bắt buộc khi hồ sơ đã tiếp nhận chính thức. Đây là dấu vết đối soát duy nhất giải thích vì sao
+   * dữ liệu chính thức đổi sau khi đã chốt — nên đòi câu có nghĩa, không nhận "sửa" hay "abc".
+   */
+  amendmentReason: z.string().trim().min(10).max(500).optional(),
 });
 
 export async function GET(
@@ -172,7 +178,11 @@ export async function PATCH(
     const { submissionId } = await context.params;
     const repository = getPublicIntakeRepository();
 
-    const scopedIdempotencyKey = `STAFF_DRAFT_EDIT:${submissionId}:${idempotencyKey}`;
+    // Chế độ suy ra từ chính yêu cầu (có `amendmentReason` hay không) để không phải đọc hồ sơ trước
+    // khi kiểm phát lại. Nếu chế độ suy ra không khớp trạng thái thật của hồ sơ thì yêu cầu bị từ
+    // chối bên dưới, trước mọi thao tác ghi.
+    const scopeKind = body.data.amendmentReason ? "OFFICIAL_AMENDMENT" : "STAFF_DRAFT_EDIT";
+    const scopedIdempotencyKey = `${scopeKind}:${submissionId}:${idempotencyKey}`;
     const mutationHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -181,10 +191,12 @@ export async function PATCH(
           version: body.data.version,
           certificate: body.data.certificate ?? null,
           owners: body.data.owners ?? [],
+          // Phải nằm trong hash: phát lại cùng khóa nhưng khác lý do là hai thao tác khác nhau.
+          amendmentReason: body.data.amendmentReason ?? null,
         }),
       )
       .digest("hex");
-    const replay = await repository.findStoredMutation(scopedIdempotencyKey, "STAFF_DRAFT_EDIT");
+    const replay = await repository.findStoredMutation(scopedIdempotencyKey, scopeKind);
     if (replay) {
       if (replay.mutationHash !== mutationHash) {
         return fail(
@@ -219,10 +231,42 @@ export async function PATCH(
     }
     const isAdministrator =
       user.roles.includes(UserRole.WARD_ADMIN) || user.roles.includes(UserRole.SYSTEM_ADMIN);
-    if (!mayStaffEdit(record, user.email) && !isAdministrator) {
+
+    /**
+     * Hai chế độ sửa, tách bạch có chủ đích:
+     *
+     *   - Sửa thường: hồ sơ `UNDER_REVIEW`, người đang giữ hồ sơ. Chỉ chạm bản kê khai.
+     *   - **Điều chỉnh hồ sơ chính thức**: hồ sơ đã `ACCEPTED`. Bắt buộc kèm `amendmentReason`, và
+     *     `commitOfficialAmendment` sẽ ghi lại cả dữ liệu chính thức trong cùng transaction.
+     *
+     * Trước 2026-07-25, nhánh `|| isAdministrator` cho quản trị viên sửa hồ sơ ở BẤT KỲ trạng thái
+     * nào — kể cả `ACCEPTED` — mà không đồng bộ lại bảng chính thức và không cần lý do. Đó chính là
+     * đường làm `draft_json` lệch khỏi dữ liệu chính thức vĩnh viễn. Nhánh đó đã bị gỡ; muốn sửa hồ
+     * sơ đã tiếp nhận thì phải đi đường điều chỉnh.
+     */
+    const isAmendment = mayAmendOfficialRecord(record, user.email, isAdministrator);
+    if (!isAmendment && !mayStaffEdit(record, user.email)) {
       return fail(
         "VALIDATION_FAILED",
-        "Hồ sơ phải đang được bạn nhận xử lý và ở trạng thái đang xử lý mới sửa được.",
+        record.status === "ACCEPTED"
+          ? "Hồ sơ đã tiếp nhận chính thức. Chỉ cán bộ đã nhận hồ sơ hoặc quản trị viên mới điều chỉnh được."
+          : "Hồ sơ phải đang được bạn nhận xử lý và ở trạng thái đang xử lý mới sửa được.",
+        requestId,
+        400,
+      );
+    }
+    if (isAmendment && !body.data.amendmentReason) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Điều chỉnh hồ sơ đã tiếp nhận chính thức phải kèm lý do (ít nhất 10 ký tự).",
+        requestId,
+        400,
+      );
+    }
+    if (!isAmendment && body.data.amendmentReason) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Chỉ hồ sơ đã tiếp nhận chính thức mới cần lý do điều chỉnh.",
         requestId,
         400,
       );
@@ -230,6 +274,8 @@ export async function PATCH(
 
     const draft: IntakeDraft = structuredClone(record.draft);
     const changes: Record<string, string> = {};
+    /** Chủ có trường định danh đọc từ chip CCCD bị cán bộ ghi đè — đánh dấu riêng trong audit. */
+    const identityOverrideOwnerIds = new Set<string>();
 
     if (body.data.certificate) {
       const patch = body.data.certificate;
@@ -271,13 +317,10 @@ export async function PATCH(
         ownerPatch.dateOfBirth !== undefined ||
         ownerPatch.gender !== undefined ||
         ownerPatch.residenceAddress !== undefined;
-      if (identityFieldsTouched && isOwnerIdentityLocked(owner.identityStatus)) {
-        return fail(
-          "VALIDATION_FAILED",
-          "Thông tin định danh đã xác thực bằng QR CCCD, không thể sửa.",
-          requestId,
-          400,
-        );
+      // Không còn chặn cán bộ sửa chủ đã `QR_CONFIRMED` (03-decisions.md [2026-07-25] Q1), nhưng
+      // ghi đè dữ liệu đọc từ chip là việc phải tra lại được — đánh dấu riêng trong audit.
+      if (identityFieldsTouched && isOwnerIdentityQrConfirmed(owner.identityStatus)) {
+        identityOverrideOwnerIds.add(ownerPatch.id);
       }
 
       if (ownerPatch.identityNumber !== undefined) {
@@ -361,24 +404,55 @@ export async function PATCH(
       return fail("VALIDATION_FAILED", "Không có thay đổi nào để lưu.", requestId, 400);
     }
 
-    const updated = await repository.commitStaffDraftEdit({
-      record,
-      expectedVersion: body.data.version,
-      draft,
-      actorEmail: user.email,
-      auditMetadata: changes,
-      timelineEvent: newTimelineEvent({
-        eventType: "STAFF_EDITED",
-        label: "Cán bộ cập nhật thông tin hồ sơ",
-        actorDisplayName: user.displayName,
-      }),
-      requestId,
-      idempotencyKey: scopedIdempotencyKey,
-      mutationHash,
-    });
+    const auditMetadata =
+      identityOverrideOwnerIds.size > 0
+        ? {
+            ...changes,
+            identityOverride: "true",
+            identityOverrideOwnerCount: String(identityOverrideOwnerIds.size),
+          }
+        : changes;
+
+    const updated = isAmendment
+      ? await repository.commitOfficialAmendment({
+          record,
+          expectedVersion: body.data.version,
+          draft,
+          actorEmail: user.email,
+          amendmentReason: body.data.amendmentReason ?? "",
+          auditMetadata,
+          timelineEvent: newTimelineEvent({
+            eventType: "OFFICIAL_RECORD_AMENDED",
+            label: "Cán bộ điều chỉnh hồ sơ đã tiếp nhận",
+            actorDisplayName: user.displayName,
+          }),
+          requestId,
+          idempotencyKey: scopedIdempotencyKey,
+          mutationHash,
+        })
+      : await repository.commitStaffDraftEdit({
+          record,
+          expectedVersion: body.data.version,
+          draft,
+          actorEmail: user.email,
+          auditMetadata,
+          timelineEvent: newTimelineEvent({
+            eventType: "STAFF_EDITED",
+            label: "Cán bộ cập nhật thông tin hồ sơ",
+            actorDisplayName: user.displayName,
+          }),
+          requestId,
+          idempotencyKey: scopedIdempotencyKey,
+          mutationHash,
+        });
 
     return NextResponse.json(
-      { submission: { version: updated.version }, requestId },
+      {
+        submission: { version: updated.version },
+        amended: isAmendment,
+        officialCaseId: isAmendment ? updated.officialCaseId : undefined,
+        requestId,
+      },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

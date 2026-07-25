@@ -7,6 +7,45 @@
 > tiên và mục tiêu dữ liệu đã thay đổi. Khi ba tài liệu mâu thuẫn, **`PLAN2.md` thắng**.
 
 ---
+
+## [2026-07-25] TRẠNG THÁI HIỆN TẠI — đã mở tiếp nhận hồ sơ chính thức
+
+**Hệ thống đang MỞ để thu hồ sơ thật.** `OFFICIAL_ACCEPTANCE_ENABLED = true`. Chưa có hồ sơ thật
+nào trong hệ thống trước ngày này; thu hồ sơ thật bắt đầu từ sau 2026-07-25.
+
+Luồng đầy đủ đang chạy được: người dân kê khai → cán bộ nhận xử lý → sửa thông tin GCN và chủ sử
+dụng → **Tiếp nhận chính thức** (sinh `PHONGCHAU-{năm}-{6 số}`, chuyển ảnh sang `02_CASES`, ghi
+`cases`/`owners`/`certificates`/`parcels`/`assets`/`files`) → xuất PL3.
+
+Phát hiện sai **sau khi** đã tiếp nhận thì dùng nút **"Điều chỉnh hồ sơ chính thức"** (màu cam,
+chỉ hiện khi hồ sơ `ACCEPTED`). Bắt buộc nhập lý do ≥ 10 ký tự; hệ thống ghi lại dữ liệu chính thức
+trong cùng transaction nên `draft_json` và bảng chính thức không bao giờ lệch nhau. Mã hồ sơ chính
+thức và ảnh trên Drive giữ nguyên. Xem `03-decisions.md` [2026-07-25] Q2.
+
+### Hạn chế đã biết — chưa đóng, KHÔNG phải lỗi mới phát hiện
+
+| Hạn chế | Ảnh hưởng | Khi nào phải đóng |
+|---|---|---|
+| Cán bộ **không sửa được thửa đất, mục đích sử dụng, tài sản** — `PATCH` chỉ nhận `certificate` + 6 trường `owners` | Thửa sai phải trả về cho người dân sửa qua "yêu cầu bổ sung" | Trước khi khối lượng lớn — xem `IMPLEMENTATION_PLAN_ANTIGRAVITY.md` Phase 6-7 |
+| Điều chỉnh hồ sơ đã `ACCEPTED` **không lưu bản chụp trạng thái chính thức trước khi sửa** | Khôi phục giá trị cũ chỉ dựa vào cặp cũ → mới trong audit, không khôi phục nguyên trạng được | Khi cần khôi phục nguyên trạng — thêm `official_payload` snapshot |
+| Xuất PL3 **cắt âm thầm ở 2.000 hồ sơ** (`route.ts` `slice(0, 2000)`), không cảnh báo | Chưa ảnh hưởng (0 hồ sơ) | **BẮT BUỘC sửa trước khi vượt 2.000 hồ sơ**, nếu không báo cáo thiếu dữ liệu mà không ai biết |
+| Lỗi ghi `export_jobs`/`audit_logs` làm **mất file PL3 đã dựng xong** → HTTP 500 | Cán bộ bấm xuất, báo lỗi, không có file | Sửa sớm — rẻ, xem Phase 2 |
+| Thửa có **>3 mục đích sử dụng** thì người dân không nộp được (Q3: tạm giữ ở 3) | Ca đó phải ra phường làm trực tiếp | Mở lại với cơ quan nếu tần suất thực tế cao |
+| `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production | `/ke-khai` và `/api/public/*` không có Cloudflare WAF/rate limiting | Khi có domain thật gắn Cloudflare |
+
+### Việc phải làm ngay trong ngày đầu thu hồ sơ thật
+
+1. Tiếp nhận chính thức **1 hồ sơ thử** trước khi mở cho dân, rồi kiểm trên Supabase:
+   `select case_id from public.cases;` · `select parcel_id, data_json from public.parcels;` ·
+   `select asset_id from public.assets;` — phải có đủ thửa và mục đích sử dụng trong `data_json`.
+2. Kiểm ảnh đã chuyển sang `02_CASES/{TĐP}/{CASE_ID}/originals` trên Drive và **đổi đúng tên**
+   (`{số phát hành}-GCN.jpg`).
+3. Bấm **Xuất PL3** một lần, mở file bằng Excel — sheet `PL3` phải có dòng của hồ sơ vừa tiếp nhận
+   (trước 2026-07-25 sheet này luôn rỗng vì không hồ sơ nào đạt được `ACCEPTED`).
+4. Nếu bất kỳ bước nào sai: đảo `OFFICIAL_ACCEPTANCE_ENABLED` về `false`, deploy, báo lại. Hồ sơ dở
+   nằm lại `ACCEPTING` an toàn.
+
+---
 ### ETL status update (2026-07-23)
 
 Schema and data ETL have completed successfully after the Google Sheets backup. Supabase verification found the expected legacy tables and one `LEGACY_SHEETS_IMPORT:*` marker. Do not rerun the import; keep the Sheet read-only during cutover.
@@ -28,12 +67,20 @@ GCN, 8798 owner, không phải dry-run); commit `9a5cea9` (migrate runtime sang 
 hay không (chỉ chủ dự án xem được dashboard Vercel) — nếu nghi ngờ, kiểm tra `/api/health/database`
 trên production trước khi coi cutover là chốt hoàn toàn.
 
-**Hoãn có chủ đích — code đã xong, chưa mở khóa:** Saga "Tiếp nhận chính thức" (`POST
-/api/submissions/:submissionId/accept`) **đã được cài đặt đầy đủ 2026-07-24** trong
+**[2026-07-25] ĐÃ MỞ — không còn hoãn.** Saga "Tiếp nhận chính thức" (`POST
+/api/submissions/:submissionId/accept`) cài đặt đầy đủ từ 2026-07-24 trong
 `src/modules/submissions/acceptance-saga.ts` (tạo thư mục `02_CASES/{TĐP}/{CASE_ID}/originals`,
-di chuyển file Drive từ `01_INBOX`, ghi `CASES/CERTIFICATES/OWNERS/FILES` — xem Code Graph trong
-`01-architecture.md`). Route bị khóa bằng cờ `OFFICIAL_ACCEPTANCE_ENABLED = false`
-(`src/modules/submissions/acceptance.ts`) và nút vẫn `disabled` ở UI.
+di chuyển file Drive từ `01_INBOX`, ghi `CASES/CERTIFICATES/OWNERS/PARCELS/ASSETS/FILES` — xem Code
+Graph trong `01-architecture.md`). Cờ `OFFICIAL_ACCEPTANCE_ENABLED` đã đảo sang `true` và nút
+"Tiếp nhận chính thức" đã được nối vào route thật. Xem `03-decisions.md` [2026-07-25] "MỞ tiếp nhận
+chính thức" — trong đó có hai lỗi chặn phải vá cùng lượt (thứ tự xóa khóa ngoại của
+`refreshCanonicalProjection`, và saga trước đó không ghi thửa/mục đích vào bảng chính thức nào).
+
+**Công tắc dừng khẩn:** đảo `OFFICIAL_ACCEPTANCE_ENABLED` về `false` trong
+`src/modules/submissions/acceptance.ts` rồi deploy. Hồ sơ đang dở nằm lại `ACCEPTING`; bấm lại với
+**cùng `idempotency-key`** sau khi mở lại sẽ đi tiếp từ checkpoint, không tạo hồ sơ chính thức thứ
+hai. Đóng cờ là quyết định phải ghi vào `03-decisions.md`, không sửa lướt qua —
+`tests/submission-acceptance.test.ts` có trip-wire hai chiều.
 
 **[SỬA KHẨN 2026-07-24]** Trước bản sửa này, route chỉ còn được chặn bởi `REFERENCE_IS_PLACEHOLDER`
 — nhưng cờ đó **đã là `false`** từ quyết định export PL3 2026-07-23 (không liên quan gì tới việc
@@ -55,12 +102,11 @@ client thật. Đã sửa trong `acceptance-saga.ts` (hàm `parseJsonbMaybeStrin
 `ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run tests/staging-rehearsal-acceptance-saga.integration.test.ts`
 (tự skip an toàn nếu thiếu biến môi trường, tự chặn nếu trỏ trùng `SUPABASE_DATABASE_URL` thật).
 
-**Còn cần chủ dự án quyết định trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true`:** dòng "danh mục
-trường 12 chính thức được nhập thay dữ liệu demo" ghi từ trước có thể đã lỗi thời — cả trường 12
-của Phụ lục 8 (loại đất/nguồn gốc) lẫn trường 12 của PL3 (pháp nhân trên GCN) đều đã được xác nhận
-chốt chính thức trong `03-decisions.md` [2026-07-22]/[2026-07-23]. Nếu đúng vậy, điều kiện gác cổng
-cuối cùng đã xong toàn bộ và chỉ còn chờ quyết định đảo cờ; nếu chủ dự án biết một danh mục trường
-12 khác còn treo, cần nói rõ ở đây.
+**[2026-07-25 — ĐÃ ĐÓNG] Điều kiện gác cổng cuối cùng.** Nghi vấn "danh mục trường 12 chính thức
+được nhập thay dữ liệu demo" đúng là **tài liệu lỗi thời**: cả trường 12 của Phụ lục 8 (loại
+đất/nguồn gốc) lẫn trường 12 của PL3 (pháp nhân trên GCN) đều đã chốt chính thức trong
+`03-decisions.md` [2026-07-22]/[2026-07-23]. Chủ dự án xác nhận không còn danh mục nào treo và
+quyết định đảo cờ ngày 2026-07-25.
 
 ## Migration Supabase (2026-07-23, đã xong về code + dữ liệu 2026-07-24)
 
@@ -171,16 +217,22 @@ chủ dự án **chấp nhận rủi ro và bỏ qua** ngày 2026-07-24 (không 
   _"Nhận chuyển nhượng đất được Công nhận QSDĐ như giao đất có thu tiền sử dụng đất"_ là **một mục
   trong danh mục** hay **ghép hai ý**? Đáp án quyết định biểu mẫu có một ô chọn hay hai. Bộ câu hỏi
   đã soạn sẵn ở `PLAN2.md` §9.
-- **Trường 21 và 22 của PL3 là gì** (số thứ tự nhảy từ 20 sang 23), và cột O, P không đánh số có
-  thuộc bộ 49 không.
+- ~~**Trường 21 và 22 của PL3 là gì**, và cột O, P không đánh số có thuộc bộ 49 không.~~
+  **[ĐÃ TRẢ LỜI 2026-07-25]** Bỏ trường 21/22 (nguồn dữ liệu hiện dùng là loại đưa vào sử dụng
+  ngay), nhưng khâu **thu thập** vẫn phải có cột O, P vì nhiều trường hợp chủ trên GCN đã mất.
+  `PL3_COLUMNS` hiện tại đã đúng y như vậy — nhảy từ 20 sang 23, và có đúng hai cột `field: null`
+  cho người sử dụng hiện tại. **Không cần sửa code.** Xem `03-decisions.md` [2026-07-25] Q4.
 - **Có bảng tham chiếu số THỬA cũ→mới không?** Bảng hiện có chỉ quy đổi số _tờ_ (trường 19); trường
   20 chưa có nguồn nào.
 - **Định nghĩa phân nhóm A/B/C/E** (KH 247/KH-UBND ngày 30/6/2026) — ảnh hưởng schema báo cáo.
 - **Tỷ lệ GCN cấp cho hộ gia đình** ở Phong Châu (đếm trên ~30 GCN thật) — quyết định có chặn được
   hộ gia đình gửi hồ sơ hay không; nếu HGĐ chiếm đa số thì quy tắc chặn làm cổng vô dụng.
 - **Tỷ lệ GCN nhiều thửa** — đếm cùng lần trên ~30 GCN thật.
-- **Xác minh tầng dịch vụ Gemini** (bật thanh toán, điều khoản không dùng dữ liệu huấn luyện) trước
-  tấm ảnh thật đầu tiên.
+- ~~**Xác minh tầng dịch vụ Gemini** (bật thanh toán, điều khoản không dùng dữ liệu huấn luyện)
+  trước tấm ảnh thật đầu tiên.~~ **[ĐÃ QUYẾT ĐỊNH 2026-07-25]** Chủ dự án quyết định cứ thực hiện.
+  Đây không còn là điều kiện chặn. **Ràng buộc kỹ thuật không đổi:** ảnh CCCD tuyệt đối không gửi
+  sang mô hình — job chỉ chứa file `documentType = 'CERTIFICATE'`, chặn ở khâu đóng gói chứ không
+  trông vào Agent nhớ quy tắc. Xem `03-decisions.md` [2026-07-25] Q5.
 
 ### Đã chốt — đừng đề xuất lại
 

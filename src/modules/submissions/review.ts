@@ -40,10 +40,42 @@ export function mayStaffEdit(record: SubmissionRecord, email: string): boolean {
 }
 
 /**
- * Chủ sử dụng đã quét QR CCCD thật (`identityStatus === "QR_CONFIRMED"`) có thông tin định danh
- * đọc trực tiếp từ chip — cán bộ không được sửa. Chỉ chủ nhập tay (`MANUAL`/chưa xác nhận) mới
- * cho sửa, đúng phạm vi "sửa lỗi gõ phím" đã chốt.
+ * Điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức.
+ *
+ * Khác `mayStaffEdit` ở ba điểm, và cả ba đều có lý do:
+ *   - Chỉ áp dụng khi hồ sơ đã `ACCEPTED` **và** đã có mã hồ sơ chính thức. Không có `case_id` thì
+ *     không có gì để đồng bộ lại, và việc sửa lúc đó thuộc luồng thường.
+ *   - Cho phép cả quản trị viên, không chỉ người đang giữ hồ sơ: sau khi tiếp nhận xong, cán bộ
+ *     nhận hồ sơ có thể đã nghỉ/chuyển việc, mà sai sót trên hồ sơ chính thức thì phải sửa được.
+ *   - Bên gọi BẮT BUỘC kèm lý do điều chỉnh (`amendmentReason`) — đó là dấu vết đối soát duy nhất
+ *     giải thích vì sao dữ liệu chính thức đổi sau khi đã chốt.
+ *
+ * Quyết định [2026-07-25] Q2: cán bộ được sửa, cán bộ là người quyết định cuối cùng.
  */
-export function isOwnerIdentityLocked(identityStatus: string): boolean {
+export function mayAmendOfficialRecord(
+  record: SubmissionRecord,
+  email: string,
+  isAdministrator: boolean,
+): boolean {
+  return (
+    record.status === "ACCEPTED" &&
+    record.officialCaseId.trim().length > 0 &&
+    (isClaimedBy(record, email) || isAdministrator)
+  );
+}
+
+/**
+ * Thông tin định danh của chủ này được đọc thẳng từ chip CCCD qua QR, không phải người dân gõ tay.
+ *
+ * **[2026-07-25] Đây là CẢNH BÁO, không còn là khóa cứng.** Trước đó hàm này chặn cán bộ sửa mọi
+ * trường định danh của chủ `QR_CONFIRMED`. Chủ dự án quyết định cán bộ được sửa toàn bộ trường và
+ * là người quyết định cuối cùng (03-decisions.md [2026-07-25] Q1) — lý do: QR đọc nhầm hoặc bìa
+ * ghi khác thẻ thì hồ sơ bế tắc, không có đường đi tiếp.
+ *
+ * Đổi lại, mỗi lần cán bộ ghi đè một trường `QR_CONFIRMED` phải để lại dấu vết riêng trong
+ * `audit_logs` (`identityOverride: true`) — chip đáng tin hơn mắt người, nên việc đi ngược lại nó
+ * cần tra lại được.
+ */
+export function isOwnerIdentityQrConfirmed(identityStatus: string): boolean {
   return identityStatus === "QR_CONFIRMED";
 }

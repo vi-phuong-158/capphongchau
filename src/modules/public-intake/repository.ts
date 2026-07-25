@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type { Sql } from "postgres";
 
+// `official-record.ts` chỉ phụ thuộc `./types`, không phụ thuộc repository — không tạo vòng import.
+import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { getDatabase } from "@/modules/supabase/database";
 
 import type { IntakeDraft } from "./types";
@@ -662,6 +664,104 @@ export class PublicIntakeRepository {
         values (
           ${input.idempotencyKey}, ${input.requestId}, 'STAFF_DRAFT_EDIT', ${input.mutationHash},
           ${JSON.stringify({ version: next.version })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
+    });
+  }
+
+  /**
+   * Điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức.
+   *
+   * Khác `commitStaffDraftEdit` ở đúng một việc, nhưng là việc quyết định: ngoài `draft_json` và
+   * hình chiếu chuẩn hóa phía bản kê khai, hàm này còn **ghi lại dữ liệu chính thức**
+   * (`certificates`/`owners`/`parcels`/`assets` theo `case_id`) trong CÙNG transaction.
+   *
+   * Vì sao phải cùng transaction: nếu `draft_json` ghi xong mà đồng bộ chính thức lỗi, hồ sơ sẽ
+   * mang hai phiên bản dữ liệu khác nhau vĩnh viễn, không cách nào biết bên nào đúng. Cùng
+   * transaction thì hoặc cả hai đổi, hoặc không gì đổi.
+   *
+   * Không đụng tới file trên Drive và không đụng `cases.case_id` — điều chỉnh là sửa nội dung,
+   * không phải tiếp nhận lại. Mã hồ sơ chính thức giữ nguyên.
+   */
+  async commitOfficialAmendment(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    draft: IntakeDraft;
+    actorEmail: string;
+    amendmentReason: string;
+    auditMetadata: Record<string, string | number | boolean>;
+    timelineEvent: PublicTimelineEvent;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+
+      // Điều kiện `status = 'ACCEPTED'` nằm trong chính câu UPDATE, không chỉ kiểm ở route: hồ sơ
+      // có thể đổi trạng thái giữa lúc route đọc và lúc ghi.
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           draft_json = $3::jsonb, version = version + 1, updated_at = now()
+         where submission_id = $1 and version = $2 and status = 'ACCEPTED'
+           and coalesce(official_case_id, '') <> ''
+         returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.expectedVersion, JSON.stringify(input.draft)],
+      );
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const next = mapSubmission(rows[0]);
+
+      await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+
+      const counts = await syncOfficialRecord(transaction, {
+        caseId: next.officialCaseId,
+        submissionId: input.record.submissionId,
+        draft: input.draft,
+      });
+
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "OFFICIAL_RECORD_AMENDED",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          ...input.auditMetadata,
+          officialCaseId: next.officialCaseId,
+          amendmentReason: input.amendmentReason,
+          ownerCount: counts.ownerCount,
+          parcelCount: counts.parcelCount,
+          assetCount: counts.assetCount,
+        },
+      });
+      await this.insertTimeline(
+        transaction,
+        input.record.submissionId,
+        input.timelineEvent,
+        input.actorEmail,
+        input.requestId,
+      );
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'OFFICIAL_AMENDMENT', ${input.mutationHash},
+          ${JSON.stringify({ version: next.version, officialCaseId: next.officialCaseId })}::jsonb,
           now() + interval '24 hours'
         )
       `;
@@ -1354,10 +1454,15 @@ export class PublicIntakeRepository {
     draft: IntakeDraft,
     pendingIdentityHmacs?: string[],
   ): Promise<void> {
-    await transaction`delete from public.public_certificates where submission_id = ${submissionId}`;
-    await transaction`delete from public.public_owners where submission_id = ${submissionId}`;
-    await transaction`delete from public.public_parcels where submission_id = ${submissionId}`;
+    // THỨ TỰ XÓA LÀ BẮT BUỘC: con trước cha. `public_land_uses.parcel_id` tham chiếu
+    // `public_parcels(parcel_id)` (schema 202607230001) và ràng buộc đó KHÔNG cascade, KHÔNG
+    // deferrable — xóa cha trước sẽ ném `foreign_key_violation` và rollback cả transaction.
+    // Lần gửi đầu không lộ lỗi vì bảng còn rỗng nên delete là no-op; lỗi chỉ nổ từ lần làm mới
+    // thứ hai trở đi (cán bộ sửa hồ sơ đã gửi, hoặc người dân gửi bổ sung).
     await transaction`delete from public.public_land_uses where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_parcels where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_owners where submission_id = ${submissionId}`;
+    await transaction`delete from public.public_certificates where submission_id = ${submissionId}`;
     await transaction`delete from public.public_assets where submission_id = ${submissionId}`;
 
     if (draft.certificate) {

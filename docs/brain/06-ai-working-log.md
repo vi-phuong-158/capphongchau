@@ -1,5 +1,148 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Diễn tập trên Postgres thật xác nhận bản vá P0-1/P0-5/Q2 — tìm và sửa fixture test sai
+
+- **Agent:** Claude Code
+- **Thay đổi:** Chạy `tests/staging-rehearsal-acceptance-saga.integration.test.ts` (9 kịch bản, gồm
+  3 kịch bản mới 1b/1c/1d thêm ở lượt trước) trên Postgres thử nghiệm thật (project riêng, region
+  `ap-northeast-2`, khác production `ap-southeast-1`) — trước đó các kịch bản này mới chỉ chạy qua
+  typecheck/mock, chưa từng chạm PostgreSQL thật.
+  - **Lần chạy đầu: 2/9 fail** — `null value in column "owner_type"/"role_on_certificate"/
+    "qr_payload_hash" of relation "public_owners" violates not-null constraint`. Nguyên nhân: fixture
+    `seedSubmission()` trong chính test dùng owner/parcel/landUse thiếu nhiều trường. Xác minh trước
+    khi kết luận: `ownerType`/`roleOnCertificate` là trường **bắt buộc** trong `draftSchema` thật
+    (`validation.ts`) và cột tương ứng trong Postgres là `not null` — dữ liệu thiếu các trường này
+    **không bao giờ tồn tại qua API thật**. Đây là lỗ hổng trong test tôi viết, không phải bug
+    trong `refreshCanonicalProjection`/`commitOfficialAmendment`.
+  - Nguyên nhân kỹ thuật sâu hơn: mọi cột `public_owners`/`public_parcels`/`public_land_uses` là
+    `not null default ''`, nhưng code luôn liệt kê đủ tên cột trong câu INSERT — nên một trường
+    JS `undefined` được `postgres.js` gửi thành `NULL` **tường minh**, ghi đè default thay vì bỏ
+    qua cột. Thiếu một trường trong fixture là đủ để vi phạm ràng buộc.
+  - Đã sửa `seedSubmission()` và ba khối `parcels`/`landUses` tùy biến trong kịch bản 1c/1d cho đủ
+    toàn bộ trường bắt buộc theo đúng shape `Owner`/`Parcel`/`LandUse` thật (`types.ts`), thay vì
+    thêm từng trường một qua nhiều vòng lặp — tra `types.ts` + schema một lần rồi sửa dứt điểm.
+  - **Lần chạy sau khi sửa fixture: 9/9 PASS** trên Postgres thật, gồm cả 1c (chứng minh P0-1: sửa
+    hồ sơ có `public_land_uses` hai lần liên tiếp không còn `foreign_key_violation`) và 1d (chứng
+    minh Q2: điều chỉnh hồ sơ đã `ACCEPTED` ghi lại đúng `public.certificates`/`public.parcels`,
+    xóa thửa bị bỏ, giữ nguyên mã hồ sơ chính thức, lý do điều chỉnh có trong `audit_logs`).
+  - Chạy lại `npx vitest run` (không cần Postgres thật) sau đó: vẫn 216 pass / 9 skip, không hồi quy.
+- **File đã sửa:** `tests/staging-rehearsal-acceptance-saga.integration.test.ts`,
+  `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Trước khi gộp nhánh review vào `main` (Vercel tự deploy từ `main`, và
+  `OFFICIAL_ACCEPTANCE_ENABLED = true` nên đây là dữ liệu thật), bắt buộc kiểm chứng hai lỗi P0 đã
+  vá và luồng điều chỉnh hồ sơ trên PostgreSQL thật — không chỉ tin vào typecheck/mock.
+- **Kiểm tra:** `ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run
+  tests/staging-rehearsal-acceptance-saga.integration.test.ts` → 9/9 PASS. Connection string thử
+  nghiệm được truyền qua biến môi trường nạp từ file tạm ngoài repo (không phải qua tham số dòng
+  lệnh, không ghi vào bất kỳ file nào trong repo, đã xóa file tạm ngay sau khi dùng xong).
+- **Chưa xác minh:** `npm run test:e2e`, `npm run test:python` vẫn chưa chạy trong phiên này.
+
+## [2026-07-25] Mở tiếp nhận hồ sơ chính thức + vá 2 lỗi chặn + trả lời 7 câu hỏi treo
+
+- **Agent:** Claude Code (Opus 5)
+- **Thay đổi:**
+  - **Vá P0-1 — thứ tự xóa khóa ngoại.** `refreshCanonicalProjection` xóa `public_parcels` **trước**
+    `public_land_uses`, mà FK `public_land_uses.parcel_id → public_parcels(parcel_id)` không
+    cascade, không deferrable. Lần gửi đầu không lộ vì bảng con còn rỗng; từ lần làm mới thứ hai
+    (cán bộ sửa hồ sơ đã gửi, người dân gửi bổ sung) là `foreign_key_violation` → HTTP 500. Đảo lại
+    thứ tự con-trước-cha: `land_uses → parcels → owners → certificates → assets`.
+  - **Vá P0-5 — saga không ghi thửa/mục đích vào bảng chính thức nào.** Bước `RECORDS_WRITTEN` chỉ
+    ghi `cases`/`owners`/`certificates`/`files`; sau khi tiếp nhận chính thức, dữ liệu thửa vẫn chỉ
+    nằm trong `draft_json` — cột mà cán bộ và người dân đều ghi đè được. Bổ sung ghi
+    `public.parcels` và `public.assets` (bảng `data_json jsonb` gắn `case_id`, **đã có sẵn** trong
+    schema `202607230001` nên **không cần migration mới**), ID tất định `ACC:{submissionId}:{id}` +
+    `on conflict do nothing`. Audit của bước này giờ ghi thêm số lượng owner/thửa/tài sản/file
+    (chỉ đếm, không ghi giá trị — tránh PII vào `audit_logs`).
+  - **Đảo `OFFICIAL_ACCEPTANCE_ENABLED` từ `false` sang `true`** và viết lại comment tại chỗ để ghi
+    đủ 4 điều kiện gác cổng đã đóng + đường lùi.
+  - **Nối nút "Tiếp nhận chính thức" vào route thật.** Trước đó nút bị `disabled` cứng, không có
+    `onClick` — đảo cờ không thôi thì cán bộ vẫn không bấm được. Thêm `acceptOfficially()` với
+    xác nhận trước khi chạy, và `idempotency-key` giữ trong `useRef` để bấm lại sau lỗi mạng đi
+    tiếp từ checkpoint thay vì sinh hồ sơ chính thức mới. Nút đổi nhãn thành "Tiếp tục tiếp nhận"
+    khi hồ sơ đang `ACCEPTING`. Header hồ sơ hiện thêm "Mã hồ sơ chính thức" và "Bước tiếp nhận dở
+    dang".
+  - **Q1 — cán bộ sửa toàn trường.** `isOwnerIdentityLocked` → `isOwnerIdentityQrConfirmed`, hạ từ
+    khóa cứng xuống cảnh báo. Bỏ chặn 400 ở `PATCH`, bỏ `disabled` ở 5 ô nhập trong giao diện, thay
+    bằng cảnh báo màu hổ phách. Ghi đè trường đọc từ chip để lại dấu vết riêng trong `audit_logs`
+    (`identityOverride`, `identityOverrideOwnerCount`).
+  - **Q2 — điều chỉnh hồ sơ đã tiếp nhận. ĐÃ THI CÔNG.** Thêm
+    `src/modules/submissions/official-record.ts` với `syncOfficialRecord` — một định nghĩa duy nhất
+    về "dữ liệu chính thức", dùng chung bởi saga tiếp nhận và đường điều chỉnh, để hai đường không
+    bao giờ lệch nhau. Ngữ nghĩa đồng bộ: upsert bản ghi còn trong bản kê khai, **xóa** bản ghi đã
+    bị bỏ. Thêm `mayAmendOfficialRecord` và `commitOfficialAmendment` (ghi `draft_json`, hình chiếu
+    chuẩn hóa và dữ liệu chính thức trong **cùng một transaction** — không có cửa sổ nào để hai bên
+    lệch). `PATCH` nhận `amendmentReason` bắt buộc ≥ 10 ký tự khi hồ sơ `ACCEPTED`, và **gỡ nhánh
+    `|| isAdministrator`** vốn cho quản trị viên sửa hồ sơ ở bất kỳ trạng thái nào mà không đồng bộ
+    và không cần lý do — đó là lỗ hổng P0-4, nay đã đóng. Giao diện có nút riêng "Điều chỉnh hồ sơ
+    chính thức" màu cam kèm ô lý do bắt buộc.
+  - **Q3–Q7 ghi vào `03-decisions.md`.** Q3 (giữ 3 mục đích) và Q4 (bỏ trường 21/22, giữ cột O/P)
+    **không cần sửa code** — hiện trạng đã đúng.
+  - **Trip-wire hai chiều.** `tests/submission-acceptance.test.ts` giờ khẳng định cờ là `true`; đóng
+    lại phải là quyết định có ghi chép, không phải sửa lướt qua.
+- **File đã sửa:** `src/modules/submissions/official-record.ts` (mới),
+  `src/modules/submissions/acceptance.ts`, `src/modules/submissions/acceptance-saga.ts`,
+  `src/modules/submissions/review.ts`, `src/modules/public-intake/repository.ts`,
+  `src/app/api/submissions/[submissionId]/route.ts`, `src/components/submission-detail.tsx`,
+  `tests/submission-acceptance.test.ts`, `tests/submission-review.test.ts`,
+  `tests/staging-rehearsal-acceptance-saga.integration.test.ts`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md`, `docs/brain/06-ai-working-log.md`,
+  `REVIEW_CLAUDE_OPUS.md`.
+- **Lý do:** Chủ dự án quyết định mở tiếp nhận chính thức để bắt đầu thu hồ sơ thật, và trả lời 7
+  câu hỏi treo ở `REVIEW_CLAUDE_OPUS.md` §10. Hai lỗi P0 phải vá cùng lượt vì nếu mở cờ mà không vá
+  thì hồ sơ chính thức đầu tiên đã hỏng: cán bộ không sửa được hồ sơ đã gửi, và dữ liệu thửa không
+  có bản chốt bất biến.
+- **Kiểm tra:**
+  - `npm run typecheck` PASS · `npm run lint` 0 error (5 warning có sẵn từ trước) ·
+    `npx vitest run` **216 pass / 9 skip** (3 skip mới là 3 kịch bản tích hợp cần Postgres thật).
+  - Thêm 2 kịch bản tích hợp vào `staging-rehearsal-acceptance-saga.integration.test.ts`:
+    **1b** — GCN 2 thửa (một thửa 2 mục đích) + 1 tài sản → `public.parcels` đúng 2 dòng với
+    `landUses` nằm trong `data_json`, `public.assets` 1 dòng, replay cùng key không nhân đôi.
+    **1c** — gọi `commitStaffDraftEdit` **hai lần liên tiếp** trên hồ sơ có `public_land_uses`;
+    lần thứ hai chính là lần ném `foreign_key_violation` trước bản vá.
+    **1d** — tiếp nhận rồi điều chỉnh: sửa số vào sổ và xóa một thửa → `public.certificates` theo
+    giá trị mới, `public.parcels` còn đúng 1 dòng (thửa bị xóa không để lại dòng mồ côi), mã hồ sơ
+    chính thức **không đổi**, không sinh `case` thứ hai, và lý do điều chỉnh có trong `audit_logs`.
+    Thêm 5 test đơn vị cho `mayAmendOfficialRecord`, gồm bất biến "không hồ sơ nào đi được cả hai
+    đường sửa".
+    Chạy bằng: `ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run tests/staging-rehearsal-acceptance-saga.integration.test.ts`
+- **Chưa xác minh:** ba kịch bản tích hợp mới **chưa được chạy trên Postgres thật trong phiên này**
+  (không có `ACCEPTANCE_SAGA_TEST_DATABASE_URL`) — cần chạy trước khi tiếp nhận hồ sơ thật đầu tiên.
+  Chưa chạy `npm run test:e2e`, `npm run test:python`, `npm run build` sau đợt sửa cuối. Chưa kiểm
+  chứng trên Vercel Production. Danh sách việc phải làm trong ngày đầu thu hồ sơ thật ở
+  `04-current-tasks.md` mục [2026-07-25].
+
+## [2026-07-25] Review kiến trúc cho phương án Antigravity và lập bản thi công (không sửa code)
+
+- **Agent:** Claude Code (Opus 5)
+- **Thay đổi:** Chỉ thêm tài liệu, **không sửa một dòng mã nguồn nào**.
+  - `REVIEW_CLAUDE_OPUS.md` — review kiến trúc, kết luận `APPROVE WITH CHANGES`, 5 lỗi P0, 10 rủi
+    ro P1, 8 cải tiến P2, các quyết định kiến trúc (một submission = một GCN, bốn lớp dữ liệu,
+    state machine, claim/lock, AI job, đặt tên tệp/thư mục, xuất PL3) và 7 câu hỏi cần chủ dự án
+    quyết định.
+  - `IMPLEMENTATION_PLAN_ANTIGRAVITY.md` — bản thi công 15 phase (0–14), mỗi phase có danh sách
+    file chính xác, migration với version duy nhất, schema trước/sau, hợp đồng API, quy tắc quyền,
+    transaction/idempotency, test phải viết, lệnh kiểm tra, tiêu chí hoàn thành, rủi ro, cách
+    rollback và commit message.
+  - `GEMINI_REVIEW_NOTES.md` — review `GEMINI.md`, 12 bản vá đề xuất kèm diff cụ thể.
+- **File đã sửa:** `REVIEW_CLAUDE_OPUS.md` (mới), `IMPLEMENTATION_PLAN_ANTIGRAVITY.md` (mới),
+  `GEMINI_REVIEW_NOTES.md` (mới), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** Thực hiện `NEW TASK/PROMPT_CLAUDE_OPUS_REVIEW_VA_LAP_BAN_THI_CONG.md` — review repo
+  và phương án `PHUONG_AN_ANTIGRAVITY_AGENT_XU_LY_HO_SO_DAT_DAI_V3.md` trước khi thi công.
+- **Kiểm tra:**
+  - Baseline đo thật: `npx vitest run` → 33 file pass / 1 skip, 211 test pass / 6 skip;
+    `npx next build` → PASS, 32 route, không warning bundling (`exceljs` được bundle sạch).
+  - P0 xuất PL3 được tái hiện bằng test tạm gọi thẳng `POST /api/exports` với I/O mock, 4 kịch bản:
+    có `ACCEPTED` → 200 + workbook 9.464 byte hợp lệ; chỉ `SUBMITTED` → sheet `PL3` rỗng;
+    `appendExportJob` lỗi → **500, mất file đã dựng xong**; 2.500 hồ sơ → **chỉ ra 2.000 dòng**.
+    Test tạm đã xóa, kịch bản được đưa vào Phase 1 của bản thi công.
+  - P0 thứ tự xóa khóa ngoại (`repository.ts:1357-1361` xóa `public_parcels` trước
+    `public_land_uses`) xác minh bằng đọc SQL + DDL khóa ngoại `schema.sql:194` (không cascade,
+    không deferrable).
+- **Chưa xác minh:** triệu chứng thật của lỗi PL3 trên production; số hồ sơ và phân bố trạng thái
+  trong `public_submissions`; biến môi trường trên Vercel Production; tần suất hiện tượng
+  jsonb-as-string của Supavisor; `npm run test:e2e` và `npm run test:python` chưa chạy trong phiên
+  này. Xem `REVIEW_CLAUDE_OPUS.md` §13.
+
 ## [2026-07-24] Thêm 2 tài khoản vdl.0595@gmail.com và thanhson2311@gmail.com vào vai trò SYSTEM_ADMIN
 
 - **Agent:** Antigravity
