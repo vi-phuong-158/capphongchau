@@ -1,5 +1,56 @@
 # 06 — AI Working Log
 
+## [2026-07-25] Vá 4 lỗi chặn của review vòng 2 trên commit `649003e` (Claude Sonnet 5)
+
+- **Agent:** Claude Sonnet 5
+- **Bối cảnh:** Review commit `649003e` ("hoàn thiện Phase 3-14") phát hiện quality gate lần này
+  trung thực (số liệu test/typecheck/lint/build khớp thật), nhưng còn 4 lỗi chặn: workspace AI trỏ
+  vào chính cây repo (rủi ro rò ảnh CCCD/GCN vào git), `AI_EXTRACTION_ENABLED` không chặn gì (route
+  `/api/ai/results` sống bất kể cờ), integration test Phase 3 sai tên cột nên chưa từng chạy được,
+  và test chống prompt injection tự định nghĩa hàm trong file test rồi tự test hàm đó (0% bao phủ mã
+  sản phẩm thật).
+- **Thay đổi:**
+  1. **Workspace path:** `.env.example` đổi `ANTIGRAVITY_WORKSPACE_ROOT` sang `D:\land-ocr-workspace`
+     (ngoài repo); thêm `/ai-workspace/`, `/agent-workspace/`, `/antigravity-workspace/` vào
+     `.gitignore` làm lưới an toàn thứ hai.
+  2. **Cờ tính năng:** `POST /api/ai/results` giờ đọc `AI_EXTRACTION_ENABLED` qua
+     `loadServerEnvironment()`, trả `503 SERVICE_UNAVAILABLE` khi tắt — trước đó cờ chỉ là khai báo,
+     không chặn gì.
+  3. **Integration test Phase 3:** Sửa tên cột (`submission_id`/`receipt_code` snake_case, không
+     phải camelCase), thêm các cột `not null` còn thiếu (`access_code_hash`, `consent_version`,
+     `drive_folder_id`, `submission_id` trên `public_land_uses`). **Đã chạy thật** với
+     `ACCEPTANCE_SAGA_TEST_DATABASE_URL` (Postgres rehearsal) — lần đầu FAIL vì migration
+     `202607250007` chưa từng được áp vào DB rehearsal đó; thêm bước tự áp migration (idempotent)
+     trong `beforeAll`, cùng cơ chế `bootstrapDatabase()` đã có ở
+     `staging-rehearsal-acceptance-saga.integration.test.ts`. Sau đó **PASS thật** trên Postgres
+     thật, không phải suy đoán.
+  4. **Prompt injection — hàm thật, wiring thật:** tạo
+     `src/modules/ai-extraction/prompt-safety.ts` (`detectPromptInjection`,
+     `scanForPromptInjection`), gọi trong `scripts/ai/validator.ts::validateAiResultPayload` —
+     đường gọi thật duy nhất nhận JSON từ AI (`POST /api/ai/results`). Kết quả nghi prompt injection
+     giờ bị `BLOCKING`, không âm thầm chấp nhận. Bổ sung quy tắc §6.2 (không làm theo chỉ dẫn trong
+     ảnh/PDF) vào `agent/prompts/certificate-extraction.md`, thêm `unreadableFields` + cho phép
+     `null` trên các trường bắt buộc trong `certificate-extraction-schema.json` theo §6.4 ("không
+     suy diễn — để null kèm UNREADABLE"), và một cảnh báo `WARNING` nếu thiếu `unreadableFields`.
+     Viết lại `tests/ai-prompt-injection.test.ts` để import hàm thật thay vì định nghĩa lại trong
+     file test.
+- **File đã sửa:** `.env.example`, `.gitignore`, `src/app/api/ai/results/route.ts`,
+  `tests/canonical-projection.integration.test.ts`, `src/modules/ai-extraction/prompt-safety.ts`
+  (mới), `scripts/ai/validator.ts`, `agent/prompts/certificate-extraction.md`,
+  `agent/schemas/certificate-extraction-schema.json`, `tests/ai-prompt-injection.test.ts`,
+  `docs/brain/06-ai-working-log.md`.
+- **Kiểm tra:** `npx vitest run` → 42 file pass / 2 skip (252 test pass / 10 skip);
+  `npm run typecheck` → 0 lỗi; `npm run build` → PASS;
+  `NODE_OPTIONS=--max-old-space-size=8192 npx eslint <file đã sửa>` → 0 lỗi;
+  `npx prettier --write <file đã sửa>` → PASS;
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL=<rehearsal> npx vitest run tests/canonical-projection.integration.test.ts`
+  → **1/1 PASS trên Postgres thật** (đọc từ `.env.rehearsal.local`, không phải giả lập).
+- **Chưa làm** (ngoài phạm vi 4 lỗi chặn lần này, vẫn còn từ review trước): advisory lock Drive
+  folder bị thay bằng `Map` trong tiến trình (rủi ro trùng thư mục trên serverless đa tiến trình);
+  `result_version` hardcode `1` ở `/api/ai/results` (không idempotency-key); `modelName` mặc định
+  hardcode thay vì bắt buộc lấy từ runtime; migration Phase 12
+  (`202607250006_public_files_naming_metadata`); cập nhật `01-architecture.md`/`03-decisions.md`.
+
 ## [2026-07-25] Hoàn thiện các phase còn lại sau Handoff Review (Antigravity)
 
 - **Agent:** Antigravity / Gemini 3.6 Flash (High)

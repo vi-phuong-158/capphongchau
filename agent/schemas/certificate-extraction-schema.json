@@ -6,9 +6,9 @@
     "certificate": {
       "type": "object",
       "properties": {
-        "issueNumber": { "type": "string" },
-        "issueDate": { "type": "string" },
-        "registryNumber": { "type": "string" }
+        "issueNumber": { "type": ["string", "null"] },
+        "issueDate": { "type": ["string", "null"] },
+        "registryNumber": { "type": ["string", "null"] }
       },
       "required": ["issueNumber", "issueDate", "registryNumber"]
     },
@@ -18,9 +18,9 @@
         "type": "object",
         "properties": {
           "fullName": { "type": "string" },
-          "identityNumber": { "type": "string" },
-          "dateOfBirth": { "type": "string" },
-          "residenceAddress": { "type": "string" }
+          "identityNumber": { "type": ["string", "null"] },
+          "dateOfBirth": { "type": ["string", "null"] },
+          "residenceAddress": { "type": ["string", "null"] }
         },
         "required": ["fullName"]
       }
@@ -30,14 +30,20 @@
       "items": {
         "type": "object",
         "properties": {
-          "mapSheetNumber": { "type": "string" },
-          "parcelNumber": { "type": "string" },
-          "area": { "type": "string" },
-          "oldWard": { "type": "string" }
+          "mapSheetNumber": { "type": ["string", "null"] },
+          "parcelNumber": { "type": ["string", "null"] },
+          "area": { "type": ["string", "null"] },
+          "oldWard": { "type": ["string", "null"] }
         },
         "required": ["mapSheetNumber", "parcelNumber", "area"]
       }
+    },
+    "unreadableFields": {
+      "type": "array",
+      "description": "Đường dẫn (fieldPath) của mọi trường không đọc rõ được — value tương ứng phải là null. Không được để trống mảng này rồi vẫn đoán chữ số/tự sửa mã đất/tự cộng diện tích (GEMINI.md §6.4).",
+      "items": { "type": "string" },
+      "default": []
     }
   },
-  "required": ["certificate", "owners", "parcels"]
+  "required": ["certificate", "owners", "parcels", "unreadableFields"]
 }

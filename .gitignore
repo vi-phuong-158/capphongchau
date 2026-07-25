@@ -29,6 +29,12 @@ Tai lieu/
 reports/
 __pycache__/
 
+# Lưới an toàn thứ hai cho vùng làm việc AI extraction — ANTIGRAVITY_WORKSPACE_ROOT phải trỏ
+# ngoài repo, nhưng nếu ai đó lỡ đặt trong repo thì các thư mục này vẫn không lọt vào git.
+/ai-workspace/
+/agent-workspace/
+/antigravity-workspace/
+
 # Operating system files
 .DS_Store
 Thumbs.db

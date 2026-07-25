@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { createApiErrorPayload } from "@/modules/common/api-error";
 import { computeResultFingerprint } from "@/modules/ai-extraction/fingerprints";
+import { loadServerEnvironment } from "@/modules/common/env";
 import { getDatabase } from "@/modules/supabase/database";
 import { validateAiResultPayload, type ValidationIssue } from "../../../../../scripts/ai/validator";
 
@@ -17,7 +18,13 @@ const schema = z.object({
 });
 
 function fail(
-  code: "ACCESS_DENIED" | "UNAUTHENTICATED" | "VALIDATION_FAILED" | "NOT_FOUND" | "INTERNAL_ERROR",
+  code:
+    | "ACCESS_DENIED"
+    | "UNAUTHENTICATED"
+    | "VALIDATION_FAILED"
+    | "NOT_FOUND"
+    | "SERVICE_UNAVAILABLE"
+    | "INTERNAL_ERROR",
   message: string,
   requestId: string,
   status: number,
@@ -31,6 +38,11 @@ function fail(
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = request.headers.get("x-request-id") ?? randomUUID();
   try {
+    const environment = loadServerEnvironment();
+    if (!environment.AI_EXTRACTION_ENABLED) {
+      return fail("SERVICE_UNAVAILABLE", "Tính năng trích xuất AI chưa được bật.", requestId, 503);
+    }
+
     const workerKey = request.headers.get("x-ai-worker-key");
     const expectedKey = process.env.AI_WORKER_API_KEY;
     if (!expectedKey || !workerKey || workerKey !== expectedKey) {
