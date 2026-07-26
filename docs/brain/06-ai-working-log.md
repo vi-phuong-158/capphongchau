@@ -343,6 +343,15 @@
 
 ## [2026-07-25] Diễn tập trên Postgres thật xác nhận bản vá P0-1/P0-5/Q2 — tìm và sửa fixture test sai
 
+## [2026-07-26] Hoàn thiện PUT trực tiếp Google Drive cho upload resumable
+
+- **Agent:** Codex
+- **Thay đổi:** Lượt PUT đầu tiên của upload resumable nay gửi đầy đủ `Content-Type` và `Content-Range: bytes 0-(n-1)/n`, thay vì chỉ trông chờ trình duyệt tự sinh `Content-Length`. Bổ sung unit test xác nhận header đầu tiên.
+- **Lý do:** Giữ ảnh gốc đi thẳng từ thiết bị lên Google Drive, đồng thời tương thích ổn định hơn với WebKit/trình duyệt nhúng và giao thức resumable chuẩn của Drive.
+- **Kiểm tra:** Preflight CORS của phiên Drive với cả `http://127.0.0.1:3000` và phiên thật trả header cho PUT; PUT kiểm tra 1 byte có `Content-Range` trả HTTP 200, file thử đã được xóa ngay sau đó. `npm.cmd run typecheck` và `npm.cmd run test -- tests/resumable-upload.test.ts` đều đạt (9 tests).
+
+## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
+
 - **Agent:** Claude Code
 - **Thay đổi:** Chạy `tests/staging-rehearsal-acceptance-saga.integration.test.ts` (9 kịch bản, gồm
   3 kịch bản mới 1b/1c/1d thêm ở lượt trước) trên Postgres thử nghiệm thật (project riêng, region
@@ -1952,6 +1961,56 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **File đã sửa:** `src/app/layout.tsx`, `src/app/manifest.ts`, `src/app/profile/page.tsx`, `public/icon.png`, `public/apple-touch-icon.png`, `docs/brain/06-ai-working-log.md`.
 - **Lý do:** Đảm bảo nhận diện thương hiệu hành chính công Phường Phong Châu đồng bộ trên tab trình duyệt, shortcut mobile, PWA app icon và giao diện.
 - **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅.
+
+## [2026-07-26] Antigravity local station → AI draft → cán bộ duyệt
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm migration job/file/comparison AI, tự enqueue khi người dân submit, endpoint
+  station poll/claim/result idempotent có kiểm checksum/version, schema/prompt v2 chỉ cho ba trường
+  GCN đánh máy, màn hình đối chiếu và nút nạp trường `CLEAR` đang trống vào working payload. Thêm
+  quy tắc QR override có lý do; địa chỉ vẫn sửa tự do.
+- **File đã sửa:** `supabase/migrations/202607260001_antigravity_ai_draft.sql`,
+  `src/modules/ai-extraction/*`, API AI/submission, `agent/*`, UI, test và tài liệu kiến trúc.
+- **Lý do:** AI là dự thảo có bằng chứng, cán bộ là người duyệt cuối; không cho Gemini đọc CCCD.
+- **Kiểm tra:** `npm.cmd run typecheck`; `npm.cmd run test` (267 test, 10 skip) đạt trước các kiểm
+  tra format/lint/build cuối lượt.
+
+## [2026-07-26] Gia cố bảo mật và giao dịch AI draft theo review PR #5
+
+- **Agent:** Codex
+- **Thay đổi:** Buộc claim/result vào `workerInstanceId`, lease sống và idempotency; cho reclaim lease
+  hết hạn; revalidate whitelist GCN qua `public_files` ở cả claim và result; sửa STALE commit cùng audit
+  thay vì rollback; giữ nguyên response khi replay nạp nháp. Thêm scanner fail-closed cho chuỗi giống
+  CCCD trong toàn JSON AI và migration `202607260002` để stale job cũ không có manifest hợp lệ, bổ sung
+  FK `file_id` và index lease.
+- **Lý do:** Khắc phục đủ 4 P1 và 4 P2 do SOL nêu, không mở đường AI đọc/lưu CCCD hoặc thay bản nháp sau
+  khi job hoàn tất.
+- **Kiểm tra:** `npm.cmd run typecheck`; Vitest toàn bộ: 261 passed, 10 skipped; `npm.cmd run lint`;
+  `npm.cmd run build` với `NODE_OPTIONS=--max-old-space-size=8192`; `git diff --check` đều đạt.
+  Integration migration/Supabase vẫn bị skip khi không có database rehearsal riêng.
+
+## [2026-07-26] Hoàn thiện STALE idempotency và evidence GCN
+
+- **Agent:** Codex
+- **Thay đổi:** Cache outcome `STALE` vào `request_log` trong cùng transaction claim/result để replay
+  cùng key trả lại cùng lỗi; bắt buộc evidence cho mọi `CLEAR`, kiểm `fileId` thuộc manifest GCN đã xác
+  minh khi nhận result và khi lấy lại bản nháp cũ. Prompt/schema station cũng yêu cầu đúng evidence.
+- **Lý do:** Đóng hai P2 do SOL phát hiện: retry STALE không ổn định và trường CLEAR thiếu truy nguyên.
+- **Kiểm tra:** `npm.cmd run typecheck`; Vitest toàn bộ: 264 passed, 10 skipped; lint các file thay đổi
+  với heap Node tăng; `git diff --check` đạt. Cần integration Supabase rehearsal để xác nhận transaction
+  SQL thật.
+
+## [2026-07-26] Hoàn thiện giao diện xác nhận và mốc thời gian
+
+- **Agent:** Codex
+- **Thay đổi:** Bỏ nhãn demo ở màn hình nộp thành công, bổ sung hai lối đi rõ ràng tới tra cứu hồ sơ và
+  trang chủ. Dùng chung `formatDateTime` cho tra cứu công khai và màn hình cán bộ; hiển thị cố định theo
+  `Asia/Ho_Chi_Minh` thay vì timezone của thiết bị. Cập nhật mô tả danh mục mục đích sử dụng đất từ demo
+  thành các mã thường dùng.
+- **Lý do:** Hoàn thiện các chỉnh sửa giao diện còn dở và tránh giờ lịch sử hiển thị sai khi cán bộ/công
+  dân dùng thiết bị đặt múi giờ khác.
+- **Kiểm tra:** `npm.cmd run typecheck`; Vitest toàn bộ: 266 passed, 10 skipped; lint các file thay đổi;
+  `npm.cmd run build` với `NODE_OPTIONS=--max-old-space-size=8192`; `git diff --check` đều đạt.
 
 ## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
 

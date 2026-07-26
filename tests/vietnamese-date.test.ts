@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assembleIsoDate, splitIsoDate } from "@/modules/public-intake/vietnamese-date";
+import {
+  assembleIsoDate,
+  formatDateTime,
+  splitIsoDate,
+} from "@/modules/public-intake/vietnamese-date";
 
 const TODAY = new Date("2026-07-23T00:00:00Z");
 
@@ -45,5 +49,16 @@ describe("assembleIsoDate", () => {
   it("ngày sinh cho phép năm xa nhưng không cho tương lai", () => {
     expect(assembleIsoDate("12", "12", "1936", { minYear: 1900 }, TODAY)).toBe("1936-12-12");
     expect(assembleIsoDate("1", "1", "1899", { minYear: 1900 }, TODAY)).toBeNull();
+  });
+});
+
+describe("formatDateTime", () => {
+  it("hiển thị theo múi giờ Việt Nam, không phụ thuộc timezone của thiết bị", () => {
+    expect(formatDateTime("2026-07-26T00:05:00.000Z")).toBe("07:05 26/07/2026");
+  });
+
+  it("trả rỗng khi thiếu hoặc sai mốc thời gian", () => {
+    expect(formatDateTime("")).toBe("");
+    expect(formatDateTime("khong-phai-ngay")).toBe("");
   });
 });

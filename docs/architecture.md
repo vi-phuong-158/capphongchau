@@ -19,6 +19,9 @@ flowchart LR
     V --> D[Google My Drive]
     U --> Q[ZXing đọc QR client-side]
     Q --> V
+    D --> L[Antigravity local station]
+    L --> G[Gemini 3.6 Flash]
+    L --> V
 ```
 
 Supabase thay Google Sheets cho dữ liệu cấu trúc. Google Drive vẫn là kho file để tránh đổi đồng thời cả database và object storage. Spreadsheet cũ không được dùng trong request runtime; chỉ `scripts/migrate-sheets-to-supabase.ts` và các script legacy được phép đọc nó.
@@ -30,6 +33,22 @@ Supabase thay Google Sheets cho dữ liệu cấu trúc. Google Drive vẫn là 
 - `src/modules/users/supabase-user-repository.ts`: allowlist `USERS`, role, khóa/mở tài khoản, audit và idempotency.
 - `src/modules/drive/*` và `src/modules/public-intake/storage.ts`: Google Drive/resumable upload.
 - Component frontend và service nghiệp vụ không gọi trực tiếp PostgreSQL hoặc Google API; luôn đi qua repository.
+
+## AI draft GCN bằng Antigravity
+
+Khi người dân gửi đủ hồ sơ, transaction tạo job chỉ với file GCN đã xác minh và checksum.
+Antigravity local station poll/claim manifest, đọc đúng ảnh GCN gốc trong Drive, dùng Gemini 3.6
+Flash và trả JSON có bằng chứng. Vercel không gọi Gemini.
+
+Server kiểm tra schema v2, model/prompt, checksum và phiên bản payload trước khi lưu result cùng
+`ai_field_comparisons`/audit. Cán bộ thấy bảng đối chiếu rồi chỉ có thể nạp các trường `CLEAR` đang
+trống vào working payload; AI không được ghi dữ liệu chính thức hay duyệt. Trạm đang dùng tài khoản
+quản trị có rủi ro `ADMIN_BROAD_ACCESS`, nên `agent/AGENTS.md` chỉ giới hạn quy trình, không phải
+rào chắn kỹ thuật tuyệt đối với CCCD. Ảnh CCCD/QR không nằm trong manifest/schema/prompt. Claim và
+result bị buộc với `workerInstanceId`/lease/idempotency; server tái kiểm manifest với `PUBLIC_FILES`
+và chặn JSON chứa chuỗi giống CCCD trước khi persist. Một trường `CLEAR` chỉ có thể được nạp khi
+evidence trỏ tới `fileId` nằm trong manifest GCN đã xác minh; mọi kết quả `STALE` cũng được cache
+trong `REQUEST_LOG` để retry cùng key trả lại đúng phản hồi.
 
 ## Mô hình dữ liệu
 
@@ -99,4 +118,4 @@ Không chạy ETL khi production còn ghi. Không xóa spreadsheet sau cutover; 
 
 ## Hướng nâng cấp
 
-Shared Drive/kho lưu trữ cơ quan vẫn là nâng cấp riêng. Khi chuyển file, giữ nguyên `file_id`/`case_id`, cập nhật `drive_file_id`, kiểm checksum và audit theo lô. OCR/Gemini, đối soát dân cư và tích hợp CSDL đất đai chỉ triển khai khi có cơ sở pháp lý và kênh kỹ thuật chính thức.
+Shared Drive/kho lưu trữ cơ quan vẫn là nâng cấp riêng. Khi chuyển file, giữ nguyên `file_id`/`case_id`, cập nhật `drive_file_id`, kiểm checksum và audit theo lô. OCR CCCD, đối soát dân cư và tích hợp CSDL đất đai chỉ triển khai khi có cơ sở pháp lý và kênh kỹ thuật chính thức.

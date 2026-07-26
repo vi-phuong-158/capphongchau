@@ -305,6 +305,7 @@ describe.skipIf(!hasTestDb)(
             qrParserVersion: "",
             identityStatus: "MANUAL_COMPLETE",
             identityConfirmedAt: "",
+            identityOverrideReason: "",
             roleOnCertificate: "CA_NHAN",
             hasDistinctCurrentUser: false,
             currentUserName: "",

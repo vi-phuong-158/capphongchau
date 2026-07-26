@@ -5,8 +5,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
 import type { IntakeDraft } from "@/modules/public-intake/types";
+import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
+import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
 import { WorkingPayloadEditor } from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 
@@ -63,6 +65,7 @@ type EditableOwner = {
   residenceAddress: string;
   roleOnCertificate: string;
   identityStatus: string;
+  identityOverrideReason: string;
 };
 
 const EDITABLE_OWNER_FIELDS = [
@@ -72,6 +75,7 @@ const EDITABLE_OWNER_FIELDS = [
   "gender",
   "residenceAddress",
   "roleOnCertificate",
+  "identityOverrideReason",
 ] as const;
 
 export function SubmissionDetail({
@@ -136,6 +140,7 @@ export function SubmissionDetail({
         residenceAddress: owner.residenceAddress,
         roleOnCertificate: owner.roleOnCertificate,
         identityStatus: owner.identityStatus,
+        identityOverrideReason: owner.identityOverrideReason ?? "",
       })),
     );
     setEditOpen(true);
@@ -479,7 +484,7 @@ export function SubmissionDetail({
           <div>
             <dt className="text-sm text-stone-500">Cập nhật</dt>
             <dd className="font-semibold text-stone-900">
-              {submission.updatedAt ? new Date(submission.updatedAt).toLocaleString("vi-VN") : "-"}
+              {submission.updatedAt ? formatDateTime(submission.updatedAt) : "-"}
             </dd>
           </div>
           {submission.officialCaseId ? (
@@ -737,6 +742,15 @@ export function SubmissionDetail({
           </div>
         </section>
       ) : null}
+      <AiDraftPanel
+        submissionId={submission.submissionId}
+        version={submission.version}
+        mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
+        onApplied={async () => {
+          const refreshed = await loadSubmission(submission.submissionId);
+          setSubmission(refreshed);
+        }}
+      />
       <p className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
         Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất theo Thông tư 08/2024/TT-BTNMT.
       </p>
@@ -915,6 +929,20 @@ export function SubmissionDetail({
                         </select>
                       </label>
                     </div>
+                    {qrConfirmed ? (
+                      <label className="mt-3 block">
+                        <span className="pc-field-label">
+                          Lý do nếu sửa họ tên, CCCD, ngày sinh hoặc giới tính
+                        </span>
+                        <textarea
+                          className="pc-textarea"
+                          onChange={(event) =>
+                            updateOwner({ identityOverrideReason: event.target.value })
+                          }
+                          value={owner.identityOverrideReason}
+                        />
+                      </label>
+                    ) : null}
                   </div>
                 );
               })}

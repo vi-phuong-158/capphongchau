@@ -55,7 +55,8 @@ Trong phạm vi:
 
 Ngoài phạm vi bản thử nghiệm:
 
-- OCR CCCD hoặc GCN, Google Cloud Vision, parser OCR và hàng đợi OCR.
+- OCR CCCD, Google Cloud Vision và parser/queue OCR nói chung. Ngoại lệ đã chốt: Antigravity local
+  dùng Gemini 3.6 Flash chỉ đọc chữ đánh máy trên **GCN** để tạo bản nháp, cán bộ duyệt lại.
 - Đối soát dân cư tự động hoặc kết nối CSDL đất đai quốc gia.
 - Vercel Blob, Google Shared Drive và service account.
 - Cung cấp dữ liệu cho người dân hoặc link Drive công khai.
@@ -248,6 +249,11 @@ GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
 POST /api/submissions/:submissionId/reset-access-secret
 GET /api/submissions/:submissionId/files/:fileId
+GET /api/submissions/:submissionId/ai-draft
+POST /api/submissions/:submissionId/ai-draft/apply
+GET /api/ai/jobs/ready
+POST /api/ai/jobs/claim
+POST /api/ai/results
 ```
 
 Mọi API lỗi phải trả:
@@ -308,9 +314,36 @@ SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com
 DATA_HASH_PEPPER=
 MAX_UPLOAD_MB=30
 VERCEL_REGION=sin1
+AI_EXTRACTION_ENABLED=false
+AI_WORKER_API_KEY=
 ```
 
 Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VISION_PROJECT_ID` hoặc `TEMP_FILE_DIR` trong bản thử nghiệm.
+
+### 6.1 Antigravity local station và AI draft GCN
+
+- Web app không gọi Gemini. Antigravity chạy trên máy quản trị, dùng `gemini-3.6-flash`, poll job và
+  trả JSON qua API worker có `AI_WORKER_API_KEY`.
+- Job chỉ chứa `PUBLIC_FILES.document_type = 'CERTIFICATE'`, checksum và manifest; không có CCCD,
+  QR raw, Drive link/ID hoặc quyền ghi database/Drive. Không tạo bản sao GCN trong thư mục AI.
+- Server revalidate từng file manifest tại lúc claim: cùng submission, `CERTIFICATE`, `ORIGINAL`,
+  `UPLOADED`, tên file và checksum. Thiếu/sai một file làm job `STALE`, không trả manifest.
+- Claim/result đều bắt buộc `workerInstanceId`, `idempotency-key` và lease còn hạn. Job `PROCESSING`
+  hết lease được thu hồi nguyên tử; kết quả chỉ do worker đang giữ lease gửi được. `AI_WORKER_API_KEY`
+  tối thiểu 32 ký tự khi `AI_EXTRACTION_ENABLED=true`.
+- Server chặn toàn bộ JSON AI có chuỗi giống CCCD trước khi lưu `raw_json`/`normalized_json`; cảnh báo
+  không được chứa lại giá trị đã chặn.
+- Trường AI `CLEAR` bắt buộc có evidence; `fileId` phải thuộc manifest GCN đã join/revalidate. Kết quả
+  cũ thiếu/sai evidence không được nạp nháp. Cả nhánh `STALE` phải ghi cache `REQUEST_LOG` trong cùng
+  transaction để replay cùng idempotency key trả đúng `409` cũ.
+- Máy trạm đang dùng tài khoản quản trị có nhãn rủi ro `ADMIN_BROAD_ACCESS`: `agent/AGENTS.md` và
+  manifest chỉ là giới hạn quy trình, không được mô tả là rào chắn quyền tuyệt đối với CCCD.
+- AI chỉ trả `CLEAR`, `CHECK`, `MANUAL_REQUIRED` cho số phát hành, ngày cấp, số vào sổ cùng bằng
+  chứng. Ảnh mờ/chữ viết tay phải để giá trị `null`, không suy đoán và không kết luận pháp lý.
+- Cán bộ chỉ có thể “Nạp nháp AI”: hệ thống điền trường `CLEAR` đang trống; không ghi đè giá trị
+  hiện có, không xác nhận hồ sơ và mọi lần nạp/ghi đè phải audit.
+- Địa chỉ thường trú sửa bình thường. Sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý
+  do, lưu audit và chuyển `QR_OVERRIDE_PENDING_REVIEW`; QR đã tách không bị xóa.
 
 ## 7. Kiểm thử và Definition of Done
 

@@ -12,7 +12,9 @@ export type AiJobStatus =
 
 export interface AiExtractionJob {
   jobId: string;
-  submissionId: string;
+  submissionId?: string;
+  caseId?: string;
+  subjectType: "PUBLIC_SUBMISSION" | "CASE";
   citizenPayloadVersion: number;
   status: AiJobStatus;
   workerType: string;
@@ -21,6 +23,7 @@ export interface AiExtractionJob {
   promptVersion: string;
   modelName: string;
   inputFingerprint: string;
+  inputFiles: readonly AiExtractionJobFile[];
   attemptCount: number;
   claimedAt?: string;
   leaseExpiresAt?: string;
@@ -30,6 +33,13 @@ export interface AiExtractionJob {
   errorMessageRedacted?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AiExtractionJobFile {
+  fileId: string;
+  checksum: string;
+  fileName: string;
+  ordinal: number;
 }
 
 export interface AiExtractionResult {

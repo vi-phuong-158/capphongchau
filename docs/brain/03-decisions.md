@@ -1097,6 +1097,42 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Người quyết định:** Claude Code (dọn code chết theo yêu cầu chủ dự án sau khi review commit
   migration Supabase).
 
+## [2026-07-26] Antigravity local station tạo AI draft GCN, cán bộ duyệt cuối
+
+- **Quyết định:** Không gọi Gemini từ web app. Antigravity trên máy quản trị dùng
+  `gemini-3.6-flash` để đọc đúng file `CERTIFICATE` trong manifest/checksum và trả JSON v2 có bằng
+  chứng. Web app chỉ nhận kết quả qua worker API, kiểm schema/model/prompt/input fingerprint rồi
+  cho cán bộ nạp trường `CLEAR` đang trống vào working payload.
+- **Lý do:** Tận dụng khả năng đọc chữ đánh máy của Gemini nhưng giữ dữ liệu chính thức, kết luận
+  nghiệp vụ và thao tác duyệt hoàn toàn cho cán bộ. CCCD vẫn chỉ đọc QR tại thiết bị.
+- **Đánh đổi:** Tài khoản quản trị đồng bộ Drive có quyền rộng; `agent/AGENTS.md`/manifest chỉ giới
+  hạn quy trình, không thể coi là chặn CCCD tuyệt đối. Giao diện luôn hiện `ADMIN_BROAD_ACCESS`.
+- **CCCD/địa chỉ:** Địa chỉ là một trường duy nhất và sửa tự do. Sửa họ tên/CCCD/ngày sinh/giới tính
+  sau QR cần lý do, giữ dấu vết QR và chuyển `QR_OVERRIDE_PENDING_REVIEW`; lookup tự động chỉ dùng
+  `QR_CONFIRMED`.
+- **Người quyết định:** Chủ dự án.
+
+## [2026-07-26] Gia cố station AI sau review PR #5
+
+- **Quyết định:** Result AI chỉ được nhập khi job đang `PROCESSING`, đúng `workerInstanceId` đã claim
+  và lease chưa hết hạn. Claim bắt buộc idempotency key; lease hết hạn được reclaim nguyên tử có audit.
+  Server revalidate manifest bằng join `public_files` trước claim và result. Job cũ/manifest sai được
+  migration `202607260002` đưa `STALE`, có audit; thêm FK `ai_extraction_job_files.file_id` →
+  `public_files.file_id` ở trạng thái `NOT VALID` để không phá dữ liệu lịch sử.
+- **Bảo vệ dữ liệu:** Trước persist, server quét mọi chuỗi trong payload AI. Chuỗi giống CCCD 12 số bị
+  từ chối fail-closed nên không thể đi vào `raw_json` hay `normalized_json`; kể cả số khác trùng mẫu thì
+  cán bộ nhập/đối chiếu thủ công.
+- **Lý do:** Đóng các đường bypass claim/lease, rollback STALE, replay sai kết quả và rò PII mà SOL nêu
+  trong PR #5; vẫn giữ nguyên nguyên tắc AI chỉ tạo nháp, cán bộ duyệt mới thay đổi hồ sơ.
+
+## [2026-07-26] Hoàn thiện idempotency STALE và truy nguyên evidence AI
+
+- **Quyết định:** Khi claim/result phát hiện manifest hoặc input đã lỗi thời, transaction ghi đồng thời
+  trạng thái `STALE`, audit và `REQUEST_LOG` có outcome `STALE`; retry cùng key trả nguyên `409`, không
+  đọc lại job terminal. Mọi trường `CLEAR` phải có evidence và `evidence.fileId` phải thuộc manifest GCN
+  đã revalidate; sai/thiếu evidence bị `BLOCKED` và kết quả cũ cũng không thể nạp vào working payload.
+- **Lý do:** Bảo toàn idempotency đầy đủ và tính truy nguyên của từng giá trị AI trước khi cán bộ nạp nháp.
+
 ## Template cho entry mới
 
 ```

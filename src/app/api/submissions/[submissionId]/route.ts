@@ -66,6 +66,7 @@ const ownerPatchSchema = z.object({
   dateOfBirth: z.string().trim().max(10).optional(),
   gender: z.enum(["NAM", "NU", ""]).optional(),
   residenceAddress: z.string().trim().max(500).optional(),
+  identityOverrideReason: z.string().trim().min(5).max(500).optional(),
   roleOnCertificate: z.string().trim().max(50).optional(),
 });
 
@@ -320,11 +321,18 @@ export async function PATCH(
         ownerPatch.fullName !== undefined ||
         ownerPatch.identityNumber !== undefined ||
         ownerPatch.dateOfBirth !== undefined ||
-        ownerPatch.gender !== undefined ||
-        ownerPatch.residenceAddress !== undefined;
+        ownerPatch.gender !== undefined;
       // Không còn chặn cán bộ sửa chủ đã `QR_CONFIRMED` (03-decisions.md [2026-07-25] Q1), nhưng
       // ghi đè dữ liệu đọc từ chip là việc phải tra lại được — đánh dấu riêng trong audit.
       if (identityFieldsTouched && isOwnerIdentityQrConfirmed(owner.identityStatus)) {
+        if (!ownerPatch.identityOverrideReason) {
+          return fail(
+            "VALIDATION_FAILED",
+            "Cần nêu lý do khi sửa thông tin định danh đã đọc từ QR.",
+            requestId,
+            400,
+          );
+        }
         identityOverrideOwnerIds.add(ownerPatch.id);
       }
 
@@ -395,6 +403,11 @@ export async function PATCH(
         changes[`owners.${ownerPatch.id}.residenceAddress`] =
           `${owner.residenceAddress || "-"} → ${ownerPatch.residenceAddress || "-"}`;
         owner.residenceAddress = ownerPatch.residenceAddress;
+      }
+      if (identityFieldsTouched && isOwnerIdentityQrConfirmed(owner.identityStatus)) {
+        owner.identitySource = "MANUAL";
+        owner.identityStatus = "QR_OVERRIDE_PENDING_REVIEW";
+        owner.identityOverrideReason = ownerPatch.identityOverrideReason ?? "";
       }
       if (
         ownerPatch.roleOnCertificate !== undefined &&

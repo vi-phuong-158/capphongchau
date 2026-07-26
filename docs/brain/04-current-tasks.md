@@ -10,6 +10,11 @@
 
 ## [2026-07-25] TRẠNG THÁI HIỆN TẠI — đã mở tiếp nhận hồ sơ chính thức
 
+**[CẬP NHẬT 2026-07-26]** Hạ tầng Antigravity AI draft GCN đã có trong code nhưng mặc định
+`AI_EXTRACTION_ENABLED=false`. Chỉ bật sau khi áp dụng migrations `202607260001` và `202607260002`, đặt worker key ở
+Vercel/máy trạm, kiểm tra station theo `agent/STATION_RUNBOOK.md` với dữ liệu giả và chấp nhận rủi
+ro `ADMIN_BROAD_ACCESS`. AI không là điều kiện tiếp nhận chính thức.
+
 **Hệ thống đang MỞ để thu hồ sơ thật.** `OFFICIAL_ACCEPTANCE_ENABLED = true`. Chưa có hồ sơ thật
 nào trong hệ thống trước ngày này; thu hồ sơ thật bắt đầu từ sau 2026-07-25.
 
@@ -33,11 +38,10 @@ snapshot `official_payload_*` cũ sau điều chỉnh (đóng bằng một updat
 `syncOfficialRecord`) và race tạo folder Drive xuyên lambda (đóng bằng advisory lock PostgreSQL
 theo `(parentId, name)`).
 
-| Hạn chế                                                                          | Ảnh hưởng                                                                                               | Khi nào phải đóng                                 |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `POST /api/ai/results` hardcode `result_version = 1`, không có `idempotency-key` | Kết quả AI thứ hai cho cùng `jobId` vỡ `unique (job_id, result_version)` → HTTP 500 thay vì lưu bản mới | Trước khi bật `AI_EXTRACTION_ENABLED = true` thật |
-| Thửa có **>3 mục đích sử dụng** thì người dân không nộp được (Q3: tạm giữ ở 3)   | Ca đó phải ra phường làm trực tiếp                                                                      | Mở lại với cơ quan nếu tần suất thực tế cao       |
-| `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production               | `/ke-khai` và `/api/public/*` không có Cloudflare WAF/rate limiting                                     | Khi có domain thật gắn Cloudflare                 |
+| Hạn chế                                                                        | Ảnh hưởng                                                           | Khi nào phải đóng                           |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ------------------------------------------- |
+| Thửa có **>3 mục đích sử dụng** thì người dân không nộp được (Q3: tạm giữ ở 3) | Ca đó phải ra phường làm trực tiếp                                  | Mở lại với cơ quan nếu tần suất thực tế cao |
+| `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE=true` trên Vercel Production             | `/ke-khai` và `/api/public/*` không có Cloudflare WAF/rate limiting | Khi có domain thật gắn Cloudflare           |
 
 ### Việc phải làm ngay trong ngày đầu thu hồ sơ thật
 

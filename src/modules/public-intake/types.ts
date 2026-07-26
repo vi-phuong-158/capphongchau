@@ -68,8 +68,11 @@ export interface Owner {
   qrPayloadHash: string;
   qrDecoderVersion: string;
   qrParserVersion: string;
-  identityStatus: "PENDING_CONFIRMATION" | "QR_CONFIRMED" | "MANUAL_COMPLETE" | "";
+  identityStatus:
+    "PENDING_CONFIRMATION" | "QR_CONFIRMED" | "QR_OVERRIDE_PENDING_REVIEW" | "MANUAL_COMPLETE" | "";
   identityConfirmedAt: string;
+  /** Bắt buộc khi sửa họ tên/CCCD/ngày sinh/giới tính sau QR; địa chỉ vẫn được sửa bình thường. */
+  identityOverrideReason: string;
   /** Trường 7 — vai trò pháp nhân trên GCN. */
   roleOnCertificate: string;
   /**
@@ -218,6 +221,7 @@ export function emptyOwner(id: string): Owner {
     qrParserVersion: "",
     identityStatus: "",
     identityConfirmedAt: "",
+    identityOverrideReason: "",
     roleOnCertificate: "",
     hasDistinctCurrentUser: false,
     currentUserName: "",

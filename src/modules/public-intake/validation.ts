@@ -72,10 +72,12 @@ export const draftSchema = z
           identityStatus: z.union([
             z.literal("PENDING_CONFIRMATION"),
             z.literal("QR_CONFIRMED"),
+            z.literal("QR_OVERRIDE_PENDING_REVIEW"),
             z.literal("MANUAL_COMPLETE"),
             z.literal(""),
           ]),
           identityConfirmedAt: z.string(),
+          identityOverrideReason: z.string().max(500),
           roleOnCertificate: z.string(),
           hasDistinctCurrentUser: z.boolean(),
           currentUserName: z.string(),
@@ -249,8 +251,18 @@ export function validateDraftForSubmit(draft: IntakeDraft): string | null {
       if (!owner.residenceAddress.trim()) {
         return "Thiếu địa chỉ thường trú của chủ sử dụng.";
       }
-      if (owner.identityStatus !== "QR_CONFIRMED" && owner.identityStatus !== "MANUAL_COMPLETE") {
+      if (
+        owner.identityStatus !== "QR_CONFIRMED" &&
+        owner.identityStatus !== "QR_OVERRIDE_PENDING_REVIEW" &&
+        owner.identityStatus !== "MANUAL_COMPLETE"
+      ) {
         return "Cần xác nhận thông tin CCCD của chủ sử dụng.";
+      }
+      if (
+        owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW" &&
+        owner.identityOverrideReason.trim().length < 5
+      ) {
+        return "Cần nêu lý do khi sửa thông tin định danh đã đọc từ QR.";
       }
     }
   }

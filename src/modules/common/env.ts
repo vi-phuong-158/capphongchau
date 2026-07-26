@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const serverEnvironmentSchema = z.object({
+const serverEnvironmentBaseSchema = z.object({
   APP_BASE_URL: z.url(),
   AUTH_SECRET: z.string().min(32),
   AUTH_GOOGLE_CLIENT_ID: z.string().min(1),
@@ -36,9 +36,21 @@ const serverEnvironmentSchema = z.object({
     .optional()
     .transform((val) => val === "true")
     .default(false),
+  // Chỉ bắt buộc khi bật AI; để optional giúp môi trường tắt AI vẫn khởi động được.
+  AI_WORKER_API_KEY: z.string().min(32).optional(),
 });
 
-const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
+const serverEnvironmentSchema = serverEnvironmentBaseSchema.superRefine((environment, context) => {
+  if (environment.AI_EXTRACTION_ENABLED && !environment.AI_WORKER_API_KEY) {
+    context.addIssue({
+      code: "custom",
+      path: ["AI_WORKER_API_KEY"],
+      message: "AI_WORKER_API_KEY bắt buộc khi bật AI_EXTRACTION_ENABLED.",
+    });
+  }
+});
+
+const googleStorageEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   GOOGLE_DRIVE_CLIENT_ID: true,
   GOOGLE_DRIVE_CLIENT_SECRET: true,
   GOOGLE_DRIVE_REFRESH_TOKEN: true,
@@ -46,11 +58,11 @@ const googleStorageEnvironmentSchema = serverEnvironmentSchema.pick({
   MIN_DRIVE_FREE_GB: true,
 });
 
-const supabaseEnvironmentSchema = serverEnvironmentSchema.pick({
+const supabaseEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   SUPABASE_DATABASE_URL: true,
 });
 
-const legacyGoogleSheetsEnvironmentSchema = serverEnvironmentSchema
+const legacyGoogleSheetsEnvironmentSchema = serverEnvironmentBaseSchema
   .pick({
     GOOGLE_DRIVE_CLIENT_ID: true,
     GOOGLE_DRIVE_CLIENT_SECRET: true,
@@ -58,7 +70,7 @@ const legacyGoogleSheetsEnvironmentSchema = serverEnvironmentSchema
     GOOGLE_SHEETS_SPREADSHEET_ID: true,
   })
   .required({ GOOGLE_SHEETS_SPREADSHEET_ID: true });
-const publicIntakeEnvironmentSchema = serverEnvironmentSchema.pick({
+const publicIntakeEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   DATA_HASH_PEPPER: true,
   PUBLIC_SESSION_SECRET: true,
   PUBLIC_ACCESS_CODE_PEPPER: true,

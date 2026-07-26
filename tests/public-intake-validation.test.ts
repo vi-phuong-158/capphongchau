@@ -26,6 +26,7 @@ function completeDraft() {
     qrParserVersion: "",
     identityStatus: "MANUAL_COMPLETE",
     identityConfirmedAt: "",
+    identityOverrideReason: "",
     roleOnCertificate: "CA_NHAN",
     hasDistinctCurrentUser: false,
     currentUserName: "",
@@ -97,6 +98,24 @@ describe("validateDraftForSubmit", () => {
     draft.owners[0] = { ...draft.owners[0], dateOfBirth: "1990-02-31" };
 
     expect(validateDraftForSubmit(draft)).toContain("Ngày sinh");
+  });
+
+  it("cho phép sửa địa chỉ QR bình thường nhưng bắt buộc lý do cho ghi đè định danh QR", () => {
+    const addressOnly = completeDraft();
+    addressOnly.owners[0] = {
+      ...addressOnly.owners[0],
+      identitySource: "QR",
+      identityStatus: "QR_CONFIRMED",
+      residenceAddress: "Địa chỉ mới do người dân khai",
+    };
+    expect(validateDraftForSubmit(addressOnly)).toBeNull();
+
+    const overrideWithoutReason = structuredClone(addressOnly);
+    overrideWithoutReason.owners[0].identityStatus = "QR_OVERRIDE_PENDING_REVIEW";
+    expect(validateDraftForSubmit(overrideWithoutReason)).toContain("lý do");
+
+    overrideWithoutReason.owners[0].identityOverrideReason = "Đối chiếu lại thẻ gốc.";
+    expect(validateDraftForSubmit(overrideWithoutReason)).toBeNull();
   });
 
   /**

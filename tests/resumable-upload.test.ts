@@ -53,6 +53,11 @@ describe("uploadWithResume", () => {
     ).resolves.toBe("drive-1");
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const initialCall = fetchImpl.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(initialCall.headers).toEqual({
+      "Content-Type": "image/jpeg",
+      "Content-Range": "bytes 0-1023/1024",
+    });
   });
 
   it("gửi tiếp từ đúng chỗ dở khi Google mới nhận một phần", async () => {
@@ -71,6 +76,9 @@ describe("uploadWithResume", () => {
         onProgress: (sent) => progress.push(sent),
       }),
     ).resolves.toBe("drive-2");
+
+    const initialCall = fetchImpl.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(initialCall.headers["Content-Range"]).toBe("bytes 0-999/1000");
 
     const secondCall = fetchImpl.mock.calls[1][1] as { headers: Record<string, string> };
     expect(secondCall.headers["Content-Range"]).toBe("bytes 400-999/1000");

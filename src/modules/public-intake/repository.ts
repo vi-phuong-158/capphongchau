@@ -4,6 +4,7 @@ import type { Sql } from "postgres";
 
 // `official-record.ts` chỉ phụ thuộc `./types`, không phụ thuộc repository — không tạo vòng import.
 import { syncOfficialRecord } from "@/modules/submissions/official-record";
+import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository";
 import { getDatabase } from "@/modules/supabase/database";
 
 import type { IntakeDraft } from "./types";
@@ -95,7 +96,7 @@ export interface ExistingCertificateMatch {
 export interface StoredSubmissionMutation {
   readonly kind: string;
   readonly mutationHash: string;
-  readonly response: Record<string, string | number | null>;
+  readonly response: Record<string, string | number | null | string[]>;
 }
 
 export interface ExportJobRecord {
@@ -265,12 +266,15 @@ function mapFile(row: FileRow): StoredFile {
   };
 }
 
-function safeResponse(value: unknown): Record<string, string | number | null> {
+function safeResponse(value: unknown): Record<string, string | number | null | string[]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value).filter(
-      (entry): entry is [string, string | number | null] =>
-        entry[1] === null || typeof entry[1] === "string" || typeof entry[1] === "number",
+      (entry): entry is [string, string | number | null | string[]] =>
+        entry[1] === null ||
+        typeof entry[1] === "string" ||
+        typeof entry[1] === "number" ||
+        (Array.isArray(entry[1]) && entry[1].every((item) => typeof item === "string")),
     ),
   );
 }
@@ -770,6 +774,11 @@ export class PublicIntakeRepository {
     requestId: string;
     idempotencyKey: string;
     mutationHash: string;
+    aiApplication?: {
+      resultId: string;
+      jobId: string;
+      appliedFieldPaths: readonly string[];
+    };
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -823,18 +832,43 @@ export class PublicIntakeRepository {
 
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
-        action: "SUBMISSION_WORKING_PAYLOAD_EDITED",
+        action: input.aiApplication ? "AI_DRAFT_APPLIED" : "SUBMISSION_WORKING_PAYLOAD_EDITED",
         entityId: input.record.submissionId,
         requestId: input.requestId,
-        metadata: { changeNote: input.changeNote || "" },
+        metadata: input.aiApplication
+          ? {
+              aiResultId: input.aiApplication.resultId,
+              aiJobId: input.aiApplication.jobId,
+              appliedFieldPaths: input.aiApplication.appliedFieldPaths.join(","),
+              changeNote: input.changeNote || "",
+            }
+          : { changeNote: input.changeNote || "" },
       });
+
+      if (input.aiApplication && input.aiApplication.appliedFieldPaths.length > 0) {
+        await transaction`
+          update public.ai_field_comparisons
+          set decision = 'APPLIED', decided_by = ${input.actorEmail}, decided_at = now()
+          where result_id = ${input.aiApplication.resultId}
+            and job_id = ${input.aiApplication.jobId}
+            and field_path = any(${input.aiApplication.appliedFieldPaths})
+            and decision = 'PENDING'
+        `;
+      }
 
       await transaction`
         insert into public.request_log
           (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (
           ${input.idempotencyKey}, ${input.requestId}, 'WORKING_PAYLOAD_EDIT', ${input.mutationHash},
-          ${JSON.stringify({ version: next.version })}::jsonb,
+          ${JSON.stringify({
+            version: next.version,
+            updatedAt: next.updatedAt,
+            aiResultId: input.aiApplication?.resultId ?? null,
+            expectedVersion: input.expectedVersion,
+            appliedFieldPaths: input.aiApplication?.appliedFieldPaths ?? [],
+            requestId: input.requestId,
+          })}::jsonb,
           now() + interval '24 hours'
         )
       `;
@@ -1510,6 +1544,13 @@ export class PublicIntakeRepository {
         input.pendingIdentityHmacs,
       );
 
+      // AI chỉ nhận đúng các file CERTIFICATE đã xác minh. Job được tạo trong cùng transaction
+      // với lần gửi hồ sơ để retry submit không sinh job trùng hay đọc bộ ảnh nửa chừng.
+      await enqueueAiDraftForSubmission(transaction, {
+        submissionId: input.record.submissionId,
+        citizenPayloadVersion: updated[0].citizen_payload_version,
+      });
+
       if (input.status === "RESUBMITTED") {
         await this.resolveOpenSupplementRequestWithSql(transaction, input.record.submissionId);
       }
@@ -1712,6 +1753,7 @@ export class PublicIntakeRepository {
           owner_id, submission_id, owner_type, full_name, identity_number, role_on_certificate,
           date_of_birth, gender, residence_address, identity_source, qr_payload_hash,
           qr_decoder_version, qr_parser_version, identity_status, identity_confirmed_at,
+          identity_override_reason,
           has_distinct_current_user, current_user_name, current_user_citizen_id,
           current_user_address, change_reason
         ) values (
@@ -1719,7 +1761,8 @@ export class PublicIntakeRepository {
           ${owner.identityNumber}, ${owner.roleOnCertificate}, ${owner.dateOfBirth},
           ${owner.gender}, ${owner.residenceAddress}, ${owner.identitySource},
           ${owner.qrPayloadHash}, ${owner.qrDecoderVersion}, ${owner.qrParserVersion},
-          ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.hasDistinctCurrentUser},
+          ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.identityOverrideReason ?? ""},
+          ${owner.hasDistinctCurrentUser},
           ${owner.currentUserName}, ${owner.currentUserCitizenId}, ${owner.currentUserAddress},
           ${owner.changeReason}
         )
