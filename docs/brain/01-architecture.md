@@ -353,9 +353,9 @@ legacy/rollback; không chạy lại ETL nếu không có kế hoạch phục h�
 
 ```text
 PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/checksum)
-→ local station poll READY_FOR_AGENT → claim manifest
+→ local station poll READY_FOR_AGENT/lease hết hạn → claim idempotent manifest
 → Antigravity/Gemini 3.6 Flash đọc GCN gốc theo whitelist
-→ POST /api/ai/results → schema/checksum/version/idempotency
+→ POST /api/ai/results với workerInstanceId + lease còn hạn → schema/checksum/version/idempotency
 → ai_extraction_results + ai_field_comparisons + audit
 → cán bộ GET /ai-draft → POST /ai-draft/apply → working_payload (CLEAR + trống)
 ```
@@ -365,8 +365,13 @@ PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/
   idempotent và chặn kết quả cũ.
 - `agent/AGENTS.md`: ranh giới local station. Máy dùng tài khoản quản trị mang nhãn
   `ADMIN_BROAD_ACCESS`; đây không phải rào chắn kỹ thuật tuyệt đối với CCCD.
+- Claim và result bị buộc vào cùng `workerInstanceId`, lease đang hiệu lực và idempotency key; lease
+  hết hạn có thể được station khác thu hồi nguyên tử. Trước khi phát manifest hoặc nhận result, server
+  join lại `public_files` để xác nhận cùng submission, `CERTIFICATE`, `ORIGINAL`, `UPLOADED`, checksum
+  và tên file. Job lỗi thời/manifest sai chuyển `STALE` trong cùng transaction + audit.
 - AI không gọi từ Vercel, không ghi chính thức, không đọc CCCD/QR; chỉ số phát hành, ngày cấp, số
-  vào sổ dạng chữ đánh máy cùng bằng chứng. Ảnh mờ/chữ viết tay trả `MANUAL_REQUIRED`.
+  vào sổ dạng chữ đánh máy cùng bằng chứng. Ảnh mờ/chữ viết tay trả `MANUAL_REQUIRED`. Server quét toàn
+  bộ JSON trước persist: chuỗi giống CCCD 12 số bị từ chối fail-closed, không được lưu raw/normalized JSON.
 
 ## Vận hành
 

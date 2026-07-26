@@ -127,4 +127,22 @@ describe("cấu hình môi trường server", () => {
       ]);
     }
   });
+
+  it("chỉ chấp nhận worker key đủ dài khi bật AI", () => {
+    expect(() =>
+      loadServerEnvironment({
+        ...validEnvironment,
+        AI_EXTRACTION_ENABLED: "true",
+        AI_WORKER_API_KEY: "ngắn",
+      }),
+    ).toThrow(EnvironmentValidationError);
+
+    expect(
+      loadServerEnvironment({
+        ...validEnvironment,
+        AI_EXTRACTION_ENABLED: "true",
+        AI_WORKER_API_KEY: "k".repeat(32),
+      }).AI_WORKER_API_KEY,
+    ).toHaveLength(32);
+  });
 });

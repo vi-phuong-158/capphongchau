@@ -96,7 +96,7 @@ export interface ExistingCertificateMatch {
 export interface StoredSubmissionMutation {
   readonly kind: string;
   readonly mutationHash: string;
-  readonly response: Record<string, string | number | null>;
+  readonly response: Record<string, string | number | null | string[]>;
 }
 
 export interface ExportJobRecord {
@@ -266,12 +266,15 @@ function mapFile(row: FileRow): StoredFile {
   };
 }
 
-function safeResponse(value: unknown): Record<string, string | number | null> {
+function safeResponse(value: unknown): Record<string, string | number | null | string[]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value).filter(
-      (entry): entry is [string, string | number | null] =>
-        entry[1] === null || typeof entry[1] === "string" || typeof entry[1] === "number",
+      (entry): entry is [string, string | number | null | string[]] =>
+        entry[1] === null ||
+        typeof entry[1] === "string" ||
+        typeof entry[1] === "number" ||
+        (Array.isArray(entry[1]) && entry[1].every((item) => typeof item === "string")),
     ),
   );
 }
@@ -860,8 +863,11 @@ export class PublicIntakeRepository {
           ${input.idempotencyKey}, ${input.requestId}, 'WORKING_PAYLOAD_EDIT', ${input.mutationHash},
           ${JSON.stringify({
             version: next.version,
+            updatedAt: next.updatedAt,
             aiResultId: input.aiApplication?.resultId ?? null,
             expectedVersion: input.expectedVersion,
+            appliedFieldPaths: input.aiApplication?.appliedFieldPaths ?? [],
+            requestId: input.requestId,
           })}::jsonb,
           now() + interval '24 hours'
         )

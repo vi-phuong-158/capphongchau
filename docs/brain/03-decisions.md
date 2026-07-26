@@ -1112,6 +1112,19 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
   `QR_CONFIRMED`.
 - **Người quyết định:** Chủ dự án.
 
+## [2026-07-26] Gia cố station AI sau review PR #5
+
+- **Quyết định:** Result AI chỉ được nhập khi job đang `PROCESSING`, đúng `workerInstanceId` đã claim
+  và lease chưa hết hạn. Claim bắt buộc idempotency key; lease hết hạn được reclaim nguyên tử có audit.
+  Server revalidate manifest bằng join `public_files` trước claim và result. Job cũ/manifest sai được
+  migration `202607260002` đưa `STALE`, có audit; thêm FK `ai_extraction_job_files.file_id` →
+  `public_files.file_id` ở trạng thái `NOT VALID` để không phá dữ liệu lịch sử.
+- **Bảo vệ dữ liệu:** Trước persist, server quét mọi chuỗi trong payload AI. Chuỗi giống CCCD 12 số bị
+  từ chối fail-closed nên không thể đi vào `raw_json` hay `normalized_json`; kể cả số khác trùng mẫu thì
+  cán bộ nhập/đối chiếu thủ công.
+- **Lý do:** Đóng các đường bypass claim/lease, rollback STALE, replay sai kết quả và rò PII mà SOL nêu
+  trong PR #5; vẫn giữ nguyên nguyên tắc AI chỉ tạo nháp, cán bộ duyệt mới thay đổi hồ sơ.
+
 ## Template cho entry mới
 
 ```

@@ -69,4 +69,14 @@ describe("AI draft cho cán bộ", () => {
     result.identityNumber = "012345678901";
     expect(aiExtractionPayloadSchema.safeParse(result).success).toBe(false);
   });
+
+  it("D4: chặn số giống CCCD ở mọi trường kết quả trước khi route có thể lưu raw JSON", () => {
+    const result = validResult();
+    result.quality.note = "CCCD 0123 456 789 01 không được phép xuất hiện ở đây";
+
+    const issues = validateAiResultPayload(result);
+
+    expect(issues.some((issue) => issue.code === "CITIZEN_ID_LIKE_VALUE")).toBe(true);
+    expect(issues.some((issue) => issue.message.includes("0123"))).toBe(false);
+  });
 });

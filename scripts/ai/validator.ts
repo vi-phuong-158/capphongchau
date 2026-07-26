@@ -1,5 +1,6 @@
 import { scanForPromptInjection } from "@/modules/ai-extraction/prompt-safety";
 import { aiExtractionPayloadSchema } from "@/modules/ai-extraction/draft";
+import { scanForCitizenIdLikeValues } from "@/modules/ai-extraction/pii-safety";
 
 export interface ValidationIssue {
   code: string;
@@ -9,6 +10,13 @@ export interface ValidationIssue {
 
 export function validateAiResultPayload(data: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  for (const finding of scanForCitizenIdLikeValues(data)) {
+    issues.push({
+      code: "CITIZEN_ID_LIKE_VALUE",
+      message: `Trường ${finding.fieldPath} chứa chuỗi giống số CCCD; hệ thống không nhận kết quả này.`,
+      severity: "BLOCKING",
+    });
+  }
   const parsed = aiExtractionPayloadSchema.safeParse(data);
   if (!parsed.success) {
     issues.push({

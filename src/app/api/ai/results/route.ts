@@ -24,6 +24,7 @@ export const runtime = "nodejs";
 const schema = z
   .object({
     jobId: z.string().trim().min(1).max(100),
+    workerInstanceId: z.string().trim().min(1).max(100),
     inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     rawJson: aiExtractionPayloadSchema,
     modelName: z.literal(AI_MODEL_NAME),
@@ -51,9 +52,19 @@ function fail(
   });
 }
 
-class StaleAiJobError extends Error {}
 class AiIdempotencyConflictError extends Error {}
 class AiJobNotFoundError extends Error {}
+class AiJobUnavailableError extends Error {}
+
+interface AiResultResponse {
+  readonly resultId: string;
+  readonly resultVersion: number;
+  readonly validationStatus: "PASSED" | "REVIEW_REQUIRED" | "BLOCKED";
+  readonly warningCount: number;
+}
+
+type ResultTransactionOutcome =
+  { readonly kind: "STALE" } | { readonly kind: "SUCCESS"; readonly response: AiResultResponse };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = request.headers.get("x-request-id") ?? randomUUID();
@@ -64,7 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const workerKey = request.headers.get("x-ai-worker-key");
-    const expectedKey = process.env.AI_WORKER_API_KEY;
+    const expectedKey = environment.AI_WORKER_API_KEY;
     if (!expectedKey || !workerKey || workerKey !== expectedKey) {
       return fail("UNAUTHENTICATED", "Khóa xác thực worker AI không hợp lệ.", requestId, 401);
     }
@@ -79,7 +90,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const { jobId, inputFingerprint, rawJson, modelName, promptVersion } = body.data;
+    const { jobId, workerInstanceId, inputFingerprint, rawJson, modelName, promptVersion } =
+      body.data;
     const issues = validateAiResultPayload(rawJson);
     const blockingCount = issues.filter(
       (issue: ValidationIssue) => issue.severity === "BLOCKING",
@@ -89,16 +101,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ).length;
     const validationStatus =
       blockingCount > 0 ? "BLOCKED" : warningCount > 0 ? "REVIEW_REQUIRED" : "PASSED";
+    if (issues.some((issue) => issue.code === "CITIZEN_ID_LIKE_VALUE")) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Kết quả AI có dữ liệu giống CCCD nên không được lưu.",
+        requestId,
+        400,
+      );
+    }
     const resultFingerprint = computeResultFingerprint(jobId, rawJson);
     const scopedIdempotencyKey = `AI_RESULT:${jobId}:${idempotencyKey}`;
     const mutationHash = createHash("sha256")
       .update(
-        JSON.stringify({ jobId, inputFingerprint, modelName, promptVersion, resultFingerprint }),
+        JSON.stringify({
+          jobId,
+          workerInstanceId,
+          inputFingerprint,
+          modelName,
+          promptVersion,
+          resultFingerprint,
+        }),
       )
       .digest("hex");
 
     const database = getDatabase();
-    const response = await database.begin(async (transaction) => {
+    const outcome = await database.begin<ResultTransactionOutcome>(async (transaction) => {
       await transaction`select pg_advisory_xact_lock(hashtextextended(${scopedIdempotencyKey}, 0))`;
       const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
         select mutation_hash, response_json from public.request_log
@@ -107,7 +134,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (cached[0]) {
         if (cached[0].mutation_hash !== mutationHash) throw new AiIdempotencyConflictError();
         const replay = cached[0].response_json;
-        return typeof replay === "string" ? JSON.parse(replay) : replay;
+        return {
+          kind: "SUCCESS",
+          response: (typeof replay === "string" ? JSON.parse(replay) : replay) as AiResultResponse,
+        };
       }
 
       const jobs = await transaction<
@@ -120,21 +150,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           schema_version: string;
           model_name: string;
           status: string;
+          worker_instance_id: string;
+          lease_expires_at: Date | string | null;
         }[]
       >`
         select job_id, submission_id, citizen_payload_version, input_fingerprint, prompt_version,
-          schema_version, model_name, status
+          schema_version, model_name, status, worker_instance_id, lease_expires_at
         from public.ai_extraction_jobs where job_id = ${jobId} for update
       `;
       const job = jobs[0];
       if (!job || !job.submission_id) throw new AiJobNotFoundError();
+      const leaseExpiresAt = job.lease_expires_at ? new Date(job.lease_expires_at).getTime() : 0;
+      if (
+        job.status !== "PROCESSING" ||
+        job.worker_instance_id !== workerInstanceId ||
+        !leaseExpiresAt ||
+        leaseExpiresAt <= Date.now()
+      ) {
+        throw new AiJobUnavailableError();
+      }
       if (
         job.input_fingerprint !== inputFingerprint ||
         job.prompt_version !== promptVersion ||
         job.schema_version !== AI_SCHEMA_VERSION ||
         job.model_name !== modelName
       ) {
-        throw new StaleAiJobError();
+        throw new AiJobUnavailableError();
       }
 
       const submissions = await transaction<
@@ -144,12 +185,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         from public.public_submissions where submission_id = ${job.submission_id}
       `;
       const submission = submissions[0];
-      const jobFiles = await transaction<{ checksum_sha256: string }[]>`
-        select checksum_sha256 from public.ai_extraction_job_files where job_id = ${jobId}
+      const declaredFiles = await transaction<{ count: string | number }[]>`
+        select count(*) as count from public.ai_extraction_job_files where job_id = ${jobId}
+      `;
+      const verifiedManifestFiles = await transaction<{ file_id: string }[]>`
+        select jf.file_id
+        from public.ai_extraction_job_files jf
+        join public.public_files pf on pf.file_id = jf.file_id
+        where jf.job_id = ${jobId}
+          and pf.submission_id = ${job.submission_id}
+          and pf.document_type = 'CERTIFICATE'
+          and pf.variant = 'ORIGINAL'
+          and pf.status = 'UPLOADED'
+          and pf.checksum_sha256 = jf.checksum_sha256
+          and pf.file_name = jf.file_name
       `;
       const currentFiles = await transaction<{ checksum_sha256: string }[]>`
         select checksum_sha256 from public.public_files
-        where submission_id = ${job.submission_id} and document_type = 'CERTIFICATE' and status = 'UPLOADED'
+        where submission_id = ${job.submission_id}
+          and document_type = 'CERTIFICATE' and variant = 'ORIGINAL' and status = 'UPLOADED'
       `;
       const currentFingerprint = submission
         ? computeInputFingerprint(
@@ -158,23 +212,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             currentFiles.map((file) => file.checksum_sha256),
           )
         : "";
+      const manifestInvalid =
+        Number(declaredFiles[0]?.count ?? 0) === 0 ||
+        verifiedManifestFiles.length !== Number(declaredFiles[0]?.count ?? 0);
       if (
         !submission ||
         !submission.draft_json ||
         submission.citizen_payload_version !== job.citizen_payload_version ||
-        jobFiles.length === 0 ||
+        manifestInvalid ||
         currentFingerprint !== job.input_fingerprint
       ) {
+        const errorCode = manifestInvalid ? "MANIFEST_INVALID" : "INPUT_CHANGED";
         await transaction`
           update public.ai_extraction_jobs
-          set status = 'STALE', error_code = 'INPUT_CHANGED', error_message_redacted = 'Dữ liệu hoặc ảnh GCN đã thay đổi.', updated_at = now()
+          set status = 'STALE', error_code = ${errorCode},
+            error_message_redacted = 'Dữ liệu, ảnh GCN hoặc manifest đã thay đổi.',
+            lease_expires_at = null, updated_at = now()
           where job_id = ${jobId}
         `;
         await transaction`
           insert into public.audit_logs (actor_email, action, entity_type, entity_id, request_id, metadata)
           values ('AI_STATION', 'AI_EXTRACTION_STALE', 'AI_EXTRACTION_JOB', ${jobId}, ${requestId}, '{}'::jsonb)
         `;
-        throw new StaleAiJobError();
+        return { kind: "STALE" };
       }
 
       const versions = await transaction<{ next_version: number }[]>`
@@ -216,8 +276,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             : "NEEDS_REVIEW";
       await transaction`
         update public.ai_extraction_jobs
-        set status = ${newStatus}, completed_at = now(), worker_instance_id = 'ANTIGRAVITY_LOCAL',
-          updated_at = now()
+        set status = ${newStatus}, completed_at = now(), lease_expires_at = null, updated_at = now()
         where job_id = ${jobId}
       `;
       await transaction`
@@ -227,25 +286,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ${JSON.stringify({ validationStatus, warningCount, blockingCount, resultVersion, modelName })}::jsonb
         )
       `;
-      const result = { resultId, resultVersion, validationStatus, warningCount };
+      const result: AiResultResponse = { resultId, resultVersion, validationStatus, warningCount };
       await transaction`
         insert into public.request_log (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (${scopedIdempotencyKey}, ${requestId}, 'AI_RESULT', ${mutationHash}, ${JSON.stringify(result)}::jsonb, now() + interval '24 hours')
       `;
-      return result;
+      return { kind: "SUCCESS", response: result };
     });
+    if (outcome.kind === "STALE") {
+      return fail(
+        "VERSION_CONFLICT",
+        "Ảnh GCN, dữ liệu nguồn hoặc manifest đã thay đổi; không nhận kết quả AI cũ.",
+        requestId,
+        409,
+      );
+    }
     return NextResponse.json(
-      { result: response, requestId },
+      { result: outcome.response, requestId },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error: unknown) {
     if (error instanceof AiJobNotFoundError) {
       return fail("NOT_FOUND", "Không tìm thấy job AI tương ứng.", requestId, 404);
     }
-    if (error instanceof StaleAiJobError) {
+    if (error instanceof AiJobUnavailableError) {
       return fail(
         "VERSION_CONFLICT",
-        "Ảnh GCN hoặc dữ liệu nguồn đã thay đổi; không nhận kết quả AI cũ.",
+        "Job không còn do worker này giữ hoặc lease đã hết hạn.",
         requestId,
         409,
       );

@@ -83,7 +83,7 @@ export async function enqueueAiDraftForSubmission(
     select file_id, checksum_sha256, file_name
     from public.public_files
     where submission_id = ${input.submissionId}
-      and document_type = 'CERTIFICATE' and status = 'UPLOADED'
+      and document_type = 'CERTIFICATE' and variant = 'ORIGINAL' and status = 'UPLOADED'
     order by created_at, file_id
   `;
   if (files.length === 0) return null;
@@ -179,7 +179,8 @@ export class AiExtractionRepository {
     `;
     const files = await database<{ checksum_sha256: string }[]>`
       select checksum_sha256 from public.public_files
-      where submission_id = ${submissionId} and document_type = 'CERTIFICATE' and status = 'UPLOADED'
+      where submission_id = ${submissionId}
+        and document_type = 'CERTIFICATE' and variant = 'ORIGINAL' and status = 'UPLOADED'
     `;
     if (
       !current[0] ||

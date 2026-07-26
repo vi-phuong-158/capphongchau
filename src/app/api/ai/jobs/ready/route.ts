@@ -22,7 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         { status: 503 },
       );
     }
-    const expectedKey = process.env.AI_WORKER_API_KEY;
+    const expectedKey = environment.AI_WORKER_API_KEY;
     if (!expectedKey || request.headers.get("x-ai-worker-key") !== expectedKey) {
       return NextResponse.json(
         createApiErrorPayload({
@@ -35,7 +35,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     const rows = await getDatabase()<{ job_id: string }[]>`
       select job_id from public.ai_extraction_jobs
-      where status = 'READY_FOR_AGENT' and worker_type = 'ANTIGRAVITY'
+      where worker_type = 'ANTIGRAVITY'
+        and (
+          status = 'READY_FOR_AGENT'
+          or (status = 'PROCESSING' and (lease_expires_at is null or lease_expires_at <= now()))
+        )
       order by created_at
       limit 10
     `;

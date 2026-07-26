@@ -85,8 +85,18 @@ export async function POST(
       }
       const version = replay.response.version;
       if (typeof version === "number") {
+        const appliedFieldPaths = replay.response.appliedFieldPaths;
         return NextResponse.json(
-          { submission: { version }, appliedFieldPaths: [], requestId },
+          {
+            submission: {
+              version,
+              updatedAt:
+                typeof replay.response.updatedAt === "string" ? replay.response.updatedAt : "",
+            },
+            appliedFieldPaths: Array.isArray(appliedFieldPaths) ? appliedFieldPaths : [],
+            requestId:
+              typeof replay.response.requestId === "string" ? replay.response.requestId : requestId,
+          },
           { headers: { "cache-control": "no-store" } },
         );
       }

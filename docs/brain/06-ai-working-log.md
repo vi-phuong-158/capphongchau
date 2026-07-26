@@ -1966,6 +1966,20 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** `npm.cmd run typecheck`; `npm.cmd run test` (267 test, 10 skip) đạt trước các kiểm
   tra format/lint/build cuối lượt.
 
+## [2026-07-26] Gia cố bảo mật và giao dịch AI draft theo review PR #5
+
+- **Agent:** Codex
+- **Thay đổi:** Buộc claim/result vào `workerInstanceId`, lease sống và idempotency; cho reclaim lease
+  hết hạn; revalidate whitelist GCN qua `public_files` ở cả claim và result; sửa STALE commit cùng audit
+  thay vì rollback; giữ nguyên response khi replay nạp nháp. Thêm scanner fail-closed cho chuỗi giống
+  CCCD trong toàn JSON AI và migration `202607260002` để stale job cũ không có manifest hợp lệ, bổ sung
+  FK `file_id` và index lease.
+- **Lý do:** Khắc phục đủ 4 P1 và 4 P2 do SOL nêu, không mở đường AI đọc/lưu CCCD hoặc thay bản nháp sau
+  khi job hoàn tất.
+- **Kiểm tra:** `npm.cmd run typecheck`; Vitest toàn bộ: 261 passed, 10 skipped; `npm.cmd run lint`;
+  `npm.cmd run build` với `NODE_OPTIONS=--max-old-space-size=8192`; `git diff --check` đều đạt.
+  Integration migration/Supabase vẫn bị skip khi không có database rehearsal riêng.
+
 ## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
 
 - **Agent:** Claude Code

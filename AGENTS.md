@@ -326,6 +326,13 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
   trả JSON qua API worker có `AI_WORKER_API_KEY`.
 - Job chỉ chứa `PUBLIC_FILES.document_type = 'CERTIFICATE'`, checksum và manifest; không có CCCD,
   QR raw, Drive link/ID hoặc quyền ghi database/Drive. Không tạo bản sao GCN trong thư mục AI.
+- Server revalidate từng file manifest tại lúc claim: cùng submission, `CERTIFICATE`, `ORIGINAL`,
+  `UPLOADED`, tên file và checksum. Thiếu/sai một file làm job `STALE`, không trả manifest.
+- Claim/result đều bắt buộc `workerInstanceId`, `idempotency-key` và lease còn hạn. Job `PROCESSING`
+  hết lease được thu hồi nguyên tử; kết quả chỉ do worker đang giữ lease gửi được. `AI_WORKER_API_KEY`
+  tối thiểu 32 ký tự khi `AI_EXTRACTION_ENABLED=true`.
+- Server chặn toàn bộ JSON AI có chuỗi giống CCCD trước khi lưu `raw_json`/`normalized_json`; cảnh báo
+  không được chứa lại giá trị đã chặn.
 - Máy trạm đang dùng tài khoản quản trị có nhãn rủi ro `ADMIN_BROAD_ACCESS`: `agent/AGENTS.md` và
   manifest chỉ là giới hạn quy trình, không được mô tả là rào chắn quyền tuyệt đối với CCCD.
 - AI chỉ trả `CLEAR`, `CHECK`, `MANUAL_REQUIRED` cho số phát hành, ngày cấp, số vào sổ cùng bằng

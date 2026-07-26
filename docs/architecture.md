@@ -44,7 +44,9 @@ Server kiểm tra schema v2, model/prompt, checksum và phiên bản payload tr�
 `ai_field_comparisons`/audit. Cán bộ thấy bảng đối chiếu rồi chỉ có thể nạp các trường `CLEAR` đang
 trống vào working payload; AI không được ghi dữ liệu chính thức hay duyệt. Trạm đang dùng tài khoản
 quản trị có rủi ro `ADMIN_BROAD_ACCESS`, nên `agent/AGENTS.md` chỉ giới hạn quy trình, không phải
-rào chắn kỹ thuật tuyệt đối với CCCD. Ảnh CCCD/QR không nằm trong manifest/schema/prompt.
+rào chắn kỹ thuật tuyệt đối với CCCD. Ảnh CCCD/QR không nằm trong manifest/schema/prompt. Claim và
+result bị buộc với `workerInstanceId`/lease/idempotency; server tái kiểm manifest với `PUBLIC_FILES`
+và chặn JSON chứa chuỗi giống CCCD trước khi persist.
 
 ## Mô hình dữ liệu
 
