@@ -46,7 +46,9 @@ trống vào working payload; AI không được ghi dữ liệu chính thức h
 quản trị có rủi ro `ADMIN_BROAD_ACCESS`, nên `agent/AGENTS.md` chỉ giới hạn quy trình, không phải
 rào chắn kỹ thuật tuyệt đối với CCCD. Ảnh CCCD/QR không nằm trong manifest/schema/prompt. Claim và
 result bị buộc với `workerInstanceId`/lease/idempotency; server tái kiểm manifest với `PUBLIC_FILES`
-và chặn JSON chứa chuỗi giống CCCD trước khi persist.
+và chặn JSON chứa chuỗi giống CCCD trước khi persist. Một trường `CLEAR` chỉ có thể được nạp khi
+evidence trỏ tới `fileId` nằm trong manifest GCN đã xác minh; mọi kết quả `STALE` cũng được cache
+trong `REQUEST_LOG` để retry cùng key trả lại đúng phản hồi.
 
 ## Mô hình dữ liệu
 

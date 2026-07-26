@@ -10,3 +10,5 @@
    `inputFingerprint`, model/prompt và `idempotency-key` mới, trước khi lease hết hạn. Không gọi Gemini từ ứng dụng web.
 5. Nếu ảnh mờ/chữ viết tay, trả `MANUAL_REQUIRED`; không retry để suy đoán. Không ghi/sửa bất kỳ
    file Drive hay dữ liệu nghiệp vụ nào, và không đưa chuỗi giống CCCD vào ghi chú/bằng chứng JSON.
+   Trường `CLEAR` bắt buộc evidence trỏ tới đúng `fileId` trong manifest; nếu không, trả `CHECK` hoặc
+   `MANUAL_REQUIRED`.

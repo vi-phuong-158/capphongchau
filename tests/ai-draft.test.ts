@@ -4,6 +4,7 @@ import {
   aiExtractionPayloadSchema,
   applyClearAiFields,
   buildAiFieldComparisons,
+  findInvalidClearEvidence,
 } from "@/modules/ai-extraction/draft";
 import { emptyDraft } from "@/modules/public-intake/types";
 import { validateAiResultPayload } from "../scripts/ai/validator";
@@ -78,5 +79,31 @@ describe("AI draft cho cán bộ", () => {
 
     expect(issues.some((issue) => issue.code === "CITIZEN_ID_LIKE_VALUE")).toBe(true);
     expect(issues.some((issue) => issue.message.includes("0123"))).toBe(false);
+  });
+
+  it("D5: CLEAR phải có evidence và evidence chỉ được trỏ tới file GCN trong manifest", () => {
+    const missingEvidence = {
+      ...validResult(),
+      certificate: {
+        ...validResult().certificate,
+        issueNumber: { ...validResult().certificate.issueNumber, evidence: null },
+      },
+    };
+    expect(
+      validateAiResultPayload(missingEvidence).some(
+        (issue) => issue.code === "CLEAR_EVIDENCE_MISSING" && issue.severity === "BLOCKING",
+      ),
+    ).toBe(true);
+
+    const foreignEvidence = aiExtractionPayloadSchema.parse(validResult());
+    foreignEvidence.certificate.issueDate.evidence = {
+      fileId: "file_khong_thuoc_manifest",
+      pageLabel: "Trang 1",
+      note: "Sai nguồn",
+    };
+    expect(findInvalidClearEvidence(foreignEvidence, new Set(["file_gcn_1"]))).toContainEqual({
+      fieldPath: "certificate.issueDate",
+      code: "CLEAR_EVIDENCE_NOT_IN_MANIFEST",
+    });
   });
 });

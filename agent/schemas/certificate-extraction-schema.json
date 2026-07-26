@@ -45,7 +45,13 @@
           "required": ["fileId", "pageLabel", "note"]
         }
       },
-      "required": ["value", "sourceValue", "status", "evidence"]
+      "required": ["value", "sourceValue", "status", "evidence"],
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "CLEAR" } } },
+          "then": { "properties": { "evidence": { "type": "object" } } }
+        }
+      ]
     }
   }
 }

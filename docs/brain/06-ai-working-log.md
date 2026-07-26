@@ -1980,6 +1980,17 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `npm.cmd run build` với `NODE_OPTIONS=--max-old-space-size=8192`; `git diff --check` đều đạt.
   Integration migration/Supabase vẫn bị skip khi không có database rehearsal riêng.
 
+## [2026-07-26] Hoàn thiện STALE idempotency và evidence GCN
+
+- **Agent:** Codex
+- **Thay đổi:** Cache outcome `STALE` vào `request_log` trong cùng transaction claim/result để replay
+  cùng key trả lại cùng lỗi; bắt buộc evidence cho mọi `CLEAR`, kiểm `fileId` thuộc manifest GCN đã xác
+  minh khi nhận result và khi lấy lại bản nháp cũ. Prompt/schema station cũng yêu cầu đúng evidence.
+- **Lý do:** Đóng hai P2 do SOL phát hiện: retry STALE không ổn định và trường CLEAR thiếu truy nguyên.
+- **Kiểm tra:** `npm.cmd run typecheck`; Vitest toàn bộ: 264 passed, 10 skipped; lint các file thay đổi
+  với heap Node tăng; `git diff --check` đạt. Cần integration Supabase rehearsal để xác nhận transaction
+  SQL thật.
+
 ## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
 
 - **Agent:** Claude Code

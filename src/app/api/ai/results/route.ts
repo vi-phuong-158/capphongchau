@@ -9,7 +9,11 @@ import {
   AI_PROMPT_VERSION,
   AI_SCHEMA_VERSION,
 } from "@/modules/ai-extraction/repository";
-import { aiExtractionPayloadSchema, buildAiFieldComparisons } from "@/modules/ai-extraction/draft";
+import {
+  aiExtractionPayloadSchema,
+  buildAiFieldComparisons,
+  findInvalidClearEvidence,
+} from "@/modules/ai-extraction/draft";
 import {
   computeInputFingerprint,
   computeResultFingerprint,
@@ -99,8 +103,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const warningCount = issues.filter(
       (issue: ValidationIssue) => issue.severity === "WARNING",
     ).length;
-    const validationStatus =
-      blockingCount > 0 ? "BLOCKED" : warningCount > 0 ? "REVIEW_REQUIRED" : "PASSED";
     if (issues.some((issue) => issue.code === "CITIZEN_ID_LIKE_VALUE")) {
       return fail(
         "VALIDATION_FAILED",
@@ -133,10 +135,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       `;
       if (cached[0]) {
         if (cached[0].mutation_hash !== mutationHash) throw new AiIdempotencyConflictError();
-        const replay = cached[0].response_json;
+        const replay = (
+          typeof cached[0].response_json === "string"
+            ? JSON.parse(cached[0].response_json)
+            : cached[0].response_json
+        ) as unknown;
+        if (
+          replay &&
+          typeof replay === "object" &&
+          !Array.isArray(replay) &&
+          "outcome" in replay &&
+          replay.outcome === "STALE"
+        ) {
+          return { kind: "STALE" };
+        }
         return {
           kind: "SUCCESS",
-          response: (typeof replay === "string" ? JSON.parse(replay) : replay) as AiResultResponse,
+          response: replay as AiResultResponse,
         };
       }
 
@@ -215,6 +230,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const manifestInvalid =
         Number(declaredFiles[0]?.count ?? 0) === 0 ||
         verifiedManifestFiles.length !== Number(declaredFiles[0]?.count ?? 0);
+      const clearEvidenceInvalid = findInvalidClearEvidence(
+        rawJson,
+        new Set(verifiedManifestFiles.map((file) => file.file_id)),
+      ).filter((issue) => issue.code === "CLEAR_EVIDENCE_NOT_IN_MANIFEST");
       if (
         !submission ||
         !submission.draft_json ||
@@ -234,8 +253,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           insert into public.audit_logs (actor_email, action, entity_type, entity_id, request_id, metadata)
           values ('AI_STATION', 'AI_EXTRACTION_STALE', 'AI_EXTRACTION_JOB', ${jobId}, ${requestId}, '{}'::jsonb)
         `;
+        await transaction`
+          insert into public.request_log (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+          values (${scopedIdempotencyKey}, ${requestId}, 'AI_RESULT', ${mutationHash},
+            '{"outcome":"STALE"}'::jsonb, now() + interval '24 hours')
+        `;
         return { kind: "STALE" };
       }
+
+      const finalBlockingCount = blockingCount + clearEvidenceInvalid.length;
+      const finalValidationStatus =
+        finalBlockingCount > 0 ? "BLOCKED" : warningCount > 0 ? "REVIEW_REQUIRED" : "PASSED";
 
       const versions = await transaction<{ next_version: number }[]>`
         select coalesce(max(result_version), 0) + 1 as next_version
@@ -249,7 +277,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           warning_count, blocking_issue_count, result_fingerprint, model_name, prompt_version, processed_at
         ) values (
           ${resultId}, ${jobId}, ${resultVersion}, ${JSON.stringify(rawJson)}::jsonb,
-          ${JSON.stringify(rawJson)}::jsonb, ${validationStatus}, ${warningCount}, ${blockingCount},
+          ${JSON.stringify(rawJson)}::jsonb, ${finalValidationStatus}, ${warningCount}, ${finalBlockingCount},
           ${resultFingerprint}, ${modelName}, ${promptVersion}, now()
         )
       `;
@@ -269,9 +297,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         `;
       }
       const newStatus =
-        validationStatus === "PASSED"
+        finalValidationStatus === "PASSED"
           ? "COMPLETED"
-          : validationStatus === "BLOCKED"
+          : finalValidationStatus === "BLOCKED"
             ? "QUARANTINED"
             : "NEEDS_REVIEW";
       await transaction`
@@ -283,10 +311,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         insert into public.audit_logs (actor_email, action, entity_type, entity_id, request_id, metadata)
         values (
           'AI_STATION', 'AI_EXTRACTION_RESULT_IMPORTED', 'AI_EXTRACTION_JOB', ${jobId}, ${requestId},
-          ${JSON.stringify({ validationStatus, warningCount, blockingCount, resultVersion, modelName })}::jsonb
+          ${JSON.stringify({
+            validationStatus: finalValidationStatus,
+            warningCount,
+            blockingCount: finalBlockingCount,
+            clearEvidenceInvalidCount: clearEvidenceInvalid.length,
+            resultVersion,
+            modelName,
+          })}::jsonb
         )
       `;
-      const result: AiResultResponse = { resultId, resultVersion, validationStatus, warningCount };
+      const result: AiResultResponse = {
+        resultId,
+        resultVersion,
+        validationStatus: finalValidationStatus,
+        warningCount,
+      };
       await transaction`
         insert into public.request_log (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (${scopedIdempotencyKey}, ${requestId}, 'AI_RESULT', ${mutationHash}, ${JSON.stringify(result)}::jsonb, now() + interval '24 hours')

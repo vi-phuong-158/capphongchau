@@ -1125,6 +1125,14 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Lý do:** Đóng các đường bypass claim/lease, rollback STALE, replay sai kết quả và rò PII mà SOL nêu
   trong PR #5; vẫn giữ nguyên nguyên tắc AI chỉ tạo nháp, cán bộ duyệt mới thay đổi hồ sơ.
 
+## [2026-07-26] Hoàn thiện idempotency STALE và truy nguyên evidence AI
+
+- **Quyết định:** Khi claim/result phát hiện manifest hoặc input đã lỗi thời, transaction ghi đồng thời
+  trạng thái `STALE`, audit và `REQUEST_LOG` có outcome `STALE`; retry cùng key trả nguyên `409`, không
+  đọc lại job terminal. Mọi trường `CLEAR` phải có evidence và `evidence.fileId` phải thuộc manifest GCN
+  đã revalidate; sai/thiếu evidence bị `BLOCKED` và kết quả cũ cũng không thể nạp vào working payload.
+- **Lý do:** Bảo toàn idempotency đầy đủ và tính truy nguyên của từng giá trị AI trước khi cán bộ nạp nháp.
+
 ## Template cho entry mới
 
 ```

@@ -333,6 +333,9 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
   tối thiểu 32 ký tự khi `AI_EXTRACTION_ENABLED=true`.
 - Server chặn toàn bộ JSON AI có chuỗi giống CCCD trước khi lưu `raw_json`/`normalized_json`; cảnh báo
   không được chứa lại giá trị đã chặn.
+- Trường AI `CLEAR` bắt buộc có evidence; `fileId` phải thuộc manifest GCN đã join/revalidate. Kết quả
+  cũ thiếu/sai evidence không được nạp nháp. Cả nhánh `STALE` phải ghi cache `REQUEST_LOG` trong cùng
+  transaction để replay cùng idempotency key trả đúng `409` cũ.
 - Máy trạm đang dùng tài khoản quản trị có nhãn rủi ro `ADMIN_BROAD_ACCESS`: `agent/AGENTS.md` và
   manifest chỉ là giới hạn quy trình, không được mô tả là rào chắn quyền tuyệt đối với CCCD.
 - AI chỉ trả `CLEAR`, `CHECK`, `MANUAL_REQUIRED` cho số phát hành, ngày cấp, số vào sổ cùng bằng

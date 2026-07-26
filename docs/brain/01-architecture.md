@@ -369,6 +369,9 @@ PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/
   hết hạn có thể được station khác thu hồi nguyên tử. Trước khi phát manifest hoặc nhận result, server
   join lại `public_files` để xác nhận cùng submission, `CERTIFICATE`, `ORIGINAL`, `UPLOADED`, checksum
   và tên file. Job lỗi thời/manifest sai chuyển `STALE` trong cùng transaction + audit.
+- Nhánh `STALE` cũng ghi `REQUEST_LOG` trong transaction, nên retry cùng idempotency key luôn nhận cùng
+  lỗi `409`. Một trường `CLEAR` bắt buộc evidence có `fileId` thuộc manifest đã xác minh; server kiểm
+  lại điều kiện này lúc nhập result và lúc lấy kết quả cũ để nạp nháp.
 - AI không gọi từ Vercel, không ghi chính thức, không đọc CCCD/QR; chỉ số phát hành, ngày cấp, số
   vào sổ dạng chữ đánh máy cùng bằng chứng. Ảnh mờ/chữ viết tay trả `MANUAL_REQUIRED`. Server quét toàn
   bộ JSON trước persist: chuỗi giống CCCD 12 số bị từ chối fail-closed, không được lưu raw/normalized JSON.

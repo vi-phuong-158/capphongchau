@@ -1,5 +1,5 @@
 import { scanForPromptInjection } from "@/modules/ai-extraction/prompt-safety";
-import { aiExtractionPayloadSchema } from "@/modules/ai-extraction/draft";
+import { aiExtractionPayloadSchema, findInvalidClearEvidence } from "@/modules/ai-extraction/draft";
 import { scanForCitizenIdLikeValues } from "@/modules/ai-extraction/pii-safety";
 
 export interface ValidationIssue {
@@ -38,6 +38,13 @@ export function validateAiResultPayload(data: unknown): ValidationIssue[] {
     return issues;
   }
   const payload = parsed.data;
+  for (const evidenceIssue of findInvalidClearEvidence(payload)) {
+    issues.push({
+      code: evidenceIssue.code,
+      message: `Trường ${evidenceIssue.fieldPath} ở trạng thái CLEAR phải có bằng chứng ảnh GCN hợp lệ.`,
+      severity: "BLOCKING",
+    });
+  }
   if (payload.quality.documentType !== "CERTIFICATE") {
     issues.push({
       code: "UNEXPECTED_DOCUMENT_TYPE",

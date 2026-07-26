@@ -8,6 +8,7 @@ import type { IntakeDraft } from "@/modules/public-intake/types";
 import {
   aiExtractionPayloadSchema,
   buildAiFieldComparisons,
+  findInvalidClearEvidence,
   type AiExtractionPayload,
   type AiFieldComparisonDraft,
 } from "./draft";
@@ -189,6 +190,24 @@ export class AiExtractionRepository {
         current[0].citizen_payload_version,
         files.map((file) => file.checksum_sha256),
       ) !== aiDraft.inputFingerprint
+    ) {
+      return null;
+    }
+    const manifestFiles = await database<{ file_id: string }[]>`
+      select jf.file_id
+      from public.ai_extraction_job_files jf
+      join public.public_files pf on pf.file_id = jf.file_id
+      where jf.job_id = ${aiDraft.jobId}
+        and pf.submission_id = ${submissionId}
+        and pf.document_type = 'CERTIFICATE'
+        and pf.variant = 'ORIGINAL'
+        and pf.status = 'UPLOADED'
+        and pf.checksum_sha256 = jf.checksum_sha256
+        and pf.file_name = jf.file_name
+    `;
+    if (
+      findInvalidClearEvidence(aiDraft.payload, new Set(manifestFiles.map((file) => file.file_id)))
+        .length > 0
     ) {
       return null;
     }

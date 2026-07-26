@@ -44,6 +44,43 @@ export const aiExtractionPayloadSchema = z
 
 export type AiExtractionPayload = z.infer<typeof aiExtractionPayloadSchema>;
 
+export interface ClearEvidenceIssue {
+  readonly fieldPath:
+    "certificate.issueNumber" | "certificate.issueDate" | "certificate.registryNumber";
+  readonly code: "CLEAR_EVIDENCE_MISSING" | "CLEAR_EVIDENCE_NOT_IN_MANIFEST";
+}
+
+/**
+ * `CLEAR` chỉ có giá trị khi cán bộ có thể lần theo đúng ảnh GCN trong manifest. Hàm này dùng cả
+ * khi nhận kết quả mới lẫn khi đọc lại kết quả cũ, để bản ghi legacy cũng không thể nạp nháp nếu
+ * thiếu bằng chứng hoặc trỏ tới file ngoài job.
+ */
+export function findInvalidClearEvidence(
+  payload: AiExtractionPayload,
+  allowedFileIds?: ReadonlySet<string>,
+): ClearEvidenceIssue[] {
+  const fields: readonly [
+    ClearEvidenceIssue["fieldPath"],
+    typeof payload.certificate.issueNumber,
+  ][] = [
+    ["certificate.issueNumber", payload.certificate.issueNumber],
+    ["certificate.issueDate", payload.certificate.issueDate],
+    ["certificate.registryNumber", payload.certificate.registryNumber],
+  ];
+  const issues: ClearEvidenceIssue[] = [];
+  for (const [fieldPath, field] of fields) {
+    if (field.status !== "CLEAR") continue;
+    if (!field.evidence) {
+      issues.push({ fieldPath, code: "CLEAR_EVIDENCE_MISSING" });
+      continue;
+    }
+    if (allowedFileIds && !allowedFileIds.has(field.evidence.fileId)) {
+      issues.push({ fieldPath, code: "CLEAR_EVIDENCE_NOT_IN_MANIFEST" });
+    }
+  }
+  return issues;
+}
+
 export interface AiFieldComparisonDraft {
   readonly fieldPath:
     "certificate.issueNumber" | "certificate.issueDate" | "certificate.registryNumber";
@@ -91,7 +128,8 @@ export function applyClearAiFields(
     if (
       comparison.fieldStatus !== "CLEAR" ||
       !comparison.aiValue ||
-      comparison.currentValue.trim()
+      comparison.currentValue.trim() ||
+      !hasEvidence(comparison.evidence)
     ) {
       continue;
     }
@@ -109,4 +147,14 @@ export function applyClearAiFields(
     appliedFieldPaths.push(comparison.fieldPath);
   }
   return { draft: next, appliedFieldPaths };
+}
+
+function hasEvidence(value: unknown): value is { fileId: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "fileId" in value &&
+    typeof value.fileId === "string" &&
+    value.fileId.trim().length > 0
+  );
 }

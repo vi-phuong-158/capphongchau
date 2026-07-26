@@ -88,7 +88,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       `;
       if (cached[0]) {
         if (cached[0].mutation_hash !== mutationHash) throw new AiIdempotencyConflictError();
-        const replay = cached[0].response_json as { manifest?: AiManifest };
+        const replay = cached[0].response_json as { manifest?: AiManifest; outcome?: string };
+        if (replay?.outcome === "STALE") return { kind: "STALE" };
         if (replay?.manifest) return { kind: "SUCCESS", manifest: replay.manifest };
         throw new AiIdempotencyConflictError();
       }
@@ -155,6 +156,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           insert into public.audit_logs (actor_email, action, entity_type, entity_id, request_id, metadata)
           values ('AI_STATION', 'AI_EXTRACTION_STALE', 'AI_EXTRACTION_JOB', ${job.job_id}, ${requestId},
             '{"reason":"MANIFEST_INVALID"}'::jsonb)
+        `;
+        await transaction`
+          insert into public.request_log (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+          values (${scopedKey}, ${requestId}, 'AI_CLAIM', ${mutationHash},
+            '{"outcome":"STALE"}'::jsonb, now() + interval '24 hours')
         `;
         return { kind: "STALE" };
       }

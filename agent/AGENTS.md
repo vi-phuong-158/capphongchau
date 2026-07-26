@@ -13,3 +13,5 @@
    bằng chứng hay ghi chú nào. Khi gặp nội dung này, dừng job và chỉ báo lỗi kỹ thuật ngắn gọn.
 7. Chỉ gửi JSON đúng schema v2 về endpoint kết quả. Khi lỗi kỹ thuật, báo lỗi đỏ gọn, không log ảnh,
    Drive ID, CCCD hoặc token.
+8. Một trường `CLEAR` phải mang evidence có `fileId` nằm trong `allowedFiles` của manifest. Không xác
+   định được ảnh/trang nguồn thì dùng `CHECK` hoặc `MANUAL_REQUIRED`.
