@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
+
 async function csrfToken(): Promise<string> {
   const response = await fetch("/api/security/csrf", { cache: "no-store" });
   if (!response.ok) throw new Error();
@@ -79,7 +81,7 @@ export function SubmissionClaimBanner({
             {claimedBy ? (
               <>
                 Hồ sơ đang được xử lý bởi <span className="font-bold">{claimedBy}</span>
-                {claimedAt ? ` từ ${new Date(claimedAt).toLocaleString("vi-VN")}` : ""}
+                {claimedAt ? ` từ ${formatDateTime(claimedAt)}` : ""}
               </>
             ) : (
               "Hồ sơ chưa có cán bộ tiếp nhận xử lý."

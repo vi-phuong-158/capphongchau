@@ -15,7 +15,7 @@ export interface ReferenceOption {
   readonly label: string;
 }
 
-/** Mục A, Phụ lục II Thông tư 08/2024/TT-BTNMT (các mã dùng cho bản demo). */
+/** Mục A, Phụ lục II Thông tư 08/2024/TT-BTNMT (các mã thường dùng). */
 export const LAND_PURPOSE_OPTIONS: readonly ReferenceOption[] = [
   { code: "LUC", label: "Đất chuyên trồng lúa" },
   { code: "LUK", label: "Đất trồng lúa còn lại" },

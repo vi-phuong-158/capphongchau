@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
 import type { IntakeDraft } from "@/modules/public-intake/types";
+import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
 import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
@@ -483,7 +484,7 @@ export function SubmissionDetail({
           <div>
             <dt className="text-sm text-stone-500">Cập nhật</dt>
             <dd className="font-semibold text-stone-900">
-              {submission.updatedAt ? new Date(submission.updatedAt).toLocaleString("vi-VN") : "-"}
+              {submission.updatedAt ? formatDateTime(submission.updatedAt) : "-"}
             </dd>
           </div>
           {submission.officialCaseId ? (

@@ -12,6 +12,7 @@ import {
   type ReactElement,
 } from "react";
 
+import Link from "next/link";
 import { SearchableSelect } from "@/components/searchable-select";
 import { TurnstileWidget } from "@/components/turnstile-widget";
 import { VietnameseDateInput } from "@/components/vietnamese-date-input";
@@ -1466,7 +1467,7 @@ export function IntakeWizard() {
   if (submitted && receipt) {
     return (
       <div className="pc-card pc-step-panel space-y-4">
-        <h2 className="text-2xl font-bold">Đã gửi bản kê khai (demo)</h2>
+        <h2 className="text-2xl font-bold">Đã gửi bản kê khai</h2>
         <p>
           Mã tiếp nhận của bạn là <strong>{receipt.code}</strong>. Cán bộ sẽ gọi điện tới số{" "}
           <strong>{draft.phone}</strong> nếu hồ sơ cần bổ sung.
@@ -1475,6 +1476,14 @@ export function IntakeWizard() {
           Dữ liệu và ảnh giấy tờ đã được lưu vào kho của UBND phường. Giữ mã tiếp nhận và mã bí mật
           để tra cứu trạng thái.
         </p>
+        <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+          <Link href="/tra-cuu" className="pc-button">
+            Tra cứu hồ sơ
+          </Link>
+          <Link href="/" className="pc-button pc-button-secondary">
+            Quay về trang chủ
+          </Link>
+        </div>
       </div>
     );
   }

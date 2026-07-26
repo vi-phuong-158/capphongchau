@@ -1991,6 +1991,18 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   với heap Node tăng; `git diff --check` đạt. Cần integration Supabase rehearsal để xác nhận transaction
   SQL thật.
 
+## [2026-07-26] Hoàn thiện giao diện xác nhận và mốc thời gian
+
+- **Agent:** Codex
+- **Thay đổi:** Bỏ nhãn demo ở màn hình nộp thành công, bổ sung hai lối đi rõ ràng tới tra cứu hồ sơ và
+  trang chủ. Dùng chung `formatDateTime` cho tra cứu công khai và màn hình cán bộ; hiển thị cố định theo
+  `Asia/Ho_Chi_Minh` thay vì timezone của thiết bị. Cập nhật mô tả danh mục mục đích sử dụng đất từ demo
+  thành các mã thường dùng.
+- **Lý do:** Hoàn thiện các chỉnh sửa giao diện còn dở và tránh giờ lịch sử hiển thị sai khi cán bộ/công
+  dân dùng thiết bị đặt múi giờ khác.
+- **Kiểm tra:** `npm.cmd run typecheck`; Vitest toàn bộ: 266 passed, 10 skipped; lint các file thay đổi;
+  `npm.cmd run build` với `NODE_OPTIONS=--max-old-space-size=8192`; `git diff --check` đều đạt.
+
 ## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
 
 - **Agent:** Claude Code

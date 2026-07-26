@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 
 import { TurnstileWidget } from "@/components/turnstile-widget";
+import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 
 interface LookupData {
   receiptCode: string;
@@ -142,7 +143,7 @@ export function PublicLookup() {
         <p className="font-mono text-lg font-bold">{data.receiptCode}</p>
         <p className="mt-4 text-xl font-bold">{data.statusLabel}</p>
         <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
-          Cập nhật {new Date(data.updatedAt).toLocaleString("vi-VN")}
+          Cập nhật {formatDateTime(data.updatedAt)}
         </p>
         {data.officialCaseId ? (
           <p className="mt-3">
@@ -225,7 +226,7 @@ export function PublicLookup() {
             <li key={event.eventId} className="border-l-2 border-stone-300 pl-3">
               <p className="font-semibold">{event.label}</p>
               <p className="text-sm">
-                {event.actorDisplayName} · {new Date(event.occurredAt).toLocaleString("vi-VN")}
+                {event.actorDisplayName} · {formatDateTime(event.occurredAt)}
               </p>
               {event.message ? <p className="text-sm">{event.message}</p> : null}
             </li>
