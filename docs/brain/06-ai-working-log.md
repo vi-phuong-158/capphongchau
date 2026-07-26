@@ -343,6 +343,15 @@
 
 ## [2026-07-25] Diễn tập trên Postgres thật xác nhận bản vá P0-1/P0-5/Q2 — tìm và sửa fixture test sai
 
+## [2026-07-26] Hoàn thiện PUT trực tiếp Google Drive cho upload resumable
+
+- **Agent:** Codex
+- **Thay đổi:** Lượt PUT đầu tiên của upload resumable nay gửi đầy đủ `Content-Type` và `Content-Range: bytes 0-(n-1)/n`, thay vì chỉ trông chờ trình duyệt tự sinh `Content-Length`. Bổ sung unit test xác nhận header đầu tiên.
+- **Lý do:** Giữ ảnh gốc đi thẳng từ thiết bị lên Google Drive, đồng thời tương thích ổn định hơn với WebKit/trình duyệt nhúng và giao thức resumable chuẩn của Drive.
+- **Kiểm tra:** Preflight CORS của phiên Drive với cả `http://127.0.0.1:3000` và phiên thật trả header cho PUT; PUT kiểm tra 1 byte có `Content-Range` trả HTTP 200, file thử đã được xóa ngay sau đó. `npm.cmd run typecheck` và `npm.cmd run test -- tests/resumable-upload.test.ts` đều đạt (9 tests).
+
+## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
+
 - **Agent:** Claude Code
 - **Thay đổi:** Chạy `tests/staging-rehearsal-acceptance-saga.integration.test.ts` (9 kịch bản, gồm
   3 kịch bản mới 1b/1c/1d thêm ở lượt trước) trên Postgres thử nghiệm thật (project riêng, region

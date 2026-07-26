@@ -116,7 +116,14 @@ export async function uploadWithResume(options: UploadOptions): Promise<string> 
       const headers: Record<string, string> =
         offset > 0
           ? { "Content-Range": `bytes ${offset}-${totalBytes - 1}/${totalBytes}` }
-          : { "Content-Type": options.contentType };
+          : {
+              // Google Drive resumable upload chấp nhận một PUT duy nhất, nhưng browser không cho
+              // phép app tự đặt Content-Length. Khai báo rõ phạm vi byte ngay từ lượt đầu là hợp
+              // đồng resumable chuẩn, tránh phụ thuộc vào việc runtime có tự thêm Content-Length
+              // hay không (đặc biệt trên WebKit/mobile).
+              "Content-Type": options.contentType,
+              "Content-Range": `bytes 0-${totalBytes - 1}/${totalBytes}`,
+            };
 
       const response = await fetchWithTimeout(
         options.uploadUrl,
