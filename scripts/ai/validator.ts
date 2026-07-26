@@ -1,4 +1,5 @@
 import { scanForPromptInjection } from "@/modules/ai-extraction/prompt-safety";
+import { aiExtractionPayloadSchema } from "@/modules/ai-extraction/draft";
 
 export interface ValidationIssue {
   code: string;
@@ -8,47 +9,65 @@ export interface ValidationIssue {
 
 export function validateAiResultPayload(data: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!data || typeof data !== "object") {
+  const parsed = aiExtractionPayloadSchema.safeParse(data);
+  if (!parsed.success) {
     issues.push({
-      code: "INVALID_ROOT",
-      message: "AI Result phải là một object.",
+      code: "INVALID_SCHEMA",
+      message: "Kết quả AI không đúng schema đọc GCN được phép.",
       severity: "BLOCKING",
     });
+    // Quét cả payload sai schema: kẻ tấn công không được né phát hiện chỉ bằng cách thêm/tráo
+    // trường ngoài schema mà prompt yêu cầu.
+    if (data && typeof data === "object") {
+      for (const finding of scanForPromptInjection(data)) {
+        issues.push({
+          code: "PROMPT_INJECTION_SUSPECTED",
+          message: `Trường ${finding.fieldPath} chứa nội dung nghi ngờ prompt injection — cần cán bộ đối chiếu lại với ảnh gốc trước khi chấp nhận.`,
+          severity: "BLOCKING",
+        });
+      }
+    }
     return issues;
   }
-  const obj = data as Record<string, unknown>;
-  if (!obj.certificate || typeof obj.certificate !== "object") {
+  const payload = parsed.data;
+  if (payload.quality.documentType !== "CERTIFICATE") {
     issues.push({
-      code: "MISSING_CERTIFICATE",
-      message: "Thiếu thông tin Giấy chứng nhận.",
+      code: "UNEXPECTED_DOCUMENT_TYPE",
+      message: "AI không xác định đây là ảnh Giấy chứng nhận; không được nạp nháp.",
       severity: "BLOCKING",
     });
   }
-  if (!Array.isArray(obj.parcels)) {
+  if (payload.quality.imageStatus !== "CLEAR") {
     issues.push({
-      code: "MISSING_PARCELS",
-      message: "Danh sách thửa đất phải là mảng.",
-      severity: "BLOCKING",
-    });
-  } else if (obj.parcels.length > 100) {
-    issues.push({
-      code: "EXCEEDED_MAX_PARCELS",
-      message: `Số thửa đất (${obj.parcels.length}) vượt quá giới hạn 100 thửa/GCN.`,
-      severity: "BLOCKING",
-    });
-  }
-  if (!Array.isArray(obj.unreadableFields)) {
-    issues.push({
-      code: "MISSING_UNREADABLE_FIELDS",
-      message:
-        "Thiếu mảng unreadableFields — không xác định được trường nào AI không đọc rõ (GEMINI.md §6.4).",
+      code: "IMAGE_REQUIRES_MANUAL_REVIEW",
+      message: "Ảnh mờ hoặc có chữ viết tay; cán bộ phải đối chiếu các trường được cảnh báo.",
       severity: "WARNING",
     });
+  }
+  for (const [fieldPath, field] of Object.entries(payload.certificate)) {
+    if (field.status === "MANUAL_REQUIRED" && field.value !== null) {
+      issues.push({
+        code: "MANUAL_FIELD_HAS_VALUE",
+        message: `Trường ${fieldPath} cần nhập thủ công nhưng AI vẫn trả giá trị.`,
+        severity: "BLOCKING",
+      });
+    }
+    if (
+      field.status !== "CLEAR" &&
+      field.value !== null &&
+      !payload.unreadableFields.includes(fieldPath)
+    ) {
+      issues.push({
+        code: "MISSING_UNREADABLE_MARKER",
+        message: `Trường ${fieldPath} chưa rõ phải có trong unreadableFields.`,
+        severity: "WARNING",
+      });
+    }
   }
 
   // Kết quả có dấu hiệu mô hình "làm theo" chỉ dẫn giấu trong ảnh thay vì trích xuất dữ liệu thật
   // (GEMINI.md §6.2) — chặn lại, không âm thầm chấp nhận vào dữ liệu chính thức.
-  const injectionFindings = scanForPromptInjection(obj);
+  const injectionFindings = scanForPromptInjection(payload);
   for (const finding of injectionFindings) {
     issues.push({
       code: "PROMPT_INJECTION_SUSPECTED",

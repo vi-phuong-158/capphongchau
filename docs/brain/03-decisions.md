@@ -1097,6 +1097,21 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Người quyết định:** Claude Code (dọn code chết theo yêu cầu chủ dự án sau khi review commit
   migration Supabase).
 
+## [2026-07-26] Antigravity local station tạo AI draft GCN, cán bộ duyệt cuối
+
+- **Quyết định:** Không gọi Gemini từ web app. Antigravity trên máy quản trị dùng
+  `gemini-3.6-flash` để đọc đúng file `CERTIFICATE` trong manifest/checksum và trả JSON v2 có bằng
+  chứng. Web app chỉ nhận kết quả qua worker API, kiểm schema/model/prompt/input fingerprint rồi
+  cho cán bộ nạp trường `CLEAR` đang trống vào working payload.
+- **Lý do:** Tận dụng khả năng đọc chữ đánh máy của Gemini nhưng giữ dữ liệu chính thức, kết luận
+  nghiệp vụ và thao tác duyệt hoàn toàn cho cán bộ. CCCD vẫn chỉ đọc QR tại thiết bị.
+- **Đánh đổi:** Tài khoản quản trị đồng bộ Drive có quyền rộng; `agent/AGENTS.md`/manifest chỉ giới
+  hạn quy trình, không thể coi là chặn CCCD tuyệt đối. Giao diện luôn hiện `ADMIN_BROAD_ACCESS`.
+- **CCCD/địa chỉ:** Địa chỉ là một trường duy nhất và sửa tự do. Sửa họ tên/CCCD/ngày sinh/giới tính
+  sau QR cần lý do, giữ dấu vết QR và chuyển `QR_OVERRIDE_PENDING_REVIEW`; lookup tự động chỉ dùng
+  `QR_CONFIRMED`.
+- **Người quyết định:** Chủ dự án.
+
 ## Template cho entry mới
 
 ```

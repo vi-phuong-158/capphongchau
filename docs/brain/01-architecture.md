@@ -349,6 +349,25 @@ ETL fail-closed: dữ liệu trùng/không hợp lệ làm rollback toàn bộ. 
 Runtime production không còn đọc/ghi Google Sheets. Sheet cũ chỉ giữ read-only/restricted làm nguồn
 legacy/rollback; không chạy lại ETL nếu không có kế hoạch phục hồi được phê duyệt.
 
+## AI draft GCN — Antigravity local station (2026-07-26)
+
+```text
+PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/checksum)
+→ local station poll READY_FOR_AGENT → claim manifest
+→ Antigravity/Gemini 3.6 Flash đọc GCN gốc theo whitelist
+→ POST /api/ai/results → schema/checksum/version/idempotency
+→ ai_extraction_results + ai_field_comparisons + audit
+→ cán bộ GET /ai-draft → POST /ai-draft/apply → working_payload (CLEAR + trống)
+```
+
+- `src/modules/ai-extraction/{draft,repository}.ts`: schema v2, so sánh dữ liệu và enqueue job.
+- `src/app/api/ai/jobs/{ready,claim}`: giao manifest không có Drive link/CCCD; `results` nhận output
+  idempotent và chặn kết quả cũ.
+- `agent/AGENTS.md`: ranh giới local station. Máy dùng tài khoản quản trị mang nhãn
+  `ADMIN_BROAD_ACCESS`; đây không phải rào chắn kỹ thuật tuyệt đối với CCCD.
+- AI không gọi từ Vercel, không ghi chính thức, không đọc CCCD/QR; chỉ số phát hành, ngày cấp, số
+  vào sổ dạng chữ đánh máy cùng bằng chứng. Ảnh mờ/chữ viết tay trả `MANUAL_REQUIRED`.
+
 ## Vận hành
 
 - Supabase project/compute nên ở Singapore gần Vercel `sin1`.

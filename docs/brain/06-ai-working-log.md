@@ -1953,6 +1953,19 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Lý do:** Đảm bảo nhận diện thương hiệu hành chính công Phường Phong Châu đồng bộ trên tab trình duyệt, shortcut mobile, PWA app icon và giao diện.
 - **Kiểm tra:** `npx tsc --noEmit` ✅, Vitest `npm test` ✅.
 
+## [2026-07-26] Antigravity local station → AI draft → cán bộ duyệt
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm migration job/file/comparison AI, tự enqueue khi người dân submit, endpoint
+  station poll/claim/result idempotent có kiểm checksum/version, schema/prompt v2 chỉ cho ba trường
+  GCN đánh máy, màn hình đối chiếu và nút nạp trường `CLEAR` đang trống vào working payload. Thêm
+  quy tắc QR override có lý do; địa chỉ vẫn sửa tự do.
+- **File đã sửa:** `supabase/migrations/202607260001_antigravity_ai_draft.sql`,
+  `src/modules/ai-extraction/*`, API AI/submission, `agent/*`, UI, test và tài liệu kiến trúc.
+- **Lý do:** AI là dự thảo có bằng chứng, cán bộ là người duyệt cuối; không cho Gemini đọc CCCD.
+- **Kiểm tra:** `npm.cmd run typecheck`; `npm.cmd run test` (267 test, 10 skip) đạt trước các kiểm
+  tra format/lint/build cuối lượt.
+
 ## [2026-07-24] Dọn cache JSON tra cứu GCN đã chết sau migration Supabase
 
 - **Agent:** Claude Code

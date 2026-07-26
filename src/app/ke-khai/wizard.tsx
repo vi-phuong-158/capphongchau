@@ -59,6 +59,7 @@ import {
   type CertificateFileMetadata,
   type IntakeDraft,
   type LandUse,
+  type Owner,
   type OwnerType,
 } from "@/modules/public-intake/types";
 import { LAND_USE_AREA_TOLERANCE_M2 } from "@/modules/public-intake/validation";
@@ -113,6 +114,13 @@ const SAVE_STATUS_LABELS: Record<SaveStatus, string> = {
 
 function newId(): string {
   return crypto.randomUUID();
+}
+
+/** Địa chỉ là thông tin khai báo có thể sửa tự do; bốn trường định danh QR phải để lại lý do. */
+function markManualIdentityEdit(owner: Owner): void {
+  owner.identitySource = "MANUAL";
+  owner.identityStatus =
+    owner.identityStatus === "QR_CONFIRMED" ? "QR_OVERRIDE_PENDING_REVIEW" : "MANUAL_COMPLETE";
 }
 
 interface ApiErrorBody {
@@ -601,6 +609,13 @@ export function IntakeWizard() {
           if (owner.identityStatus === "PENDING_CONFIRMATION") {
             found[`owner-${index}-identity`] = "Xem và xác nhận thông tin đọc từ QR.";
           }
+          if (
+            owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW" &&
+            owner.identityOverrideReason.trim().length < 5
+          ) {
+            found[`owner-${index}-identity-override`] =
+              "Nêu lý do khi sửa thông tin định danh đã đọc từ QR.";
+          }
           if (!identityPhotos[owner.id]?.CITIZEN_ID_FRONT) {
             found[`owner-${index}-front`] = "Cần ảnh CCCD mặt trước.";
           }
@@ -1064,6 +1079,7 @@ export function IntakeWizard() {
         owner.qrParserVersion = result.parserVersion;
         owner.identityStatus = "PENDING_CONFIRMATION";
         owner.identityConfirmedAt = "";
+        owner.identityOverrideReason = "";
       });
 
       return result !== null;
@@ -1756,8 +1772,7 @@ export function IntakeWizard() {
                       onChange={(event) =>
                         update((next) => {
                           next.owners[index].fullName = event.target.value;
-                          next.owners[index].identitySource = "MANUAL";
-                          next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                          markManualIdentityEdit(next.owners[index]);
                         })
                       }
                     />
@@ -1788,8 +1803,7 @@ export function IntakeWizard() {
                       onChange={(event) =>
                         update((next) => {
                           next.owners[index].identityNumber = event.target.value.trim();
-                          next.owners[index].identitySource = "MANUAL";
-                          next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                          markManualIdentityEdit(next.owners[index]);
                         })
                       }
                     />
@@ -1825,8 +1839,7 @@ export function IntakeWizard() {
                             onChange={(iso) =>
                               update((next) => {
                                 next.owners[index].dateOfBirth = iso;
-                                next.owners[index].identitySource = "MANUAL";
-                                next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                                markManualIdentityEdit(next.owners[index]);
                               })
                             }
                           />
@@ -1838,8 +1851,7 @@ export function IntakeWizard() {
                             onChange={(event) =>
                               update((next) => {
                                 next.owners[index].gender = event.target.value as "NAM" | "NU" | "";
-                                next.owners[index].identitySource = "MANUAL";
-                                next.owners[index].identityStatus = "MANUAL_COMPLETE";
+                                markManualIdentityEdit(next.owners[index]);
                               })
                             }
                           >
@@ -1860,12 +1872,29 @@ export function IntakeWizard() {
                           onChange={(event) =>
                             update((next) => {
                               next.owners[index].residenceAddress = event.target.value;
-                              next.owners[index].identitySource = "MANUAL";
-                              next.owners[index].identityStatus = "MANUAL_COMPLETE";
                             })
                           }
                         />
                       </Field>
+                      {owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW" ? (
+                        <Field
+                          label="Lý do sửa thông tin đã đọc từ QR"
+                          required
+                          error={errors[`owner-${index}-identity-override`]}
+                          hint="Sửa địa chỉ không cần lý do; lý do này chỉ áp dụng cho họ tên, CCCD, ngày sinh hoặc giới tính."
+                        >
+                          <textarea
+                            className="pc-textarea"
+                            maxLength={500}
+                            value={owner.identityOverrideReason}
+                            onChange={(event) =>
+                              update((next) => {
+                                next.owners[index].identityOverrideReason = event.target.value;
+                              })
+                            }
+                          />
+                        </Field>
+                      ) : null}
                       <div className="order-first rounded-lg border border-stone-200 p-4">
                         <p className="font-semibold">Ảnh CCCD (cần khi nộp GCN mới)</p>
                         <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>

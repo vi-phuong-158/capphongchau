@@ -1,0 +1,72 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  aiExtractionPayloadSchema,
+  applyClearAiFields,
+  buildAiFieldComparisons,
+} from "@/modules/ai-extraction/draft";
+import { emptyDraft } from "@/modules/public-intake/types";
+import { validateAiResultPayload } from "../scripts/ai/validator";
+
+const clearField = (value: string) => ({
+  value,
+  sourceValue: value,
+  status: "CLEAR" as const,
+  evidence: { fileId: "file_gcn_1", pageLabel: "Trang 1", note: "Vùng tiêu đề" },
+});
+
+function validResult() {
+  return {
+    quality: { documentType: "CERTIFICATE" as const, imageStatus: "CLEAR" as const, note: "" },
+    certificate: {
+      issueNumber: clearField("CS 123456"),
+      issueDate: clearField("2026-07-26"),
+      registryNumber: clearField("CH 00123"),
+    },
+    unreadableFields: [],
+  };
+}
+
+describe("AI draft cho cán bộ", () => {
+  it("D1: chỉ nạp trường CLEAR đang trống, không ghi đè giá trị cán bộ/người dân", () => {
+    const draft = emptyDraft("owner-1", "parcel-1", "use-1");
+    draft.certificate.issueNumber = "Đã nhập";
+    const payload = aiExtractionPayloadSchema.parse(validResult());
+    const comparisons = buildAiFieldComparisons(draft, payload);
+    const applied = applyClearAiFields(draft, comparisons);
+
+    expect(applied.draft.certificate.issueNumber).toBe("Đã nhập");
+    expect(applied.draft.certificate.issueDate).toBe("2026-07-26");
+    expect(applied.draft.certificate.registryNumber).toBe("CH 00123");
+    expect(applied.appliedFieldPaths).toEqual([
+      "certificate.issueDate",
+      "certificate.registryNumber",
+    ]);
+  });
+
+  it("D2: ảnh mờ/chữ viết tay phải cảnh báo thay vì nhận là kết quả sạch", () => {
+    const result: unknown = {
+      quality: { documentType: "CERTIFICATE", imageStatus: "HANDWRITING", note: "Có ghi tay" },
+      certificate: {
+        issueNumber: {
+          value: null,
+          sourceValue: null,
+          status: "MANUAL_REQUIRED",
+          evidence: { fileId: "file_gcn_1", pageLabel: "Trang 1", note: "Có chữ viết tay" },
+        },
+        issueDate: clearField("2026-07-26"),
+        registryNumber: clearField("CH 00123"),
+      },
+      unreadableFields: ["issueNumber"],
+    };
+    const issues = validateAiResultPayload(result);
+    expect(issues.some((issue) => issue.code === "IMAGE_REQUIRES_MANUAL_REVIEW")).toBe(true);
+    expect(issues.some((issue) => issue.severity === "BLOCKING")).toBe(false);
+  });
+
+  it("D3: schema AI không có trường CCCD/địa chỉ/chủ sử dụng để tránh nới phạm vi đọc", () => {
+    const result = validResult() as Record<string, unknown>;
+    result.identityNumber = "012345678901";
+    expect(aiExtractionPayloadSchema.safeParse(result).success).toBe(false);
+  });
+});

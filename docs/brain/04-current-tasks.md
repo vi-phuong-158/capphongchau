@@ -10,6 +10,11 @@
 
 ## [2026-07-25] TRẠNG THÁI HIỆN TẠI — đã mở tiếp nhận hồ sơ chính thức
 
+**[CẬP NHẬT 2026-07-26]** Hạ tầng Antigravity AI draft GCN đã có trong code nhưng mặc định
+`AI_EXTRACTION_ENABLED=false`. Chỉ bật sau khi áp dụng migration `202607260001`, đặt worker key ở
+Vercel/máy trạm, kiểm tra station theo `agent/STATION_RUNBOOK.md` với dữ liệu giả và chấp nhận rủi
+ro `ADMIN_BROAD_ACCESS`. AI không là điều kiện tiếp nhận chính thức.
+
 **Hệ thống đang MỞ để thu hồ sơ thật.** `OFFICIAL_ACCEPTANCE_ENABLED = true`. Chưa có hồ sơ thật
 nào trong hệ thống trước ngày này; thu hồ sơ thật bắt đầu từ sau 2026-07-25.
 
