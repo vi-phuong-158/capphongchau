@@ -43,7 +43,22 @@ import {
   readCitizenIdQr,
   type CitizenIdQrReadResult,
 } from "@/modules/public-intake/citizen-id-qr.client";
-import { normalizeIntakeImage } from "@/modules/public-intake/image-normalization.client";
+import {
+  normalizeIntakeImage,
+  safeUploadFileName,
+} from "@/modules/public-intake/image-normalization.client";
+import { createXhrTransport } from "@/modules/public-intake/xhr-upload-transport.client";
+import {
+  hasFailedUpload as queueHasFailedUpload,
+  hasPendingUpload as queueHasPendingUpload,
+  readConnectionHints,
+  resolveUploadConcurrency,
+  runWithConcurrency,
+  uploadPercent as taskPercent,
+  uploadTaskLabel,
+  type UploadDocumentType,
+  type UploadTaskView,
+} from "@/modules/public-intake/upload-queue";
 import {
   OWNER_TYPES,
   OWNER_TYPE_LABELS,
@@ -510,11 +525,20 @@ export function IntakeWizard() {
   });
   const [challengeNonce, setChallengeNonce] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("IDLE");
+  /**
+   * `busy` giờ **chỉ** dành cho các thao tác mạng ngắn khóa cả màn hình (tạo bản kê khai, lưu
+   * nháp, xóa ảnh). Việc tải ảnh KHÔNG còn đặt cờ này: người dân phải điền được các ô khác trong
+   * lúc ảnh đang lên, thay vì ngồi nhìn màn hình đơ.
+   */
   const [busy, setBusy] = useState(false);
+  /** Mỗi ảnh đang tải là một việc có trạng thái, phần trăm và nút hủy/thử lại riêng. */
+  const [uploadTasks, setUploadTasks] = useState<UploadTaskView[]>([]);
   const [serverError, setServerError] = useState("");
   const [uploadNote, setUploadNote] = useState("");
   const [uploadPercent, setUploadPercent] = useState(0);
   const uploadAbort = useRef<AbortController | null>(null);
+  /** Một `AbortController` cho mỗi việc tải, để hủy được từng ảnh mà không đụng ảnh khác. */
+  const taskAborts = useRef(new Map<string, AbortController>());
   const createIdempotencyKey = useRef<string | null>(null);
   const submitIdempotencyKey = useRef<string | null>(null);
   const serverErrorRef = useRef<HTMLDivElement>(null);
@@ -614,10 +638,8 @@ export function IntakeWizard() {
       certificateCount,
       uploadedIdentitySides,
       uploadedCertificateCount: certificatePhotos.length,
-      // Phase 4 thay hai cờ này bằng trạng thái từng task upload; hiện tại `busy` là thứ duy
-      // nhất biết có việc mạng đang chạy.
-      hasPendingUpload: busy,
-      hasFailedUpload: false,
+      hasPendingUpload: queueHasPendingUpload(uploadTasks),
+      hasFailedUpload: queueHasFailedUpload(uploadTasks),
     }),
     [
       step,
@@ -627,7 +649,7 @@ export function IntakeWizard() {
       certificateCount,
       uploadedIdentitySides,
       certificatePhotos.length,
-      busy,
+      uploadTasks,
     ],
   );
 
@@ -640,6 +662,10 @@ export function IntakeWizard() {
     [validationInput],
   );
 
+  const certificateSlotsLeft = Math.max(
+    0,
+    MAX_CERTIFICATE_PHOTOS - certificatePhotos.length - uploadTasks.length,
+  );
   const checklist = useMemo(() => submitChecklist(validationInput), [validationInput]);
   const optionalItems = useMemo(() => optionalSummary(draft), [draft]);
 
@@ -937,13 +963,14 @@ export function IntakeWizard() {
       documentType: IdentityDocumentType | "CERTIFICATE",
       ownerId = "",
       replaceFileId = "",
+      hooks?: { signal?: AbortSignal; onProgress?: (sent: number, total: number) => void },
     ): Promise<string | null> => {
       // Ảnh nhận qua Zalo/Messenger hay tải về từ trình duyệt thường có `File.type` rỗng hoặc là
       // bí danh `image/jpg`. Quy về tên chuẩn ngay ở đây để không bị từ chối oan.
       const declaredMimeType = canonicalImageMimeType(file.type, file.name);
       if (!declaredMimeType) {
         setServerError(
-          `Không nhận dạng được định dạng của tệp "${file.name}". Hãy chọn ảnh JPG, PNG, WebP hoặc HEIC.`,
+          "Không nhận dạng được định dạng của tệp bạn chọn. Hãy chọn ảnh JPG, PNG, WebP hoặc HEIC.",
         );
         return null;
       }
@@ -955,7 +982,12 @@ export function IntakeWizard() {
           documentType,
           ownerId,
           replaceFileId,
-          fileName: file.name,
+          // Tên trung tính, KHÔNG phải tên tệp gốc: máy chủ ghép tên client gửi lên vào tên tệp
+          // trong Drive, mà tên do máy ảnh/người dân đặt hay mang số CCCD, tên người, ngày giờ.
+          fileName: safeUploadFileName(
+            documentType === "CERTIFICATE" ? "CERTIFICATE" : "CITIZEN_ID",
+            declaredMimeType,
+          ),
           mimeType: declaredMimeType,
           sizeBytes: file.size,
         }),
@@ -978,9 +1010,15 @@ export function IntakeWizard() {
           uploadUrl,
           file,
           contentType: mimeType,
-          signal: uploadAbort.current?.signal,
+          signal: hooks?.signal ?? uploadAbort.current?.signal,
+          // XHR là cách duy nhất lấy được tiến độ tải lên thật ở trình duyệt; `fetch` không có
+          // sự kiện nào giữa lúc gửi và lúc nhận response.
+          transport: createXhrTransport(),
           onProgress: (sent, total) => {
-            setUploadPercent(total > 0 ? Math.round((sent / total) * 100) : 0);
+            hooks?.onProgress?.(sent, total);
+            if (!hooks?.onProgress) {
+              setUploadPercent(total > 0 ? Math.round((sent / total) * 100) : 0);
+            }
           },
         });
       } catch (error) {
@@ -1213,38 +1251,107 @@ export function IntakeWizard() {
     [csrfToken],
   );
 
+  const patchTask = useCallback((id: string, patch: Partial<UploadTaskView>) => {
+    setUploadTasks((current) =>
+      current.map((task) => (task.id === id ? { ...task, ...patch } : task)),
+    );
+  }, []);
+
+  /** Hủy một việc đang tải; các việc khác chạy tiếp. */
+  const cancelTask = useCallback((id: string) => {
+    taskAborts.current.get(id)?.abort();
+  }, []);
+
+  /** Bỏ một việc đã lỗi khỏi danh sách để người dân gửi được phần còn lại. */
+  const dismissTask = useCallback((id: string) => {
+    taskAborts.current.delete(id);
+    setUploadTasks((current) => current.filter((task) => task.id !== id));
+  }, []);
+
+  /**
+   * Tải nhiều ảnh Giấy chứng nhận.
+   *
+   * Trước V2 vòng lặp này tuần tự và `break` ngay khi một ảnh hỏng — chọn 3 ảnh mà ảnh thứ 2 lỗi
+   * là mất luôn ảnh thứ 3, dù nó chưa hề được thử. Nay mỗi ảnh là một việc độc lập: tối đa 2 việc
+   * chạy song song, một việc hỏng không kéo theo việc nào, và UI chỉ đúng ảnh cần thử lại.
+   *
+   * Chuẩn hóa ảnh chạy **trong từng việc** chứ không dựng sẵn cả loạt: giữ nhiều bitmap 12MP cùng
+   * lúc là đường ngắn nhất tới tab bị trình duyệt kill trên máy yếu.
+   */
   const handleCertificateUpload = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
-      uploadAbort.current = new AbortController();
-      setBusy(true);
       setServerError("");
-      const accepted: UploadedCertificateImage[] = [];
-      try {
-        for (const [index, file] of files.entries()) {
-          setUploadPercent(0);
-          setUploadNote(`Đang tải ảnh GCN ${index + 1}/${files.length}…`);
-          // Ảnh GCN cũng phải qua bước chuyển HEIC như ảnh CCCD: iPhone mặc định chụp HEIC, mà
-          // Drive không phải lúc nào cũng nhận dạng được định dạng này khi xác minh sau tải.
-          const prepared = (await normalizeIntakeImage(file, "CERTIFICATE")).file;
-          const fileId = await uploadFile(prepared, "CERTIFICATE");
-          if (!fileId) {
-            break;
+
+      const baseIndex = certificatePhotos.length;
+      const queued: UploadTaskView[] = files.map((file, index) => ({
+        id: newId(),
+        documentType: "CERTIFICATE" as UploadDocumentType,
+        status: "QUEUED",
+        sentBytes: 0,
+        totalBytes: file.size,
+        errorMessage: "",
+        orderIndex: baseIndex + index,
+      }));
+      setUploadTasks((current) => [...current, ...queued]);
+
+      const concurrency = resolveUploadConcurrency(readConnectionHints());
+      const results = await runWithConcurrency(
+        queued.map((task, index) => async () => {
+          const controller = new AbortController();
+          taskAborts.current.set(task.id, controller);
+          try {
+            patchTask(task.id, { status: "PREPARING" });
+            // Ảnh GCN cũng phải qua bước chuyển HEIC như ảnh CCCD: iPhone mặc định chụp HEIC, mà
+            // Drive không phải lúc nào cũng nhận dạng được định dạng này khi xác minh sau tải.
+            const prepared = (await normalizeIntakeImage(files[index], "CERTIFICATE")).file;
+            patchTask(task.id, {
+              status: "UPLOADING",
+              totalBytes: prepared.size,
+              sentBytes: 0,
+            });
+
+            const fileId = await uploadFile(prepared, "CERTIFICATE", "", "", {
+              signal: controller.signal,
+              onProgress: (sent) => patchTask(task.id, { sentBytes: sent }),
+            });
+            if (!fileId) throw new Error("UPLOAD_REJECTED");
+
+            patchTask(task.id, { status: "COMPLETED", sentBytes: prepared.size });
+            return { file: prepared, fileId, name: prepared.name, pageLabel: "" };
+          } catch (error) {
+            patchTask(task.id, {
+              status: controller.signal.aborted ? "CANCELLED" : "FAILED",
+              errorMessage: controller.signal.aborted
+                ? "Đã hủy."
+                : error instanceof Error && error.message !== "UPLOAD_REJECTED"
+                  ? error.message
+                  : "Tải ảnh thất bại. Bấm “Thử lại” hoặc chọn ảnh khác.",
+            });
+            throw error;
+          } finally {
+            taskAborts.current.delete(task.id);
           }
-          accepted.push({ file: prepared, fileId, name: prepared.name, pageLabel: "" });
-        }
+        }),
+        { concurrency },
+      );
+
+      const accepted: UploadedCertificateImage[] = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+
+      if (accepted.length > 0) {
         updateCertificatePhotos((current) => [...current, ...accepted]);
-        // Đếm theo tổng số ảnh của cả hồ sơ, không theo lượt chọn tệp vừa rồi — người dân chọn ảnh
-        // làm nhiều lượt phải thấy con số cộng dồn đúng.
-        const total = certificatePhotos.length + accepted.length;
-        setUploadNote(total > 0 ? `Đã tải ${total} ảnh GCN.` : "");
-      } finally {
-        setBusy(false);
-        setUploadPercent(0);
-        uploadAbort.current = null;
       }
+      // Việc đã xong thì gỡ khỏi danh sách; việc lỗi/hủy ở lại để người dân xử lý.
+      setUploadTasks((current) => current.filter((task) => task.status !== "COMPLETED"));
+
+      // Đếm theo tổng số ảnh của cả hồ sơ, không theo lượt chọn tệp vừa rồi — người dân chọn ảnh
+      // làm nhiều lượt phải thấy con số cộng dồn đúng.
+      const total = certificatePhotos.length + accepted.length;
+      setUploadNote(total > 0 ? `Đã tải ${total} ảnh GCN.` : "");
     },
-    [uploadFile, updateCertificatePhotos, certificatePhotos.length],
+    [uploadFile, updateCertificatePhotos, certificatePhotos.length, patchTask],
   );
 
   const deleteCertificate = useCallback(
@@ -2264,9 +2371,7 @@ export function IntakeWizard() {
             >
               <label
                 className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
-                  busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS
-                    ? "opacity-50 pointer-events-none"
-                    : "hover:bg-black/5"
+                  certificateSlotsLeft <= 0 ? "opacity-50 pointer-events-none" : "hover:bg-black/5"
                 }`}
                 style={{ borderColor: "var(--border-strong)", background: "var(--surface)" }}
               >
@@ -2275,13 +2380,10 @@ export function IntakeWizard() {
                   type="file"
                   accept={IMAGE_FILE_ACCEPT}
                   multiple
-                  disabled={busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS}
+                  disabled={certificateSlotsLeft <= 0}
                   onChange={(event) => {
                     void handleCertificateUpload(
-                      Array.from(event.target.files ?? []).slice(
-                        0,
-                        MAX_CERTIFICATE_PHOTOS - certificatePhotos.length,
-                      ),
+                      Array.from(event.target.files ?? []).slice(0, certificateSlotsLeft),
                     );
                   }}
                 />
@@ -2443,67 +2545,101 @@ export function IntakeWizard() {
               </ul>
             ) : null}
 
-            {uploadNote ? (
-              <div
-                className="mt-6 flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border shadow-sm transition-all pc-fade-in"
-                style={{
-                  background: "var(--surface)",
-                  borderColor: "var(--accent)",
-                  borderLeftWidth: "4px",
-                }}
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-3">
-                  {busy ? (
-                    <svg
-                      className="w-5 h-5 animate-spin"
-                      style={{ color: "var(--accent)" }}
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                  ) : (
-                    <svg
-                      className="w-5 h-5 text-emerald-600"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                  <p className="font-medium text-sm sm:text-base">
-                    {uploadNote}
-                    {busy && uploadPercent > 0 ? ` (${uploadPercent}%)` : ""}
-                  </p>
-                </div>
-                {busy ? (
-                  <button
-                    type="button"
-                    className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors"
-                    style={{ color: "var(--danger)" }}
-                    onClick={cancelUpload}
+            {/*
+              Danh sách từng việc tải, thay cho một thanh phần trăm chung.
+
+              Một thanh chung không nói được ảnh nào đang chạy, ảnh nào hỏng, và khi có ảnh hỏng
+              thì người dân không biết phải làm lại ảnh nào. Nhãn dùng "Trang GCN 1", KHÔNG dùng
+              tên tệp gốc — tên do máy ảnh hoặc người dân đặt hay mang số CCCD và tên người.
+            */}
+            {uploadTasks.length > 0 ? (
+              <ul className="space-y-2" aria-live="polite">
+                {uploadTasks.map((task) => (
+                  <li
+                    key={task.id}
+                    className="pc-card"
+                    style={{
+                      borderLeftWidth: "4px",
+                      borderLeftColor:
+                        task.status === "FAILED" || task.status === "CANCELLED"
+                          ? "var(--danger)"
+                          : "var(--accent)",
+                    }}
                   >
-                    Hủy tải ảnh
-                  </button>
-                ) : null}
-              </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold text-sm">
+                        {uploadTaskLabel(task.documentType, task.orderIndex)}
+                      </p>
+                      <p className="text-sm" style={{ color: "var(--muted)" }}>
+                        {task.status === "QUEUED"
+                          ? "Đang chờ"
+                          : task.status === "PREPARING"
+                            ? "Đang chuẩn bị ảnh…"
+                            : task.status === "UPLOADING"
+                              ? `Đang tải ${taskPercent(task)}%`
+                              : task.status === "CANCELLED"
+                                ? "Đã hủy"
+                                : task.status === "FAILED"
+                                  ? "Tải lỗi"
+                                  : "Xong"}
+                      </p>
+                    </div>
+                    {task.status === "UPLOADING" ? (
+                      <div
+                        className="mt-2 h-2 w-full overflow-hidden rounded-full"
+                        style={{ background: "var(--surface-muted, rgba(0,0,0,0.08))" }}
+                        role="progressbar"
+                        aria-valuenow={taskPercent(task)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`Tiến độ ${uploadTaskLabel(task.documentType, task.orderIndex)}`}
+                      >
+                        <div
+                          className="h-full transition-all"
+                          style={{
+                            width: `${taskPercent(task)}%`,
+                            background: "var(--accent)",
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    {task.errorMessage ? (
+                      <p className="pc-field-error mt-2">{task.errorMessage}</p>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {task.status === "UPLOADING" ||
+                      task.status === "QUEUED" ||
+                      task.status === "PREPARING" ? (
+                        <button
+                          type="button"
+                          className="pc-button-quiet"
+                          style={{ color: "var(--danger)" }}
+                          onClick={() => cancelTask(task.id)}
+                        >
+                          Hủy ảnh này
+                        </button>
+                      ) : null}
+                      {task.status === "FAILED" || task.status === "CANCELLED" ? (
+                        <button
+                          type="button"
+                          className="pc-button-quiet"
+                          onClick={() => dismissTask(task.id)}
+                        >
+                          Bỏ ảnh này
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             ) : null}
+
+            {uploadNote && uploadTasks.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--muted)" }} aria-live="polite">
+                {uploadNote}
+              </p>
+            ) : null}
+
             <div className="pc-card">
               <h3 className="text-base font-semibold">
                 Thông tin trên Giấy chứng nhận — nếu đọc được

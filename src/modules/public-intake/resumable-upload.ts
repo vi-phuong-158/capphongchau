@@ -7,6 +7,12 @@
  * thì hỏi Google đã nhận được bao nhiêu byte rồi gửi tiếp phần còn thiếu, và luôn hủy được.
  */
 
+import {
+  createFetchTransport,
+  UploadTransportError,
+  type ResumablePutTransport,
+} from "./upload-transport";
+
 export const UPLOAD_TIMEOUT_MS = 60_000;
 export const MAX_UPLOAD_ATTEMPTS = 3;
 
@@ -44,6 +50,11 @@ export interface UploadOptions {
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
   readonly maxAttempts?: number;
+  /**
+   * Lớp truyền PUT dữ liệu. Mặc định dùng `fetch` (không có tiến độ liên tục); trình duyệt truyền
+   * `createXhrTransport()` để có `upload.onprogress`. Việc hỏi tiến độ vẫn luôn đi qua `fetch`.
+   */
+  readonly transport?: ResumablePutTransport;
 }
 
 interface AttemptContext {
@@ -103,9 +114,25 @@ export async function uploadWithResume(options: UploadOptions): Promise<string> 
   };
   const maxAttempts = options.maxAttempts ?? MAX_UPLOAD_ATTEMPTS;
   const totalBytes = options.file.size;
+  const transport = options.transport ?? createFetchTransport(context.fetchImpl);
 
   let offset = 0;
   let lastError = "Tải tệp thất bại.";
+
+  /**
+   * Tiến độ chỉ được tăng.
+   *
+   * Sau một lần đứt mạng, Google có thể báo đã nhận **ít hơn** con số XHR vừa đếm được — byte đã
+   * rời thiết bị không có nghĩa là đã tới nơi. Để thanh phần trăm tụt lại là tín hiệu sai: người
+   * dân đọc đó là "hỏng, phải làm lại" và bấm hủy.
+   */
+  let reportedBytes = 0;
+  const reportProgress = (sent: number): void => {
+    if (!options.onProgress) return;
+    const clamped = Math.min(Math.max(sent, reportedBytes), totalBytes);
+    reportedBytes = clamped;
+    options.onProgress(clamped, totalBytes);
+  };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     if (options.signal?.aborted) {
@@ -113,27 +140,28 @@ export async function uploadWithResume(options: UploadOptions): Promise<string> 
     }
 
     try {
-      const headers: Record<string, string> =
-        offset > 0
-          ? { "Content-Range": `bytes ${offset}-${totalBytes - 1}/${totalBytes}` }
-          : {
-              // Google Drive resumable upload chấp nhận một PUT duy nhất, nhưng browser không cho
-              // phép app tự đặt Content-Length. Khai báo rõ phạm vi byte ngay từ lượt đầu là hợp
-              // đồng resumable chuẩn, tránh phụ thuộc vào việc runtime có tự thêm Content-Length
-              // hay không (đặc biệt trên WebKit/mobile).
-              "Content-Type": options.contentType,
-              "Content-Range": `bytes 0-${totalBytes - 1}/${totalBytes}`,
-            };
-
-      const response = await fetchWithTimeout(
-        options.uploadUrl,
-        { method: "PUT", headers, body: options.file.slice(offset) },
-        context,
-      );
+      // Google Drive resumable upload chấp nhận một PUT duy nhất, nhưng browser không cho phép
+      // app tự đặt Content-Length. Khai báo rõ phạm vi byte ngay từ lượt đầu là hợp đồng
+      // resumable chuẩn, tránh phụ thuộc vào việc runtime có tự thêm Content-Length hay không
+      // (đặc biệt trên WebKit/mobile).
+      const sentBefore = offset;
+      const response = await transport.put({
+        url: options.uploadUrl,
+        body: options.file.slice(offset),
+        contentType: offset > 0 ? undefined : options.contentType,
+        contentRange: `bytes ${offset}-${totalBytes - 1}/${totalBytes}`,
+        signal: options.signal,
+        timeoutMs: context.timeoutMs,
+        // Transport đếm theo phần thân đang gửi; cộng lại phần đã gửi ở các lượt trước để phần
+        // trăm hiển thị luôn tính trên toàn tệp và không bao giờ tụt về sau khi resume.
+        onProgress: options.onProgress
+          ? (loaded) => reportProgress(sentBefore + loaded)
+          : undefined,
+      });
 
       if (response.ok) {
-        options.onProgress?.(totalBytes, totalBytes);
-        const body = (await response.json()) as { id?: string };
+        reportProgress(totalBytes);
+        const body = JSON.parse(response.bodyText || "{}") as { id?: string };
         if (!body.id) {
           throw new UploadFailedError("Google Drive không trả mã tệp.");
         }
@@ -142,8 +170,8 @@ export async function uploadWithResume(options: UploadOptions): Promise<string> 
 
       // 308 = đã nhận một phần, gửi tiếp từ chỗ dở.
       if (response.status === 308) {
-        offset = parseReceivedBytes(response.headers.get("Range"));
-        options.onProgress?.(offset, totalBytes);
+        offset = parseReceivedBytes(response.rangeHeader);
+        reportProgress(offset);
         continue;
       }
 
@@ -153,18 +181,20 @@ export async function uploadWithResume(options: UploadOptions): Promise<string> 
         throw new UploadCancelledError();
       }
       lastError =
-        error instanceof UploadFailedError ? error.message : "Mất kết nối khi đang tải tệp lên.";
+        error instanceof UploadFailedError || error instanceof UploadTransportError
+          ? error.message
+          : "Mất kết nối khi đang tải tệp lên.";
 
       if (attempt < maxAttempts) {
         // Hỏi lại tiến độ trước khi thử tiếp, tránh gửi lại từ đầu phần đã đến nơi.
         try {
           const status = await queryUploadedBytes(options.uploadUrl, totalBytes, context);
           if (status.completedFileId) {
-            options.onProgress?.(totalBytes, totalBytes);
+            reportProgress(totalBytes);
             return status.completedFileId;
           }
           offset = status.received;
-          options.onProgress?.(offset, totalBytes);
+          reportProgress(offset);
         } catch {
           // Không hỏi được tiến độ thì giữ nguyên offset và thử lại.
         }
