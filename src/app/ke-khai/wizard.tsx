@@ -27,6 +27,7 @@ import {
 } from "@/modules/public-intake/reference";
 import {
   PUBLIC_WIZARD_STEPS,
+  STEP_CONTACT_AND_IDENTITY,
   optionalSummary,
   ownerNeedsIdentityPhotos,
   submitChecklist,
@@ -515,6 +516,9 @@ export function IntakeWizard() {
   const [identityPhotos, setIdentityPhotos] = useState<IdentityPhotos>({});
   const [certificatePhotos, setCertificatePhotos] = useState<UploadedCertificateImage[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const [receiptCopied, setReceiptCopied] = useState(false);
+  const [nextSubmissionError, setNextSubmissionError] = useState("");
+  const successHeadingRef = useRef<HTMLHeadingElement>(null);
   const [existingResults, setExistingResults] = useState<Record<string, ExistingLookupResult>>({});
 
   const [csrfToken, setCsrfToken] = useState("");
@@ -548,6 +552,12 @@ export function IntakeWizard() {
       serverErrorRef.current.focus();
     }
   }, [serverError]);
+
+  // Sau khi gửi xong, con trỏ nhảy về dòng "KÊ KHAI THÀNH CÔNG". Không có bước này thì người dùng
+  // bàn phím và trình đọc màn hình vẫn đứng ở nút Gửi cũ, không biết chuyện gì vừa xảy ra.
+  useEffect(() => {
+    if (submitted) successHeadingRef.current?.focus();
+  }, [submitted]);
 
   useEffect(() => {
     if (saveStatus === "SAVING" || saveStatus === "FAILED") {
@@ -1527,6 +1537,95 @@ export function IntakeWizard() {
     }
   }, [csrfToken, draft, certificatePhotos, challengeToken, refreshChallenge]);
 
+  const copyReceiptCode = useCallback(() => {
+    if (!receipt) return;
+    // `navigator.clipboard` không có trên http hoặc trình duyệt cũ; im lặng không sao vì mã vẫn
+    // hiển thị to trên màn hình để người dân tự chép.
+    void navigator.clipboard
+      ?.writeText(receipt.code)
+      .then(() => setReceiptCopied(true))
+      .catch(() => undefined);
+  }, [receipt]);
+
+  /**
+   * Bắt đầu một hồ sơ mới ngay trên màn hình thành công.
+   *
+   * Cán bộ đi thu hồ sơ làm liên tiếp nhiều hộ; bắt quay về trang chủ rồi vào lại từ đầu là thừa
+   * một vòng. Quan trọng: **tạo được bản mới rồi mới xóa state cũ**. Làm ngược lại thì mạng lỗi
+   * giữa chừng là mất luôn mã tiếp nhận vừa nhận, mà mã đó không khôi phục trực tuyến được.
+   */
+  const startNextSubmission = useCallback(async () => {
+    setBusy(true);
+    setNextSubmissionError("");
+    try {
+      const idempotencyKey = crypto.randomUUID();
+      const response = await fetchApi(
+        "/api/public/submissions",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": idempotencyKey,
+            "x-turnstile-token": challengeToken,
+          },
+          body: JSON.stringify({ phone: "" }),
+        },
+        CREATE_API_TIMEOUT_MS,
+      );
+
+      if (!response.ok) {
+        setNextSubmissionError(
+          await readErrorMessage(
+            response,
+            "Chưa tạo được bản kê khai mới. Mã tiếp nhận ở trên vẫn còn; thử lại sau ít phút.",
+          ),
+        );
+        return;
+      }
+
+      const created = (await response.json()) as {
+        receiptCode: string;
+        accessSecret: string;
+        csrfToken: string;
+      };
+
+      // Xóa sạch PII của hộ trước. Không giữ lại ảnh, CCCD hay số điện thoại nào.
+      setDraft(emptyDraft(newId(), newId(), newId()));
+      setIdentityPhotos({});
+      setCertificatePhotos([]);
+      setUploadTasks([]);
+      setExistingResults({});
+      setErrors({});
+      setServerError("");
+      setUploadNote("");
+      setReceiptCopied(false);
+      setSubmitted(false);
+      setStep(STEP_CONTACT_AND_IDENTITY);
+      submitIdempotencyKey.current = null;
+      draftDirtyRef.current = false;
+      try {
+        sessionStorage.removeItem(CERT_META_STORAGE_KEY);
+      } catch {
+        // Storage riêng tư bị chặn thì thôi; nhãn trang chỉ là dữ liệu trình bày.
+      }
+
+      setReceipt({ code: created.receiptCode, secret: created.accessSecret });
+      setCsrfToken(created.csrfToken);
+      refreshChallenge();
+      if (!(await adoptServerDraft())) {
+        setServerError(
+          "Đã tạo bản kê khai mới nhưng chưa tải được dữ liệu về máy. Kiểm tra mạng rồi thử lại.",
+        );
+      }
+    } catch {
+      setNextSubmissionError(
+        "Kết nối bị gián đoạn. Mã tiếp nhận ở trên vẫn còn; thử lại sau ít phút.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [challengeToken, refreshChallenge, adoptServerDraft]);
+
   const goBack = useCallback(() => {
     setErrors({});
     setStep((current) => Math.max(current - 1, 0));
@@ -1539,24 +1638,71 @@ export function IntakeWizard() {
 
   if (submitted && receipt) {
     return (
-      <div className="pc-card pc-step-panel space-y-4">
-        <h2 className="text-2xl font-bold">Đã gửi bản kê khai</h2>
-        <p>
-          Mã tiếp nhận của bạn là <strong>{receipt.code}</strong>. Cán bộ sẽ gọi điện tới số{" "}
-          <strong>{draft.phone}</strong> nếu hồ sơ cần bổ sung.
-        </p>
+      <div className="pc-card pc-step-panel space-y-5 text-center">
+        {/*
+          Thông báo hoàn thành đặt giữa màn hình và nhận focus ngay.
+
+          Bản cũ chỉ là một dòng tiêu đề lẫn giữa các khối khác, nên cán bộ đi thu hồ sơ báo lại
+          là hộ dân không chắc mình đã gửi xong hay chưa. `aria-live` + `tabIndex={-1}` để trình
+          đọc màn hình đọc ngay và bàn phím nhảy đúng chỗ.
+        */}
+        <h2
+          ref={successHeadingRef}
+          tabIndex={-1}
+          className="text-2xl font-bold"
+          style={{ color: "var(--accent)", outline: "none" }}
+          aria-live="assertive"
+        >
+          KÊ KHAI THÀNH CÔNG
+        </h2>
+
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "var(--muted)" }}>
+            Mã tiếp nhận
+          </p>
+          <p className="pc-code text-2xl font-bold">{receipt.code}</p>
+          <p className="pc-field-hint">Hãy lưu mã này để tra cứu tiến độ hồ sơ.</p>
+        </div>
+
         <p style={{ color: "var(--muted)" }}>
-          Dữ liệu và ảnh giấy tờ đã được lưu vào kho của UBND phường. Giữ mã tiếp nhận và mã bí mật
-          để tra cứu trạng thái.
+          Cán bộ sẽ gọi điện tới số bạn đã cung cấp nếu hồ sơ cần bổ sung. Dữ liệu và ảnh giấy tờ đã
+          được lưu vào kho của UBND phường.
         </p>
-        <div className="flex flex-col gap-3 pt-2 sm:flex-row">
-          <Link href="/tra-cuu" className="pc-button">
+
+        {nextSubmissionError ? (
+          <p className="pc-field-error" role="alert">
+            {nextSubmissionError}
+          </p>
+        ) : null}
+
+        <div className="flex flex-col items-stretch gap-3 pt-1 sm:flex-row sm:justify-center">
+          <button type="button" className="pc-button-secondary" onClick={copyReceiptCode}>
+            {receiptCopied ? "Đã sao chép ✓" : "Sao chép mã"}
+          </button>
+          <button
+            type="button"
+            className="pc-button"
+            disabled={busy}
+            onClick={() => {
+              void startNextSubmission();
+            }}
+          >
+            {busy ? "Đang chuẩn bị…" : "Kê khai hồ sơ tiếp theo"}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+          <Link href="/tra-cuu" className="pc-button-quiet">
             Tra cứu hồ sơ
           </Link>
-          <Link href="/" className="pc-button pc-button-secondary">
+          <Link href="/" className="pc-button-quiet">
             Quay về trang chủ
           </Link>
         </div>
+
+        <p className="pc-field-hint">
+          Trang này không tự chuyển đi. Mã tiếp nhận ở trên vẫn hiển thị tới khi bạn tự rời trang.
+        </p>
       </div>
     );
   }
