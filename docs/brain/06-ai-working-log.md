@@ -4,6 +4,16 @@
 > trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
 > read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
 
+## [2026-07-29] Sửa bắt buộc 2 BLOCKER + 5 HIGH của review PR #6
+
+- **Agent:** Codex.
+- **Baseline:** branch `claude/land-declaration-process-feedback-126f2e`, HEAD `48f232d`; giữ nguyên
+  file untracked `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
+- **Sửa:** deletion-safe upload replay; assisted submit không Turnstile; exact version CAS;
+  official consent/identity gate; consent audit atomic; telemetry RLS; timeline privacy; CI PR.
+- **Test tập trung:** 53/53 pass, gồm route simulation DB commit/response mất/retry.
+- **Không làm:** merge, deploy hoặc chạy migration.
+
 ## [2026-07-28] Public Intake V2 — rút luồng kê khai công khai còn 4 bước
 
 - **Agent:** Claude Opus 5

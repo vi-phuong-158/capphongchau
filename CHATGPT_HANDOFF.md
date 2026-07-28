@@ -1,5 +1,19 @@
 # CHATGPT HANDOFF REPORT
 
+## Cập nhật 2026-07-29 — review bắt buộc PR #6
+
+- Branch: `claude/land-declaration-process-feedback-126f2e`
+- Base PR: `main` tại `79f4ae67448625c9e92fb20c356c889008a27940`
+- Baseline HEAD: `48f232d73b180acc7f4159ca0d7c95f0e6fc7c3d`
+- Commits mới: `5d8c73c`, `60be5ab`, `69c86ee`, `06f2e52`; commit docs/final HEAD báo sau push.
+- Đã đóng 2 BLOCKER + 5 HIGH; migration mới
+  `202607290001_public_upload_attempts_rls.sql` chưa chạy.
+- Baseline: lint 0 error/5 warning có sẵn; typecheck pass; 558 pass/10 skipped; build pass.
+- Regression tập trung sau sửa: 53/53 pass, gồm route simulation DB commit/response mất/retry.
+- E2E assisted đầy đủ đã thêm; chỉ chạy thật khi có rehearsal credential, không ghi pass nếu skip.
+- Không merge, deploy, chạy migration hoặc thay đổi `main`.
+- Giữ nguyên, không stage `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
+
 ## 1. Metadata
 
 - Project: Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu

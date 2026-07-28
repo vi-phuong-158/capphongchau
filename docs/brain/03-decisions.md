@@ -7,6 +7,18 @@
 > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
 > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
 
+## [2026-07-29] Đóng 2 BLOCKER và 5 HIGH của review PR #6
+
+- Upload complete tra `REQUEST_LOG` trước validation lượt mới; replay trả summary cũ và cleanup
+  luôn xác minh `isDriveFileAdopted` trước khi xóa.
+- Assisted submit có endpoint staff riêng: allowlist vai trò + staff auth + CSRF, không Turnstile;
+  self-service giữ public session + public CSRF + Turnstile.
+- PATCH dùng exact version ở route và SQL CAS. Official acceptance chặn consent thiếu, identity
+  chưa xác nhận và `QR_OVERRIDE_PENDING_REVIEW`; không backfill consent.
+- Consent audit create cùng transaction với submission/request log. Timeline public sanitize lúc
+  ghi và qua serializer allowlist lúc đọc.
+- Migration `202607290001` force RLS, revoke `anon`/`authenticated` cho telemetry, không policy.
+
 ## [2026-07-28] Consent create phải được khai báo trong request và xác minh phía server
 
 - **Quyết định:** Cả `POST /api/public/submissions` và

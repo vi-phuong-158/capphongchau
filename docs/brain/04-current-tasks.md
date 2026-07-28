@@ -8,6 +8,12 @@
 
 ---
 
+## [2026-07-29] Review bắt buộc PR #6 — đã sửa trong code
+
+Đã sửa 2 BLOCKER và 5 HIGH: upload replay, assisted submit, exact version, official gate, atomic
+consent audit, telemetry RLS và timeline privacy; đã thêm CI PR. Chưa merge/deploy/chạy migration.
+E2E assisted phải báo skipped khi thiếu rehearsal credential.
+
 ## [2026-07-28] PUBLIC INTAKE V2 — luồng kê khai công khai còn 4 bước
 
 Thi công theo `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md`, trên nhánh

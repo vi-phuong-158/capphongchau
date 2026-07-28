@@ -1,12 +1,12 @@
-# KẾ HOẠCH THI CÔNG CHI TIẾT CHO CLAUDE CODE  
+# KẾ HOẠCH THI CÔNG CHI TIẾT CHO CLAUDE CODE
 ## Tối giản luồng kê khai công khai, tăng tốc tải ảnh Google Drive và bổ sung chế độ cán bộ hỗ trợ
 
-**Dự án:** CAP Phong Châu — Hệ thống thu thập, kiểm tra hồ sơ đất đai  
-**Nguồn mã đã rà soát:** `capphongchau-main.zip` do người dùng cung cấp ngày 28/07/2026  
-**Mốc mã nguồn trong tệp ZIP:** không có thư mục `.git`, vì vậy Claude phải tự xác định commit/nhánh thật trong máy làm việc trước khi sửa  
-**Trạng thái tài liệu:** Đã chốt chủ trương nghiệp vụ, dùng làm đầu bài thi công  
-**Mức ưu tiên:** P0 — trải nghiệm người dùng và tốc độ tải ảnh  
-**Agent thực hiện:** Claude Code  
+**Dự án:** CAP Phong Châu — Hệ thống thu thập, kiểm tra hồ sơ đất đai
+**Nguồn mã đã rà soát:** `capphongchau-main.zip` do người dùng cung cấp ngày 28/07/2026
+**Mốc mã nguồn trong tệp ZIP:** không có thư mục `.git`, vì vậy Claude phải tự xác định commit/nhánh thật trong máy làm việc trước khi sửa
+**Trạng thái tài liệu:** Đã chốt chủ trương nghiệp vụ, dùng làm đầu bài thi công
+**Mức ưu tiên:** P0 — trải nghiệm người dùng và tốc độ tải ảnh
+**Agent thực hiện:** Claude Code
 **Nguyên tắc:** sửa theo từng phase, mỗi phase có test, commit độc lập, có thể rollback
 
 ---
@@ -350,7 +350,7 @@ Hiển thị ngắn gọn:
 
 Nhãn loại đất:
 
-> Ký hiệu loại đất ghi trên GCN  
+> Ký hiệu loại đất ghi trên GCN
 > Ví dụ: LUC, LUK, BHK… Không biết có thể để trống.
 
 Không hiển thị:

@@ -251,6 +251,7 @@ POST /api/public/submissions/current/no-action
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
 POST /api/public/submissions/current/submit
+POST /api/staff/assisted-submissions/current/submit
 GET /api/submissions
 GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action

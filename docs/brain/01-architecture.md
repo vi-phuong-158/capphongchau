@@ -1,5 +1,32 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-29 — review PR #6
+
+```text
+POST /api/public/submissions/current/uploads/complete
+├── findStoredMutation(PUBLIC_UPLOAD_COMPLETE) trước validation upload/replace
+├── replay → trả nguyên fileId/sizeBytes đã commit
+└── mọi lỗi cleanup → discardIfOrphan → isDriveFileAdopted → StorageRepository.discardFile
+
+POST /api/staff/assisted-submissions/current/submit
+├── requireActiveUser(ASSISTED_INTAKE_ROLES) + staff CSRF
+├── public session ký chỉ định vị submission OFFICER_ASSISTED
+└── validateCitizenSubmitDraft/files → repository.submit transaction; không Turnstile
+
+PATCH /api/public/submissions/current
+└── body.version === record.version → saveDraft(expectedVersion) → SQL WHERE version = expected
+
+completionChecks
+└── consentAccepted + identity confirmed; QR_OVERRIDE_PENDING_REVIEW là BLOCKING
+
+PublicIntakeRepository
+├── create transaction: submission + request_log + consent audit
+└── listTimeline → serializePublicTimelineEvent allowlist + sanitize legacy
+
+202607290001_public_upload_attempts_rls.sql
+└── ENABLE/FORCE RLS + REVOKE anon/authenticated; không public policy
+```
+
 ## Stack hiện tại
 
 | Layer            | Công nghệ                                                                   |
