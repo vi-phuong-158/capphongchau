@@ -115,6 +115,7 @@ function recordWith(draft: IntakeDraft, fileSummaries: PublicFileSummary[]): Sub
     officialCaseId: "",
     acceptStep: "",
     claimedBy: "officer@example.test",
+    claimedByDisplayName: "",
     claimedAt: "2026-07-28T00:00:00.000Z",
     createdAt: "2026-07-28T00:00:00.000Z",
     updatedAt: "2026-07-28T00:00:00.000Z",

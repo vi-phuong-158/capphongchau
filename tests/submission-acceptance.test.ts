@@ -25,6 +25,7 @@ function record(overrides: Partial<SubmissionRecord> = {}): SubmissionRecord {
     officialCaseId: "",
     acceptStep: "",
     claimedBy: "officer@example.com",
+    claimedByDisplayName: "",
     claimedAt: "2026-07-21T00:00:00.000Z",
     createdAt: "2026-07-21T00:00:00.000Z",
     updatedAt: "2026-07-21T00:00:00.000Z",

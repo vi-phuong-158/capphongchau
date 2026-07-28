@@ -122,6 +122,7 @@ export async function GET(
           phone: record.phone,
           version: record.version,
           claimedBy: record.claimedBy || null,
+          claimedByDisplayName: record.claimedByDisplayName || null,
           claimedAt: record.claimedAt || null,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,

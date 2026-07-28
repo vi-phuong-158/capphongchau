@@ -20,6 +20,10 @@ import {
   turnstileHostname,
   verifyTurnstileToken,
 } from "@/modules/public-intake/turnstile";
+import {
+  publicAssignedOfficer,
+  publicHasAssignedOfficer,
+} from "@/modules/submissions/assigned-officer";
 
 export const runtime = "nodejs";
 
@@ -125,6 +129,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   return NextResponse.json({
     receiptCode: activeRecord.receiptCode,
     status: activeRecord.status,
+    // Chỉ TÊN cán bộ, không bao giờ email: email công vụ đưa ra cổng công khai là địa chỉ thật
+    // có thể bị thu thập để gửi thư rác hoặc lừa đảo nhân danh phường. Hồ sơ nhận trước khi có
+    // cột tên trả `null`, giao diện hiển thị "Đã phân công cán bộ".
+    assignedOfficer: publicAssignedOfficer(activeRecord),
+    hasAssignedOfficer: publicHasAssignedOfficer(activeRecord),
     csrfToken: createPublicCsrfToken(
       environment.PUBLIC_SESSION_SECRET,
       activeRecord.submissionId,

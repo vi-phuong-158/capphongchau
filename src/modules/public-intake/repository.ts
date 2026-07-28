@@ -35,6 +35,14 @@ export interface SubmissionRecord {
   readonly officialCaseId: string;
   readonly acceptStep: string;
   readonly claimedBy: string;
+  /**
+   * Tên cán bộ tại thời điểm nhận xử lý. Rỗng với hồ sơ nhận trước 2026-07-28.
+   *
+   * Lưu tại chỗ thay vì join sang `public.users` mỗi lần đọc: tên hiển thị đổi được, và cán bộ
+   * nghỉ việc thì bản ghi `users` có thể bị vô hiệu hóa — join sẽ làm lịch sử hồ sơ mất dấu
+   * người từng xử lý.
+   */
+  readonly claimedByDisplayName: string;
   readonly claimedAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -61,6 +69,7 @@ export interface SubmissionSummary {
   readonly phone: string;
   readonly version: number;
   readonly claimedBy: string;
+  readonly claimedByDisplayName: string;
   readonly updatedAt: string;
   readonly rowIndex: number;
 }
@@ -131,6 +140,7 @@ interface SubmissionRow {
   readonly drive_folder_id: string;
   readonly accept_step: string | null;
   readonly claimed_by: string | null;
+  readonly claimed_by_display_name: string | null;
   readonly claimed_at: Date | null;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -167,7 +177,7 @@ interface FileRow {
 const SUBMISSION_SELECT = `
   submission_id, receipt_code::text, status, phone, version, access_code_hash,
   failed_attempts, locked_until, consent_version, consented_at, retention_until,
-  official_case_id, drive_folder_id, accept_step, claimed_by, claimed_at,
+  official_case_id, drive_folder_id, accept_step, claimed_by, claimed_by_display_name, claimed_at,
   created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
   citizen_payload_json, citizen_payload_version, citizen_payload_at,
   working_payload_json, working_payload_at, working_payload_by,
@@ -230,6 +240,7 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     officialCaseId: row.official_case_id ?? "",
     acceptStep: row.accept_step ?? "",
     claimedBy: row.claimed_by ?? "",
+    claimedByDisplayName: row.claimed_by_display_name ?? "",
     claimedAt: asIso(row.claimed_at),
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
@@ -568,6 +579,8 @@ export class PublicIntakeRepository {
     expectedVersion: number;
     status: PublicStatus;
     claimedBy?: string;
+    /** Truyền cùng `claimedBy`. Chuỗi rỗng nghĩa là xóa (RELEASE), `undefined` là giữ nguyên. */
+    claimedByDisplayName?: string;
     claimedAt?: string;
     force?: boolean;
     supplementRequest?: SupplementRequest;
@@ -601,6 +614,7 @@ export class PublicIntakeRepository {
         `update public.public_submissions set
            status = $3, version = version + 1,
            claimed_by = coalesce($4, claimed_by),
+           claimed_by_display_name = coalesce($8, claimed_by_display_name),
            claimed_at = coalesce($5::timestamptz, claimed_at),
            working_payload_json = case
              when working_payload_json is null then coalesce(citizen_payload_json, draft_json)
@@ -626,6 +640,7 @@ export class PublicIntakeRepository {
           input.claimedAt || null,
           input.actorEmail,
           isForce,
+          input.claimedByDisplayName ?? null,
         ],
       );
       if (!rows[0]) {
@@ -683,7 +698,12 @@ export class PublicIntakeRepository {
           (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (
           ${input.idempotencyKey}, ${input.requestId}, 'STAFF_ACTION', ${input.mutationHash},
-          ${JSON.stringify({ status: next.status, version: next.version, claimedBy: next.claimedBy || null })}::jsonb,
+          ${JSON.stringify({
+            status: next.status,
+            version: next.version,
+            claimedBy: next.claimedBy || null,
+            claimedByDisplayName: next.claimedByDisplayName || null,
+          })}::jsonb,
           now() + interval '24 hours'
         )
       `;
@@ -1144,12 +1164,13 @@ export class PublicIntakeRepository {
         phone: string;
         version: number;
         claimed_by: string | null;
+        claimed_by_display_name: string | null;
         updated_at: Date;
         legacy_row_index: string | number;
       }[]
     >`
       select submission_id, receipt_code::text, status, phone, version, claimed_by,
-        updated_at, legacy_row_index
+        claimed_by_display_name, updated_at, legacy_row_index
       from public.public_submissions order by legacy_row_index
     `;
     return rows.map((row) => ({
@@ -1159,6 +1180,7 @@ export class PublicIntakeRepository {
       phone: row.phone,
       version: row.version,
       claimedBy: row.claimed_by ?? "",
+      claimedByDisplayName: row.claimed_by_display_name ?? "",
       updatedAt: row.updated_at.toISOString(),
       rowIndex: Number(row.legacy_row_index),
     }));
@@ -1522,7 +1544,8 @@ export class PublicIntakeRepository {
           citizen_payload_json = ${JSON.stringify(input.draft)}::jsonb,
           citizen_payload_version = citizen_payload_version + 1,
           citizen_payload_at = now(),
-          accept_step = null, claimed_by = null, claimed_at = null, updated_at = now()
+          accept_step = null, claimed_by = null, claimed_by_display_name = null,
+          claimed_at = null, updated_at = now()
         where submission_id = ${input.record.submissionId} and version = ${input.record.version}
         returning version, citizen_payload_version
       `;

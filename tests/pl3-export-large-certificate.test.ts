@@ -67,6 +67,7 @@ function makeRecord(id: string, draft: IntakeDraft): SubmissionRecord {
     officialCaseId: "",
     acceptStep: "",
     claimedBy: "",
+    claimedByDisplayName: "",
     claimedAt: "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

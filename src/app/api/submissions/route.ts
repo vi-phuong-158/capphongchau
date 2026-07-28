@@ -77,6 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         issueNumber: record.draft?.certificate.issueNumber ?? "",
         ownerName: record.draft?.owners[0]?.fullName ?? "",
         claimedBy: record.claimedBy || null,
+        claimedByDisplayName: record.claimedByDisplayName || null,
         updatedAt: record.updatedAt,
         version: record.version,
       }));
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       issueNumber: display.get(summary.rowIndex)?.issueNumber ?? "",
       ownerName: display.get(summary.rowIndex)?.ownerName ?? "",
       claimedBy: summary.claimedBy || null,
+      claimedByDisplayName: summary.claimedByDisplayName || null,
       updatedAt: summary.updatedAt,
       version: summary.version,
     }));

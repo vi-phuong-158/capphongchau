@@ -97,6 +97,7 @@ function makeRecord(claimedBy: string, status: PublicStatus = "UNDER_REVIEW"): S
     officialCaseId: "",
     acceptStep: "",
     claimedBy,
+    claimedByDisplayName: claimedBy ? "Cán bộ Test" : "",
     claimedAt: claimedBy ? new Date().toISOString() : "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

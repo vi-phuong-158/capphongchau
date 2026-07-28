@@ -87,6 +87,7 @@ function makeRecord(): SubmissionRecord {
     officialCaseId: "",
     acceptStep: "",
     claimedBy: "officer@phongchau.gov.vn",
+    claimedByDisplayName: "",
     claimedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

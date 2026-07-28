@@ -11,6 +11,10 @@ import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banne
 import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
 import { WorkingPayloadEditor } from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
+import {
+  assignedOfficerAccount,
+  assignedOfficerLabel,
+} from "@/modules/submissions/assigned-officer";
 
 type Submission = {
   submissionId: string;
@@ -19,6 +23,7 @@ type Submission = {
   phone: string;
   version: number;
   claimedBy: string | null;
+  claimedByDisplayName?: string | null;
   claimedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -250,7 +255,12 @@ export function SubmissionDetail({
         }),
       });
       const data = (await response.json()) as {
-        submission?: { status: string; version: number; claimedBy?: string };
+        submission?: {
+          status: string;
+          version: number;
+          claimedBy?: string;
+          claimedByDisplayName?: string;
+        };
         error?: { message: string };
       };
       if (!response.ok || !data.submission)
@@ -262,6 +272,8 @@ export function SubmissionDetail({
               ...current,
               ...nextSubmission,
               claimedBy: nextSubmission.claimedBy ?? current.claimedBy,
+              claimedByDisplayName:
+                nextSubmission.claimedByDisplayName ?? current.claimedByDisplayName,
             }
           : current,
       );
@@ -478,8 +490,27 @@ export function SubmissionDetail({
             <dd className="font-semibold text-stone-900">{submission.phone}</dd>
           </div>
           <div>
-            <dt className="text-sm text-stone-500">Cán bộ phụ trách</dt>
-            <dd className="font-semibold text-stone-900">{submission.claimedBy ?? "Chưa nhận"}</dd>
+            <dt className="text-sm text-stone-500">Cán bộ tiếp nhận</dt>
+            {/* Tên đứng trước, email ở dòng phụ — cán bộ hỏi "ai đang xử lý", không hỏi "địa
+                chỉ thư nào". Hồ sơ nhận trước 2026-07-28 chưa có tên nên lùi về email. */}
+            <dd className="font-semibold text-stone-900">
+              {assignedOfficerLabel({
+                claimedBy: submission.claimedBy ?? "",
+                claimedByDisplayName: submission.claimedByDisplayName ?? "",
+              })}
+            </dd>
+            {assignedOfficerAccount({
+              claimedBy: submission.claimedBy ?? "",
+              claimedByDisplayName: submission.claimedByDisplayName ?? "",
+            }) ? (
+              <dd className="text-sm text-stone-500">
+                Tài khoản:{" "}
+                {assignedOfficerAccount({
+                  claimedBy: submission.claimedBy ?? "",
+                  claimedByDisplayName: submission.claimedByDisplayName ?? "",
+                })}
+              </dd>
+            ) : null}
           </div>
           <div>
             <dt className="text-sm text-stone-500">Cập nhật</dt>

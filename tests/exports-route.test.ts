@@ -126,6 +126,7 @@ function makeRecord(
     officialCaseId: "",
     acceptStep: "",
     claimedBy: "",
+    claimedByDisplayName: "",
     claimedAt: "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
