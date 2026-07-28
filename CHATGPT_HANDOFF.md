@@ -6,7 +6,7 @@
 - Branch: `claude/land-declaration-process-feedback-126f2e`
 - Base trước Codex: `de65501a0474e21b11d83d76e63070a73253110a`
 - Task: Review và sửa consent create contract, owner-ID adoption, server version; test rehearsal;
-  chia ba commit chọn lọc.
+  chia commit chọn lọc; xác minh lại từ clean worktree tại `a378fa6`.
 - Status: COMPLETED
 - Không thực hiện: push, merge, deploy, migration, cleanup dữ liệu.
 
@@ -62,8 +62,11 @@
 
 1. `1fa3c25` — `fix(public-intake): preserve consent and synchronize owner identity`
 2. `5fc836a` — `test(public-intake): cover consent adoption and rehearsal flows`
-3. `docs(public-intake): record owner-id and consent rehearsal findings`
-   - Commit chứa chính báo cáo này; hash được báo trong final chat sau khi commit.
+3. `a378fa6` — `docs(public-intake): record owner-id and consent rehearsal findings`
+4. `d83a23f` — `test(e2e): make public intake rehearsal reproducible`
+5. `7618c15` — `test(public-intake): cover adoption edge cases`
+6. `docs(public-intake): record clean rehearsal verification`
+   - Commit chứa phần cập nhật cuối của báo cáo này; hash được báo trong final chat.
 
 ## 5. Files theo commit
 
@@ -83,9 +86,17 @@
 - `tests/draft-adoption.test.ts`
 - `tests/e2e/public-intake-v2.spec.ts`
 - `tests/public-submission-create.test.ts`
+- `tests/public-current-route.test.ts`
 
 `tests/e2e/public-intake-v2.spec.ts` có thay đổi từ trước và được stage bằng `git add -p`, không
 dùng `git add .`.
+
+### Rehearsal config commit
+
+- `playwright.config.ts`
+  - local base URL và web-server URL dùng `localhost`, đồng nhất origin resumable Drive;
+  - timeout 90 giây vì rehearsal tối thiểu đo được 36,3 giây, vượt mặc định 30 giây;
+  - toàn bộ hunk được stage bằng `git add -p` sau phép thử đối chứng.
 
 ### Docs commit
 
@@ -100,13 +111,16 @@ dùng `git add .`.
 
 | Check | Result |
 |---|---|
-| Focused regression | PASS — 3 files, 18/18 tests |
+| Focused regression | PASS — 4 files, 19/19 tests |
 | `npm.cmd run typecheck` | PASS |
 | `npm.cmd run lint` | PASS — 0 error, 5 warning có sẵn |
-| `npm.cmd run test` | PASS — 61 files passed, 2 skipped; 557 passed, 10 skipped |
+| `npm.cmd run test` | PASS — 62 files passed, 2 skipped; 558 passed, 10 skipped |
 | `npm.cmd run build` | PASS — Next.js compiled, typechecked và generated 21/21 pages |
-| `git diff --check` | PASS; chỉ cảnh báo CRLF→LF |
-| Rehearsal minimal submit | PASS — đến `KÊ KHAI THÀNH CÔNG` |
+| `git diff --check` | PASS |
+| Clean worktree `a378fa6` | PASS — typecheck/lint/unit/build; 557 passed, 10 skipped |
+| Clean rehearsal | BLOCKED — không sao chép `.env.local`; fail ở environment validation |
+| Rehearsal với `127.0.0.1` | FAIL — timeout 90 giây tại upload, không có `/uploads/complete` |
+| Rehearsal với `localhost` | PASS — 1/1 trong 36,3 giây |
 
 Rehearsal dùng fixture không PII và cấu hình rehearsal hiện có. Không cleanup dữ liệu sau test theo
 yêu cầu.
@@ -122,16 +136,17 @@ yêu cầu.
 | Adoption giữ phone và consent | PASS |
 | Adoption không mất trường local | PASS |
 | Adoption/PATCH cập nhật đúng server version | PASS |
+| Adoption nhiều owner/parcel/land-use | PASS |
+| Stale public PATCH trả 409 và không gọi `saveDraft` | PASS |
+| Recovery dùng nguyên object snapshot server | PASS |
 | Request thiếu consent có regression test | PASS |
 | Typecheck/lint/unit/build/diff check | PASS |
 | Không push/deploy/migration/cleanup | PASS |
 
 ## 8. Remaining working-tree changes
 
-- `playwright.config.ts`: thay đổi có trước của người dùng; không stage vì chưa chứng minh hunk thuộc
-  nhiệm vụ.
 - `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`: file untracked có trước của người dùng; không stage.
-- `next-env.d.ts`: không stage; sau build hiện không còn diff.
+- `next-env.d.ts`: file sinh bởi `next dev/build` đã được trả về baseline; không stage.
 
 ## 9. Important diff
 
@@ -162,6 +177,8 @@ yêu cầu.
 - Đã đọc và tuân thủ AGENTS, workflow handoff, PLAN và docs/brain.
 - Không dùng `git add .`.
 - E2E file có thay đổi từ trước được stage bằng `git add -p`.
-- Không stage `playwright.config.ts`, `next-env.d.ts` hoặc evidence có sẵn.
+- `playwright.config.ts` chỉ được stage bằng `git add -p` sau khi đối chứng chứng minh cả origin và
+  timeout đều cần thiết.
+- Không stage `next-env.d.ts` hoặc evidence có sẵn.
 - Không push, merge, deploy, migration hoặc cleanup dữ liệu.
 - Không đưa secret, token, Drive ID, QR raw hoặc PII vào source/report.

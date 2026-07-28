@@ -2223,3 +2223,22 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Test:** 18/18 test tập trung pass, gồm public/assisted thiếu consent và ba test adoption.
   Rehearsal submit tối thiểu pass đến `KÊ KHAI THÀNH CÔNG`. Bộ typecheck/lint/unit/build đầy đủ
   được chạy lại trước commit. Không migration, cleanup, deploy hoặc push.
+
+## [2026-07-29] Xác minh clean checkout và khóa adoption edge cases
+
+- **Agent:** Codex
+- **Baseline:** Nhánh `claude/land-declaration-process-feedback-126f2e`, HEAD `a378fa6`; working
+  tree ban đầu chỉ có `playwright.config.ts` đã sửa và
+  `evidence/BUG_OWNER_ID_RACE_HANDOFF.md` untracked.
+- **Clean verification:** Worktree sibling tách biệt tại đúng `a378fa6`; `npm ci`, typecheck,
+  lint, 557 unit pass/10 skipped và build đều đạt. Rehearsal thật không được cấp credential vào
+  worktree sạch vì không sao chép `.env.local`.
+- **Đối chứng E2E:** Cùng server/credential, test tối thiểu dùng `127.0.0.1` timeout sau 90 giây
+  tại upload; đổi duy nhất browser URL sang `localhost` pass 1/1 trong 36,3 giây. Vì vậy commit
+  `d83a23f` giữ cả origin `localhost` và timeout 90 giây; hunk được stage bằng `git add -p`.
+- **Test bổ sung:** `adoptServerDraftSnapshot()` nay khóa nhiều owner, nhiều parcel, nhiều
+  land-use, giữ local fields, đồng bộ toàn bộ server ID/version và recovery dùng nguyên snapshot.
+  Route-level test xác nhận PATCH version quá cũ trả `409 VERSION_CONFLICT` và không gọi
+  `saveDraft`.
+- **Kết quả HEAD mới:** focused 19/19; typecheck đạt; lint 0 error/5 warning có sẵn; unit 558
+  pass/10 skipped; build đạt. Không push, merge, deploy, migration hoặc cleanup dữ liệu.
