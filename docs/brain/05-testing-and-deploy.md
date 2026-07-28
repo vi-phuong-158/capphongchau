@@ -126,7 +126,7 @@ npm run build
 npm run test:e2e
 ```
 
-PR chạy `.github/workflows/ci.yml` trên Node 22 với cấu hình mẫu không-production: `npm ci`, lint,
+PR chạy `.github/workflows/ci.yml` trên Node 24 với cấu hình mẫu không-production: `npm ci`, lint,
 typecheck, unit, build, `git diff --check` và kiểm whitespace toàn diff PR. Không dùng credential
 production trong CI.
 
