@@ -199,7 +199,7 @@ export class PublicIntakeStorage {
     let pageToken: string | undefined;
     do {
       const page = await drive.files.list({
-        q: `'${folderId}' in parents and trashed = false`,
+        q: `'${escapeQueryValue(folderId)}' in parents and trashed = false`,
         fields: "nextPageToken, files(id, size)",
         pageSize: 200,
         pageToken,
@@ -210,6 +210,23 @@ export class PublicIntakeStorage {
       pageToken = page.data.nextPageToken ?? undefined;
     } while (pageToken);
     return found;
+  }
+
+  /**
+   * Tệp này có nằm trong đúng thư mục của bản kê khai đang gọi hay không.
+   *
+   * Tách khỏi `verifyUploadedFile` vì hai câu hỏi khác nhau: `verifyUploadedFile` hỏi "tệp có đạt
+   * để nhận vào hồ sơ không" (định dạng, dung lượng, checksum), còn hàm này chỉ hỏi "tệp có thuộc
+   * hộ dân đang gọi không" — dùng ngay trước khi XÓA. Một tệp sai định dạng vẫn thuộc thư mục của
+   * người gọi và vẫn được xóa; một tệp đúng định dạng nhưng nằm ở thư mục hộ khác thì tuyệt đối
+   * không.
+   *
+   * Ném lỗi được coi là "không xác nhận được" ở phía gọi, và phía gọi phải nghiêng về GIỮ tệp.
+   */
+  async isFileInFolder(driveFileId: string, folderId: string): Promise<boolean> {
+    const { drive } = createGoogleWorkspaceClient(this.credentials);
+    const response = await drive.files.get({ fileId: driveFileId, fields: "id,parents" });
+    return response.data.parents?.includes(folderId) === true;
   }
 
   /** Tệp không đạt xác minh phải rời khỏi Drive ngay, không để tích rác (PLAN_NL §6.3). */

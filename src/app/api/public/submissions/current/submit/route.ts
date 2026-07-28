@@ -150,14 +150,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // Chỉ băm CCCD **hợp lệ**. Trước V2 mọi owner cá nhân đều được băm; khi CCCD được phép để trống,
-  // băm chuỗi rỗng sẽ cho mọi hồ sơ không nhập CCCD cùng một khóa tra cứu — đụng nhau hàng loạt.
-  const pendingIdentityHmacs =
-    status === "SUBMITTED"
-      ? citizenIdsForLookup(draft).map((identityNumber) =>
-          identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
-        )
-      : undefined;
+  /*
+   * Chỉ băm CCCD **hợp lệ**. Trước V2 mọi owner cá nhân đều được băm; khi CCCD được phép để trống,
+   * băm chuỗi rỗng sẽ cho mọi hồ sơ không nhập CCCD cùng một khóa tra cứu — đụng nhau hàng loạt.
+   *
+   * Ghi cho CẢ `RESUBMITTED`, không riêng `SUBMITTED` (quyết định 2026-07-29). Ở MỨC A, CCCD là
+   * tùy chọn, nên tình huống rất thường gặp là người dân gửi lần đầu không có CCCD, bị yêu cầu bổ
+   * sung, rồi mới điền ở lần gửi lại — đúng lần mà điều kiện `=== "SUBMITTED"` cũ bỏ qua. Cùng dữ
+   * liệu, cùng cửa vào, cùng người khai thì không có lý do gì phân biệt. Insert dùng
+   * `on conflict do nothing` nên ghi lại ở mỗi lần gửi bổ sung là vô hại.
+   */
+  const pendingIdentityHmacs = citizenIdsForLookup(draft).map((identityNumber) =>
+    identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
+  );
 
   try {
     await repository.submit({

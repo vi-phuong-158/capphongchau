@@ -8,7 +8,20 @@
 
 ---
 
-## [2026-07-29] Review bắt buộc PR #6 — đã sửa trong code
+## [2026-07-29] Review PR #6 vòng hai — đã sửa trong code
+
+Đã sửa 3 phát hiện chính (xóa nhầm tệp Drive của hộ khác; RLS `force` làm telemetry hỏng im lặng;
+409 giả làm người dân kẹt) và 4 phát hiện phụ (trần bảng số đo, so sánh sâu `hasLocalChanges`,
+escape truy vấn Drive, guard môi trường cho script xóa dữ liệu E2E). Test 590 pass/10 skipped.
+Chưa merge, chưa push, chưa deploy, chưa chạy migration.
+
+### Chỉ mục tra cứu CCCD — ĐÃ CHỐT VÀ ĐÃ LÀM
+
+Người dùng chốt ngày 2026-07-29: CCCD vào `public_lookup_index` với `kind = 'PENDING'`, ghi ở cả
+`RESUBMITTED` và ở cả ba đường ghi của cán bộ. Chi tiết và lý do ở `03-decisions.md` cùng ngày.
+Trước đó hồ sơ MỨC A không có CCCD lúc gửi đầu sẽ không bao giờ vào chỉ mục.
+
+## [2026-07-29] Review bắt buộc PR #6 — đã sửa trong code (vòng một)
 
 Đã sửa 2 BLOCKER và 5 HIGH: upload replay, assisted submit, exact version, official gate, atomic
 consent audit, telemetry RLS và timeline privacy; đã thêm CI PR. Chưa merge/deploy/chạy migration.

@@ -743,80 +743,6 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const checklist = useMemo(() => submitChecklist(validationInput), [validationInput]);
   const optionalItems = useMemo(() => optionalSummary(draft), [draft]);
 
-  /** Lưu nháp lên server. Chỉ gọi khi chuyển bước để giữ số lần ghi Sheets ở mức thấp. */
-  const saveDraft = useCallback(
-    async (draftToSave: IntakeDraft = draft): Promise<boolean> => {
-      if (!csrfToken) {
-        return true;
-      }
-
-      setSaveStatus("SAVING");
-      try {
-        const response = await fetchApi("/api/public/submissions/current", {
-          method: "PATCH",
-          headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
-          body: JSON.stringify({
-            draft: withCertificateMetadata(draftToSave, certificatePhotos),
-            version: serverVersion,
-          }),
-        });
-
-        if (!response.ok) {
-          setSaveStatus("FAILED");
-          setServerError(await readErrorMessage(response, "Chưa lưu được. Thử lại sau ít phút."));
-          return false;
-        }
-
-        const saved = (await response.json()) as { version?: unknown };
-        if (
-          typeof saved.version !== "number" ||
-          !Number.isInteger(saved.version) ||
-          saved.version < 1
-        ) {
-          setSaveStatus("FAILED");
-          setServerError("Máy chủ không trả phiên bản bản kê khai hợp lệ. Vui lòng thử lại.");
-          return false;
-        }
-
-        setServerVersion(saved.version);
-        setSaveStatus("SAVED");
-        setServerError("");
-        // Chỉ hạ cờ khi máy chủ đã nhận. Lưu hỏng mà hạ cờ là mất dữ liệu im lặng ở lần sau.
-        draftDirtyRef.current = false;
-        return true;
-      } catch {
-        setSaveStatus("OFFLINE");
-        setServerError("Mất kết nối. Dữ liệu bạn nhập vẫn còn trên màn hình, đừng đóng trang.");
-        return false;
-      }
-    },
-    [csrfToken, draft, certificatePhotos, serverVersion],
-  );
-
-  /**
-   * Lưu nháp **một lần** cho mỗi lô thay đổi.
-   *
-   * Hai việc:
-   * - bỏ qua hoàn toàn nếu bản nháp không đổi từ lần lưu trước (tải ảnh mặt sau ngay sau mặt
-   *   trước không PATCH lại);
-   * - gộp các lời gọi chồng nhau vào cùng một request đang bay, thay vì bắn song song rồi để hai
-   *   response ghi đè nhau theo thứ tự ngẫu nhiên.
-   */
-  const savePromiseRef = useRef<Promise<boolean> | null>(null);
-
-  const flushDraft = useCallback(
-    async (options?: { force?: boolean }): Promise<boolean> => {
-      if (!options?.force && !draftDirtyRef.current) return true;
-      if (savePromiseRef.current) return savePromiseRef.current;
-      const promise = saveDraft().finally(() => {
-        savePromiseRef.current = null;
-      });
-      savePromiseRef.current = promise;
-      return promise;
-    },
-    [saveDraft],
-  );
-
   /**
    * Lấy bản nháp mà máy chủ đang giữ về máy.
    *
@@ -826,20 +752,27 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
    *
    * Ở lần khôi phục (`recovered`), bản của máy chủ còn là bản duy nhất có dữ liệu đã lưu trước
    * đó — nên phải lấy về, không được đẩy bản rỗng trên máy lên đè.
+   *
+   * Trả về bản nháp và version vừa nhận thay vì chỉ `true`/`false`: `setServerVersion` là state
+   * setter nên giá trị mới **không** thấy được trong cùng closure đang chạy. `saveDraft` cần con
+   * số đó ngay để thử lại PATCH sau một lần 409, nên nó phải đi ra theo đường trả về. Vẫn dùng
+   * được như boolean ở các chỗ gọi cũ vì thất bại trả `null`.
    */
   const adoptServerDraft = useCallback(
-    async (options?: { localDraft?: IntakeDraft }): Promise<boolean> => {
+    async (options?: {
+      localDraft?: IntakeDraft;
+    }): Promise<{ draft: IntakeDraft; version: number } | null> => {
       try {
         const response = await fetchApi("/api/public/submissions/current", { method: "GET" });
         if (!response.ok) {
-          return false;
+          return null;
         }
         const body = (await response.json()) as {
           draft: (IntakeDraft & { owners?: unknown }) | null;
           files?: ServerFileSummary[];
           version?: unknown;
         };
-        if (!body.draft || !Array.isArray(body.draft.owners)) return false;
+        if (!body.draft || !Array.isArray(body.draft.owners)) return null;
         // Nháp lưu trước 2026-07-22 mang mã vai trò cũ, không còn trong danh mục PL3. Đổi ngay lúc
         // tải về, nếu không ô "Vai trò trên GCN" hiện trống và người dân không hiểu vì sao.
         const serverDraft = {
@@ -854,7 +787,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           serverVersion: body.version,
           localDraft: options?.localDraft,
         });
-        if (!adopted) return false;
+        if (!adopted) return null;
         const restoredDraft = adopted.draft;
         setDraft(restoredDraft);
         setServerVersion(adopted.version);
@@ -888,13 +821,112 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         setCertificatePhotos(
           applyCertMeta(restoredCertificates, restoredDraft.certificateFileMetadata),
         );
-        return true;
+        return { draft: restoredDraft, version: adopted.version };
       } catch {
-        return false;
+        return null;
       }
     },
     [],
   );
+
+  /** Lưu nháp lên server. Chỉ gọi khi chuyển bước để giữ số lần ghi Sheets ở mức thấp. */
+  const saveDraft = useCallback(
+    async (draftToSave: IntakeDraft = draft): Promise<boolean> => {
+      if (!csrfToken) {
+        return true;
+      }
+
+      // `version` có thể là `null` khi chưa nhận được snapshot nào; máy chủ trả 409 và nhánh phục
+      // hồi bên dưới lấy đúng version rồi thử lại, thay vì thất bại thẳng như trước.
+      const patch = (payload: IntakeDraft, version: number | null): Promise<Response> =>
+        fetchApi("/api/public/submissions/current", {
+          method: "PATCH",
+          headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
+          body: JSON.stringify({
+            draft: withCertificateMetadata(payload, certificatePhotos),
+            version,
+          }),
+        });
+
+      setSaveStatus("SAVING");
+      try {
+        let response = await patch(draftToSave, serverVersion);
+
+        /*
+         * 409 = version trên máy chủ khác version trên máy. Máy chủ kiểm khớp TUYỆT ĐỐI, nên
+         * nguyên nhân thường gặp nhất KHÔNG phải "hai thiết bị cùng sửa" mà là: một lần PATCH đã
+         * ghi xong nhưng response rơi mất trên mạng yếu — lần thử lại gửi đúng version cũ và bị
+         * từ chối. Trước đây người dân kẹt luôn ở bước đó, kèm một thông báo sai sự thật.
+         *
+         * Xử lý: lấy lại snapshot máy chủ, gộp dữ liệu đang có trên máy lên trên (chính
+         * `adoptServerDraftSnapshot` với `localDraft`), rồi thử lại đúng MỘT lần. Trường hợp mất
+         * response tự gỡ được vì snapshot mới chính là thứ vừa ghi. Nếu thật sự có thiết bị thứ
+         * hai đang sửa thì lần hai vẫn 409 và thông báo gốc được hiển thị — không nuốt lỗi thật,
+         * cũng không lặp vô hạn.
+         */
+        if (response.status === 409) {
+          const adopted = await adoptServerDraft({ localDraft: draftToSave });
+          if (adopted) {
+            response = await patch(adopted.draft, adopted.version);
+          }
+        }
+
+        if (!response.ok) {
+          setSaveStatus("FAILED");
+          setServerError(await readErrorMessage(response, "Chưa lưu được. Thử lại sau ít phút."));
+          return false;
+        }
+
+        const saved = (await response.json()) as { version?: unknown };
+        if (
+          typeof saved.version !== "number" ||
+          !Number.isInteger(saved.version) ||
+          saved.version < 1
+        ) {
+          setSaveStatus("FAILED");
+          setServerError("Máy chủ không trả phiên bản bản kê khai hợp lệ. Vui lòng thử lại.");
+          return false;
+        }
+
+        setServerVersion(saved.version);
+        setSaveStatus("SAVED");
+        setServerError("");
+        // Chỉ hạ cờ khi máy chủ đã nhận. Lưu hỏng mà hạ cờ là mất dữ liệu im lặng ở lần sau.
+        draftDirtyRef.current = false;
+        return true;
+      } catch {
+        setSaveStatus("OFFLINE");
+        setServerError("Mất kết nối. Dữ liệu bạn nhập vẫn còn trên màn hình, đừng đóng trang.");
+        return false;
+      }
+    },
+    [csrfToken, draft, certificatePhotos, serverVersion, adoptServerDraft],
+  );
+
+  /**
+   * Lưu nháp **một lần** cho mỗi lô thay đổi.
+   *
+   * Hai việc:
+   * - bỏ qua hoàn toàn nếu bản nháp không đổi từ lần lưu trước (tải ảnh mặt sau ngay sau mặt
+   *   trước không PATCH lại);
+   * - gộp các lời gọi chồng nhau vào cùng một request đang bay, thay vì bắn song song rồi để hai
+   *   response ghi đè nhau theo thứ tự ngẫu nhiên.
+   */
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+
+  const flushDraft = useCallback(
+    async (options?: { force?: boolean }): Promise<boolean> => {
+      if (!options?.force && !draftDirtyRef.current) return true;
+      if (savePromiseRef.current) return savePromiseRef.current;
+      const promise = saveDraft().finally(() => {
+        savePromiseRef.current = null;
+      });
+      savePromiseRef.current = promise;
+      return promise;
+    },
+    [saveDraft],
+  );
+
 
   useEffect(() => {
     let recovery: {

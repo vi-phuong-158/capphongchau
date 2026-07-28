@@ -166,6 +166,35 @@ export function buildUploadAttemptMetric(input: BuildMetricInput): UploadAttempt
   };
 }
 
+/**
+ * Báo một lần khi đường ghi số đo hỏng.
+ *
+ * Cả hai chỗ gọi `appendUploadAttempt` đều nuốt lỗi có chủ đích — một lượt tải ảnh đã thành công
+ * không được hỏng vì bảng phụ. Nhưng nuốt mà không báo gì thì một bảng hỏng (thiếu migration, sai
+ * quyền, sai RLS) nằm im hàng tháng, và lúc cần nghiệm thu ngưỡng hiệu năng mới phát hiện không có
+ * số nào. Ghi **một** dòng cho mỗi tiến trình là đủ để thấy trong log Vercel mà không làm ngập log
+ * khi sự cố kéo dài.
+ *
+ * Chỉ ghi mã lỗi Postgres (`42501`, `42P01`…), **không** ghi `error.message`: thông báo lỗi
+ * Postgres có thể nhắc lại giá trị của dòng vừa insert.
+ */
+let uploadMetricFailureReported = false;
+
+export function reportUploadMetricFailure(error: unknown): void {
+  if (uploadMetricFailureReported) return;
+  uploadMetricFailureReported = true;
+  const code = (error as { code?: unknown } | null)?.code;
+  console.error(
+    "[upload-metrics] Không ghi được public_upload_attempts; số đo tải ảnh đang mất. " +
+      `pg_code=${typeof code === "string" ? code : "UNKNOWN"}`,
+  );
+}
+
+/** Chỉ dùng trong test: đặt lại cờ "đã báo" để mỗi ca kiểm tra chạy độc lập. */
+export function resetUploadMetricFailureReport(): void {
+  uploadMetricFailureReported = false;
+}
+
 export interface FileNormalizationMetadata {
   readonly sourceSizeBytes: number | null;
   readonly sourceMimeType: string | null;

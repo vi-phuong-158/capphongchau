@@ -4,6 +4,46 @@
 > trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
 > read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
 
+## [2026-07-29] Review PR #6 vòng hai — sửa 3 phát hiện chính + 4 phát hiện phụ
+
+- **Agent:** Claude Code.
+- **Baseline:** branch `claude/land-declaration-process-feedback-126f2e`, HEAD `45b7fc9`;
+  typecheck pass, lint 0 error/5 warning có sẵn, test 570 pass/10 skipped, build pass.
+- **Thay đổi:**
+  - `isDriveFileAdopted` bỏ lọc `submission_id` (hỏi toàn bảng), và `discardIfOrphan` thêm điều
+    kiện tệp phải nằm đúng thư mục Drive của hồ sơ đang gọi (`storage.isFileInFolder`);
+  - migration `202607290001` bỏ `force row level security` (lệch mẫu 8 bảng còn lại, và có thể
+    làm mọi insert số đo thất bại trong im lặng); hai chỗ nuốt lỗi đổi sang
+    `reportUploadMetricFailure` — log một lần mỗi tiến trình, chỉ ghi mã lỗi Postgres;
+  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại **một lần** khi PATCH trả 409;
+    `adoptServerDraft` trả `{draft, version}` thay vì boolean;
+  - `appendUploadAttempt` có trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200`;
+  - `hasLocalChanges` so sánh sâu thay cho `JSON.stringify` (nhạy thứ tự khóa);
+  - `listFolderFileIds` escape `folderId` bằng `escapeQueryValue` có sẵn;
+  - `cleanup-e2e-preview-data.ts` từ chối chạy khi `NODE_ENV=production` hoặc `APP_BASE_URL`
+    không giống môi trường thử, trừ khi có cờ `--i-know-this-is-not-preview`.
+- **File đã sửa:** `src/modules/public-intake/{repository,storage,upload-metrics,draft-adoption}.ts`,
+  `src/app/api/public/submissions/current/uploads/{complete,metrics}/route.ts`,
+  `src/app/ke-khai/wizard.tsx`, `supabase/migrations/202607290001_public_upload_attempts_rls.sql`,
+  `scripts/cleanup-e2e-preview-data.ts`, `tests/pr6-review-round-two.test.ts` (mới),
+  `tests/public-upload-{complete-route,legacy-draft}.test.ts`.
+- **Lý do:** xem `docs/brain/03-decisions.md` cùng ngày — trọng tâm là hai chỗ có thể **mất dữ
+  liệu** (xóa nhầm tệp Drive của hộ khác; telemetry hỏng im lặng) và một chỗ làm người dân **kẹt
+  giữa chừng** (409 giả trên mạng yếu).
+- **Kiểm tra:** typecheck pass; lint 0 error/5 warning có sẵn; test 590 pass/10 skipped
+  (+20 test so với baseline); build pass. Test đặc tả cũ được **siết chặt** theo bất biến mới, không
+  nới lỏng: `tests/public-upload-complete-route.test.ts` giờ khẳng định truy vấn adopt KHÔNG chứa
+  `submission_id`.
+  - sau khi người dùng chốt: CCCD vào `public_lookup_index` với `kind = 'PENDING'` — ghi ở cả
+    `RESUBMITTED` (bỏ điều kiện `status === "SUBMITTED"`) và ở cả ba đường ghi của cán bộ
+    (`commitStaffDraftEdit`, `commitWorkingPayload`, `commitOfficialAmendment`); route tính HMAC,
+    repository vẫn không đọc biến môi trường.
+- **File đã sửa (bổ sung cho phần chỉ mục):** `src/app/api/public/submissions/current/submit/route.ts`,
+  `src/app/api/staff/assisted-submissions/current/submit/route.ts`,
+  `src/app/api/submissions/[submissionId]/{route,working-payload/route,ai-draft/apply/route}.ts`,
+  `tests/working-payload.test.ts`.
+- **Không làm:** merge, deploy, chạy migration.
+
 ## [2026-07-29] Sửa bắt buộc 2 BLOCKER + 5 HIGH của review PR #6
 
 - **Agent:** Codex.

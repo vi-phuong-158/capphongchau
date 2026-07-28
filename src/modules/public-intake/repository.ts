@@ -29,6 +29,15 @@ export type { PublicStatus } from "./workflow";
  * của mình, làm mất luôn ý nghĩa của việc phân biệt nguồn.
  */
 export const INTAKE_CHANNELS = ["SELF_SERVICE", "OFFICER_ASSISTED"] as const;
+
+/**
+ * Trần số bản ghi số đo tải ảnh cho MỘT hồ sơ.
+ *
+ * Đặt rất cao so với thực tế (một hộ tối đa 2 ảnh CCCD mỗi chủ sử dụng + 10 ảnh GCN, kể cả mạng
+ * rất tệ cũng chỉ vài chục lượt kể cả thử lại). Trần này không nhằm giới hạn người dân mà nhằm
+ * chặn một phiên hợp lệ bơm vô hạn dòng vào bảng qua `/uploads/metrics`.
+ */
+export const MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200;
 export type IntakeChannel = (typeof INTAKE_CHANNELS)[number];
 
 /** Cán bộ ngồi nhập hộ. Mọi trường do máy chủ điền từ phiên đăng nhập. */
@@ -776,6 +785,14 @@ export class PublicIntakeRepository {
     requestId: string;
     idempotencyKey: string;
     mutationHash: string;
+    /**
+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
+     *
+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
+     */
+    pendingIdentityHmacs?: string[];
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -805,7 +822,12 @@ export class PublicIntakeRepository {
       const next = mapSubmission(rows[0]);
 
       if (input.record.status !== "DRAFT") {
-        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+        await this.refreshCanonicalProjection(
+          transaction,
+          input.record.submissionId,
+          input.draft,
+          input.pendingIdentityHmacs,
+        );
       }
 
       await this.insertAudit(transaction, {
@@ -849,6 +871,14 @@ export class PublicIntakeRepository {
       jobId: string;
       appliedFieldPaths: readonly string[];
     };
+    /**
+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
+     *
+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
+     */
+    pendingIdentityHmacs?: string[];
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -897,7 +927,12 @@ export class PublicIntakeRepository {
       `;
 
       if (input.record.status !== "DRAFT") {
-        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+        await this.refreshCanonicalProjection(
+          transaction,
+          input.record.submissionId,
+          input.draft,
+          input.pendingIdentityHmacs,
+        );
       }
 
       await this.insertAudit(transaction, {
@@ -971,6 +1006,14 @@ export class PublicIntakeRepository {
     requestId: string;
     idempotencyKey: string;
     mutationHash: string;
+    /**
+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
+     *
+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
+     */
+    pendingIdentityHmacs?: string[];
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -1011,7 +1054,12 @@ export class PublicIntakeRepository {
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
 
-      await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+      await this.refreshCanonicalProjection(
+          transaction,
+          input.record.submissionId,
+          input.draft,
+          input.pendingIdentityHmacs,
+        );
 
       const counts = await syncOfficialRecord(transaction, {
         caseId: next.officialCaseId,
@@ -1484,12 +1532,18 @@ export class PublicIntakeRepository {
    * Dùng để quyết định có được xóa tệp trên Drive khi đường ghi hỏng hay không. Đọc **mọi** trạng
    * thái, kể cả `REPLACED`/`DELETED`: một tệp đã bị thay vẫn là tệp đã từng được nhận, và xóa nó
    * khỏi Drive sẽ làm mất bằng chứng của hồ sơ.
+   *
+   * CỐ Ý KHÔNG lọc theo `submission_id`. Câu hỏi cần trả lời trước khi xóa là "có hồ sơ NÀO đang
+   * trỏ vào tệp này không", không phải "hồ sơ đang gọi có trỏ vào nó không". Lọc theo hồ sơ gọi
+   * thì một `driveFileId` do client gửi lên trỏ sang hồ sơ khác sẽ bị coi là mồ côi và bị xóa —
+   * mất bằng chứng của một hộ dân không liên quan. `driveFileId` tại các nhánh dọn dẹp trong
+   * `uploads/complete` là dữ liệu client chưa qua xác minh, nên hàng rào phải nằm ở đây.
    */
-  async isDriveFileAdopted(submissionId: string, driveFileId: string): Promise<boolean> {
+  async isDriveFileAdopted(driveFileId: string): Promise<boolean> {
     const database = getDatabase();
     const rows = await database<{ count: string }[]>`
       select count(*)::text as count from public.public_files
-      where submission_id = ${submissionId} and drive_file_id = ${driveFileId}
+      where drive_file_id = ${driveFileId}
     `;
     return Number(rows[0]?.count ?? "0") > 0;
   }
@@ -1498,6 +1552,12 @@ export class PublicIntakeRepository {
    * Ghi một lượt tải vào bảng số đo. Best-effort ở phía gọi — hàm này vẫn ném lỗi để bên gọi tự
    * quyết định nuốt, chứ không tự nuốt ở đây (nuốt trong repository là cách chắc chắn để một bảng
    * hỏng nằm im hàng tháng mà không ai biết).
+   *
+   * Trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION` áp ngay trong câu lệnh, không phải một lượt `select`
+   * riêng: `/uploads/metrics` nhận số đo của các lượt HỎNG nên không có gì buộc client phải dừng,
+   * và một phiên hợp lệ có thể bắn bao nhiêu bản ghi tùy ý. Một hộ dân thật tối đa vài chục lượt
+   * kể cả khi mạng rất tệ, nên trần này không chạm dữ liệu thật; nó chỉ chặn việc bơm hàng loạt
+   * dòng rác vào cơ sở dữ liệu.
    */
   async appendUploadAttempt(metric: UploadAttemptMetric): Promise<void> {
     const database = getDatabase();
@@ -1507,14 +1567,18 @@ export class PublicIntakeRepository {
         prepare_duration_ms, initiate_duration_ms, upload_duration_ms, complete_duration_ms,
         retry_count, client_platform, effective_connection_type, normalization_version,
         failure_stage, failure_code
-      ) values (
+      )
+      select
         ${metric.attemptId}, ${metric.submissionId}, ${metric.documentType}, ${metric.outcome},
         ${metric.sourceSizeBytes}, ${metric.uploadSizeBytes},
         ${metric.prepareDurationMs}, ${metric.initiateDurationMs},
         ${metric.uploadDurationMs}, ${metric.completeDurationMs},
         ${metric.retryCount}, ${metric.clientPlatform}, ${metric.effectiveConnectionType},
         ${metric.normalizationVersion}, ${metric.failureStage}, ${metric.failureCode}
-      )
+      where (
+        select count(*) from public.public_upload_attempts
+        where submission_id = ${metric.submissionId}
+      ) < ${MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION}
       on conflict (attempt_id) do nothing
     `;
   }

@@ -6,6 +6,7 @@ import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { publicError, resolvePublicRequest } from "@/modules/public-intake/route-context";
 import {
   buildUploadAttemptMetric,
+  reportUploadMetricFailure,
   uploadFailureMetricSchema,
 } from "@/modules/public-intake/upload-metrics";
 
@@ -62,7 +63,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         failureCode: input.failureCode ?? "",
       }),
     )
-    .catch(() => undefined);
+    .catch(reportUploadMetricFailure);
 
   return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } });
 }

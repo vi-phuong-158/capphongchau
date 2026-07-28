@@ -17,11 +17,12 @@ import {
 import type { IntakeDraft } from "@/modules/public-intake/types";
 import { isOrganisationOwner } from "@/modules/public-intake/types";
 import {
+  citizenIdsForLookup,
   CITIZEN_ID_PATTERN,
   isValidDate,
   ORGANISATION_ID_PATTERN,
 } from "@/modules/public-intake/validation";
-import { newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
+import { identityHmac, newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
 import { payloadLayerOf } from "@/modules/public-intake/payload-layers";
 import {
   isOwnerIdentityQrConfirmed,
@@ -435,6 +436,19 @@ export async function PATCH(
           }
         : changes;
 
+    /*
+     * Cán bộ sửa/điền CCCD mà người dân để trống ở MỨC A thì hồ sơ phải vào chỉ mục tra cứu ngay
+     * tại đây. Trước V2 mọi hồ sơ đều có CCCD lúc gửi nên chỉ cần ghi ở `submit`; từ khi CCCD là
+     * tùy chọn, đường của cán bộ là đường DUY NHẤT mà một số CCCD có thể xuất hiện lần đầu.
+     *
+     * Dùng `kind = 'PENDING'` y như người dân tự khai (quyết định 2026-07-29): chỉ mục trả lời
+     * "có hồ sơ nào đang gắn với CCCD này", không phân biệt ai gõ vào ô đó. Insert dùng
+     * `on conflict do nothing` nên ghi lại ở mỗi lần sửa là vô hại.
+     */
+    const pendingIdentityHmacs = citizenIdsForLookup(draft).map((identityNumber) =>
+      identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
+    );
+
     const updated = isAmendment
       ? await repository.commitOfficialAmendment({
           record,
@@ -451,6 +465,7 @@ export async function PATCH(
           requestId,
           idempotencyKey: scopedIdempotencyKey,
           mutationHash,
+          pendingIdentityHmacs,
         })
       : await repository.commitStaffDraftEdit({
           record,
@@ -466,6 +481,7 @@ export async function PATCH(
           requestId,
           idempotencyKey: scopedIdempotencyKey,
           mutationHash,
+          pendingIdentityHmacs,
         });
 
     return NextResponse.json(

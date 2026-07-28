@@ -64,6 +64,33 @@ function preserveLocalFields(local: IntakeDraft, server: IntakeDraft): IntakeDra
 }
 
 /**
+ * So sánh sâu, không phụ thuộc thứ tự khóa.
+ *
+ * `JSON.stringify(a) !== JSON.stringify(b)` đọc thì gọn nhưng nhạy với **thứ tự chèn khóa**:
+ * `preserveLocalFields` dựng đối tượng bằng `{...server, ...local}`, nên hôm nay thứ tự trùng
+ * server và phép so sánh đúng. Chỉ cần một trường mới xuất hiện ở một phía là thứ tự lệch và
+ * `hasLocalChanges` báo "có thay đổi" cho hai bản nháp giống hệt nhau — hệ quả là một PATCH thừa
+ * mỗi lần khôi phục phiên. Giá trị này quyết định có ghi đè dữ liệu người dân hay không, nên nó
+ * không nên phụ thuộc vào chi tiết dựng đối tượng ở nơi khác.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => deepEqual(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(
+    (key) => Object.prototype.hasOwnProperty.call(right, key) && deepEqual(left[key], right[key]),
+  );
+}
+
+/**
  * Nhận snapshot GET `/current`: version luôn thuộc server; dữ liệu local chỉ được giữ ở lần
  * CREATE, còn các ID sinh phía server được thay vào theo vị trí để upload sau đó tham chiếu đúng.
  */
@@ -85,6 +112,6 @@ export function adoptServerDraftSnapshot(
   return {
     draft,
     version: input.serverVersion,
-    hasLocalChanges: JSON.stringify(draft) !== JSON.stringify(input.serverDraft),
+    hasLocalChanges: !deepEqual(draft, input.serverDraft),
   };
 }

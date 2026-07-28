@@ -65,6 +65,31 @@ async function discoverChildTables(): Promise<string[]> {
   return rows.map((row) => row.table_name);
 }
 
+/**
+ * Chặn chạy nhầm trên production.
+ *
+ * Script này xóa theo **số điện thoại**, không theo một tiền tố mã do script tự sinh. Trên preview
+ * đó là nhãn nhận diện đúng; trên production đúng số đó có thể là của một hộ dân thật, và lệnh xóa
+ * đi qua khoảng 16 bảng con là không khôi phục được. Token xác nhận chỉ buộc người chạy nhìn danh
+ * sách — nó không phân biệt được preview với production.
+ *
+ * Mặc định TỪ CHỐI khi `NODE_ENV=production` hoặc khi `APP_BASE_URL` không mang dấu hiệu môi
+ * trường thử. Cần chạy trên một môi trường không khớp mẫu thì phải khai báo có ý thức bằng
+ * `--i-know-this-is-not-preview`.
+ */
+function refusesToRunHere(argv: readonly string[]): string | null {
+  if (argv.includes("--i-know-this-is-not-preview")) return null;
+
+  if (process.env.NODE_ENV === "production") {
+    return "NODE_ENV=production";
+  }
+  const baseUrl = (process.env.APP_BASE_URL ?? "").toLowerCase();
+  if (baseUrl && !/(localhost|127\.0\.0\.1|preview|staging|vercel\.app)/.test(baseUrl)) {
+    return `APP_BASE_URL không giống môi trường thử (${baseUrl})`;
+  }
+  return null;
+}
+
 async function cleanup(options: Options): Promise<void> {
   const database = getDatabase();
 
@@ -143,7 +168,18 @@ async function cleanup(options: Options): Promise<void> {
   );
 }
 
-cleanup(parseOptions(process.argv.slice(2)))
+const argv = process.argv.slice(2);
+const refusal = refusesToRunHere(argv);
+if (refusal) {
+  console.error(
+    `Từ chối chạy: ${refusal}.\n` +
+      "Script này xóa hồ sơ theo SỐ ĐIỆN THOẠI và không khôi phục được. Nếu bạn chắc chắn đây " +
+      "không phải dữ liệu thật, chạy lại kèm --i-know-this-is-not-preview.",
+  );
+  process.exit(1);
+}
+
+cleanup(parseOptions(argv))
   .then(() => process.exit(process.exitCode ?? 0))
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : "Lỗi không rõ.");

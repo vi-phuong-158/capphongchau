@@ -60,9 +60,23 @@ describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
   });
 
   it("hỏi không được thì mặc định coi như ĐÃ nhận", () => {
-    // `.catch(() => false)` ở đây là lỗi mất dữ liệu, không phải lỗi phong cách.
-    expect(route).toContain("isDriveFileAdopted(submissionId, driveFileId).catch(() => true)");
-    expect(route).not.toContain(".catch(() => false)");
+    // Đảo chiều `.catch` ở đây là lỗi mất dữ liệu, không phải lỗi phong cách.
+    expect(route).toContain("isDriveFileAdopted(driveFileId).catch(() => true)");
+  });
+
+  it("không xác nhận được thư mục thì KHÔNG xóa", () => {
+    // Hai `.catch` ngược chiều nhau nhưng cùng một ý: không chắc thì giữ tệp lại.
+    //   - hỏi cơ sở dữ liệu hỏng  → coi như ĐÃ nhận (`true`)  → không xóa;
+    //   - hỏi Drive hỏng          → coi như KHÔNG thuộc (`false`) → không xóa.
+    const guard = route.slice(route.indexOf("async function discardIfOrphan"));
+    expect(guard).toContain(".isFileInFolder(driveFileId, record.driveFolderId)");
+    expect(guard).toContain(".catch(() => false)");
+    expect(guard).toMatch(/if \(!ownedByCaller\) return;/);
+  });
+
+  it("kiểm thư mục đứng TRƯỚC lệnh xóa, không phải sau", () => {
+    const guard = route.slice(route.indexOf("async function discardIfOrphan"));
+    expect(guard.indexOf("isFileInFolder")).toBeLessThan(guard.indexOf("discardFile("));
   });
 
   it("truy vấn adopt tính cả tệp đã REPLACED — tệp bị thay vẫn là bằng chứng của hồ sơ", () => {
@@ -70,8 +84,22 @@ describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
       repository.indexOf("async isDriveFileAdopted"),
       repository.indexOf("async appendUploadAttempt"),
     );
-    expect(method).toContain("where submission_id = ");
+    expect(method).toContain("where drive_file_id = ");
     expect(method).not.toContain("status = 'UPLOADED'");
+  });
+
+  it("truy vấn adopt KHÔNG lọc theo hồ sơ đang gọi", () => {
+    /*
+     * Hồi quy đã từng có thật: lọc thêm `submission_id = <hồ sơ đang gọi>` biến câu hỏi "có ai
+     * đang trỏ vào tệp này không" thành "hồ sơ đang gọi có trỏ vào nó không". Một `driveFileId`
+     * do client gửi lên trỏ sang hồ sơ khác khi đó bị coi là mồ côi và bị xóa — mất bằng chứng
+     * của một hộ dân không liên quan.
+     */
+    const method = repository.slice(
+      repository.indexOf("async isDriveFileAdopted"),
+      repository.indexOf("async appendUploadAttempt"),
+    );
+    expect(method).not.toContain("submission_id");
   });
 
   it("phát lại idempotent trả bản ghi cũ, không chèn bản mới", () => {

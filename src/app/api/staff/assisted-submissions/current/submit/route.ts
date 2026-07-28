@@ -128,12 +128,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       requestId,
       idempotencyKey,
       mutationHash,
-      pendingIdentityHmacs:
-        status === "SUBMITTED"
-          ? citizenIdsForLookup(draft).map((value) =>
-              identityHmac(environment.DATA_HASH_PEPPER, value),
-            )
-          : undefined,
+      // Ghi cho cả `RESUBMITTED`, xem lý do đầy đủ ở route submit công khai (quyết định
+      // 2026-07-29): ở MỨC A, CCCD hay xuất hiện lần đầu đúng vào lần gửi bổ sung.
+      pendingIdentityHmacs: citizenIdsForLookup(draft).map((value) =>
+        identityHmac(environment.DATA_HASH_PEPPER, value),
+      ),
     });
     return NextResponse.json({ receiptCode: record.receiptCode, status });
   } catch (error) {
