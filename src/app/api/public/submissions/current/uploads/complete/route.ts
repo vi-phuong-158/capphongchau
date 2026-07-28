@@ -36,9 +36,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const { record } = context;
-  if (!isEditable(record)) {
-    return publicError("INVALID_STATE", "Bản kê khai đang bị khóa.", requestId);
-  }
 
   let body: {
     driveFileId?: unknown;
@@ -72,13 +69,53 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const environment = loadPublicIntakeEnvironment();
   const storage = getPublicIntakeStorage();
+  const repository = getPublicIntakeRepository();
   const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
   const replaceFileId = typeof body.replaceFileId === "string" ? body.replaceFileId : "";
+  const idempotencyKey = `PUBLIC_UPLOAD_COMPLETE:${record.submissionId}:${rawIdempotencyKey}`;
+  const mutationHash = createHash("sha256")
+    .update(
+      JSON.stringify({
+        submissionId: record.submissionId,
+        driveFileId,
+        documentType,
+        ownerId,
+        replaceFileId,
+      }),
+    )
+    .digest("hex");
+
+  // Replay phải đứng trước mọi kiểm tra trạng thái của một lượt upload mới. Sau lần đầu commit,
+  // chính file vừa adopt làm các kiểm tra "đã có ảnh" bên dưới thất bại; cleanup khi đó sẽ xóa
+  // bằng chứng mà DB đang trỏ tới nếu response đầu bị mất.
+  const replay = await repository.findStoredMutation(idempotencyKey, "PUBLIC_UPLOAD_COMPLETE");
+  if (replay) {
+    if (replay.mutationHash !== mutationHash) {
+      await discardIfOrphan(repository, record.submissionId, driveFileId);
+      return publicError(
+        "IDEMPOTENCY_CONFLICT",
+        "Yêu cầu hoàn tất tải lên bị xung đột.",
+        requestId,
+      );
+    }
+    const replayFileId = replay.response.fileId;
+    const replaySizeBytes = replay.response.sizeBytes;
+    if (typeof replayFileId === "string" && typeof replaySizeBytes === "number") {
+      return NextResponse.json({ ok: true, fileId: replayFileId, sizeBytes: replaySizeBytes });
+    }
+    return publicError("INTERNAL_ERROR", "Kết quả tải lên đã lưu không hợp lệ.", requestId);
+  }
+
+  if (!isEditable(record)) {
+    await discardIfOrphan(repository, record.submissionId, driveFileId);
+    return publicError("INVALID_STATE", "Bản kê khai đang bị khóa.", requestId);
+  }
+
   const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
   if (identityImage) {
     const owners = record.draft?.owners;
     if (!Array.isArray(owners)) {
-      await storage.discardFile(driveFileId).catch(() => undefined);
+      await discardIfOrphan(repository, record.submissionId, driveFileId);
       return publicError(
         "INVALID_STATE",
         "Dữ liệu bản kê khai chưa đầy đủ. Tải lại trang và thử lại.",
@@ -90,16 +127,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       return publicError("VALIDATION_FAILED", "Chủ sử dụng của ảnh CCCD không hợp lệ.", requestId);
     }
     // Kiểm tra thay ảnh phải đọc nguồn thật, không dùng cache có thể bị trễ sau upload trước đó.
-    const currentFiles = await getPublicIntakeRepository().listFiles(record.submissionId);
+    const currentFiles = await repository.listFiles(record.submissionId);
     const existing = currentFiles.find(
       (file) => file.ownerId === ownerId && file.documentType === documentType,
     );
     if ((existing && existing.fileId !== replaceFileId) || (!existing && replaceFileId)) {
-      await storage.discardFile(driveFileId).catch(() => undefined);
+      await discardIfOrphan(repository, record.submissionId, driveFileId);
       return publicError("INVALID_STATE", "Trạng thái thay ảnh CCCD không còn hợp lệ.", requestId);
     }
   } else if (replaceFileId) {
-    const currentFiles = await getPublicIntakeRepository().listFiles(record.submissionId);
+    const currentFiles = await repository.listFiles(record.submissionId);
     const existing = currentFiles.find(
       (file) =>
         file.fileId === replaceFileId &&
@@ -107,7 +144,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         file.status === "UPLOADED",
     );
     if (!existing) {
-      await storage.discardFile(driveFileId).catch(() => undefined);
+      await discardIfOrphan(repository, record.submissionId, driveFileId);
       return publicError(
         "INVALID_STATE",
         "Ảnh Giấy chứng nhận cần thay không còn hợp lệ.",
@@ -126,27 +163,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (error) {
     if (error instanceof UploadVerificationError) {
       // Tệp không đạt phải rời khỏi Drive ngay, không để tích rác trong kho của quản trị viên.
-      await storage.discardFile(driveFileId).catch(() => undefined);
+      await discardIfOrphan(repository, record.submissionId, driveFileId);
       return publicError("VALIDATION_FAILED", error.message, requestId);
     }
     throw error;
   }
 
   const fileId = randomUUID();
-  const idempotencyKey = `PUBLIC_UPLOAD_COMPLETE:${record.submissionId}:${rawIdempotencyKey}`;
-  const mutationHash = createHash("sha256")
-    .update(
-      JSON.stringify({
-        submissionId: record.submissionId,
-        driveFileId: verified.driveFileId,
-        documentType,
-        ownerId,
-        replaceFileId,
-      }),
-    )
-    .digest("hex");
-
-  const repository = getPublicIntakeRepository();
   try {
     const summary = await repository.appendFile(
       {

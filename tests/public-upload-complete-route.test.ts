@@ -40,6 +40,20 @@ describe("Ghi cơ sở dữ liệu hỏng không để lại tệp mồ côi", (
 });
 
 describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
+  it("response đầu bị mất rồi retry: replay được xử lý trước validation trạng thái upload mới", () => {
+    const replayLookup = route.indexOf('findStoredMutation(idempotencyKey, "PUBLIC_UPLOAD_COMPLETE")');
+    const stateValidation = route.indexOf("const identityImage");
+    expect(replayLookup).toBeGreaterThan(0);
+    expect(replayLookup).toBeLessThan(stateValidation);
+    expect(route.slice(replayLookup, stateValidation)).toContain("replay.response.fileId");
+    expect(route.slice(replayLookup, stateValidation)).toContain("replay.response.sizeBytes");
+  });
+
+  it("route không gọi discardFile trực tiếp trên bất kỳ đường lỗi nào", () => {
+    const postBody = route.slice(route.indexOf("export async function POST"), route.indexOf("/**\n * Xóa tệp"));
+    expect(postBody).not.toContain(".discardFile(");
+  });
+
   it("hỏi cơ sở dữ liệu trước khi xóa", () => {
     expect(route).toContain("isDriveFileAdopted");
     expect(route).toMatch(/if \(adopted\) return;/);
@@ -64,6 +78,10 @@ describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
     // Nếu replay chèn thêm dòng thì tệp cũ mất tham chiếu và trở thành mồi cho script dọn rác.
     const method = repository.slice(repository.indexOf("async appendFile"));
     expect(method).toContain("return cached[0].response_json as PublicFileSummary;");
+  });
+
+  it("replay dùng cùng driveFileId cho cả upload mới và replace", () => {
+    expect(route).toContain("driveFileId,\n        documentType,\n        ownerId,\n        replaceFileId,");
   });
 });
 
