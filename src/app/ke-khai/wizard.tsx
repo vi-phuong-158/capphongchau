@@ -1683,14 +1683,25 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     setServerError("");
     try {
       if (!submitIdempotencyKey.current) submitIdempotencyKey.current = crypto.randomUUID();
-      const response = await fetchApi("/api/public/submissions/current/submit", {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "idempotency-key": submitIdempotencyKey.current,
+      };
+      if (assisted) {
+        const csrfResponse = await fetchApi("/api/security/csrf", { method: "GET" });
+        if (!csrfResponse.ok) throw new Error("ASSISTED_CSRF_FAILED");
+        headers["x-csrf-token"] = ((await csrfResponse.json()) as { csrfToken: string }).csrfToken;
+      } else {
+        headers["x-public-csrf-token"] = csrfToken;
+        headers["x-turnstile-token"] = challengeToken;
+      }
+      const response = await fetchApi(
+        assisted
+          ? "/api/staff/assisted-submissions/current/submit"
+          : "/api/public/submissions/current/submit",
+        {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-public-csrf-token": csrfToken,
-          "x-turnstile-token": challengeToken,
-          "idempotency-key": submitIdempotencyKey.current,
-        },
+        headers,
         body: JSON.stringify({
           draft: withCertificateMetadata(draft, certificatePhotos),
         }),
@@ -1708,7 +1719,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     } finally {
       setBusy(false);
     }
-  }, [csrfToken, draft, certificatePhotos, challengeToken, refreshChallenge]);
+  }, [assisted, csrfToken, draft, certificatePhotos, challengeToken, refreshChallenge]);
 
   const copyReceiptCode = useCallback(() => {
     if (!receipt) return;
@@ -3400,7 +3411,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
             onClick={() => {
               void handleSubmit();
             }}
-            disabled={busy || !challengeToken}
+            disabled={busy || (!assisted && !challengeToken)}
           >
             {busy ? "Đang gửi…" : "Gửi bản kê khai"}
           </button>

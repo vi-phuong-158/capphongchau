@@ -112,8 +112,8 @@ function certificatePhotoInput(page: Page) {
 }
 
 /** Từ bước 1 tới màn hình "KÊ KHAI THÀNH CÔNG" bằng đúng một ảnh GCN tối thiểu. */
-async function submitMinimalRecord(page: Page): Promise<void> {
-  await page.goto("/ke-khai");
+async function submitMinimalRecord(page: Page, path = "/ke-khai"): Promise<void> {
+  await page.goto(path);
   await fillMinimalStepOne(page);
   await page.getByRole("button", { name: /Tiếp tục/i }).click();
   await uploadAndAwaitComplete(page, certificatePhotoInput(page), "tests/fixtures/gcn.png");
@@ -251,11 +251,14 @@ test.describe("E2E-06a — /ke-khai-ho chặn người chưa đăng nhập", () 
 test.describe("E2E-06b — Chế độ cán bộ hỗ trợ kê khai", () => {
   test.skip(!HAS_OFFICER, "Cần tài khoản cán bộ có quyền lập hồ sơ hộ dân.");
 
-  test("cán bộ đúng vai trò thấy banner chế độ hỗ trợ", async ({ page, context, baseURL }) => {
+  test("login → create → upload CCCD → upload GCN → submit → success", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     await signInAs(context, OFFICER_EMAIL, baseURL!);
-    await page.goto("/ke-khai-ho");
-    await expect(page.getByText("Chế độ cán bộ hỗ trợ kê khai")).toBeVisible();
-    await expect(page.getByText(/Đang đăng nhập:/)).toBeVisible();
+    await submitMinimalRecord(page, "/ke-khai-ho");
+    await expect(page.getByRole("heading", { name: "KÊ KHAI THÀNH CÔNG" })).toBeVisible();
   });
 });
 
