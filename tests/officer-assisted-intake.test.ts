@@ -14,7 +14,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { UserRole } from "@/modules/common/domain";
 import { INTAKE_CHANNELS } from "@/modules/public-intake/repository";
+import { ASSISTED_INTAKE_ROLES, SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
 function read(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
@@ -58,9 +60,48 @@ describe("Cổng công khai không thể tạo hồ sơ mang nhãn cán bộ", (
   });
 });
 
+describe("Quyền lập hồ sơ hộ dân hẹp hơn quyền đọc hàng đợi", () => {
+  it("có policy riêng, không dùng lại danh sách vai trò đọc", () => {
+    expect([...ASSISTED_INTAKE_ROLES]).toEqual([
+      UserRole.INTAKE_OFFICER,
+      UserRole.WARD_ADMIN,
+      UserRole.SYSTEM_ADMIN,
+    ]);
+  });
+
+  it("loại REVIEW_OFFICER — người thẩm định không được vừa nhập vừa duyệt", () => {
+    // Đây là chốt kiểm tra chéo duy nhất trong quy trình. Thêm REVIEW_OFFICER vào đây là bỏ nó.
+    expect([...ASSISTED_INTAKE_ROLES]).not.toContain(UserRole.REVIEW_OFFICER);
+    expect([...SUBMISSION_READ_ROLES]).toContain(UserRole.REVIEW_OFFICER);
+  });
+
+  it("loại các vai trò chỉ đọc và nghiệp vụ khác", () => {
+    for (const role of [
+      UserRole.REPORT_VIEWER,
+      UserRole.AUDITOR,
+      UserRole.POPULATION_MATCH_OFFICER,
+    ]) {
+      expect([...ASSISTED_INTAKE_ROLES]).not.toContain(role);
+    }
+  });
+
+  it("API và trang đọc cùng một hằng số — không có bản sao lệch nhau", () => {
+    const page = read("../src/app/ke-khai-ho/page.tsx");
+    expect(staffRoute).toContain("requireActiveUser(ASSISTED_INTAKE_ROLES)");
+    expect(page).toContain("requireActiveUser(ASSISTED_INTAKE_ROLES)");
+    expect(staffRoute).not.toContain("SUBMISSION_READ_ROLES");
+    expect(page).not.toContain("SUBMISSION_READ_ROLES");
+  });
+
+  it("quyền được kiểm ở API, không chỉ ở trang", () => {
+    // Trang chỉ là lớp trải nghiệm: gọi thẳng API bằng curl phải bị chặn y hệt.
+    expect(staffRoute).toMatch(/requireActiveUser\(ASSISTED_INTAKE_ROLES\)/);
+  });
+});
+
 describe("Route cán bộ tự bảo vệ, không chỉ dựa vào proxy Edge", () => {
   it("đòi phiên đăng nhập còn hiệu lực và đúng vai trò", () => {
-    expect(staffRoute).toContain("requireActiveUser(SUBMISSION_READ_ROLES)");
+    expect(staffRoute).toContain("requireActiveUser(ASSISTED_INTAKE_ROLES)");
   });
 
   it("đòi CSRF", () => {

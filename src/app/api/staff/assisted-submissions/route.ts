@@ -23,7 +23,7 @@ import {
   PUBLIC_SESSION_COOKIE,
   SESSION_COOKIE_OPTIONS,
 } from "@/modules/public-intake/session";
-import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
+import { ASSISTED_INTAKE_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const requestId = randomUUID();
 
   try {
-    const user = await requireActiveUser(SUBMISSION_READ_ROLES);
+    const user = await requireActiveUser(ASSISTED_INTAKE_ROLES);
     const serverEnvironment = loadServerEnvironment();
     if (
       !verifyCsrfToken(

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { requireActiveUser } from "@/modules/auth/authorization";
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
-import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
+import { ASSISTED_INTAKE_ROLES } from "@/modules/submissions/review";
 
 import { AssistedIntakeWizard } from "./assisted-wizard";
 
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 export default async function AssistedIntakePage() {
   // Kiểm lại vai trò tại trang, không chỉ dựa vào proxy Edge: JWT cũ vẫn còn hạn sau khi quản trị
   // viên khóa tài khoản, nên Edge thấy "có session" là chưa đủ.
-  const user = await requireActiveUser(SUBMISSION_READ_ROLES);
+  const user = await requireActiveUser(ASSISTED_INTAKE_ROLES);
   const environment = loadPublicIntakeEnvironment();
 
   return (
