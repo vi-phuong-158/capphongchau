@@ -19,6 +19,22 @@ import {
 export { PUBLIC_STATUSES } from "./workflow";
 export type { PublicStatus } from "./workflow";
 
+/**
+ * Nguồn của hồ sơ.
+ *
+ * `OFFICER_ASSISTED` do **máy chủ** gán từ phiên đăng nhập của cán bộ. Client không bao giờ được
+ * gửi giá trị này lên: nhận từ client là để bất kỳ ai cũng gắn nhãn "cán bộ đã nhập hộ" cho hồ sơ
+ * của mình, làm mất luôn ý nghĩa của việc phân biệt nguồn.
+ */
+export const INTAKE_CHANNELS = ["SELF_SERVICE", "OFFICER_ASSISTED"] as const;
+export type IntakeChannel = (typeof INTAKE_CHANNELS)[number];
+
+/** Cán bộ ngồi nhập hộ. Mọi trường do máy chủ điền từ phiên đăng nhập. */
+export interface AssistingOfficer {
+  readonly email: string;
+  readonly displayName: string;
+}
+
 export interface SubmissionRecord {
   readonly submissionId: string;
   readonly receiptCode: string;
@@ -44,6 +60,10 @@ export interface SubmissionRecord {
    */
   readonly claimedByDisplayName: string;
   readonly claimedAt: string;
+  readonly intakeChannel: IntakeChannel;
+  readonly assistedByEmail: string;
+  readonly assistedByDisplayName: string;
+  readonly assistedAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly draft: IntakeDraft | null;
@@ -141,6 +161,10 @@ interface SubmissionRow {
   readonly accept_step: string | null;
   readonly claimed_by: string | null;
   readonly claimed_by_display_name: string | null;
+  readonly intake_channel: string | null;
+  readonly assisted_by_email: string | null;
+  readonly assisted_by_display_name: string | null;
+  readonly assisted_at: Date | null;
   readonly claimed_at: Date | null;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -178,6 +202,7 @@ const SUBMISSION_SELECT = `
   submission_id, receipt_code::text, status, phone, version, access_code_hash,
   failed_attempts, locked_until, consent_version, consented_at, retention_until,
   official_case_id, drive_folder_id, accept_step, claimed_by, claimed_by_display_name, claimed_at,
+  intake_channel, assisted_by_email, assisted_by_display_name, assisted_at,
   created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
   citizen_payload_json, citizen_payload_version, citizen_payload_at,
   working_payload_json, working_payload_at, working_payload_by,
@@ -241,6 +266,10 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     acceptStep: row.accept_step ?? "",
     claimedBy: row.claimed_by ?? "",
     claimedByDisplayName: row.claimed_by_display_name ?? "",
+    intakeChannel: row.intake_channel === "OFFICER_ASSISTED" ? "OFFICER_ASSISTED" : "SELF_SERVICE",
+    assistedByEmail: row.assisted_by_email ?? "",
+    assistedByDisplayName: row.assisted_by_display_name ?? "",
+    assistedAt: asIso(row.assisted_at),
     claimedAt: asIso(row.claimed_at),
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
@@ -304,6 +333,9 @@ export class PublicIntakeRepository {
     driveFolderId: string;
     draft: IntakeDraft;
     consentVersion: string;
+    /** Mặc định `SELF_SERVICE`; chỉ route nhân viên đã xác thực mới truyền giá trị khác. */
+    intakeChannel?: IntakeChannel;
+    assistedBy?: AssistingOfficer;
   }): Promise<void> {
     const database = getDatabase();
     await database.begin(async (transaction) => {
@@ -317,13 +349,18 @@ export class PublicIntakeRepository {
         }
         return;
       }
+      const channel: IntakeChannel = input.intakeChannel ?? "SELF_SERVICE";
+      const assisted = channel === "OFFICER_ASSISTED" ? (input.assistedBy ?? null) : null;
       await transaction`
         insert into public.public_submissions (
           submission_id, receipt_code, phone, access_code_hash, consent_version,
-          drive_folder_id, draft_json
+          drive_folder_id, draft_json,
+          intake_channel, assisted_by_email, assisted_by_display_name, assisted_at
         ) values (
           ${input.submissionId}, ${input.receiptCode}, ${input.phone}, ${input.accessCodeHash},
-          ${input.consentVersion}, ${input.driveFolderId}, ${JSON.stringify(input.draft)}::jsonb
+          ${input.consentVersion}, ${input.driveFolderId}, ${JSON.stringify(input.draft)}::jsonb,
+          ${channel}, ${assisted?.email ?? null}, ${assisted?.displayName ?? null},
+          ${assisted ? new Date().toISOString() : null}
         )
       `;
       await transaction`

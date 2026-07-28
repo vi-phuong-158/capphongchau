@@ -24,6 +24,8 @@ type Submission = {
   version: number;
   claimedBy: string | null;
   claimedByDisplayName?: string | null;
+  intakeChannel?: string | null;
+  assistedByDisplayName?: string | null;
   claimedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -511,6 +513,18 @@ export function SubmissionDetail({
                 })}
               </dd>
             ) : null}
+          </div>
+          <div>
+            <dt className="text-sm text-stone-500">Nguồn hồ sơ</dt>
+            {/* Hồ sơ cán bộ nhập hộ có độ tin cậy khác hồ sơ hộ dân tự khai — cán bộ cầm giấy
+                tờ gốc trên tay. Người duyệt cần biết điều đó ngay khi mở hồ sơ. */}
+            <dd className="font-semibold text-stone-900">
+              {submission.intakeChannel === "OFFICER_ASSISTED"
+                ? `Cán bộ nhập hộ${
+                    submission.assistedByDisplayName ? ` — ${submission.assistedByDisplayName}` : ""
+                  }`
+                : "Hộ dân tự kê khai"}
+            </dd>
           </div>
           <div>
             <dt className="text-sm text-stone-500">Cập nhật</dt>

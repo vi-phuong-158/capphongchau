@@ -91,6 +91,10 @@ import {
  */
 const STEPS = PUBLIC_WIZARD_STEPS;
 
+const PUBLIC_CREATE_ENDPOINT = "/api/public/submissions";
+/** Route cán bộ: máy chủ tự gắn `OFFICER_ASSISTED` từ phiên đăng nhập, client không khai được. */
+const ASSISTED_CREATE_ENDPOINT = "/api/staff/assisted-submissions";
+
 const MAX_CERTIFICATE_PHOTOS = 10;
 const MAX_INDIVIDUAL_OWNERS = 10;
 const CREATE_IDEMPOTENCY_STORAGE_KEY = "pc_kk_create_idempotency";
@@ -503,7 +507,18 @@ function ReviewBlock({
   );
 }
 
-export function IntakeWizard() {
+/**
+ * Chế độ cán bộ hỗ trợ kê khai.
+ *
+ * Dùng lại **nguyên** wizard công khai thay vì dựng một bản song song: hai bản mã cho cùng một
+ * biểu mẫu là hai bản sẽ lệch nhau ngay ở lần sửa đầu tiên. Chỉ khác đường tạo hồ sơ và việc bỏ
+ * Turnstile; nhãn kênh và danh tính cán bộ do **máy chủ** gán từ phiên đăng nhập.
+ */
+export interface AssistedModeConfig {
+  readonly officerName: string;
+}
+
+export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {}) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<IntakeDraft>(() => emptyDraft(newId(), newId(), newId()));
   const [errors, setErrors] = useState<Errors>({});
@@ -574,8 +589,15 @@ export function IntakeWizard() {
 
   // Hai hành động phải qua Turnstile: tạo bản kê khai và gửi chính thức. Các bước ở giữa chỉ lưu
   // nháp trong phiên đã có, không cần bắt người dân giải lại.
-  const challengeAction: "create" | "submit" | null =
-    step === 0 && !receipt ? "create" : step === STEPS.length - 1 ? "submit" : null;
+  // Chế độ cán bộ đã đăng nhập và có CSRF — hai thứ đó mạnh hơn hẳn một bài kiểm tra bot, nên
+  // không bắt cán bộ giải Turnstile ở mỗi hộ dân.
+  const challengeAction: "create" | "submit" | null = assisted
+    ? null
+    : step === 0 && !receipt
+      ? "create"
+      : step === STEPS.length - 1
+        ? "submit"
+        : null;
   const challengeToken = challenge.action === challengeAction ? challenge.token : "";
 
   const handleChallengeToken = useCallback(
@@ -599,6 +621,31 @@ export function IntakeWizard() {
    * ngay trước công đoạn chậm nhất.
    */
   const draftDirtyRef = useRef(false);
+
+  /**
+   * Header cho lệnh tạo hồ sơ.
+   *
+   * Cổng công khai gửi token Turnstile; chế độ cán bộ gửi CSRF của phiên đăng nhập. Không bao giờ
+   * gửi cả hai, và **không** gửi trường nào để client tự khai mình là cán bộ — máy chủ suy ra từ
+   * chính route và phiên.
+   */
+  const buildCreateHeaders = useCallback(
+    async (idempotencyKey: string): Promise<Record<string, string>> => {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
+      };
+      if (assisted) {
+        const response = await fetchApi("/api/security/csrf", { method: "GET" });
+        if (!response.ok) throw new Error("CREATE_NETWORK_FAILED");
+        headers["x-csrf-token"] = ((await response.json()) as { csrfToken: string }).csrfToken;
+      } else {
+        headers["x-turnstile-token"] = challengeToken;
+      }
+      return headers;
+    },
+    [assisted, challengeToken],
+  );
 
   const update = useCallback((mutate: (next: IntakeDraft) => void) => {
     draftDirtyRef.current = true;
@@ -874,18 +921,15 @@ export function IntakeWizard() {
           }
         }
 
+        const createHeaders = await buildCreateHeaders(createIdempotencyKey.current);
         let response: Response | null = null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
             response = await fetchApi(
-              "/api/public/submissions",
+              assisted ? ASSISTED_CREATE_ENDPOINT : PUBLIC_CREATE_ENDPOINT,
               {
                 method: "POST",
-                headers: {
-                  "content-type": "application/json",
-                  "idempotency-key": createIdempotencyKey.current,
-                  "x-turnstile-token": challengeToken,
-                },
+                headers: createHeaders,
                 body: JSON.stringify({ phone: draft.phone }),
               },
               CREATE_API_TIMEOUT_MS,
@@ -961,7 +1005,8 @@ export function IntakeWizard() {
     receipt,
     draft.phone,
     flushDraft,
-    challengeToken,
+    assisted,
+    buildCreateHeaders,
     refreshChallenge,
     adoptServerDraft,
   ]);
@@ -1560,14 +1605,10 @@ export function IntakeWizard() {
     try {
       const idempotencyKey = crypto.randomUUID();
       const response = await fetchApi(
-        "/api/public/submissions",
+        assisted ? ASSISTED_CREATE_ENDPOINT : PUBLIC_CREATE_ENDPOINT,
         {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "idempotency-key": idempotencyKey,
-            "x-turnstile-token": challengeToken,
-          },
+          headers: await buildCreateHeaders(idempotencyKey),
           body: JSON.stringify({ phone: "" }),
         },
         CREATE_API_TIMEOUT_MS,
@@ -1624,7 +1665,7 @@ export function IntakeWizard() {
     } finally {
       setBusy(false);
     }
-  }, [challengeToken, refreshChallenge, adoptServerDraft]);
+  }, [assisted, buildCreateHeaders, refreshChallenge, adoptServerDraft]);
 
   const goBack = useCallback(() => {
     setErrors({});
@@ -1731,6 +1772,12 @@ export function IntakeWizard() {
           ))}
         </ol>
       </nav>
+
+      {assisted ? (
+        <p className="text-sm" style={{ color: "var(--muted)" }}>
+          Cán bộ hỗ trợ: <strong>{assisted.officerName}</strong>
+        </p>
+      ) : null}
 
       {receipt ? (
         <div className="pc-card" style={{ borderColor: "var(--accent)" }}>

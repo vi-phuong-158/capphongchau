@@ -123,6 +123,8 @@ export async function GET(
           version: record.version,
           claimedBy: record.claimedBy || null,
           claimedByDisplayName: record.claimedByDisplayName || null,
+          intakeChannel: record.intakeChannel,
+          assistedByDisplayName: record.assistedByDisplayName || null,
           claimedAt: record.claimedAt || null,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
