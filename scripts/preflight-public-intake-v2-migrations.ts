@@ -73,6 +73,25 @@ async function indexExists(name: string): Promise<boolean> {
   return rows[0]?.exists ?? false;
 }
 
+/** Trạng thái RLS thật của một bảng, đọc thẳng từ `pg_class`. */
+async function rowSecurityState(
+  table: string,
+): Promise<{ found: boolean; enabled: boolean; forced: boolean }> {
+  const database = getDatabase();
+  const rows = await database<{ relrowsecurity: boolean; relforcerowsecurity: boolean }[]>`
+    select c.relrowsecurity, c.relforcerowsecurity
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname = ${table}
+  `;
+  const row = rows[0];
+  return {
+    found: Boolean(row),
+    enabled: row?.relrowsecurity === true,
+    forced: row?.relforcerowsecurity === true,
+  };
+}
+
 async function runChecks(): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const check = (label: string, ok: boolean, detail: string) => {
@@ -197,6 +216,37 @@ async function runChecks(): Promise<CheckResult[]> {
     );
   }
 
+  /*
+   * 202607290001 — RLS của bảng số đo.
+   *
+   * Trước bản vá này script bỏ QUA hoàn toàn migration thứ năm, nhưng vẫn in "Schema sẵn sàng. Có
+   * thể deploy code." khi 20 kiểm tra kia đạt. Đúng cái migration dễ hỏng âm thầm nhất lại không
+   * được kiểm: cả hai chỗ gọi `appendUploadAttempt` đều nuốt lỗi, nên `force row level security`
+   * còn sót lại sẽ làm bảng rỗng vĩnh viễn mà không một dòng log nào báo.
+   */
+  {
+    const security = await rowSecurityState("public_upload_attempts");
+    check(
+      "public_upload_attempts đã bật RLS (202607290001)",
+      security.found && security.enabled,
+      !security.found
+        ? "THIẾU BẢNG — migration 202607280003 chưa chạy"
+        : security.enabled
+          ? "relrowsecurity=true"
+          : "CHƯA BẬT RLS — migration 202607290001 chưa chạy",
+    );
+    check(
+      "public_upload_attempts KHÔNG dùng FORCE RLS (202607290001)",
+      security.found && !security.forced,
+      !security.found
+        ? "THIẾU BẢNG"
+        : security.forced
+          ? "relforcerowsecurity=true — bản migration CŨ đã được áp. Sửa tại chỗ không có tác dụng; " +
+            "phải thêm migration mới: alter table public.public_upload_attempts no force row level security;"
+          : "relforcerowsecurity=false",
+    );
+  }
+
   // Kiểm tra dữ liệu — hồ sơ cũ phải nhất quán, không phải chỉ schema đúng.
   {
     const database = getDatabase();
@@ -216,7 +266,26 @@ async function runChecks(): Promise<CheckResult[]> {
   return results;
 }
 
+/**
+ * Cơ sở dữ liệu đang kiểm là cái nào.
+ *
+ * Script đọc `.env.local` của thư mục đang chạy, nên rất dễ chạy nhầm sang DB dev rồi kết luận
+ * "production sẵn sàng". In host ra để người chạy tự đối chiếu. Chỉ in host — chuỗi kết nối đầy đủ
+ * có mật khẩu, không được xuất hiện trong log hay ảnh chụp màn hình dán vào báo cáo.
+ */
+function connectionTarget(): string {
+  const raw = process.env.SUPABASE_DATABASE_URL ?? "";
+  if (!raw) return "KHÔNG RÕ (thiếu SUPABASE_DATABASE_URL)";
+  try {
+    const url = new URL(raw);
+    return `${url.hostname}${url.port ? `:${url.port}` : ""}${url.pathname}`;
+  } catch {
+    return "KHÔNG ĐỌC ĐƯỢC";
+  }
+}
+
 async function main(): Promise<void> {
+  console.log(`Cơ sở dữ liệu đang kiểm: ${connectionTarget()}\n`);
   const results = await runChecks();
   const failed = results.filter((result) => !result.ok);
 

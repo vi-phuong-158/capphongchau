@@ -44,6 +44,14 @@
   `src/app/api/staff/assisted-submissions/current/submit/route.ts`,
   `src/app/api/submissions/[submissionId]/{route,working-payload/route,ai-draft/apply/route}.ts`,
   `tests/working-payload.test.ts`.
+  - vá lỗ hổng nghiệm thu: `preflight-public-intake-v2-migrations.ts` trước đó **bỏ qua hoàn
+    toàn** migration `202607290001` nhưng vẫn in "Schema sẵn sàng. Có thể deploy code." khi 20
+    kiểm tra kia đạt. Thêm 2 kiểm tra `relrowsecurity`/`relforcerowsecurity` và in host DB đang
+    kết nối (chỉ host, không in chuỗi kết nối vì chứa mật khẩu).
+- **Kết quả chạy thật (2026-07-29, DB `aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres`):**
+  21/22 — bốn migration `202607280001`–`04` ĐÃ chạy; `202607290001` CHƯA chạy
+  (`relrowsecurity=false`). Quan trọng: `relforcerowsecurity=false` chứng minh bản cũ có `force`
+  chưa từng được áp ở đâu, nên bản sửa tại chỗ là hợp lệ và **không cần migration bù**.
 - **Không làm:** merge, deploy, chạy migration.
 
 ## [2026-07-29] Sửa bắt buộc 2 BLOCKER + 5 HIGH của review PR #6

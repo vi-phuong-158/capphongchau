@@ -99,6 +99,34 @@ describe("Telemetry tải ảnh không được hỏng trong im lặng", () => {
     expect(seen[0]).toContain("pg_code=UNKNOWN");
   });
 
+  it("preflight kiểm ĐỦ cả 5 migration, không bỏ sót cái nào", () => {
+    /*
+     * Lỗ hổng đã xảy ra thật: script bỏ qua hoàn toàn `202607290001` nhưng vẫn in "Schema sẵn
+     * sàng. Có thể deploy code." khi 20 kiểm tra kia đạt. Bỏ sót đúng migration dễ hỏng âm thầm
+     * nhất — cả hai chỗ gọi `appendUploadAttempt` đều nuốt lỗi, nên RLS sai làm bảng rỗng vĩnh
+     * viễn mà không tín hiệu nào. Một script nghiệm thu nói quá phạm vi nó kiểm còn nguy hiểm hơn
+     * không có script.
+     */
+    const preflight = read("../scripts/preflight-public-intake-v2-migrations.ts");
+    const directory = fileURLToPath(new URL("../supabase/migrations/", import.meta.url));
+    const v2Migrations = readdirSync(directory)
+      .filter((name) => /^20260728|^20260729/.test(name))
+      .map((name) => name.slice(0, 12));
+
+    expect(v2Migrations.length).toBeGreaterThanOrEqual(5);
+    for (const version of v2Migrations) {
+      expect(preflight, `preflight không nhắc tới migration ${version}`).toContain(version);
+    }
+  });
+
+  it("preflight đọc relforcerowsecurity, không chỉ relrowsecurity", () => {
+    // Bật RLS mà vẫn còn `force` là trạng thái hỏng im lặng; kiểm một nửa là không kiểm.
+    const preflight = read("../scripts/preflight-public-intake-v2-migrations.ts");
+    expect(preflight).toContain("relrowsecurity");
+    expect(preflight).toContain("relforcerowsecurity");
+    expect(preflight).toContain("no force row level security");
+  });
+
   it("bảng số đo có trần số dòng cho mỗi hồ sơ", () => {
     // `/uploads/metrics` nhận số đo của các lượt HỎNG nên không có gì buộc client phải dừng.
     const repository = read("../src/modules/public-intake/repository.ts");
