@@ -40,10 +40,10 @@ import {
 } from "@/modules/public-intake/support-contacts";
 import { uploadWithResume, UploadCancelledError } from "@/modules/public-intake/resumable-upload";
 import {
-  prepareCitizenIdImage,
   readCitizenIdQr,
   type CitizenIdQrReadResult,
 } from "@/modules/public-intake/citizen-id-qr.client";
+import { normalizeIntakeImage } from "@/modules/public-intake/image-normalization.client";
 import {
   OWNER_TYPES,
   OWNER_TYPE_LABELS,
@@ -1085,7 +1085,8 @@ export function IntakeWizard() {
           setUploadNote("");
           return;
         }
-        const prepared = await prepareCitizenIdImage(file);
+        const normalized = await normalizeIntakeImage(file, "CITIZEN_ID");
+        const prepared = normalized.file;
         const replaceFileId = identityPhotos[ownerId]?.[documentType]?.fileId ?? "";
         const fileId = await uploadFile(prepared, documentType, ownerId, replaceFileId);
         if (fileId) {
@@ -1097,8 +1098,13 @@ export function IntakeWizard() {
             },
           }));
           setUploadNote(`Đã tải ảnh CCCD ${sideLabel}. Đang đọc QR ngay trên thiết bị…`);
+          // Đọc QR trên bản đã chuẩn hóa trước (2400 px vẫn thừa nét cho một mã QR trên thẻ).
+          // Chỉ khi thất bại mới thử lại trên ảnh nguồn — làm ngược lại thì mọi ảnh 12MP/HEIC
+          // đều phải giải mã hai lần dù bản chuẩn hóa đọc được ngay.
+          let qr = await readCitizenIdQr(prepared);
+          if (!qr && normalized.changed) qr = await readCitizenIdQr(file);
           setUploadNote(
-            applyQrResult(ownerId, await readCitizenIdQr(prepared))
+            applyQrResult(ownerId, qr)
               ? "Đã đọc QR. Kiểm tra và xác nhận các thông tin vừa tự điền."
               : "Không đọc được QR từ ảnh đã tải. Vui lòng nhập thông tin bằng tay.",
           );
@@ -1220,7 +1226,7 @@ export function IntakeWizard() {
           setUploadNote(`Đang tải ảnh GCN ${index + 1}/${files.length}…`);
           // Ảnh GCN cũng phải qua bước chuyển HEIC như ảnh CCCD: iPhone mặc định chụp HEIC, mà
           // Drive không phải lúc nào cũng nhận dạng được định dạng này khi xác minh sau tải.
-          const prepared = await prepareCitizenIdImage(file);
+          const prepared = (await normalizeIntakeImage(file, "CERTIFICATE")).file;
           const fileId = await uploadFile(prepared, "CERTIFICATE");
           if (!fileId) {
             break;
@@ -1299,7 +1305,7 @@ export function IntakeWizard() {
       setUploadPercent(0);
       setUploadNote("Đang thay ảnh Giấy chứng nhận…");
       try {
-        const prepared = await prepareCitizenIdImage(file);
+        const prepared = (await normalizeIntakeImage(file, "CERTIFICATE")).file;
         const newFileId = await uploadFile(prepared, "CERTIFICATE", "", fileId);
         if (!newFileId) {
           setUploadNote("");
