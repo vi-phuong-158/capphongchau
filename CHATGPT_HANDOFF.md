@@ -16,8 +16,8 @@
 - Lần chạy thực tế: Playwright E2E-06b báo `1 skipped` do thiếu rehearsal credential/kill switch.
 - CI lần đầu dừng ở `npm ci` do lockfile thiếu ba gói `@emnapi/*`; đã chạy
   `npm install --package-lock-only`, xác minh lại `npm ci` local và commit lockfile, không bỏ gate.
-- Runner Node 22/npm 10 vẫn yêu cầu một optional package Linux mà npm 11 lock không materialize
-  trên Windows; workflow dùng Node 24/npm 11, đúng runtime local đã chạy `npm ci` thành công.
+- Runner Linux yêu cầu thêm entry optional `@emnapi/runtime@1.11.3`; đã bổ sung metadata chính xác
+  (registry URL + integrity) vào lockfile, giữ workflow Node 22 và nguyên lệnh `npm ci`.
 - Không merge, deploy, chạy migration hoặc thay đổi `main`.
 - Giữ nguyên, không stage `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
 
