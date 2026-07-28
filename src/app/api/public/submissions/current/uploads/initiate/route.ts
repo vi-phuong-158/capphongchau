@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
+import { extensionFromMimeType } from "@/modules/public-intake/file-naming";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import {
   isEditable,
@@ -170,10 +173,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  const fileName =
-    typeof body.fileName === "string" && body.fileName.trim()
-      ? `${documentType}-${Date.now()}-${body.fileName.trim().slice(-60)}`
-      : `${documentType}-${Date.now()}`;
+  // Tên tệp trong kho do **máy chủ** đặt, không ghép bất cứ mảnh nào của tên client gửi lên.
+  //
+  // Tên do máy ảnh sinh hoặc do người dân đặt rất hay mang số CCCD, họ tên, ngày giờ, đôi khi cả
+  // toạ độ; tên đó đi thẳng vào tên tệp trên Drive và vào cột `public_files.file_name`. Trình
+  // duyệt của app đã gửi tên trung tính, nhưng đó là biện pháp phía client — ranh giới tin cậy
+  // nằm ở đây, và bất kỳ ai gọi thẳng endpoint cũng gửi được tên tùy ý.
+  //
+  // `body.fileName` vẫn được đọc ở trên để suy ra loại ảnh khi trình duyệt không khai được
+  // `mimeType`; chỉ phần mở rộng đã kiểm mới được dùng lại, không phải phần thân tên.
+  const fileName = `${documentType}-${Date.now()}-${randomUUID().slice(0, 8)}.${extensionFromMimeType(mimeType)}`;
 
   const session = await getPublicIntakeStorage().createUploadSession({
     folderId: record.driveFolderId,

@@ -59,7 +59,22 @@ export function publicAssignedOfficer(
   if (!ACTIVE_ASSIGNMENT_STATUSES.has(record.status)) return null;
   if (!record.claimedBy.trim()) return null;
   const name = record.claimedByDisplayName.trim();
-  return name ? { displayName: name } : null;
+  return name && !looksLikeEmail(name) ? { displayName: name } : null;
+}
+
+/**
+ * Tên hiển thị có thực chất là một địa chỉ thư hay không.
+ *
+ * `public.users.display_name` là ô nhập tự do do quản trị viên điền, và trong thực tế rất hay bị
+ * điền chính bằng email công vụ — nhanh, không ai nghĩ tới hệ quả. Cột đó vô hại ở màn hình nội
+ * bộ, nhưng để nguyên chảy ra cổng công khai thì cam kết "không lộ email cán bộ" bị vô hiệu mà
+ * không ai phải sửa dòng mã nào.
+ *
+ * Kiểm ở ranh giới ra ngoài chứ không kiểm lúc quản trị viên nhập: siết ô nhập không cứu được các
+ * bản ghi đã có, còn đường ra công khai thì chỉ có đúng một chỗ này.
+ */
+function looksLikeEmail(value: string): boolean {
+  return /\S+@\S+/.test(value);
 }
 
 /** Đã phân công nhưng chưa biết tên (hồ sơ cũ) — dùng để hiển thị câu thay thế an toàn. */

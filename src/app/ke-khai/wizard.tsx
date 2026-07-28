@@ -47,7 +47,14 @@ import {
 import {
   normalizeIntakeImage,
   safeUploadFileName,
+  type ImageNormalizationResult,
 } from "@/modules/public-intake/image-normalization.client";
+import {
+  classifyPlatform,
+  connectionClass,
+  type FailureCode,
+  type FailureStage,
+} from "@/modules/public-intake/upload-metrics";
 import { createXhrTransport } from "@/modules/public-intake/xhr-upload-transport.client";
 import {
   hasFailedUpload as queueHasFailedUpload,
@@ -532,7 +539,14 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const [certificatePhotos, setCertificatePhotos] = useState<UploadedCertificateImage[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [receiptCopied, setReceiptCopied] = useState(false);
-  const [nextSubmissionError, setNextSubmissionError] = useState("");
+  /**
+   * Mã tiếp nhận đã gửi trong phiên làm việc này.
+   *
+   * Chỉ mã, **không** kèm tên, số điện thoại hay CCCD, và chỉ nằm trong bộ nhớ của trang — đóng
+   * tab là mất. Cán bộ đi cơ sở làm liên tiếp nhiều hộ cần đọc lại mã vừa tạo mà không phải mở
+   * trang tra cứu; ghi thêm bất cứ thứ gì khác là để PII nằm trên máy cá nhân (kế hoạch §12).
+   */
+  const [recentReceipts, setRecentReceipts] = useState<string[]>([]);
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
   const [existingResults, setExistingResults] = useState<Record<string, ExistingLookupResult>>({});
 
@@ -1018,8 +1032,45 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
       documentType: IdentityDocumentType | "CERTIFICATE",
       ownerId = "",
       replaceFileId = "",
-      hooks?: { signal?: AbortSignal; onProgress?: (sent: number, total: number) => void },
+      hooks?: {
+        signal?: AbortSignal;
+        onProgress?: (sent: number, total: number) => void;
+        /** Kết quả bước chuẩn hóa, dùng để đo tỷ lệ nén thật. Thiếu thì chỉ mất số đo. */
+        normalization?: ImageNormalizationResult;
+        prepareDurationMs?: number;
+      },
     ): Promise<string | null> => {
+      const attemptId = crypto.randomUUID();
+      const platform = classifyPlatform(
+        typeof navigator === "undefined" ? "" : navigator.userAgent,
+      );
+      const connection = connectionClass(readConnectionHints());
+      const metricDocumentType = documentType as UploadDocumentType;
+
+      /**
+       * Bắn số đo cho một lượt hỏng. Cố tình không `await` ở chỗ gọi và nuốt mọi lỗi: người dân
+       * đang chờ một thông báo lỗi rõ ràng, không phải chờ thêm một request thống kê.
+       */
+      const reportFailure = (stage: FailureStage, code: FailureCode): void => {
+        void fetchApi("/api/public/submissions/current/uploads/metrics", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
+          body: JSON.stringify({
+            documentType: metricDocumentType,
+            outcome: code === "CANCELLED" ? "CANCELLED" : "FAILED",
+            failureStage: stage,
+            failureCode: code,
+            clientUpload: {
+              attemptId,
+              sourceSizeBytes: hooks?.normalization?.source.sizeBytes ?? file.size,
+              prepareDurationMs: hooks?.prepareDurationMs ?? 0,
+              clientPlatform: platform,
+              effectiveConnectionType: connection,
+            },
+          }),
+        }).catch(() => undefined);
+      };
+
       // Ảnh nhận qua Zalo/Messenger hay tải về từ trình duyệt thường có `File.type` rỗng hoặc là
       // bí danh `image/jpg`. Quy về tên chuẩn ngay ở đây để không bị từ chối oan.
       const declaredMimeType = canonicalImageMimeType(file.type, file.name);
@@ -1027,9 +1078,11 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         setServerError(
           "Không nhận dạng được định dạng của tệp bạn chọn. Hãy chọn ảnh JPG, PNG, WebP hoặc HEIC.",
         );
+        reportFailure("PREPARE", "DECODE_FAILED");
         return null;
       }
 
+      const initiateStartedAt = Date.now();
       const initiate = await fetchApi("/api/public/submissions/current/uploads/initiate", {
         method: "POST",
         headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
@@ -1050,8 +1103,10 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
 
       if (!initiate.ok) {
         setServerError(await readErrorMessage(initiate, "Không tạo được phiên tải lên."));
+        reportFailure("INITIATE", "SERVER_REJECTED");
         return null;
       }
+      const initiateDurationMs = Date.now() - initiateStartedAt;
 
       // Dùng đúng loại máy chủ đã đăng ký với phiên, không dùng lại `file.type`.
       const { uploadUrl, mimeType } = (await initiate.json()) as {
@@ -1059,6 +1114,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         mimeType: string;
       };
 
+      const uploadStartedAt = Date.now();
       let id: string;
       try {
         id = await uploadWithResume({
@@ -1079,16 +1135,20 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
       } catch (error) {
         if (error instanceof UploadCancelledError) {
           setServerError("Đã hủy tải ảnh. Bạn có thể chọn lại tệp để thử lần nữa.");
+          reportFailure("UPLOAD", "CANCELLED");
         } else {
           setServerError(
             error instanceof Error
               ? `${error.message} Kiểm tra mạng rồi chọn lại tệp để thử lại.`
               : "Tải ảnh lên thất bại.",
           );
+          reportFailure("UPLOAD", "NETWORK");
         }
         return null;
       }
+      const uploadDurationMs = Date.now() - uploadStartedAt;
 
+      const normalization = hooks?.normalization;
       const complete = await fetchApi("/api/public/submissions/current/uploads/complete", {
         method: "POST",
         headers: {
@@ -1096,11 +1156,38 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           "x-public-csrf-token": csrfToken,
           "idempotency-key": crypto.randomUUID(),
         },
-        body: JSON.stringify({ driveFileId: id, documentType, ownerId, replaceFileId }),
+        body: JSON.stringify({
+          driveFileId: id,
+          documentType,
+          ownerId,
+          replaceFileId,
+          /*
+           * Số đo hiệu năng. Không có trường tự do nào: mọi thứ ở đây là số hoặc giá trị thuộc
+           * danh mục đóng, và tên tệp/CCCD/điện thoại **không** được đưa vào (kế hoạch §3.6).
+           * Dung lượng đã tải thì máy chủ tự lấy từ Drive, không tin số client gửi.
+           */
+          clientUpload: {
+            attemptId,
+            sourceSizeBytes: normalization?.source.sizeBytes ?? file.size,
+            sourceMimeType: normalization?.source.mimeType || undefined,
+            sourceWidth: normalization?.source.width || undefined,
+            sourceHeight: normalization?.source.height || undefined,
+            uploadWidth: normalization?.upload.width || undefined,
+            uploadHeight: normalization?.upload.height || undefined,
+            normalizationVersion: normalization?.normalizationVersion,
+            prepareDurationMs: hooks?.prepareDurationMs ?? 0,
+            initiateDurationMs,
+            uploadDurationMs,
+            retryCount: 0,
+            clientPlatform: platform,
+            effectiveConnectionType: connection,
+          },
+        }),
       });
 
       if (!complete.ok) {
         setServerError(await readErrorMessage(complete, "Ảnh tải lên không hợp lệ."));
+        reportFailure("COMPLETE", "SERVER_REJECTED");
         return null;
       }
 
@@ -1178,10 +1265,15 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           setUploadNote("");
           return;
         }
+        const prepareStartedAt = Date.now();
         const normalized = await normalizeIntakeImage(file, "CITIZEN_ID");
+        const prepareDurationMs = Date.now() - prepareStartedAt;
         const prepared = normalized.file;
         const replaceFileId = identityPhotos[ownerId]?.[documentType]?.fileId ?? "";
-        const fileId = await uploadFile(prepared, documentType, ownerId, replaceFileId);
+        const fileId = await uploadFile(prepared, documentType, ownerId, replaceFileId, {
+          normalization: normalized,
+          prepareDurationMs,
+        });
         if (fileId) {
           setIdentityPhotos((current) => ({
             ...current,
@@ -1359,7 +1451,10 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
             patchTask(task.id, { status: "PREPARING" });
             // Ảnh GCN cũng phải qua bước chuyển HEIC như ảnh CCCD: iPhone mặc định chụp HEIC, mà
             // Drive không phải lúc nào cũng nhận dạng được định dạng này khi xác minh sau tải.
-            const prepared = (await normalizeIntakeImage(files[index], "CERTIFICATE")).file;
+            const prepareStartedAt = Date.now();
+            const normalized = await normalizeIntakeImage(files[index], "CERTIFICATE");
+            const prepareDurationMs = Date.now() - prepareStartedAt;
+            const prepared = normalized.file;
             patchTask(task.id, {
               status: "UPLOADING",
               totalBytes: prepared.size,
@@ -1369,6 +1464,8 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
             const fileId = await uploadFile(prepared, "CERTIFICATE", "", "", {
               signal: controller.signal,
               onProgress: (sent) => patchTask(task.id, { sentBytes: sent }),
+              normalization: normalized,
+              prepareDurationMs,
             });
             if (!fileId) throw new Error("UPLOAD_REJECTED");
 
@@ -1596,76 +1693,54 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
    * Bắt đầu một hồ sơ mới ngay trên màn hình thành công.
    *
    * Cán bộ đi thu hồ sơ làm liên tiếp nhiều hộ; bắt quay về trang chủ rồi vào lại từ đầu là thừa
-   * một vòng. Quan trọng: **tạo được bản mới rồi mới xóa state cũ**. Làm ngược lại thì mạng lỗi
-   * giữa chừng là mất luôn mã tiếp nhận vừa nhận, mà mã đó không khôi phục trực tuyến được.
+   * một vòng.
+   *
+   * **Không gọi API tạo hồ sơ ở đây.** Bản đầu tiên của nút này POST thẳng lên endpoint tạo với
+   * `phone: ""`, mà cả `/api/public/submissions` lẫn `/api/staff/assisted-submissions` đều bắt
+   * buộc `^0\d{9}$` — nên nút luôn trả 400 và không ai kê khai tiếp được. Số điện thoại của hộ
+   * **sau** thì lúc bấm nút chưa ai biết; chỉ có thể hỏi ở bước 1.
+   *
+   * Vì vậy thao tác này thuần cục bộ: dọn sạch PII của hộ trước rồi quay về bước 1. Đường tạo hồ
+   * sơ là đúng một đường duy nhất — bấm "Tiếp tục" ở bước 1 sau khi nhập số — nên không có nhánh
+   * thứ hai phải bảo trì, và không có lời gọi mạng nào để hỏng.
+   *
+   * Mã tiếp nhận vừa nhận được đẩy sang danh sách "vừa gửi trong ca" (chỉ trong bộ nhớ trang,
+   * không ghi đĩa, không kèm CCCD/tên/điện thoại) để cán bộ vẫn đọc lại được sau khi màn hình đã
+   * chuyển sang hộ mới.
    */
-  const startNextSubmission = useCallback(async () => {
-    setBusy(true);
-    setNextSubmissionError("");
+  const startNextSubmission = useCallback(() => {
+    setRecentReceipts((current) =>
+      receipt ? [receipt.code, ...current.filter((code) => code !== receipt.code)].slice(0, 10) : current,
+    );
+
+    // Xóa sạch PII của hộ trước. Không giữ lại ảnh, CCCD hay số điện thoại nào.
+    setDraft(emptyDraft(newId(), newId(), newId()));
+    setIdentityPhotos({});
+    setCertificatePhotos([]);
+    setUploadTasks([]);
+    setExistingResults({});
+    setErrors({});
+    setServerError("");
+    setUploadNote("");
+    setReceiptCopied(false);
+    setSubmitted(false);
+    setStep(STEP_CONTACT_AND_IDENTITY);
+    submitIdempotencyKey.current = null;
+    draftDirtyRef.current = false;
+
+    // Phiên của hộ trước phải đóng lại: `receipt`/`csrfToken` rỗng buộc bước 1 tạo hồ sơ mới thay
+    // vì PATCH tiếp vào bản kê khai vừa gửi.
+    setReceipt(null);
+    setCsrfToken("");
+    createIdempotencyKey.current = null;
     try {
-      const idempotencyKey = crypto.randomUUID();
-      const response = await fetchApi(
-        assisted ? ASSISTED_CREATE_ENDPOINT : PUBLIC_CREATE_ENDPOINT,
-        {
-          method: "POST",
-          headers: await buildCreateHeaders(idempotencyKey),
-          body: JSON.stringify({ phone: "" }),
-        },
-        CREATE_API_TIMEOUT_MS,
-      );
-
-      if (!response.ok) {
-        setNextSubmissionError(
-          await readErrorMessage(
-            response,
-            "Chưa tạo được bản kê khai mới. Mã tiếp nhận ở trên vẫn còn; thử lại sau ít phút.",
-          ),
-        );
-        return;
-      }
-
-      const created = (await response.json()) as {
-        receiptCode: string;
-        accessSecret: string;
-        csrfToken: string;
-      };
-
-      // Xóa sạch PII của hộ trước. Không giữ lại ảnh, CCCD hay số điện thoại nào.
-      setDraft(emptyDraft(newId(), newId(), newId()));
-      setIdentityPhotos({});
-      setCertificatePhotos([]);
-      setUploadTasks([]);
-      setExistingResults({});
-      setErrors({});
-      setServerError("");
-      setUploadNote("");
-      setReceiptCopied(false);
-      setSubmitted(false);
-      setStep(STEP_CONTACT_AND_IDENTITY);
-      submitIdempotencyKey.current = null;
-      draftDirtyRef.current = false;
-      try {
-        sessionStorage.removeItem(CERT_META_STORAGE_KEY);
-      } catch {
-        // Storage riêng tư bị chặn thì thôi; nhãn trang chỉ là dữ liệu trình bày.
-      }
-
-      setReceipt({ code: created.receiptCode, secret: created.accessSecret });
-      setCsrfToken(created.csrfToken);
-      refreshChallenge();
-      if (!(await adoptServerDraft())) {
-        setServerError(
-          "Đã tạo bản kê khai mới nhưng chưa tải được dữ liệu về máy. Kiểm tra mạng rồi thử lại.",
-        );
-      }
+      sessionStorage.removeItem(CERT_META_STORAGE_KEY);
+      sessionStorage.removeItem(CREATE_IDEMPOTENCY_STORAGE_KEY);
     } catch {
-      setNextSubmissionError(
-        "Kết nối bị gián đoạn. Mã tiếp nhận ở trên vẫn còn; thử lại sau ít phút.",
-      );
-    } finally {
-      setBusy(false);
+      // Storage riêng tư bị chặn thì thôi; nhãn trang chỉ là dữ liệu trình bày.
     }
-  }, [assisted, buildCreateHeaders, refreshChallenge, adoptServerDraft]);
+    refreshChallenge();
+  }, [receipt, refreshChallenge]);
 
   const goBack = useCallback(() => {
     setErrors({});
@@ -1710,27 +1785,22 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           được lưu vào kho của UBND phường.
         </p>
 
-        {nextSubmissionError ? (
-          <p className="pc-field-error" role="alert">
-            {nextSubmissionError}
-          </p>
-        ) : null}
-
         <div className="flex flex-col items-stretch gap-3 pt-1 sm:flex-row sm:justify-center">
           <button type="button" className="pc-button-secondary" onClick={copyReceiptCode}>
             {receiptCopied ? "Đã sao chép ✓" : "Sao chép mã"}
           </button>
-          <button
-            type="button"
-            className="pc-button"
-            disabled={busy}
-            onClick={() => {
-              void startNextSubmission();
-            }}
-          >
-            {busy ? "Đang chuẩn bị…" : "Kê khai hồ sơ tiếp theo"}
+          <button type="button" className="pc-button" onClick={startNextSubmission}>
+            Kê khai hồ sơ tiếp theo
           </button>
         </div>
+
+        {recentReceipts.length > 0 ? (
+          <div className="pc-field-hint">
+            <p className="font-semibold">Đã gửi trong phiên này</p>
+            <p className="pc-code">{recentReceipts.join(" · ")}</p>
+            <p>Danh sách này mất khi bạn đóng trang. Không chứa thông tin cá nhân của hộ dân.</p>
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
           <Link href="/tra-cuu" className="pc-button-quiet">
