@@ -1360,3 +1360,46 @@ Cờ phía client không bao giờ là hàng rào bảo mật — ai cũng đặ
 Hàng rào thật là ba lớp máy chủ: proxy Edge, `requireActiveUser(ASSISTED_INTAKE_ROLES)` ở trang và
 ở API, cộng CSRF. Thêm một cờ server chỉ tạo ảo giác về lớp bảo vệ thứ tư mà không thêm gì thật;
 muốn tắt chế độ này thì thu hồi vai trò.
+
+## [2026-07-28] Kill switch server-side cho chế độ cán bộ hỗ trợ, tách khỏi ASSISTED_INTAKE_ROLES
+
+`OFFICER_ASSISTED_INTAKE_ENABLED` (mặc định `false`) là lớp thứ hai, độc lập với
+`ASSISTED_INTAKE_ROLES`. Vai trò trả lời "ai được dùng"; cờ trả lời "tính năng có mở hay không" —
+cả hai đều bắt buộc, kiểm theo đúng thứ tự vai trò trước rồi mới tới cờ (giữ nguyên 401/403 khi
+người không đủ quyền gọi vào lúc cờ đang tắt, thay vì lộ ra một 503 không phân biệt được).
+
+Đọc ở `loadPublicIntakeEnvironment()` (transform chuỗi `"true"` → `true`, mọi giá trị khác kể cả
+thiếu biến → `false`), dùng ở cả `route.ts` (503 SERVICE_UNAVAILABLE khi tắt) và `page.tsx` (màn
+hình "Chế độ chưa được bật"). Đây là cờ **server-side thuần túy** — không có biến `NEXT_PUBLIC_`
+tương ứng, vì cờ client không bao giờ là hàng rào bảo mật (ai cũng đọc được bundle đã tải về).
+
+## [2026-07-28] `receiptCode` không dùng được làm nhãn cho dữ liệu test — dùng số điện thoại
+
+`deriveReceiptCode` sinh mã bằng HMAC từ `PUBLIC_SESSION_SECRET` + idempotency key ngẫu nhiên;
+client không đặt được tiền tố. `scripts/cleanup-e2e-preview-data.ts` và tài liệu E2E vì vậy dùng
+một số điện thoại dựng cố định (`E2E_TEST_PHONE`, mặc định `0912345678`) làm nhãn nhận diện dữ
+liệu test thay cho "receipt prefix" — cùng mục đích, khác cơ chế.
+
+## [2026-07-28] Script dọn dữ liệu E2E dò bảng con động, không liệt kê cứng tên bảng
+
+`public_submissions` có khoảng 16 bảng con tham chiếu `submission_id`, phần lớn không có
+`on delete cascade`. `cleanup-e2e-preview-data.ts` dò `information_schema.columns` để tìm mọi bảng
+có cột `submission_id` rồi xóa theo kiểu thử-và-thử-lại (bảng nào xóa được thì xóa, còn vướng thì
+để lại lượt sau) thay vì liệt kê cứng tên bảng — một migration sau này thêm bảng con mới sẽ tự
+được script nhận ra, không cần sửa script.
+
+## [2026-07-28] Đăng nhập E2E bằng mã hóa JWT trực tiếp, không tự động hóa Google OAuth
+
+`tests/e2e/auth-helpers.ts` dùng `@auth/core/jwt`.`encode()` với `AUTH_SECRET` thật của preview để
+tạo thẳng cookie phiên hợp lệ, thay vì Playwright tự động hóa màn hình chọn tài khoản Google (thuộc
+domain `accounts.google.com`, ngoài tầm kiểm soát của test, và không nên lưu mật khẩu tài khoản
+test thật trong CI). Cookie vẫn đi qua `requireActiveUser` thật ở server — không phải mock, không
+làm yếu điều đang được kiểm.
+
+## [2026-07-28] Logic tính toán của 2 script Phase 5 tách sang module thuần, test được không cần DB
+
+`report-upload-performance.ts` → `upload-performance-stats.ts` (percentile, gộp nhóm, tỷ lệ nén).
+`audit-orphan-public-files.ts` → `orphan-audit-support.ts` (phân tích tham số dòng lệnh, token xác
+nhận). Không có Postgres/Drive thật trong môi trường CI hiện tại; tách phần thuần ra là cách duy
+nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nhóm, tính tỷ lệ nén trên mẫu thiếu số
+đo) mà không cần hạ tầng đó. Phần chạm DB/Drive trong hai script gốc không đổi hành vi.

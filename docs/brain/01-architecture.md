@@ -132,13 +132,16 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không 
             + public_status_events + audit_logs + public_lookup_index + request_log
 
 src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-07-28)
-├── requireActiveUser(ASSISTED_INTAKE_ROLES) tại TRANG (proxy Edge chỉ là lớp một; JWT cũ
-│   còn hạn sau khi quản trị viên khóa tài khoản)
+├── requireActiveUser(ASSISTED_INTAKE_ROLES) TRƯỚC, rồi mới đọc kill switch (thứ tự cố ý — giữ
+│   401/403 đúng cho người không đủ quyền, không lộ ra một 503 chung chung)
 │   ⚠️ ASSISTED_INTAKE_ROLES ⊊ SUBMISSION_READ_ROLES — REVIEW_OFFICER bị loại để không ai
 │   vừa nhập hộ dân vừa thẩm định chính hồ sơ đó. Trang và API đọc CÙNG một hằng số.
+├── environment.OFFICER_ASSISTED_INTAKE_ENABLED (mặc định FALSE) — kill switch server-side,
+│   ĐỘC LẬP với vai trò. Tắt → trang hiện "Chế độ chưa được bật", API trả 503
+│   SERVICE_UNAVAILABLE. KHÔNG có biến NEXT_PUBLIC_ tương ứng — cờ client không phải hàng rào.
 ├── assisted-wizard.tsx → <IntakeWizard assisted={{ officerName }} />
 └── POST /api/staff/assisted-submissions
-    ├── requireActiveUser + verifyCsrfToken, KHÔNG Turnstile
+    ├── requireActiveUser + kill switch (cùng thứ tự trang) + verifyCsrfToken, KHÔNG Turnstile
     ├── createIntakeSubmission({ channel: "OFFICER_ASSISTED", assistedBy: từ phiên })
     │   ⚠️ client KHÔNG gửi được channel/assistedBy — nhận từ client là để ai cũng gắn nhãn
     │   "cán bộ đã nhập hộ" cho hồ sơ của mình

@@ -2122,3 +2122,54 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `npx playwright test --list` liệt kê 12 test/2 file. **`npm run test:e2e` vẫn CHƯA chạy** (thiếu
   credential) — điều kiện đầy đủ ở `evidence/PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`. Bốn migration
   **chưa chạy ở bất kỳ môi trường nào**.
+
+## [2026-07-28] Chuẩn bị và kiểm thử môi trường preview cho Public Intake V2
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - **Kill switch server-side** `OFFICER_ASSISTED_INTAKE_ENABLED` (mặc định `false`), độc lập với
+    `ASSISTED_INTAKE_ROLES`, kiểm sau vai trò ở cả route và page; UI "Chế độ chưa được bật" khi tắt.
+    7 test mới (`tests/assisted-submissions-route.test.ts` mock đầy đủ requireActiveUser/csrf/env,
+    kiểm bốn tổ hợp cờ×vai trò thật; `tests/env.test.ts` kiểm parsing; `tests/officer-assisted-intake.test.ts`
+    kiểm thứ tự vai trò-trước-cờ trong mã nguồn).
+  - **Kiểm 10 test bị skip** — cả 10 nằm trong 2 file `*.integration.test.ts` gác bởi
+    `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, bảo vệ `runOfficialAcceptance` (không thuộc phạm vi thi
+    công V2 trực tiếp). Đối chiếu với 10 luồng bắt buộc: chỉ "official acceptance guard" và
+    "idempotent replay" nằm trong 10 test này; 8 luồng còn lại đã chạy pass ở tầng vitest từ trước.
+    Tài liệu đầy đủ: `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
+  - **Migration preflight**: `scripts/preflight-public-intake-v2-migrations.ts` (17 kiểm tra schema
+    qua `information_schema`/`pg_constraint`/`pg_indexes`, thoát mã khác 0 nếu có FAIL) +
+    `evidence/PUBLIC_INTAKE_V2_PREVIEW_MIGRATION_RUNBOOK.md` (backup, thứ tự, kiểm sau mỗi
+    migration, dấu hiệu rollback, gate deploy code).
+  - **E2E preview thật**: bỏ 3 `test.fixme(true, ...)` không điều kiện còn lại (dùng fixture PNG
+    1×1 không PII ở `tests/fixtures/` cho ảnh, `page.route()` mô phỏng đứt mạng thay vì tắt mạng
+    thiết bị); thêm 3 kịch bản mới E2E-08 (kê khai tiếp — phép thử trực tiếp của BLOCKER đã sửa ở
+    vòng trước), E2E-09 (orphan cleanup, chạy `audit-orphan-public-files.ts` thật), E2E-10
+    (idempotent replay qua network interception, không tự tay gọi API để không phải tự giải
+    Turnstile). `tests/e2e/auth-helpers.ts` mã hóa cookie phiên bằng `@auth/core/jwt`.`encode()` +
+    `AUTH_SECRET` thật — không tự động hóa Google OAuth, không mock `requireActiveUser`.
+    `playwright.config.ts` thêm chế độ `E2E_BASE_URL` trỏ preview thật, bỏ qua `webServer` cục bộ.
+    `npm run test:e2e:preview` mới. `scripts/cleanup-e2e-preview-data.ts` dọn dữ liệu bằng nhãn số
+    điện thoại (mã tiếp nhận do server sinh bằng HMAC, không đặt tiền tố được), dò bảng con động.
+  - **Chất lượng ảnh**: `PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` thêm hướng dẫn dựng fixture không
+    PII (không thêm dependency `sharp`/`canvas`) và bảng so sánh nguồn↔sau chuẩn hóa theo từng ảnh.
+  - **Xác nhận 2 script Phase 5**: tách logic thuần sang `upload-performance-stats.ts` và
+    `orphan-audit-support.ts` (module mới, không chạm DB/Drive) vì import thẳng script gốc vào
+    test sẽ kích hoạt `process.exit()` ở cuối file — nguy hiểm cho tiến trình vitest. 38 test mới
+    khóa percentile, gộp nhóm, tỷ lệ nén, phân tích tham số dòng lệnh, token xác nhận. Cả hai script
+    vẫn thoát mã 1 với thông báo rõ khi thiếu `SUPABASE_DATABASE_URL` — xác nhận bằng chạy trực tiếp.
+- **File đã sửa:** `src/modules/common/env.ts`, `src/app/api/staff/assisted-submissions/route.ts`,
+  `src/app/ke-khai-ho/page.tsx`, `.env.example`, `playwright.config.ts`, `package.json`,
+  `scripts/{report-upload-performance,audit-orphan-public-files}.ts` (refactor), 2 module mới
+  (`upload-performance-stats.ts`, `orphan-audit-support.ts`), 2 script mới
+  (`preflight-public-intake-v2-migrations.ts`, `cleanup-e2e-preview-data.ts`), `tests/e2e/*` (viết
+  lại + `auth-helpers.ts` mới), `tests/fixtures/*.png` (mới), 8 file test mới/sửa, 3 file evidence
+  mới, `docs/brain/*`.
+- **Lý do:** Chuẩn bị và kiểm thử môi trường preview theo yêu cầu, không deploy production, không
+  chạy migration production.
+- **Kiểm tra:** `npm run lint` 0 lỗi (5 cảnh báo có sẵn); `npm run typecheck` sạch; `npm test`
+  **552 passed, 10 skipped** (đầu phiên này: 516); `npm run build` exit 0, `✓ Compiled successfully`;
+  `npx playwright test --list` → 15 test/2 file, không lỗi parse. Hai script Phase 5 chạy trực tiếp
+  không có `SUPABASE_DATABASE_URL` → thoát mã 1 với thông báo rõ (đúng kỳ vọng, không phải lỗi).
+  **`npm run test:e2e:preview` và migration production/preview đều CHƯA chạy** trong phiên này —
+  không có credential thật.

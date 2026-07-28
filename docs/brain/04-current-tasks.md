@@ -40,18 +40,31 @@ render và E2E chưa chạy lần nào.
 
 ### Việc bắt buộc trước khi merge / bật cờ
 
-1. **Chạy bốn migration** `202607280001`–`202607280004` trên staging trước, production sau,
-   **đúng thứ tự và trước khi deploy code**. Toàn bộ additive; rollback là bỏ cột/bỏ bảng. Chi
-   tiết và điểm vỡ nếu làm ngược thứ tự: `evidence/PUBLIC_INTAKE_V2_MIGRATION_REVIEW_V2.md`.
-2. **Chạy `npm run test:e2e`** — chưa chạy được trong phiên thi công vì thiếu credential thật.
-3. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` trước khi đặt
+1. **Chạy bốn migration** `202607280001`–`202607280004` trên preview trước, production sau,
+   **đúng thứ tự và trước khi deploy code**, rồi chạy
+   `npm run preflight:public-intake-v2-migrations` để xác nhận PASS. Toàn bộ additive; rollback là
+   bỏ cột/bỏ bảng. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V2_PREVIEW_MIGRATION_RUNBOOK.md`.
+2. **Chạy `npm run test:e2e:preview`** trên preview thật — chưa chạy lần nào trong phiên thi công
+   vì thiếu Supabase/Drive/tài khoản cán bộ thật. 15 kịch bản đã viết đầy đủ, không còn
+   `test.fixme` không điều kiện. Điều kiện đầy đủ: `evidence/PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`.
+3. **Bật `OFFICER_ASSISTED_INTAKE_ENABLED=true`** trên preview trước khi chạy các kịch bản
+   E2E-06b/E2E-06c — kill switch server-side mặc định TẮT (2026-07-28, vòng rà soát lần hai).
+4. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` (đã có bảng so
+   sánh nguồn↔sau chuẩn hóa theo từng ảnh) trước khi đặt
    `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`. Chưa có số đo nào; **không được** tuyên
    bố tăng tốc.
-4. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
+5. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
    resume và tiến độ không tụt.
-5. **Xác nhận danh sách vai trò `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,
+6. **Xác nhận danh sách vai trò `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,
    `SYSTEM_ADMIN`) đúng nghiệp vụ. `REVIEW_OFFICER` bị loại có chủ đích — không để một người vừa
    nhập hộ dân vừa thẩm định chính hồ sơ đó.
+7. **Chạy hai test integration còn skip** (`ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run
+   tests/staging-rehearsal-acceptance-saga.integration.test.ts
+   tests/canonical-projection.integration.test.ts`) trên một Postgres thử nghiệm — bảo vệ đúng
+   luồng "official acceptance guard" và "idempotent replay". Danh sách đầy đủ 10 test đang skip:
+   `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
+8. **Sau mỗi đợt E2E, dọn dữ liệu**: `npm run cleanup:e2e-preview-data -- --apply --confirm=...`
+   rồi `npx tsx scripts/audit-orphan-public-files.ts --apply --confirm=...`.
 
 ### Cảnh báo cho agent sau
 
@@ -67,6 +80,12 @@ render và E2E chưa chạy lần nào.
 - **KHÔNG thêm trường tự do vào `clientUploadTelemetrySchema`.** Mọi trường phải là số hoặc danh
   mục đóng; một ô tự do là chỗ để CCCD hay tên tệp lọt vào bảng số đo, và đã ghi thì không gỡ ra.
 - **KHÔNG ghép tên tệp client gửi lên vào tên tệp trong kho.** Máy chủ tự đặt tên; xem H-01.
+- **KHÔNG dùng cờ `NEXT_PUBLIC_` cho chế độ cán bộ hỗ trợ.** `OFFICER_ASSISTED_INTAKE_ENABLED` là
+  server-side thuần túy, đọc qua `loadPublicIntakeEnvironment()`. Cờ client không phải hàng rào
+  bảo mật.
+- **KHÔNG liệt kê cứng tên bảng con của `public_submissions` trong script dọn dữ liệu.** Có ~16
+  bảng, phần lớn không cascade. `cleanup-e2e-preview-data.ts` dò `information_schema` — giữ
+  nguyên cách đó khi sửa.
 
 ---
 
