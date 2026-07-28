@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   createUploadSession: vi.fn(),
   discardFile: vi.fn(),
   listFiles: vi.fn(),
+  findStoredMutation: vi.fn(),
+  isDriveFileAdopted: vi.fn(),
   resolvePublicRequest: vi.fn(),
 }));
 
@@ -12,7 +14,11 @@ vi.mock("@/modules/common/env", () => ({
 }));
 
 vi.mock("@/modules/public-intake/repository", () => ({
-  getPublicIntakeRepository: () => ({ listFiles: mocks.listFiles }),
+  getPublicIntakeRepository: () => ({
+    listFiles: mocks.listFiles,
+    findStoredMutation: mocks.findStoredMutation,
+    isDriveFileAdopted: mocks.isDriveFileAdopted,
+  }),
 }));
 
 vi.mock("@/modules/public-intake/route-context", async (importOriginal) => ({
@@ -75,6 +81,10 @@ describe("public upload với nháp legacy thiếu owners", () => {
     mocks.discardFile.mockResolvedValue(undefined);
     mocks.listFiles.mockReset();
     mocks.listFiles.mockResolvedValue([]);
+    mocks.findStoredMutation.mockReset();
+    mocks.findStoredMutation.mockResolvedValue(null);
+    mocks.isDriveFileAdopted.mockReset();
+    mocks.isDriveFileAdopted.mockResolvedValue(false);
     mocks.resolvePublicRequest.mockReset();
     mocks.resolvePublicRequest.mockResolvedValue({
       record: malformedRecord,

@@ -25,6 +25,7 @@ function read(relative: string): string {
 const publicRoute = read("../src/app/api/public/submissions/route.ts");
 const staffRoute = read("../src/app/api/staff/assisted-submissions/route.ts");
 const service = read("../src/modules/public-intake/create-submission.ts");
+const repository = read("../src/modules/public-intake/repository.ts");
 const migration = read("../supabase/migrations/202607280002_officer_assisted_intake.sql");
 
 describe("Kênh tiếp nhận", () => {
@@ -153,7 +154,12 @@ describe("Route cán bộ tự bảo vệ, không chỉ dựa vào proxy Edge", 
   });
 
   it("ghi audit khi tạo hồ sơ hộ dân", () => {
-    expect(staffRoute).toContain("ASSISTED_SUBMISSION_CREATED");
+    const create = repository.slice(
+      repository.indexOf("async create(input:"),
+      repository.indexOf("async findCreationByIdempotencyKey"),
+    );
+    expect(create).toContain("ASSISTED_SUBMISSION_CREATED");
+    expect(create).toContain("await this.insertAudit(transaction");
   });
 
   it("phân biệt chưa đăng nhập (401) với không đủ quyền (403)", () => {

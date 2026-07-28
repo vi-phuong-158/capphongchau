@@ -55,6 +55,7 @@ function complete(): IntakeDraft {
     gender: "NAM",
     residenceAddress: "Phường Phong Châu, Phú Thọ",
     roleOnCertificate: "CA_NHAN",
+    identityStatus: "MANUAL_COMPLETE",
   };
   draft.parcels[0] = {
     ...emptyParcel("parcel-1", "use-1"),

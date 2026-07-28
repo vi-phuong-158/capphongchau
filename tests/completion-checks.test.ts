@@ -26,6 +26,7 @@ function makeDraft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
         gender: "NAM",
         residenceAddress: "Phong Châu",
         roleOnCertificate: "CA_NHAN",
+        identityStatus: "MANUAL_COMPLETE",
       },
     ],
     parcels: [
