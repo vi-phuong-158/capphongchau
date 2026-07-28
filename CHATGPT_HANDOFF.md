@@ -14,6 +14,8 @@
 - Regression tập trung sau sửa: 53/53 pass, gồm route simulation DB commit/response mất/retry.
 - E2E assisted đầy đủ đã thêm; chỉ chạy thật khi có rehearsal credential, không ghi pass nếu skip.
 - Lần chạy thực tế: Playwright E2E-06b báo `1 skipped` do thiếu rehearsal credential/kill switch.
+- CI lần đầu dừng ở `npm ci` do lockfile thiếu ba gói `@emnapi/*`; đã chạy
+  `npm install --package-lock-only`, xác minh lại `npm ci` local và commit lockfile, không bỏ gate.
 - Không merge, deploy, chạy migration hoặc thay đổi `main`.
 - Giữ nguyên, không stage `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
 
