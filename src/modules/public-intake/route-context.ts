@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { createApiErrorPayload, type ApiErrorCode } from "@/modules/common/api-error";
+import {
+  createApiErrorPayload,
+  type ApiErrorCode,
+  type ApiErrorDetails,
+} from "@/modules/common/api-error";
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 
 import { isTrustedEdgeRequest } from "./edge-guard";
@@ -49,9 +53,10 @@ export function publicError(
   code: PublicErrorCode,
   message: string,
   requestId: string = randomUUID(),
+  details?: ApiErrorDetails,
 ): NextResponse {
   return NextResponse.json(
-    createApiErrorPayload({ code: code as ApiErrorCode, message, requestId }),
+    createApiErrorPayload({ code: code as ApiErrorCode, message, requestId, details }),
     { status: PUBLIC_ERROR_STATUS[code] ?? 500 },
   );
 }

@@ -7,7 +7,13 @@ import {
   emptyParcel,
   type IntakeDraft,
 } from "@/modules/public-intake/types";
+import type { PublicFileSummary } from "@/modules/public-intake/workflow";
 
+/**
+ * Từ Public Intake V2, `completionChecks` là gác cổng **đầy đủ** cho tiếp nhận chính thức: bản
+ * kê khai "hợp lệ" phải đủ cả `oldWard`, nguồn gốc/hình thức/thời hạn và bộ ảnh CCCD + GCN.
+ * Fixture này được bổ sung cho khớp, không phải nới lỏng kiểm tra.
+ */
 function makeDraft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
   return {
     certificate: { issueNumber: "AD 123456", issueDate: "2020-01-01", registryNumber: "CH001" },
@@ -29,7 +35,17 @@ function makeDraft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
         mapSheetNumber: "5",
         area: "100",
         addressOnCertificate: "Phong Châu",
-        landUses: [{ ...emptyLandUse("l1"), purposeCode: "ODT", area: "100" }],
+        oldWard: "PHONG_CHAU_CU",
+        landUses: [
+          {
+            ...emptyLandUse("l1"),
+            purposeCode: "ODT",
+            originCode: "NHA_NUOC_CONG_NHAN",
+            formCode: "SU_DUNG_RIENG",
+            termCode: "SU_DUNG_ON_DINH_LAU_DAI",
+            area: "100",
+          },
+        ],
       },
     ],
     assets: [],
@@ -37,6 +53,21 @@ function makeDraft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
     consentAccepted: true,
     ...overrides,
   };
+}
+
+function makeFiles(): PublicFileSummary[] {
+  const base = {
+    status: "UPLOADED" as const,
+    sizeBytes: 1024,
+    checksum: "checksum",
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+  };
+  return [
+    { ...base, fileId: "f1", ownerId: "o1", documentType: "CITIZEN_ID_FRONT" },
+    { ...base, fileId: "f2", ownerId: "o1", documentType: "CITIZEN_ID_BACK" },
+    { ...base, fileId: "f3", ownerId: "", documentType: "CERTIFICATE" },
+  ];
 }
 
 function makeRecord(): SubmissionRecord {
@@ -61,7 +92,7 @@ function makeRecord(): SubmissionRecord {
     updatedAt: new Date().toISOString(),
     draft: makeDraft(),
     accessVersion: 1,
-    fileSummaries: [],
+    fileSummaries: makeFiles(),
     rowIndex: 1,
   };
 }

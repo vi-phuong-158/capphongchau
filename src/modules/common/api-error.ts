@@ -13,7 +13,19 @@ export const API_ERROR_CODES = [
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
-export type ApiErrorDetails = Readonly<Record<string, boolean | number | string | null>> | null;
+/**
+ * Giá trị được phép nằm trong `details`. Cho phép mảng đối tượng phẳng để trả danh sách lỗi theo
+ * trường (`details.issues`) — client cần `fieldPath` để focus đúng ô sai, một chuỗi thông báo
+ * chung không làm được việc đó.
+ *
+ * Vẫn là allowlist: chỉ thông tin kỹ thuật an toàn, không PII, không token, không Drive ID/link.
+ */
+export type ApiErrorDetailScalar = boolean | number | string | null;
+export type ApiErrorDetailValue =
+  | ApiErrorDetailScalar
+  | readonly ApiErrorDetailScalar[]
+  | readonly Readonly<Record<string, ApiErrorDetailScalar>>[];
+export type ApiErrorDetails = Readonly<Record<string, ApiErrorDetailValue>> | null;
 
 export interface ApiErrorPayload {
   readonly error: {

@@ -19,15 +19,39 @@ import {
   emptyParcel,
   type IntakeDraft,
 } from "@/modules/public-intake/types";
-import { validateDraftForSubmit } from "@/modules/public-intake/validation";
+import {
+  validateCitizenSubmitDraft,
+  validateDraftForSubmit,
+} from "@/modules/public-intake/validation";
+import type { PublicFileSummary } from "@/modules/public-intake/workflow";
 import { completionChecks } from "@/modules/submissions/completion-checks";
+
+/** Bộ ảnh đủ cho `fullDraft()`: CCCD trước/sau của owner-1 và một ảnh GCN. */
+function completeFiles(): PublicFileSummary[] {
+  const base = {
+    status: "UPLOADED" as const,
+    sizeBytes: 1024,
+    checksum: "checksum",
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+  };
+  return [
+    { ...base, fileId: "f1", ownerId: "owner-1", documentType: "CITIZEN_ID_FRONT" },
+    { ...base, fileId: "f2", ownerId: "owner-1", documentType: "CITIZEN_ID_BACK" },
+    { ...base, fileId: "f3", ownerId: "", documentType: "CERTIFICATE" },
+  ];
+}
 
 /** Draft đủ mọi trường PL3 mà `validateDraftForSubmit` đang đòi hỏi. */
 function fullDraft(): IntakeDraft {
   const draft = emptyDraft("owner-1", "parcel-1", "use-1");
   draft.phone = "0987654321";
   draft.consentAccepted = true;
-  draft.certificate = { issueNumber: "GCN-TEST-001", issueDate: "2016-03-11", registryNumber: "CS-TEST" };
+  draft.certificate = {
+    issueNumber: "GCN-TEST-001",
+    issueDate: "2016-03-11",
+    registryNumber: "CS-TEST",
+  };
   draft.owners[0] = {
     ...emptyOwner("owner-1"),
     fullName: "Nguyễn Văn Test",
@@ -50,9 +74,9 @@ function fullDraft(): IntakeDraft {
       {
         ...emptyLandUse("use-1"),
         purposeCode: "ONT",
-        originCode: "CN_QSD",
-        formCode: "RIENG",
-        termCode: "LAU_DAI",
+        originCode: "NHA_NUOC_CONG_NHAN",
+        formCode: "SU_DUNG_RIENG",
+        termCode: "SU_DUNG_ON_DINH_LAU_DAI",
       },
     ],
   };
@@ -140,45 +164,85 @@ describe("hiện trạng: public submit đòi toàn bộ dữ liệu PL3 (sẽ n
   });
 });
 
-describe("hiện trạng: completionChecks yếu hơn public submit (lỗ hổng §1.5, vá ở Phase 1)", () => {
-  it("KHÔNG chặn thửa thiếu đơn vị hành chính cũ", () => {
+/**
+ * Phase 1 đã **đảo ngược** nhóm này.
+ *
+ * Trước Phase 1 (commit `1cc7d93`) sáu test dưới đây khẳng định `completionChecks` **không** chặn
+ * các thiếu sót này — đó là lỗ hổng §1.5: cổng công khai đòi đủ PL3 còn gác cổng tiếp nhận chính
+ * thức thì không. Nới điều kiện gửi của người dân mà giữ nguyên gác cổng sẽ để hồ sơ chỉ có tên +
+ * ảnh tiếp nhận chính thức được. Nay mỗi thiếu sót phải sinh đúng mã BLOCKING tương ứng.
+ */
+describe("sau Phase 1: completionChecks là gác cổng đầy đủ (lỗ hổng §1.5 đã vá)", () => {
+  it("chặn thửa thiếu đơn vị hành chính cũ", () => {
     const draft = fullDraft();
     draft.parcels[0].oldWard = "";
-    expect(blockingCodes(recordWith({ draft }), draft)).toEqual([]);
+    expect(blockingCodes(recordWith({ draft }), draft)).toContain("PARCEL_0_WARD_INVALID");
   });
 
-  it("KHÔNG chặn chủ sử dụng thiếu vai trò trên GCN", () => {
+  it("chặn chủ sử dụng thiếu vai trò trên GCN", () => {
     const draft = fullDraft();
     draft.owners[0].roleOnCertificate = "";
-    expect(blockingCodes(recordWith({ draft }), draft)).toEqual([]);
+    expect(blockingCodes(recordWith({ draft }), draft)).toContain("OWNER_0_ROLE_MISSING");
   });
 
-  it("KHÔNG chặn chủ sử dụng thiếu ngày sinh / giới tính / địa chỉ", () => {
+  it("chặn chủ sử dụng thiếu ngày sinh / giới tính / địa chỉ", () => {
     const draft = fullDraft();
     draft.owners[0].dateOfBirth = "";
     draft.owners[0].gender = "";
     draft.owners[0].residenceAddress = "";
-    expect(blockingCodes(recordWith({ draft }), draft)).toEqual([]);
+    const codes = blockingCodes(recordWith({ draft }), draft);
+    expect(codes).toContain("OWNER_0_DOB_MISSING");
+    expect(codes).toContain("OWNER_0_GENDER_MISSING");
+    expect(codes).toContain("OWNER_0_ADDRESS_MISSING");
   });
 
-  it("KHÔNG chặn thửa thiếu địa chỉ ghi trên GCN", () => {
+  it("chặn thửa thiếu địa chỉ ghi trên GCN", () => {
     const draft = fullDraft();
     draft.parcels[0].addressOnCertificate = "";
-    expect(blockingCodes(recordWith({ draft }), draft)).toEqual([]);
+    expect(blockingCodes(recordWith({ draft }), draft)).toContain("PARCEL_0_ADDRESS_MISSING");
   });
 
-  it("KHÔNG chặn loại đất thiếu nguồn gốc / hình thức / thời hạn", () => {
+  it("chặn loại đất thiếu nguồn gốc / hình thức / thời hạn", () => {
     const draft = fullDraft();
-    draft.parcels[0].landUses[0] = emptyLandUse("use-1");
-    draft.parcels[0].landUses[0].purposeCode = "ONT";
-    expect(blockingCodes(recordWith({ draft }), draft)).toEqual([]);
+    draft.parcels[0].landUses[0] = { ...emptyLandUse("use-1"), purposeCode: "ONT" };
+    const codes = blockingCodes(recordWith({ draft }), draft);
+    expect(codes).toContain("PARCEL_0_USE_0_ORIGIN_MISSING");
+    expect(codes).toContain("PARCEL_0_USE_0_FORM_MISSING");
+    expect(codes).toContain("PARCEL_0_USE_0_TERM_MISSING");
   });
 
-  it("chỉ cảnh báo (WARNING) khi hồ sơ không có ảnh nào — tiếp nhận chính thức vẫn qua", () => {
+  it("chặn (không còn chỉ cảnh báo) khi hồ sơ thiếu ảnh GCN hoặc ảnh CCCD", () => {
     const draft = fullDraft();
-    const checks = completionChecks(recordWith({ draft, fileSummaries: [] }), draft);
-    expect(checks.some((check) => check.code === "FILES_WARNING_EMPTY")).toBe(true);
-    expect(checks.filter((check) => check.severity === "BLOCKING")).toEqual([]);
+    const codes = blockingCodes(recordWith({ draft, fileSummaries: [] }), draft);
+    expect(codes).toContain("FILES_CERTIFICATE_MISSING");
+    expect(codes).toContain("FILES_OWNER_0_CITIZEN_ID_FRONT_MISSING");
+    expect(codes).toContain("FILES_OWNER_0_CITIZEN_ID_BACK_MISSING");
+  });
+
+  it("chặn loại đất còn ở trạng thái “đề nghị cán bộ đối chiếu”", () => {
+    const draft = fullDraft();
+    draft.parcels[0].landUses[0].purposeCode = "CAN_DOI_CHIEU";
+    expect(blockingCodes(recordWith({ draft }), draft)).toContain(
+      "PARCEL_0_USE_0_PURPOSE_UNRESOLVED",
+    );
+  });
+
+  it("hồ sơ hoàn chỉnh kèm đủ ảnh thì không còn lỗi chặn nào", () => {
+    const draft = fullDraft();
+    expect(blockingCodes(recordWith({ draft, fileSummaries: completeFiles() }), draft)).toEqual([]);
+  });
+});
+
+describe("sau Phase 1: public submit chấp nhận hồ sơ tối thiểu", () => {
+  it("chỉ phone + consent + tên chủ là đủ để gửi", () => {
+    expect(validateCitizenSubmitDraft(minimalDraft())).toEqual([]);
+  });
+
+  it("nhưng tiếp nhận chính thức vẫn chặn chính hồ sơ đó", () => {
+    const draft = minimalDraft();
+    expect(
+      blockingCodes(recordWith({ draft, fileSummaries: completeFiles() }), draft).length,
+    ).toBeGreaterThan(0);
   });
 });
 
