@@ -60,6 +60,43 @@ describe("Cổng công khai không thể tạo hồ sơ mang nhãn cán bộ", (
   });
 });
 
+describe("Kill switch server-side OFFICER_ASSISTED_INTAKE_ENABLED", () => {
+  const page = read("../src/app/ke-khai-ho/page.tsx");
+
+  it("route kiểm cờ ở máy chủ, không phải cờ NEXT_PUBLIC_ phía client", () => {
+    expect(staffRoute).toContain("environment.OFFICER_ASSISTED_INTAKE_ENABLED");
+    expect(staffRoute).not.toMatch(/NEXT_PUBLIC_OFFICER_ASSISTED/);
+  });
+
+  it("vai trò kiểm TRƯỚC cờ — requireActiveUser đứng trước dòng đọc cờ", () => {
+    const roleIndex = staffRoute.indexOf("requireActiveUser(ASSISTED_INTAKE_ROLES)");
+    const flagIndex = staffRoute.indexOf("OFFICER_ASSISTED_INTAKE_ENABLED");
+    expect(roleIndex).toBeGreaterThan(-1);
+    expect(flagIndex).toBeGreaterThan(roleIndex);
+  });
+
+  it("cờ tắt trả mã lỗi ổn định SERVICE_UNAVAILABLE, không lộ lý do tắt", () => {
+    const flagBlock = staffRoute.slice(
+      staffRoute.indexOf("OFFICER_ASSISTED_INTAKE_ENABLED"),
+      staffRoute.indexOf("serverEnvironment = loadServerEnvironment"),
+    );
+    expect(flagBlock).toContain("SERVICE_UNAVAILABLE");
+    expect(flagBlock).toContain("503");
+  });
+
+  it("trang cũng kiểm cờ và hiển thị trạng thái không khả dụng, không chỉ trắng trang", () => {
+    expect(page).toContain("environment.OFFICER_ASSISTED_INTAKE_ENABLED");
+    expect(page).toContain("Chế độ chưa được bật");
+  });
+
+  it("trang kiểm vai trò trước cờ, giống route", () => {
+    const roleIndex = page.indexOf("requireActiveUser(ASSISTED_INTAKE_ROLES)");
+    const flagIndex = page.indexOf("OFFICER_ASSISTED_INTAKE_ENABLED");
+    expect(roleIndex).toBeGreaterThan(-1);
+    expect(flagIndex).toBeGreaterThan(roleIndex);
+  });
+});
+
 describe("Quyền lập hồ sơ hộ dân hẹp hơn quyền đọc hàng đợi", () => {
   it("có policy riêng, không dùng lại danh sách vai trò đọc", () => {
     expect([...ASSISTED_INTAKE_ROLES]).toEqual([

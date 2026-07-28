@@ -30,9 +30,27 @@ export const metadata: Metadata = {
  */
 export default async function AssistedIntakePage() {
   // Kiểm lại vai trò tại trang, không chỉ dựa vào proxy Edge: JWT cũ vẫn còn hạn sau khi quản trị
-  // viên khóa tài khoản, nên Edge thấy "có session" là chưa đủ.
+  // viên khóa tài khoản, nên Edge thấy "có session" là chưa đủ. Vai trò kiểm TRƯỚC kill switch —
+  // xem lý do ở `route.ts`.
   const user = await requireActiveUser(ASSISTED_INTAKE_ROLES);
   const environment = loadPublicIntakeEnvironment();
+
+  if (!environment.OFFICER_ASSISTED_INTAKE_ENABLED) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+        <div
+          className="rounded-lg border p-6 text-center"
+          style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+        >
+          <h1 className="mb-2 text-xl font-semibold">Chế độ chưa được bật</h1>
+          <p style={{ color: "var(--muted)" }}>
+            Chế độ cán bộ hỗ trợ kê khai hiện chưa được bật cho tài khoản của bạn. Liên hệ quản trị
+            viên hệ thống nếu bạn cần dùng tính năng này.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">

@@ -56,7 +56,22 @@ export async function POST(request: Request): Promise<NextResponse> {
   const requestId = randomUUID();
 
   try {
+    // Vai trò kiểm TRƯỚC kill switch: cả hai đều bắt buộc, và thứ tự này giữ hành vi cũ khi cờ
+    // bật — người không đủ quyền vẫn nhận đúng lỗi 401/403 thay vì 503.
     const user = await requireActiveUser(ASSISTED_INTAKE_ROLES);
+
+    const environment = loadPublicIntakeEnvironment();
+    if (!environment.OFFICER_ASSISTED_INTAKE_ENABLED) {
+      // Mã lỗi ổn định, không đổi theo lý do tắt (bảo trì, chưa duyệt nghiệp vụ, sự cố) — client
+      // không cần phân biệt, chỉ cần biết tính năng hiện không dùng được.
+      return fail(
+        "SERVICE_UNAVAILABLE",
+        "Chế độ cán bộ hỗ trợ kê khai hiện chưa được bật.",
+        requestId,
+        503,
+      );
+    }
+
     const serverEnvironment = loadServerEnvironment();
     if (
       !verifyCsrfToken(
@@ -68,7 +83,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       return fail("ACCESS_DENIED", "Yêu cầu bảo mật không hợp lệ hoặc đã hết hạn.", requestId, 403);
     }
 
-    const environment = loadPublicIntakeEnvironment();
     if (environment.PUBLIC_INTAKE_MODE === "PAUSED") {
       return fail(
         "SERVICE_UNAVAILABLE",
