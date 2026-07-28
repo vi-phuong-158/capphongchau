@@ -86,14 +86,51 @@ src/app/api/users/route.ts
 └── SupabaseUserRepository.mutate
     └── transaction: users + audit_logs + request_log
 
-src/app/ke-khai/wizard.tsx
+src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không còn 7
+│   STEPS = Người kê khai và CCCD | Ảnh GCN | Thông tin thửa đất | Kiểm tra và gửi
+│   Nhận prop `assisted?: { officerName }` — /ke-khai-ho dùng lại NGUYÊN component này,
+│   không có bản wizard song song nào.
+├── src/modules/public-intake/public-wizard-validation.ts (thuần, test được ở Node)
+│   └── validatePublicWizardStep → GỌI validateCitizenSubmitDraft (cùng hàm với máy chủ)
+│       rồi lọc theo bước + ánh xạ fieldPath → khóa ô nhập.
+│       ⚠️ TRƯỚC V2 `validate()` trong wizard chép lại luật bằng regex riêng — hai bản lệch nhau.
+│       Sửa luật nghiệp vụ thì sửa validation.ts, KHÔNG sửa lại ở wizard.
+├── src/modules/public-intake/image-normalization.client.ts (cờ
+│   NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED, mặc định FALSE)
+│   └── normalizeIntakeImage → CCCD 2400px / GCN 3000px, JPEG q0.88, không phóng to,
+│       imageOrientation:"from-image" (thiếu là ảnh dọc bị xoay ngang), mọi lỗi → trả tệp nguồn
+├── src/modules/public-intake/upload-queue.ts (thuần)
+│   └── runWithConcurrency — GCN tối đa 2 luồng, 1 khi saveData/2g; một ảnh hỏng KHÔNG
+│       hủy ảnh khác (trước V2 vòng lặp `break` làm mất cả các ảnh chưa thử)
+├── src/modules/public-intake/upload-transport.ts + xhr-upload-transport.client.ts
+│   └── ResumablePutTransport — PUT dữ liệu qua XHR để có upload.onprogress;
+│       initiate / hỏi tiến độ / complete VẪN dùng fetch.
+│       resumable-upload.ts giữ tiến độ ĐƠN ĐIỆU TĂNG (Google có thể báo nhận ít hơn số byte
+│       XHR đã đếm; thanh phần trăm tụt bị người dân đọc là "hỏng").
 ├── POST /api/public/submissions (PUBLIC_CREATE idempotency)
-├── PATCH /api/public/submissions/current (version)
+│   └── src/modules/public-intake/create-submission.ts — DÙNG CHUNG với route cán bộ;
+│       `channel` là tham số BẮT BUỘC, cổng công khai gán cứng "SELF_SERVICE"
+├── PATCH /api/public/submissions/current (version) — qua flushDraft() single-flight + cờ dirty
 ├── initiate/complete upload → Google Drive + public_files
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
+    ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
+    │   (code + fieldPath, trả trong error.details.issues)
+    ├── citizenIdsForLookup — CHỈ băm CCCD khớp 12 số; không bao giờ băm chuỗi rỗng
     └── PublicIntakeRepository.submit
         └── transaction: public_submissions + normalized children
             + public_status_events + audit_logs + public_lookup_index + request_log
+
+src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-07-28)
+├── requireActiveUser(SUBMISSION_READ_ROLES) tại TRANG (proxy Edge chỉ là lớp một; JWT cũ
+│   còn hạn sau khi quản trị viên khóa tài khoản)
+├── assisted-wizard.tsx → <IntakeWizard assisted={{ officerName }} />
+└── POST /api/staff/assisted-submissions
+    ├── requireActiveUser + verifyCsrfToken, KHÔNG Turnstile
+    ├── createIntakeSubmission({ channel: "OFFICER_ASSISTED", assistedBy: từ phiên })
+    │   ⚠️ client KHÔNG gửi được channel/assistedBy — nhận từ client là để ai cũng gắn nhãn
+    │   "cán bộ đã nhập hộ" cho hồ sơ của mình
+    ├── audit ASSISTED_SUBMISSION_CREATED
+    └── đặt CÙNG cookie phiên công khai → wizard/upload/submit dùng lại y nguyên
 
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
@@ -141,6 +178,13 @@ src/modules/public-intake/payload-layers.ts (thuần, không I/O)
 src/app/api/submissions/[submissionId]/accept/route.ts
 ├── completionChecks (src/modules/submissions/completion-checks.ts) chạy TRƯỚC khi mở saga —
 │   còn BLOCKING → 400 VALIDATION_FAILED, không mở transaction nào (Phase 8)
+│   ⚠️ TỪ V2 (2026-07-28) ĐÂY LÀ GÁC CỔNG DUY NHẤT cho dữ liệu nghiệp vụ đầy đủ.
+│   Cổng công khai chỉ còn đòi phone + tên chủ + đủ ảnh, nên MỌI trường PL3 mà
+│   validateDraftForSubmit từng chặn đã chuyển hết về đây: vai trò trên GCN, ngày sinh/giới
+│   tính/địa chỉ, định danh tổ chức, nhóm người sử dụng hiện tại, địa chỉ trên GCN, oldWard
+│   TRỐNG (trước chỉ chặn khi sai danh mục), land use rỗng, nguồn gốc/hình thức/thời hạn,
+│   tổng diện tích. Ảnh chuyển từ WARNING sang BLOCKING.
+│   NỚI completionChecks = mở đường cho hồ sơ chỉ có tên + ảnh đi thẳng vào hồ sơ chính thức.
 └── runOfficialAcceptance (src/modules/submissions/acceptance-saga.ts)
     ⚠️ OFFICIAL_ACCEPTANCE_ENABLED = true NGAY TỪ ĐIỂM GỐC của nhánh này (b8e67a2, trước Phase 1) —
     saga dưới đây đã LIVE suốt Phase 2-14 và hai vòng vá lỗi, không phải trạng thái "chưa bật".

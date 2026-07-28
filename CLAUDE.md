@@ -19,7 +19,7 @@ docs/brain/05-testing-and-deploy.md — lệnh cài đặt, chạy, test, deploy
 docs/brain/06-ai-working-log.md     — nhật ký các lần AI sửa code
 ```
 
-**Đặc biệt đọc Code Graph trong `docs/brain/01-architecture.md`** để hiểu quan hệ phụ thuộc giữa các module — biết "đụng vào file X thì ảnh hưởng những đâu" trước khi sửa, tránh phá vỡ thứ ở xa. Dự án hiện **chưa có mã nguồn** — Code Graph còn trống, agent khởi tạo code (mốc M0) phải điền lại ngay sau khi tạo cấu trúc module.
+**Đặc biệt đọc Code Graph trong `docs/brain/01-architecture.md`** để hiểu quan hệ phụ thuộc giữa các module — biết "đụng vào file X thì ảnh hưởng những đâu" trước khi sửa, tránh phá vỡ thứ ở xa. Code Graph đã có nội dung đầy đủ và **phải được cập nhật cùng lúc** với mọi thay đổi kiến trúc; Code Graph lỗi thời còn nguy hiểm hơn không có, vì agent sau sẽ tin nó.
 
 Ngoài `docs/brain/`, dự án còn có tài liệu nghiệp vụ chi tiết đã chốt trước:
 
@@ -32,7 +32,7 @@ Ngoài `docs/brain/`, dự án còn có tài liệu nghiệp vụ chi tiết đ�
 Lệnh cài đặt, chạy dev, test, build, deploy nằm đầy đủ trong
 `docs/brain/05-testing-and-deploy.md`. Đọc file đó để dựng môi trường, đừng đoán lệnh.
 
-Dự án chưa có `package.json` — chưa có lệnh chạy thật. Khi khởi tạo (mốc M0 trong `PLAN.md`), dùng Next.js App Router + TypeScript strict + PWA theo `docs/brain/01-architecture.md`.
+Stack đang chạy: Next.js 16 App Router + TypeScript strict + PWA, Supabase PostgreSQL, Google My Drive. Lệnh thường dùng: `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e`.
 
 ---
 

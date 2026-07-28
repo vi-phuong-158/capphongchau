@@ -8,6 +8,58 @@
 
 ---
 
+## [2026-07-28] PUBLIC INTAKE V2 — luồng kê khai công khai còn 4 bước
+
+Thi công theo `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md`, trên nhánh
+`claude/land-declaration-process-feedback-126f2e`. **Chưa merge, chưa deploy, chưa chạy migration
+production.**
+
+### Đã xong (7 commit)
+
+| Phase | Nội dung | Commit |
+|---|---|---|
+| 0 | Baseline + test characterization khóa lỗ hổng `completionChecks` | `1cc7d93` |
+| 1 | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức) | `e938bab` |
+| 2 | Wizard 7 bước → 4 bước | `fe3e2e3` |
+| 3 | Chuẩn hóa ảnh trên thiết bị (cờ, mặc định TẮT) | `814eee7` |
+| 4 | Tiến độ tải thật qua XHR + hàng đợi 2 luồng | `bdbf180` |
+| 6 | Màn hình thành công + kê khai hồ sơ tiếp theo | `ee30ee8` |
+| 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
+| 7 | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho` | `7345090` |
+
+### CHƯA làm — Phase 5 của đầu bài
+
+Bảng metric `public.public_upload_attempts`, telemetry ở complete route, orphan cleanup an toàn
+(`isDriveFileAdopted` fail-safe), `scripts/audit-orphan-public-files.ts`,
+`scripts/report-upload-performance.ts`.
+
+Không chặn phase nào khác. Nhưng đây là **nguồn số liệu duy nhất** để nghiệm thu mốc hiệu năng
+§18 của đầu bài, nên phải làm trước khi bật cờ chuẩn hóa ảnh cho người dân.
+
+### Việc bắt buộc trước khi merge / bật cờ
+
+1. **Chạy hai migration** `202607280001_assigned_officer_display_name.sql` và
+   `202607280002_officer_assisted_intake.sql` trên staging trước, production sau. Cả hai additive
+   (chỉ thêm cột nullable + CHECK), rollback là bỏ cột.
+2. **Chạy `npm run test:e2e`** — chưa chạy được trong phiên thi công vì thiếu credential thật.
+3. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` trước khi đặt
+   `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`. Chưa có số đo nào; **không được** tuyên
+   bố tăng tốc.
+4. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
+   resume và tiến độ không tụt.
+5. **Cấp quyền `/ke-khai-ho`** cho đúng nhóm cán bộ đi cơ sở (hiện dùng `SUBMISSION_READ_ROLES`).
+
+### Cảnh báo cho agent sau
+
+- **KHÔNG nới `completionChecks`.** Từ V2 nó là gác cổng duy nhất cho dữ liệu nghiệp vụ đầy đủ;
+  cổng công khai đã nới hết mức. Xem `03-decisions.md` [2026-07-28] entry đầu tiên.
+- **KHÔNG thêm luật nghiệp vụ trực tiếp vào `wizard.tsx`.** Luật nằm ở `validation.ts`;
+  `public-wizard-validation.ts` chỉ lọc theo bước và ánh xạ tên trường. Trước V2 hai nơi có hai bản
+  regex riêng và đã lệch nhau.
+- **KHÔNG cho client gửi `intake_channel` hay `assistedBy`.** Máy chủ suy ra từ route và phiên.
+
+---
+
 ## [2026-07-25] TRẠNG THÁI HIỆN TẠI — đã mở tiếp nhận hồ sơ chính thức
 
 **[CẬP NHẬT 2026-07-26]** Hạ tầng Antigravity AI draft GCN đã có trong code nhưng mặc định

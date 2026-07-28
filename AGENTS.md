@@ -3,8 +3,8 @@
 > Dành riêng cho **Codex**. Claude Code dùng `CLAUDE.md`.
 >
 > **BẮT BUỘC: đọc `docs/brain/` trước khi code**, đặc biệt **Code Graph** trong
-> `docs/brain/01-architecture.md` (bản đồ module — "đụng vào X ảnh hưởng đâu"; dự án hiện
-> chưa có mã nguồn nên Code Graph còn trống, agent khởi tạo code phải điền lại). File
+> `docs/brain/01-architecture.md` (bản đồ module — "đụng vào X ảnh hưởng đâu"; Code Graph đã có
+> nội dung đầy đủ và phải được cập nhật cùng lúc với mọi thay đổi kiến trúc). File
 > `AGENTS.md` này vẫn là nguồn chi tiết nhất về mô hình dữ liệu, API và bảo mật —
 > `docs/brain/` là bản tóm tắt/tổng hợp để đọc nhanh, không thay thế. Sau khi sửa code, bắt
 > buộc thêm entry vào `docs/brain/06-ai-working-log.md`; nếu đổi kiến trúc/API/schema, cập

@@ -4,6 +4,65 @@
 > trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
 > read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
 
+## [2026-07-28] Public Intake V2 — rút luồng kê khai công khai còn 4 bước
+
+- **Agent:** Claude Opus 5
+- **Đầu bài:** `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md` (chủ dự án soạn từ góp ý của cán bộ
+  trực tiếp đi thu hồ sơ). Nhánh `claude/land-declaration-process-feedback-126f2e`, base
+  `79f4ae6`.
+- **Thay đổi (7 commit, mỗi phase một commit):**
+  1. `1cc7d93` — baseline + test characterization. Ghi lại **bằng chứng lỗ hổng**:
+     `completionChecks` yếu hơn hẳn `validateDraftForSubmit`.
+  2. `e938bab` — tách `validateCitizenSubmitDraft` (MỨC A) khỏi `completionChecks` (MỨC C); siết
+     `completionChecks` thành gác cổng đầy đủ; bỏ HMAC chuỗi rỗng; dùng `parseVietnameseDecimal` ở
+     cả hai tầng.
+  3. `fe3e2e3` — wizard 7 bước → 4; bỏ bước tài sản và bước loại đất; ảnh GCN lên bước 2; ô ký
+     hiệu loại đất tự do; nhãn tổ dân phố + "Chưa xác định"; lỗi thiếu ảnh báo tại đúng khối;
+     `flushDraft` single-flight.
+  4. `814eee7` — chuẩn hóa ảnh trên thiết bị sau cờ, **mặc định tắt**.
+  5. `bdbf180` — transport XHR có tiến độ thật, hàng đợi 2 luồng, bỏ `busy` khỏi luồng tải ảnh.
+  6. `ee30ee8` — màn hình thành công giữa màn hình + "Kê khai hồ sơ tiếp theo".
+  7. `ea3f716` — lưu và hiển thị tên cán bộ tiếp nhận.
+  8. `7345090` — chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho`.
+- **File chính đã sửa/thêm:**
+  - `src/app/ke-khai/wizard.tsx` (7 bước → 4, nhận prop `assisted`)
+  - `src/modules/public-intake/validation.ts` (`validateDraftStructure`,
+    `validateCitizenSubmitDraft`, `validateCitizenRequiredFiles`, `citizenIdsForLookup`,
+    `normalizeLandPurposeFreeText`)
+  - `src/modules/submissions/completion-checks.ts` (viết lại thành gác cổng đầy đủ)
+  - `src/modules/public-intake/public-wizard-validation.ts` (mới)
+  - `src/modules/public-intake/image-normalization.client.ts` (mới)
+  - `src/modules/public-intake/upload-queue.ts`, `upload-transport.ts`,
+    `xhr-upload-transport.client.ts` (mới)
+  - `src/modules/public-intake/create-submission.ts` (mới, dùng chung hai route tạo hồ sơ)
+  - `src/modules/submissions/assigned-officer.ts` (mới)
+  - `src/app/ke-khai-ho/page.tsx` + `assisted-wizard.tsx` (mới)
+  - `src/app/api/staff/assisted-submissions/route.ts` (mới)
+  - `src/proxy.ts` (matcher thêm `/ke-khai-ho`, `/api/staff`)
+  - Migration `202607280001_assigned_officer_display_name.sql`,
+    `202607280002_officer_assisted_intake.sql` — **cả hai additive, CHƯA CHẠY production**
+- **Lý do:** Cán bộ đi thu hồ sơ báo bảy bước với hàng chục ô bắt buộc theo PL3 khiến hộ dân bỏ dở;
+  ảnh tải quá lâu; thiếu ảnh không báo rõ; kê xong không biết đã gửi chưa; không biết ai đang xử
+  lý; không có công cụ cho cán bộ nhập hộ. Chi tiết từng quyết định ở `03-decisions.md` (chín entry
+  ngày 2026-07-28).
+- **Kiểm tra:**
+  - `npm run lint` — 0 error, 5 warning **có từ trước** (không phát sinh warning mới).
+  - `npm run typecheck` — sạch.
+  - `npm test` — 464 pass, 10 skipped (baseline 266 → +198).
+  - `npm run build` — pass; `/ke-khai`, `/ke-khai-ho`, `/api/staff/assisted-submissions` đều build.
+  - Dựng dev server, mở `/ke-khai`: hiển thị đúng 4 bước, không lỗi console.
+- **CHƯA KIỂM ĐƯỢC — ghi rõ để agent sau không tưởng đã xong:**
+  - `npm run test:e2e` chưa chạy: Playwright cần dev server + Supabase/Google credential thật.
+  - Không có số đo tốc độ tải thật (thiếu Drive/Supabase thật và thiết bị 4G) → **không có tuyên bố
+    hiệu năng nào**; cờ chuẩn hóa ảnh để `false`.
+  - Các bước sau bước 1 của wizard chưa thao tác được trên trình duyệt vì tạo hồ sơ cần Supabase
+    thật.
+  - Chưa kiểm chất lượng ảnh sau chuẩn hóa (chữ còn đọc được, QR còn quét được) — checklist bắt
+    buộc ở `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md`.
+- **Phase CHƯA làm trong đợt này:** Phase 5 của đầu bài (bảng metric `public_upload_attempts`,
+  orphan cleanup an toàn ở complete route, script audit/report). Không chặn các phase khác; là
+  hạ tầng để lấy số đo hiệu năng sau khi deploy preview.
+
 ## [2026-07-25] Đồng bộ tài liệu sau cutover Supabase
 
 - **Agent:** Codex
