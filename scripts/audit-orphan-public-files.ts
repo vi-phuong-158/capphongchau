@@ -19,56 +19,20 @@
  * lượng. Bản in này được dán qua lại giữa nhiều người trong lúc xử lý sự cố.
  */
 
-import { createHash } from "node:crypto";
-
 import { loadEnvConfig } from "@next/env";
 
+import {
+  driveOrphanConfirmationToken,
+  parseAuditOptions,
+  type AuditOptions,
+  type OrphanFinding,
+} from "../src/modules/public-intake/orphan-audit-support";
 import { getPublicIntakeStorage } from "../src/modules/public-intake/storage";
 import { getDatabase } from "../src/modules/supabase/database";
 
 loadEnvConfig(process.cwd());
 
-type FindingKind = "DRIVE_ORPHAN" | "MISSING_ON_DRIVE" | "FOLDER_UNREADABLE";
-
-interface Finding {
-  readonly kind: FindingKind;
-  readonly submissionId: string;
-  readonly driveFileId: string;
-  readonly sizeBytes: number;
-}
-
-interface Options {
-  readonly apply: boolean;
-  readonly confirm: string;
-  readonly limit: number;
-}
-
-function parseOptions(argv: readonly string[]): Options {
-  const limitArgument = argv.find((value) => value.startsWith("--limit="));
-  return {
-    // `--dry-run` được chấp nhận nhưng thừa: không có `--apply` thì luôn là chạy khô.
-    apply: argv.includes("--apply"),
-    confirm: argv.find((value) => value.startsWith("--confirm="))?.slice("--confirm=".length) ?? "",
-    limit: limitArgument ? Number(limitArgument.slice("--limit=".length)) : 500,
-  };
-}
-
-/**
- * Token xác nhận buộc người chạy phải đọc kết quả khô trước.
- *
- * Gắn với đúng tập tệp sắp xóa: thêm hay bớt một tệp là token đổi, nên không thể lấy token của
- * lần chạy hôm qua để xóa tập của hôm nay.
- */
-function confirmationToken(findings: readonly Finding[]): string {
-  const material = findings
-    .filter((item) => item.kind === "DRIVE_ORPHAN")
-    .map((item) => `${item.submissionId}:${item.driveFileId}`)
-    .sort()
-    .join("|");
-  return createHash("sha256").update(material).digest("hex").slice(0, 16);
-}
-
-async function audit(options: Options): Promise<void> {
+async function audit(options: AuditOptions): Promise<void> {
   const database = getDatabase();
   const storage = getPublicIntakeStorage();
 
@@ -80,7 +44,7 @@ async function audit(options: Options): Promise<void> {
     limit ${options.limit}
   `;
 
-  const findings: Finding[] = [];
+  const findings: OrphanFinding[] = [];
 
   for (const submission of submissions) {
     const rows = await database<{ drive_file_id: string }[]>`
@@ -139,7 +103,7 @@ async function audit(options: Options): Promise<void> {
     console.log(`  ${item.kind}\t${item.submissionId}\t${item.driveFileId}\t${item.sizeBytes}`);
   }
 
-  const token = confirmationToken(findings);
+  const token = driveOrphanConfirmationToken(findings);
   if (!options.apply) {
     console.log("\nChạy khô — không xóa gì.");
     if (orphans.length > 0) {
@@ -173,7 +137,7 @@ async function audit(options: Options): Promise<void> {
   console.log(`\nĐã xóa ${deleted}/${orphans.length} tệp mồ côi.`);
 }
 
-audit(parseOptions(process.argv.slice(2)))
+audit(parseAuditOptions(process.argv.slice(2)))
   .then(() => process.exit(process.exitCode ?? 0))
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : "Lỗi không rõ.");
