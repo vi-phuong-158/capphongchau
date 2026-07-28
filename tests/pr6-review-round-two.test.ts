@@ -119,6 +119,27 @@ describe("Telemetry tải ảnh không được hỏng trong im lặng", () => {
     }
   });
 
+  it("preflight in project ref, không chỉ hostname", () => {
+    /*
+     * Hostname KHÔNG phân biệt được project: mọi project Supabase cùng region dùng chung endpoint
+     * pooler. Bản đầu chỉ in host, nên chạy nhầm sang DB test vẫn trông y hệt chạy đúng production
+     * — bước tự kiểm coi như vô tác dụng. Thứ phân biệt là `postgres.<project-ref>` ở username.
+     */
+    const preflight = read("../scripts/preflight-public-intake-v2-migrations.ts");
+    expect(preflight).toContain("url.username");
+    expect(preflight).toContain("project=");
+  });
+
+  it("preflight KHÔNG in mật khẩu của chuỗi kết nối", () => {
+    // Log này hay bị dán nguyên văn vào báo cáo bàn giao và ảnh chụp màn hình.
+    const code = read("../scripts/preflight-public-intake-v2-migrations.ts")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("//"))
+      .join("\n");
+    expect(code).not.toContain("url.password");
+    expect(code).not.toContain("SUPABASE_DATABASE_URL}");
+  });
+
   it("preflight đọc relforcerowsecurity, không chỉ relrowsecurity", () => {
     // Bật RLS mà vẫn còn `force` là trạng thái hỏng im lặng; kiểm một nửa là không kiểm.
     const preflight = read("../scripts/preflight-public-intake-v2-migrations.ts");

@@ -270,15 +270,27 @@ async function runChecks(): Promise<CheckResult[]> {
  * Cơ sở dữ liệu đang kiểm là cái nào.
  *
  * Script đọc `.env.local` của thư mục đang chạy, nên rất dễ chạy nhầm sang DB dev rồi kết luận
- * "production sẵn sàng". In host ra để người chạy tự đối chiếu. Chỉ in host — chuỗi kết nối đầy đủ
- * có mật khẩu, không được xuất hiện trong log hay ảnh chụp màn hình dán vào báo cáo.
+ * "production sẵn sàng". Phải in ra thứ ĐỦ SỨC PHÂN BIỆT.
+ *
+ * Hostname KHÔNG đủ: mọi project Supabase trong cùng một region dùng chung endpoint pooler
+ * (`aws-1-ap-northeast-2.pooler.supabase.com`), nên hai project khác nhau in ra y hệt nhau. Thứ
+ * phân biệt là **project ref**, nằm trong username dạng `postgres.<project-ref>`.
+ *
+ * Project ref không phải bí mật — nó nằm trong mọi URL công khai của project. Mật khẩu thì có, và
+ * nó nằm ở `url.password`: tuyệt đối không in, kể cả rút gọn, vì log này hay bị dán vào báo cáo.
  */
 function connectionTarget(): string {
   const raw = process.env.SUPABASE_DATABASE_URL ?? "";
   if (!raw) return "KHÔNG RÕ (thiếu SUPABASE_DATABASE_URL)";
   try {
     const url = new URL(raw);
-    return `${url.hostname}${url.port ? `:${url.port}` : ""}${url.pathname}`;
+    const projectRef = url.username.includes(".")
+      ? url.username.slice(url.username.indexOf(".") + 1)
+      : "";
+    const host = `${url.hostname}${url.port ? `:${url.port}` : ""}${url.pathname}`;
+    return projectRef
+      ? `project=${projectRef}  (${host})`
+      : `${host}  [KHÔNG đọc được project ref từ username — không thể phân biệt project]`;
   } catch {
     return "KHÔNG ĐỌC ĐƯỢC";
   }
