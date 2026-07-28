@@ -1301,3 +1301,62 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Đánh đổi:** <cái gì bị đánh đổi>
 - **Người quyết định:** <user / Claude / Codex>
 ```
+
+## [2026-07-28] Quyền lập hồ sơ hộ dân hẹp hơn quyền đọc hàng đợi
+
+`ASSISTED_INTAKE_ROLES` = `INTAKE_OFFICER`, `WARD_ADMIN`, `SYSTEM_ADMIN` — **không** dùng lại
+`SUBMISSION_READ_ROLES`.
+
+Quyền đọc hàng đợi và quyền tạo dữ liệu mới mang dấu vết "cán bộ đã nhập hộ" là hai chuyện khác
+nhau: hồ sơ do cán bộ nhập được coi là đáng tin hơn hồ sơ hộ dân tự khai, nên quyền tạo nó phải
+hẹp hơn quyền xem.
+
+`REVIEW_OFFICER` bị loại có chủ đích. Vai trò đó thẩm định hồ sơ; cho cùng một người vừa nhập vừa
+duyệt là bỏ mất chốt kiểm tra chéo duy nhất trong quy trình.
+
+Giả định: `INTAKE_OFFICER` là cán bộ tiếp nhận tại bộ phận một cửa. Mã nguồn không mô tả nghiệp vụ
+chi tiết hơn; nếu phường chốt khác, sửa đúng hằng số đó — trang và API đọc từ một chỗ.
+
+## [2026-07-28] Tên tệp trong kho do máy chủ đặt, không nhận từ client
+
+`uploads/initiate` trước đây ghép `body.fileName` vào tên tệp trên Drive và `public_files.file_name`.
+Tên do máy ảnh sinh hay do người dân đặt thường mang số CCCD, họ tên, ngày giờ.
+
+Trình duyệt của app đã gửi tên trung tính từ Phase 3, nhưng đó là biện pháp phía client. Ranh giới
+tin cậy nằm ở route: ai gọi thẳng endpoint bằng `curl` cũng gửi được tên tùy ý. Nay máy chủ tự đặt
+`{documentType}-{timestamp}-{8 ký tự ngẫu nhiên}.{đuôi theo mimeType đã kiểm}`; chỉ phần mở rộng
+đã qua `canonicalImageMimeType` mới được dùng lại. Tên chính thức lúc tiếp nhận
+(`buildOriginalFileNames`) không đổi.
+
+## [2026-07-28] Dọn tệp mồ côi nghiêng về giữ lại, không nghiêng về xóa
+
+`discardIfOrphan` trong complete route hỏi `repository.isDriveFileAdopted` trước khi xóa, và
+`.catch(() => true)` — hỏi không được thì mặc định coi như **đã nhận**, tức là không xóa.
+
+Đánh đổi không đối xứng: để sót một tệp thừa thì `scripts/audit-orphan-public-files.ts` dọn được và
+chỉ mất ít dung lượng; xóa nhầm một tệp cơ sở dữ liệu đã nhận là hồ sơ trỏ vào Drive ID không còn
+tồn tại, ảnh giấy tờ mất vĩnh viễn, và không ai phát hiện cho tới lúc cán bộ mở ra đối chiếu.
+
+`isDriveFileAdopted` đọc mọi trạng thái kể cả `REPLACED`/`DELETED`: tệp đã bị thay vẫn là tệp từng
+được nhận.
+
+## [2026-07-28] Bảng số đo tải ảnh không có ô văn bản tự do nào
+
+`public.public_upload_attempts` chỉ chứa số, enum và `submission_id`. Không có cột nào có thể chứa
+tên tệp, CCCD, họ tên, điện thoại, user agent thô, Drive ID, URL upload hay IP — và
+`clientUploadTelemetrySchema` là `strict()` với mọi trường thuộc danh mục đóng.
+
+Lý do là hình dạng của rủi ro chứ không phải mức độ: một ô tự do trong bảng thống kê là chỗ dữ liệu
+cá nhân lọt vào mà không ai nghĩ tới lúc rà soát, và một khi đã ghi thì không gỡ ra được.
+`classifyPlatform` quy user agent về đúng bốn nhãn ngay tại chỗ, không bao giờ lưu chuỗi gốc — user
+agent đầy đủ là dấu vân tay nhận dạng được thiết bị.
+
+Số đo là best-effort ở cả hai đường ghi: metric hỏng không được làm hỏng lượt tải ảnh.
+`uploadSizeBytes` cố ý lấy từ Drive đã xác minh, không tin số client gửi.
+
+## [2026-07-28] Chế độ cán bộ hỗ trợ không có feature flag
+
+Cờ phía client không bao giờ là hàng rào bảo mật — ai cũng đặt được biến trong bundle đã tải về.
+Hàng rào thật là ba lớp máy chủ: proxy Edge, `requireActiveUser(ASSISTED_INTAKE_ROLES)` ở trang và
+ở API, cộng CSRF. Thêm một cờ server chỉ tạo ảo giác về lớp bảo vệ thứ tư mà không thêm gì thật;
+muốn tắt chế độ này thì thu hồi vai trò.

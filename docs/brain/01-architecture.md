@@ -111,7 +111,18 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không 
 │   └── src/modules/public-intake/create-submission.ts — DÙNG CHUNG với route cán bộ;
 │       `channel` là tham số BẮT BUỘC, cổng công khai gán cứng "SELF_SERVICE"
 ├── PATCH /api/public/submissions/current (version) — qua flushDraft() single-flight + cờ dirty
-├── initiate/complete upload → Google Drive + public_files
+├── POST .../uploads/initiate → phiên resumable Drive
+│   ⚠️ tên tệp trong kho do MÁY CHỦ đặt, KHÔNG ghép body.fileName (tên máy ảnh hay mang CCCD,
+│   họ tên); chỉ đuôi mở rộng lấy từ mimeType đã qua canonicalImageMimeType
+├── POST .../uploads/complete → verifyUploadedFile → appendFile + số đo
+│   ├── src/modules/public-intake/upload-metrics.ts (thuần) — Zod strict, danh mục ĐÓNG,
+│   │   kẹp giá trị; KHÔNG có ô văn bản tự do nào để CCCD/tên tệp lọt vào
+│   ├── appendUploadAttempt(...).catch(() => undefined) — metric hỏng KHÔNG phá lượt tải
+│   └── discardIfOrphan → isDriveFileAdopted(...).catch(() => true)
+│       ⚠️ hỏi DB không được thì mặc định ĐÃ NHẬN, tức là KHÔNG xóa. Sót tệp thừa thì
+│       scripts/audit-orphan-public-files.ts dọn được; xóa nhầm là mất ảnh vĩnh viễn.
+├── POST .../uploads/metrics → số đo cho lượt HỎNG (lượt hỏng không có complete để bám vào);
+│   luôn trả 204, vẫn đòi phiên + CSRF
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
     ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
     │   (code + fieldPath, trả trong error.details.issues)
@@ -121,8 +132,10 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không 
             + public_status_events + audit_logs + public_lookup_index + request_log
 
 src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-07-28)
-├── requireActiveUser(SUBMISSION_READ_ROLES) tại TRANG (proxy Edge chỉ là lớp một; JWT cũ
+├── requireActiveUser(ASSISTED_INTAKE_ROLES) tại TRANG (proxy Edge chỉ là lớp một; JWT cũ
 │   còn hạn sau khi quản trị viên khóa tài khoản)
+│   ⚠️ ASSISTED_INTAKE_ROLES ⊊ SUBMISSION_READ_ROLES — REVIEW_OFFICER bị loại để không ai
+│   vừa nhập hộ dân vừa thẩm định chính hồ sơ đó. Trang và API đọc CÙNG một hằng số.
 ├── assisted-wizard.tsx → <IntakeWizard assisted={{ officerName }} />
 └── POST /api/staff/assisted-submissions
     ├── requireActiveUser + verifyCsrfToken, KHÔNG Turnstile
@@ -260,6 +273,11 @@ Migration SQL tạo các nhóm bảng:
 - `existing_certificates`, owners/link/import/index append-only.
 - `cases`, `certificates`, `owners`, `files`, QR scans và bảng tương thích nâng cấp.
 - `export_jobs`.
+- `public_upload_attempts` (2026-07-28, Phase 5) — số đo mỗi lượt tải ảnh. **KHÔNG chứa PII**:
+  không tên tệp, CCCD, họ tên, điện thoại, user agent thô, Drive ID, URL upload hay IP. Chỉ số,
+  enum và `submission_id` (`on delete cascade`). Retention 90 ngày, chưa có job tự xóa.
+  7 cột metadata chuẩn hóa (`source_*`, `upload_*`, `normalization_version`) nằm ngay trên
+  `public_files`, không phải bảng riêng.
 - `public_submission_payload_history` (2026-07-25) — layer `CITIZEN`/`WORKING`/`OFFICIAL`, unique
   `(submission_id, layer, payload_version)`. 6+3 cột `citizen_payload_*`/`working_payload_*`/
   `official_payload_*` nằm ngay trên `public_submissions`, không phải bảng riêng.
@@ -313,6 +331,8 @@ GET/PATCH /api/public/submissions/current
 POST /api/public/submissions/current/submit
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
+POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — số đo lượt hỏng,
+                                                        best-effort, luôn 204)
 GET /api/submissions
 GET /api/submissions/:submissionId
 PATCH /api/submissions/:submissionId

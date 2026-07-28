@@ -2086,3 +2086,39 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Lý do:** Review commit migration Supabase phát hiện toàn bộ đường cache JSON (từ PR #2) đã thành
   code chết — Postgres có index thật nên không cần cache tĩnh song song nữa.
 - **Kiểm tra:** `python -m unittest discover` 3/3, `npx vitest run` 180/180, `npx tsc --noEmit` sạch.
+
+## [2026-07-28] Rà soát diff V2, siết quyền hỗ trợ kê khai và hoàn thành Phase 5
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - Rà soát toàn bộ diff `79f4ae6..aa2135e` theo 14 điểm. **1 BLOCKER + 4 HIGH đã sửa**:
+    - **BLOCKER** — nút "Kê khai hồ sơ tiếp theo" POST endpoint tạo hồ sơ với `phone: ""` trong khi
+      endpoint bắt buộc `^0\d{9}$`; nút chưa bao giờ chạy được. Chuyển thành thao tác thuần cục bộ
+      (dọn PII, đóng phiên cũ, quay về bước 1) + danh sách mã đã gửi trong ca (chỉ trong bộ nhớ).
+    - **H-01** — máy chủ ghép tên tệp client gửi vào tên tệp Drive và `public_files.file_name`. Nay
+      máy chủ tự đặt tên hoàn toàn; chỉ đuôi mở rộng lấy từ mimeType đã kiểm.
+    - **H-02** — `/ke-khai-ho` dùng chung `SUBMISSION_READ_ROLES`. Tạo `ASSISTED_INTAKE_ROLES`
+      (`INTAKE_OFFICER`, `WARD_ADMIN`, `SYSTEM_ADMIN`); loại `REVIEW_OFFICER` để không ai vừa nhập
+      vừa duyệt.
+    - **H-03** — ghi cơ sở dữ liệu hỏng để lại tệp mồ côi trên Drive. Thêm
+      `repository.isDriveFileAdopted` + `discardIfOrphan` fail-safe nghiêng về **giữ lại**.
+    - **H-04** — `users.display_name` là ô nhập tự do, có thể là email; cổng công khai trả nguyên
+      văn. Nay cả `publicAssignedOfficer` lẫn `publicActorName` từ chối chuỗi hình dạng địa chỉ thư.
+  - **Phase 5** (trước đó bỏ trống): bảng `public_upload_attempts` + 7 cột metadata chuẩn hóa trên
+    `public_files`; module `upload-metrics.ts` (Zod strict, danh mục đóng, kẹp giá trị);
+    telemetry ở complete route và endpoint `uploads/metrics` cho lượt hỏng — cả hai best-effort;
+    `scripts/audit-orphan-public-files.ts` (mặc định khô, token xác nhận gắn với đúng tập tệp) và
+    `scripts/report-upload-performance.ts` (P50/P95, không PII).
+  - Viết bảy kịch bản E2E §17.3 (`tests/e2e/public-intake-v2.spec.ts`) — trước đó chỉ có smoke test.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`, `src/app/api/public/submissions/current/uploads/{initiate,complete}/route.ts`,
+  `src/app/api/public/submissions/current/uploads/metrics/route.ts` (mới),
+  `src/app/api/staff/assisted-submissions/route.ts`, `src/app/ke-khai-ho/page.tsx`,
+  `src/modules/submissions/{review,assigned-officer}.ts`, `src/modules/public-intake/{workflow,repository,storage,upload-metrics}.ts`,
+  4 migration `202607280003`/`202607280004`, 2 script, 4 file test mới, 6 file evidence, `docs/brain/*`.
+- **Lý do:** Yêu cầu rà soát an toàn trước khi phát hành và hoàn thiện phần Phase 5 còn nợ. Ba
+  trong năm lỗi HIGH đều cùng một dạng: tin biện pháp phía client thay cho kiểm soát ở máy chủ.
+- **Kiểm tra:** `npm run lint` 0 lỗi (5 cảnh báo có sẵn); `npm run typecheck` sạch; `npm test`
+  **516 passed, 10 skipped** (trước vòng này 464); `npm run build` đạt, có `/api/public/submissions/current/uploads/metrics`;
+  `npx playwright test --list` liệt kê 12 test/2 file. **`npm run test:e2e` vẫn CHƯA chạy** (thiếu
+  credential) — điều kiện đầy đủ ở `evidence/PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`. Bốn migration
+  **chưa chạy ở bất kỳ môi trường nào**.

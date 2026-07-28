@@ -5,9 +5,12 @@ migration ở bất kỳ môi trường nào.**
 
 ## 1. Trước khi merge
 
-- [ ] Đọc lại `evidence/PUBLIC_INTAKE_V2_MIGRATION_REVIEW.md` — **migration chạy TRƯỚC, code deploy
-      SAU**. Ngược lại là 500 ở mọi màn hình hồ sơ.
-- [ ] `npm run test:e2e` với credential thật (chưa chạy được trong phiên thi công).
+- [ ] Đọc lại `evidence/PUBLIC_INTAKE_V2_MIGRATION_REVIEW_V2.md` (bản đầy đủ, **4 migration**) —
+      **migration chạy TRƯỚC, code deploy SAU**. Ngược lại là 500 ở mọi màn hình hồ sơ.
+- [ ] Đọc `evidence/PUBLIC_INTAKE_V2_DIFF_REVIEW.md` — 1 BLOCKER + 4 HIGH đã sửa, 5 MEDIUM còn lại.
+- [ ] `npm run test:e2e` với credential thật — **chưa chạy lần nào**. Bảy kịch bản đã viết ở
+      `tests/e2e/public-intake-v2.spec.ts`; điều kiện đầy đủ ở `PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`.
+      Lưu ý các test `fixme`/`skip` **không** tính là pass.
 - [ ] Bảy kịch bản E2E §17.3 của đầu bài, đặc biệt **E2E-05 official guard**: hồ sơ tối thiểu phải
       **bị chặn** ở bước tiếp nhận chính thức.
 - [ ] Rà soát người thật: mở `/ke-khai` trên điện thoại, kê khai một hồ sơ giả từ đầu đến cuối.
@@ -38,11 +41,18 @@ thật, không phải bằng cờ; cờ client không bao giờ là hàng rào b
 - [ ] Kiểm SQL: hồ sơ tạo ở `/ke-khai` có `intake_channel = 'SELF_SERVICE'` và ba cột kia NULL.
 - [ ] Gửi hồ sơ xong → màn hình **"KÊ KHAI THÀNH CÔNG"** giữa màn hình, có mã tiếp nhận, nút sao
       chép và nút kê khai tiếp.
-- [ ] Bấm "Kê khai hồ sơ tiếp theo" → hồ sơ mới trống hoàn toàn, không còn ảnh hay dữ liệu hộ trước.
+- [ ] Bấm "Kê khai hồ sơ tiếp theo" → về **bước 1**, hồ sơ trống hoàn toàn, không còn ảnh hay dữ
+      liệu hộ trước; mã vừa gửi vẫn đọc lại được ở dòng "Đã gửi trong phiên này". Nhập số điện
+      thoại hộ mới rồi Tiếp tục → tạo được hồ sơ mới với mã khác.
+      **Đây là phép thử của lỗi BLOCKER đã sửa** — trước đó nút này luôn trả 400.
+- [ ] Kiểm SQL: `select count(*) from public.public_upload_attempts;` > 0 sau vài lượt tải ảnh, và
+      không cột nào chứa tên tệp hay dữ liệu cá nhân.
+- [ ] Chạy `npx tsx scripts/audit-orphan-public-files.ts` (chế độ khô) → kỳ vọng `DRIVE_ORPHAN = 0`.
 
 ## 4. Trước khi bật chuẩn hóa ảnh (đợt sau)
 
-- [ ] Làm đủ Phase 5 (bảng `public_upload_attempts`) để có số liệu thật.
+- [x] Phase 5 đã làm (bảng `public_upload_attempts`, telemetry, hai script vận hành).
+- [ ] Chạy `npx tsx scripts/report-upload-performance.ts --days=7` để có số **trước** khi bật cờ.
 - [ ] Chạy bộ kiểm chất lượng Q1–Q7 ở `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` trên
       preview deployment với thiết bị thật.
 - [ ] Điền bảng đo thời gian trước/sau trong file đó.
@@ -60,7 +70,10 @@ thật, không phải bằng cờ; cờ client không bao giờ là hàng rào b
 
 ## 6. Việc còn nợ, đã ghi rõ ở `docs/brain/04-current-tasks.md`
 
-- Phase 5: bảng metric, telemetry ở complete route, orphan cleanup fail-safe, script audit/report.
-- Đo hiệu năng thật — **hiện chưa có số nào, không được tuyên bố đã tăng tốc**.
-- E2E chưa chạy.
-- Cân nhắc siết quyền `/ke-khai-ho` xuống nhóm hẹp hơn `SUBMISSION_READ_ROLES`.
+- Đo hiệu năng thật — **hiện chưa có số nào, không được tuyên bố đã tăng tốc**. Hạ tầng đo đã có;
+  còn thiếu đúng dữ liệu chạy thật.
+- E2E chưa chạy lần nào.
+- Xác nhận `ASSISTED_INTAKE_ROLES` đúng nghiệp vụ của phường (giả định: `INTAKE_OFFICER` là cán bộ
+  một cửa).
+- 5 phát hiện MEDIUM ở `PUBLIC_INTAKE_V2_DIFF_REVIEW.md`, đáng chú ý nhất là M-01 (phản hồi 308
+  tiêu một lượt thử lại) — cần dữ liệu Phase 5 rồi mới chỉnh có căn cứ.

@@ -27,27 +27,31 @@ production.**
 | 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
 | 7 | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho` | `7345090` |
 
-### CHƯA làm — Phase 5 của đầu bài
+| 5 | Số đo tải ảnh, dọn tệp mồ côi an toàn, hai script vận hành | vòng rà soát |
 
-Bảng metric `public.public_upload_attempts`, telemetry ở complete route, orphan cleanup an toàn
-(`isDriveFileAdopted` fail-safe), `scripts/audit-orphan-public-files.ts`,
-`scripts/report-upload-performance.ts`.
+### Vòng rà soát (sau `aa2135e`)
 
-Không chặn phase nào khác. Nhưng đây là **nguồn số liệu duy nhất** để nghiệm thu mốc hiệu năng
-§18 của đầu bài, nên phải làm trước khi bật cờ chuẩn hóa ảnh cho người dân.
+Rà soát toàn bộ diff `79f4ae6..aa2135e` theo 14 điểm, kết quả ở
+`evidence/PUBLIC_INTAKE_V2_DIFF_REVIEW.md`: **1 BLOCKER, 4 HIGH đã sửa**; 5 MEDIUM, 3 LOW ghi lại.
+
+BLOCKER đáng nhớ: nút "Kê khai hồ sơ tiếp theo" gọi endpoint tạo hồ sơ với `phone: ""`, mà endpoint
+bắt buộc `^0\d{9}$` — nút **chưa bao giờ** chạy được. Không test nào bắt vì wizard không có test
+render và E2E chưa chạy lần nào.
 
 ### Việc bắt buộc trước khi merge / bật cờ
 
-1. **Chạy hai migration** `202607280001_assigned_officer_display_name.sql` và
-   `202607280002_officer_assisted_intake.sql` trên staging trước, production sau. Cả hai additive
-   (chỉ thêm cột nullable + CHECK), rollback là bỏ cột.
+1. **Chạy bốn migration** `202607280001`–`202607280004` trên staging trước, production sau,
+   **đúng thứ tự và trước khi deploy code**. Toàn bộ additive; rollback là bỏ cột/bỏ bảng. Chi
+   tiết và điểm vỡ nếu làm ngược thứ tự: `evidence/PUBLIC_INTAKE_V2_MIGRATION_REVIEW_V2.md`.
 2. **Chạy `npm run test:e2e`** — chưa chạy được trong phiên thi công vì thiếu credential thật.
 3. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` trước khi đặt
    `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`. Chưa có số đo nào; **không được** tuyên
    bố tăng tốc.
 4. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
    resume và tiến độ không tụt.
-5. **Cấp quyền `/ke-khai-ho`** cho đúng nhóm cán bộ đi cơ sở (hiện dùng `SUBMISSION_READ_ROLES`).
+5. **Xác nhận danh sách vai trò `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,
+   `SYSTEM_ADMIN`) đúng nghiệp vụ. `REVIEW_OFFICER` bị loại có chủ đích — không để một người vừa
+   nhập hộ dân vừa thẩm định chính hồ sơ đó.
 
 ### Cảnh báo cho agent sau
 
@@ -57,6 +61,12 @@ Không chặn phase nào khác. Nhưng đây là **nguồn số liệu duy nhấ
   `public-wizard-validation.ts` chỉ lọc theo bước và ánh xạ tên trường. Trước V2 hai nơi có hai bản
   regex riêng và đã lệch nhau.
 - **KHÔNG cho client gửi `intake_channel` hay `assistedBy`.** Máy chủ suy ra từ route và phiên.
+- **KHÔNG đổi `.catch(() => true)` trong `discardIfOrphan`** (complete route) thành `false` cho
+  "hợp lý hơn". Hỏi cơ sở dữ liệu không được thì mặc định là **đã nhận**, tức là không xóa: để sót
+  một tệp thừa thì script rà soát dọn được, xóa nhầm tệp đã nhận là mất ảnh giấy tờ vĩnh viễn.
+- **KHÔNG thêm trường tự do vào `clientUploadTelemetrySchema`.** Mọi trường phải là số hoặc danh
+  mục đóng; một ô tự do là chỗ để CCCD hay tên tệp lọt vào bảng số đo, và đã ghi thì không gỡ ra.
+- **KHÔNG ghép tên tệp client gửi lên vào tên tệp trong kho.** Máy chủ tự đặt tên; xem H-01.
 
 ---
 

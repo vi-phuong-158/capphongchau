@@ -9,10 +9,10 @@ tại commit cuối của nhánh `claude/land-declaration-process-feedback-126f2
 | 2 | Không log QR raw | **ĐẠT** (giữ nguyên) | `citizen-id-qr.client.ts` chỉ trả hash, không đổi ở V2 |
 | 3 | Không log upload URL | **ĐẠT** | `xhr-upload-transport.client.ts` có chú thích cấm; không có `console.*` nào trong đường upload |
 | 4 | Không log Drive ID ở client | **ĐẠT** | Không thêm log nào; Drive ID chỉ đi trong body request tới complete route |
-| 5 | Metric không có filename/PII | **KHÔNG ÁP DỤNG** | Phase 5 chưa làm — chưa có bảng metric |
+| 5 | Metric không có filename/PII | **ĐẠT** | Bảng `public_upload_attempts` chỉ có số, enum và `submission_id`; `clientUploadTelemetrySchema` là `strict()` với danh mục đóng. `tests/upload-metrics.test.ts` |
 | 6 | Assisted channel không forge được | **ĐẠT** | Cổng công khai gán cứng `SELF_SERVICE`; route cán bộ lấy danh tính từ `requireActiveUser`; CHECK ở DB bắt buộc đủ dấu vết. `tests/officer-assisted-intake.test.ts` |
 | 7 | Public status không trả email cán bộ | **ĐẠT** | `publicAssignedOfficer()` chỉ trả `displayName`; test khẳng định payload không chứa ký tự `@` |
-| 8 | Complete cleanup không xóa file đã adopt | **KHÔNG ÁP DỤNG** | Phase 5 chưa làm; hành vi cleanup hiện tại giữ nguyên như trước V2 |
+| 8 | Complete cleanup không xóa file đã adopt | **ĐẠT** | `discardIfOrphan` hỏi `isDriveFileAdopted` trước, `.catch(() => true)` nghiêng về giữ lại. `tests/public-upload-complete-route.test.ts` |
 | 9 | Idempotency giữ nguyên | **ĐẠT** | `create-submission.ts` giữ nguyên logic cũ, chỉ đổi chỗ đặt; `tests/public-submission-create.test.ts` vẫn xanh |
 | 10 | CSRF/Turnstile giữ nguyên | **ĐẠT** | Cổng công khai không đổi. Route cán bộ **thay** Turnstile bằng phiên đăng nhập + CSRF (mạnh hơn), không phải bỏ trống |
 | 11 | Service worker không cache API/ảnh | **ĐẠT** (giữ nguyên) | Không đụng tới cấu hình PWA |
@@ -33,12 +33,21 @@ tại commit cuối của nhánh `claude/land-declaration-process-feedback-126f2
    của mọi owner cá nhân. Vô hại khi CCCD còn bắt buộc, nhưng V2 cho phép để trống — nếu giữ
    nguyên, mọi hồ sơ không nhập CCCD sẽ dùng chung một khóa tra cứu trong `public_lookup_index`.
 
-3. **Tên tệp gửi lên không còn mang PII.** Máy chủ ghép tên tệp client gửi vào tên tệp trong Drive
-   (`initiate/route.ts:175`). Tên do máy ảnh hoặc người dân đặt thường chứa số CCCD, tên người,
-   ngày giờ. Client nay luôn gửi `cccd.jpg` / `gcn.jpg`. Đây là lỗ có sẵn, sửa nhân tiện.
+3. **Tên tệp trong kho do máy chủ đặt.** Máy chủ từng ghép tên tệp client gửi vào tên tệp trong
+   Drive và cột `public_files.file_name`. Tên do máy ảnh hoặc người dân đặt thường chứa số CCCD,
+   tên người, ngày giờ.
 
-4. **Email cán bộ không ra cổng công khai.** Tính năng "cán bộ tiếp nhận là ai" được làm theo hướng
-   chỉ trả tên; hồ sơ cũ chưa có tên trả `null` chứ không lùi về email.
+   Vòng đầu chỉ sửa phía client (luôn gửi `cccd.jpg`/`gcn.jpg`) và ghi mục này là "ĐẠT". **Sai** —
+   đó là biện pháp phía client, còn ranh giới tin cậy nằm ở route; gọi thẳng bằng `curl` là gửi
+   được tên tùy ý. Vòng rà soát sửa ở máy chủ: tên do máy chủ sinh hoàn toàn, chỉ đuôi mở rộng lấy
+   từ `mimeType` đã kiểm. Xem H-01 trong `PUBLIC_INTAKE_V2_DIFF_REVIEW.md`.
+
+4. **Email cán bộ không ra cổng công khai.** Tính năng "cán bộ tiếp nhận là ai" chỉ trả tên; hồ sơ
+   cũ chưa có tên trả `null` chứ không lùi về email.
+
+   Vòng rà soát bổ sung một lớp nữa: `users.display_name` là ô nhập tự do và rất hay được điền
+   bằng chính email công vụ, nên cả `publicAssignedOfficer` lẫn `publicActorName` nay từ chối chuỗi
+   hình dạng địa chỉ thư. Xem H-04.
 
 ## Điểm cần chú ý khi vận hành
 
@@ -46,5 +55,8 @@ tại commit cuối của nhánh `claude/land-declaration-process-feedback-126f2
   nhắc lại: còn bật là mở `/ke-khai` và `/api/public/*` cho bất kỳ ai gọi thẳng.
 - **`/ke-khai-ho` chỉ khác `/ke-khai` một gạch nối.** Ba lớp chặn (proxy Edge → trang → route) và
   `tests/public-surface-guard.test.ts` khóa cả hai chiều. Đừng gộp matcher.
-- **Quyền vào `/ke-khai-ho` hiện là `SUBMISSION_READ_ROLES`** — rộng hơn mức tối thiểu cần thiết.
-  Nếu muốn siết, đổi ở cả `page.tsx` và `route.ts`, đừng đổi một chỗ.
+- **Quyền vào `/ke-khai-ho` là `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,
+  `SYSTEM_ADMIN`), hẹp hơn `SUBMISSION_READ_ROLES`. `REVIEW_OFFICER` bị loại có chủ đích. Trang và
+  API đọc **cùng một hằng số** — nếu đổi, đổi ở đó, đừng chép lại danh sách.
+- **Bảng `public_upload_attempts` giữ 90 ngày, chưa có job tự xóa.** Cố ý: job xóa tự động trên
+  production mà chưa ai duyệt là rủi ro lớn hơn việc giữ thừa vài tháng số liệu không PII.
