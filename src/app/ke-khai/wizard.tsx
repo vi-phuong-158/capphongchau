@@ -13,29 +13,27 @@ import {
 } from "react";
 
 import Link from "next/link";
-import { SearchableSelect } from "@/components/searchable-select";
 import { TurnstileWidget } from "@/components/turnstile-widget";
 import { VietnameseDateInput } from "@/components/vietnamese-date-input";
 import {
-  ASSET_TYPE_OPTIONS,
-  CERTIFICATE_ROLE_CODES,
   CERTIFICATE_ROLE_OPTIONS,
-  CHANGE_REASON_CODES,
   CHANGE_REASON_OPTIONS,
   normalizeCertificateRole,
-  LAND_ORIGIN_OPTIONS,
-  LAND_PURPOSE_CAN_DOI_CHIEU,
   LAND_PURPOSE_GHI_THEO_BIA,
   LAND_PURPOSE_SELECT_OPTIONS,
-  LAND_USE_FORM_OPTIONS,
-  LAND_USE_TERM_OPTIONS,
-  NEIGHBORHOOD_HINTS,
+  NEIGHBORHOOD_OPTIONS,
   OLD_WARD_OPTIONS,
   type ReferenceOption,
 } from "@/modules/public-intake/reference";
-import { parseVietnameseDecimal } from "@/modules/public-intake/vietnamese-number";
+import {
+  PUBLIC_WIZARD_STEPS,
+  optionalSummary,
+  ownerNeedsIdentityPhotos,
+  submitChecklist,
+  validatePublicWizardStep,
+  type WizardValidationInput,
+} from "@/modules/public-intake/public-wizard-validation";
 import { canonicalImageMimeType, IMAGE_FILE_ACCEPT } from "@/modules/public-intake/image-format";
-import { lastSecretGroup } from "@/modules/public-intake/receipt-code";
 import {
   SUPPORT_CONTACTS,
   GENERAL_SUPPORT_CONTACT,
@@ -47,10 +45,8 @@ import {
   type CitizenIdQrReadResult,
 } from "@/modules/public-intake/citizen-id-qr.client";
 import {
-  MAX_LAND_USES_PER_PARCEL,
   OWNER_TYPES,
   OWNER_TYPE_LABELS,
-  emptyAsset,
   emptyDraft,
   emptyLandUse,
   emptyOwner,
@@ -62,18 +58,22 @@ import {
   type LandUse,
   type Owner,
   type OwnerType,
+  type Parcel,
 } from "@/modules/public-intake/types";
-import { LAND_USE_AREA_TOLERANCE_M2 } from "@/modules/public-intake/validation";
+import {
+  MAX_PURPOSE_FREE_TEXT_LENGTH,
+  normalizeLandPurposeFreeText,
+} from "@/modules/public-intake/validation";
 
-const STEPS = [
-  "Khởi tạo và ảnh CCCD",
-  "Thông tin GCN",
-  "Thửa đất",
-  "Loại đất",
-  "Tài sản",
-  "Tải ảnh GCN",
-  "Kiểm tra và gửi",
-] as const;
+/**
+ * Public Intake V2 — bốn bước thay cho bảy.
+ *
+ * Cán bộ đi thu hồ sơ báo lại: bảy bước với hàng chục ô bắt buộc theo PL3 khiến hộ dân bỏ dở.
+ * Mục tiêu của cổng công khai chỉ là lấy được **CCCD + ảnh GCN + tên chủ đang sử dụng**; phần dữ
+ * liệu PL3 còn lại do cán bộ hoàn thiện ở `working_payload` và bị chặn ở `completionChecks` trước
+ * khi tiếp nhận chính thức.
+ */
+const STEPS = PUBLIC_WIZARD_STEPS;
 
 const MAX_CERTIFICATE_PHOTOS = 10;
 const MAX_INDIVIDUAL_OWNERS = 10;
@@ -422,26 +422,38 @@ function optionLabel(options: readonly ReferenceOption[], code: string): string 
   return options.find((option) => option.code === code)?.label ?? code;
 }
 
+/**
+ * Ghi ký hiệu loại đất người dân gõ vào dòng mục đích **đầu tiên** của thửa.
+ *
+ * Người dân chỉ thấy một ô chữ; mô hình dữ liệu vẫn là mảng `landUses` để cán bộ tách thành nhiều
+ * mục đích ở `working_payload` và để xuất PL3 không đổi. Xóa hết chữ thì trả `purposeCode` về rỗng
+ * — giữ lại mã "ghi theo bìa" mà không có nội dung là tạo ra dữ liệu giả.
+ */
+function setRawLandPurpose(parcel: Parcel, raw: string): void {
+  if (parcel.landUses.length === 0) parcel.landUses.push(emptyLandUse(newId()));
+  const landUse = parcel.landUses[0];
+  landUse.purposeFreeText = raw;
+  landUse.purposeCode = raw.trim() ? LAND_PURPOSE_GHI_THEO_BIA : "";
+}
+
 /** ISO `YYYY-MM-DD` → `DD/MM/YYYY` cho trang kiểm tra cuối; giá trị khác giữ nguyên. */
 function formatVnDate(iso: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
   return match ? `${match[3]}/${match[2]}/${match[1]}` : iso.trim();
 }
 
-function genderText(gender: string): string {
-  if (gender === "NAM") return "Nam";
-  if (gender === "NU") return "Nữ";
-  return "";
-}
-
-/** Loại đất để hiển thị: xử lý hai lối thoát ngoài danh mục như khi xuất PL3. */
-function landPurposeDisplay(landUse: LandUse): string {
-  if (landUse.purposeCode === LAND_PURPOSE_GHI_THEO_BIA) {
-    const text = landUse.purposeFreeText.trim();
-    return text ? `${text} (ghi theo bìa)` : "(chưa ghi loại đất)";
-  }
-  if (landUse.purposeCode === LAND_PURPOSE_CAN_DOI_CHIEU) return "Đề nghị cán bộ đối chiếu";
-  if (!landUse.purposeCode) return "(chưa chọn)";
+/**
+ * Loại đất để hiển thị trên trang kiểm tra.
+ *
+ * Ở V2 cổng công khai chỉ thu ký hiệu ghi theo bìa, nên chỉ còn hai trạng thái: có chữ hoặc chưa
+ * ghi. Hồ sơ cũ (kê khai trước V2, hoặc cán bộ đã chuẩn hóa ở `working_payload`) vẫn có thể mang
+ * mã danh mục — giữ nhánh đó để không hiện mã thô cho người dân.
+ */
+function landPurposeDisplay(landUse: LandUse | undefined): string {
+  if (!landUse) return "cán bộ sẽ bổ sung";
+  const text = landUse.purposeFreeText.trim();
+  if (text) return text;
+  if (!landUse.purposeCode) return "cán bộ sẽ bổ sung";
   return optionLabel(LAND_PURPOSE_SELECT_OPTIONS, landUse.purposeCode);
 }
 
@@ -484,8 +496,6 @@ export function IntakeWizard() {
   const [hasCertificate, setHasCertificate] = useState("");
 
   const [receipt, setReceipt] = useState<{ code: string; secret: string } | null>(null);
-  const [secretEcho, setSecretEcho] = useState("");
-  const [secretConfirmed, setSecretConfirmed] = useState(false);
 
   const [identityPhotos, setIdentityPhotos] = useState<IdentityPhotos>({});
   const [certificatePhotos, setCertificatePhotos] = useState<UploadedCertificateImage[]>([]);
@@ -547,7 +557,17 @@ export function IntakeWizard() {
     setChallengeNonce((current) => current + 1);
   }, []);
 
+  /**
+   * Bản nháp trên máy đã khác bản máy chủ đang giữ chưa.
+   *
+   * Trước V2, mỗi lần tải ảnh CCCD đều PATCH nháp trước — chọn mặt trước rồi mặt sau là hai lần
+   * ghi, dù giữa hai lần đó người dân không sửa gì. Trên mạng yếu đó là hai vòng round-trip thừa
+   * ngay trước công đoạn chậm nhất.
+   */
+  const draftDirtyRef = useRef(false);
+
   const update = useCallback((mutate: (next: IntakeDraft) => void) => {
+    draftDirtyRef.current = true;
     setDraft((current) => {
       const next = structuredClone(current);
       mutate(next);
@@ -555,139 +575,73 @@ export function IntakeWizard() {
     });
   }, []);
 
-  const validate = useCallback((): Errors => {
-    const found: Errors = {};
-
-    if (step === 0 && !receipt) {
-      if (!hasCertificate) found.hasCertificate = "Chọn một phương án.";
-      if (!certificateCount) found.certificateCount = "Chọn một phương án.";
-      if (!/^0\d{9}$/.test(draft.phone)) found.phone = "Nhập số điện thoại 10 số, bắt đầu bằng 0.";
-      if (!draft.consentAccepted) found.consent = "Cần đồng ý để tiếp tục.";
-    }
-
-    if (step === 1) {
-      if (!draft.certificate.issueNumber.trim()) found.issueNumber = "Bắt buộc theo Phụ lục 8.";
-      if (!draft.certificate.issueDate) found.issueDate = "Bắt buộc theo Phụ lục 8.";
-      if (!draft.certificate.registryNumber.trim())
-        found.registryNumber = "Bắt buộc theo Phụ lục 8.";
-    }
-
-    if (step === 0 && receipt) {
-      draft.owners.forEach((owner, index) => {
-        if (!owner.fullName.trim()) found[`owner-${index}-name`] = "Bắt buộc theo Phụ lục 8.";
-        if (!CERTIFICATE_ROLE_CODES.includes(owner.roleOnCertificate)) {
-          found[`owner-${index}-role`] = "Chọn một vai trò trong danh mục.";
-        }
-        if (isOrganisationOwner(owner.ownerType)) {
-          if (!/^\d{10}(-\d{3})?$/.test(owner.identityNumber.trim())) {
-            found[`owner-${index}-id`] = "Mã số thuế gồm 10 chữ số.";
-          }
-          if (!owner.residenceAddress.trim()) {
-            found[`owner-${index}-orgaddress`] = "Cần địa chỉ trụ sở.";
-          }
-        } else if (owner.hasDistinctCurrentUser) {
-          // Người trên GCN đã mất / đã sang tên: CCCD của họ tùy có, nhưng người sử dụng hiện tại
-          // phải khai đủ (cột O, P và trường 14, 15 của PL3).
-          if (owner.identityNumber.trim() && !/^\d{12}$/.test(owner.identityNumber.trim())) {
-            found[`owner-${index}-id`] = "CCCD gồm đúng 12 chữ số (có thể để trống).";
-          }
-          if (!owner.currentUserName.trim())
-            found[`owner-${index}-cu-name`] = "Cần tên người sử dụng hiện tại.";
-          if (!/^\d{12}$/.test(owner.currentUserCitizenId.trim()))
-            found[`owner-${index}-cu-id`] = "CCCD người sử dụng hiện tại gồm đúng 12 chữ số.";
-          if (!owner.currentUserAddress.trim())
-            found[`owner-${index}-cu-address`] = "Cần địa chỉ thường trú.";
-          if (!CHANGE_REASON_CODES.includes(owner.changeReason))
-            found[`owner-${index}-cu-reason`] = "Chọn lý do thay đổi.";
-        } else if (!/^\d{12}$/.test(owner.identityNumber)) {
-          found[`owner-${index}-id`] = "CCCD gồm đúng 12 chữ số.";
-        }
-        if (requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser) {
-          if (!owner.dateOfBirth) found[`owner-${index}-dob`] = "Cần ngày sinh.";
-          if (!owner.gender) found[`owner-${index}-gender`] = "Cần giới tính.";
-          if (!owner.residenceAddress.trim())
-            found[`owner-${index}-address`] = "Cần địa chỉ thường trú.";
-          if (owner.identityStatus === "PENDING_CONFIRMATION") {
-            found[`owner-${index}-identity`] = "Xem và xác nhận thông tin đọc từ QR.";
-          }
-          if (
-            owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW" &&
-            owner.identityOverrideReason.trim().length < 5
-          ) {
-            found[`owner-${index}-identity-override`] =
-              "Nêu lý do khi sửa thông tin định danh đã đọc từ QR.";
-          }
-          if (!identityPhotos[owner.id]?.CITIZEN_ID_FRONT) {
-            found[`owner-${index}-front`] = "Cần ảnh CCCD mặt trước.";
-          }
-          if (!identityPhotos[owner.id]?.CITIZEN_ID_BACK) {
-            found[`owner-${index}-back`] = "Cần ảnh CCCD mặt sau.";
-          }
-        }
+  /**
+   * Mọi thay đổi danh sách ảnh GCN đi qua đây: ghi `sessionStorage` và **đánh dấu nháp bẩn**.
+   *
+   * Thứ tự và nhãn trang nằm trong `draft.certificateFileMetadata`, tức là một phần của bản nháp.
+   * Thiếu việc đánh dấu thì `flushDraft` sẽ bỏ qua và thứ tự/nhãn người dân vừa đặt không được
+   * lưu lên máy chủ.
+   */
+  const updateCertificatePhotos = useCallback(
+    (mutate: (current: UploadedCertificateImage[]) => UploadedCertificateImage[]) => {
+      draftDirtyRef.current = true;
+      setCertificatePhotos((current) => {
+        const next = mutate(current);
+        writeCertMeta(next);
+        return next;
       });
+    },
+    [],
+  );
+
+  /** `ownerId` -> các mặt CCCD đã tải xong, dạng module kiểm tra dùng được. */
+  const uploadedIdentitySides = useMemo(() => {
+    const sides: Record<string, IdentityDocumentType[]> = {};
+    for (const [ownerId, photos] of Object.entries(identityPhotos)) {
+      sides[ownerId] = (Object.keys(photos ?? {}) as IdentityDocumentType[]).filter(
+        (side) => photos?.[side],
+      );
     }
+    return sides;
+  }, [identityPhotos]);
 
-    if (step === 2) {
-      draft.parcels.forEach((parcel, index) => {
-        if (!parcel.addressOnCertificate.trim())
-          found[`parcel-${index}-address`] = "Bắt buộc theo Phụ lục 8.";
-        if (!parcel.oldWard)
-          found[`parcel-${index}-oldward`] = "Chọn một mục; không rõ thì chọn “Không rõ”.";
-        const area = parseVietnameseDecimal(parcel.area);
-        if (area === null || area <= 0) found[`parcel-${index}-area`] = "Nhập diện tích lớn hơn 0.";
-      });
-    }
+  const validationInput: WizardValidationInput = useMemo(
+    () => ({
+      step,
+      draft,
+      hasReceipt: Boolean(receipt),
+      hasCertificate,
+      certificateCount,
+      uploadedIdentitySides,
+      uploadedCertificateCount: certificatePhotos.length,
+      // Phase 4 thay hai cờ này bằng trạng thái từng task upload; hiện tại `busy` là thứ duy
+      // nhất biết có việc mạng đang chạy.
+      hasPendingUpload: busy,
+      hasFailedUpload: false,
+    }),
+    [
+      step,
+      draft,
+      receipt,
+      hasCertificate,
+      certificateCount,
+      uploadedIdentitySides,
+      certificatePhotos.length,
+      busy,
+    ],
+  );
 
-    if (step === 3) {
-      draft.parcels.forEach((parcel, parcelIndex) => {
-        if (parcel.landUses.length > MAX_LAND_USES_PER_PARCEL) {
-          found[`parcel-${parcelIndex}-usecount`] =
-            `Chỉ ghi tối đa ${MAX_LAND_USES_PER_PARCEL} mục đích sử dụng cho mỗi thửa. Xóa bớt dòng thừa.`;
-        }
-        parcel.landUses.forEach((landUse, useIndex) => {
-          const key = `use-${parcelIndex}-${useIndex}`;
-          if (!landUse.purposeCode) found[`${key}-purpose`] = "Bắt buộc theo Phụ lục 8.";
-          if (
-            landUse.purposeCode === LAND_PURPOSE_GHI_THEO_BIA &&
-            !landUse.purposeFreeText.trim()
-          ) {
-            found[`${key}-purposefree`] = "Nhập loại đất ghi trên bìa Giấy chứng nhận.";
-          }
-          if (!landUse.originCode) found[`${key}-origin`] = "Bắt buộc theo Phụ lục 8.";
-          if (!landUse.formCode) found[`${key}-form`] = "Bắt buộc theo Phụ lục 8.";
-          if (!landUse.termCode) found[`${key}-term`] = "Bắt buộc theo Phụ lục 8.";
-        });
+  /**
+   * Kiểm tra bước hiện tại. Toàn bộ luật nghiệp vụ nằm ở
+   * `public-wizard-validation.ts` — dùng chung hàm với máy chủ để hai bên không lệch nhau.
+   */
+  const validate = useCallback(
+    (): Errors => validatePublicWizardStep(validationInput),
+    [validationInput],
+  );
 
-        const declared = parcel.landUses
-          .map((landUse) => parseVietnameseDecimal(landUse.area))
-          .filter((value): value is number => value !== null && value > 0);
-        const parcelArea = parseVietnameseDecimal(parcel.area);
-        if (declared.length > 0 && parcelArea !== null && parcelArea > 0) {
-          const total = declared.reduce((sum, value) => sum + value, 0);
-          if (total - parcelArea > LAND_USE_AREA_TOLERANCE_M2) {
-            found[`parcel-${parcelIndex}-usearea`] =
-              `Tổng diện tích theo mục đích (${total} m²) vượt diện tích thửa (${parcelArea} m²).`;
-          }
-        }
-      });
-    }
-
-    if (step === 5) {
-      if (!secretConfirmed) found.secretEcho = "Cần xác nhận đã lưu mã bí mật trước khi tải ảnh.";
-      if (certificatePhotos.length < 1) found.certificatePhotos = "Cần ít nhất một ảnh GCN.";
-    }
-
-    return found;
-  }, [
-    step,
-    draft,
-    hasCertificate,
-    certificateCount,
-    receipt,
-    secretConfirmed,
-    identityPhotos,
-    certificatePhotos,
-  ]);
+  const checklist = useMemo(() => submitChecklist(validationInput), [validationInput]);
+  const optionalItems = useMemo(() => optionalSummary(draft), [draft]);
 
   /** Lưu nháp lên server. Chỉ gọi khi chuyển bước để giữ số lần ghi Sheets ở mức thấp. */
   const saveDraft = useCallback(
@@ -714,6 +668,8 @@ export function IntakeWizard() {
 
         setSaveStatus("SAVED");
         setServerError("");
+        // Chỉ hạ cờ khi máy chủ đã nhận. Lưu hỏng mà hạ cờ là mất dữ liệu im lặng ở lần sau.
+        draftDirtyRef.current = false;
         return true;
       } catch {
         setSaveStatus("OFFLINE");
@@ -722,6 +678,30 @@ export function IntakeWizard() {
       }
     },
     [csrfToken, draft, certificatePhotos],
+  );
+
+  /**
+   * Lưu nháp **một lần** cho mỗi lô thay đổi.
+   *
+   * Hai việc:
+   * - bỏ qua hoàn toàn nếu bản nháp không đổi từ lần lưu trước (tải ảnh mặt sau ngay sau mặt
+   *   trước không PATCH lại);
+   * - gộp các lời gọi chồng nhau vào cùng một request đang bay, thay vì bắn song song rồi để hai
+   *   response ghi đè nhau theo thứ tự ngẫu nhiên.
+   */
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+
+  const flushDraft = useCallback(
+    async (options?: { force?: boolean }): Promise<boolean> => {
+      if (!options?.force && !draftDirtyRef.current) return true;
+      if (savePromiseRef.current) return savePromiseRef.current;
+      const promise = saveDraft().finally(() => {
+        savePromiseRef.current = null;
+      });
+      savePromiseRef.current = promise;
+      return promise;
+    },
+    [saveDraft],
   );
 
   /**
@@ -813,7 +793,6 @@ export function IntakeWizard() {
     void adoptServerDraft().then((ok) => {
       setReceipt({ code: recovery.receiptCode!, secret: recovery.accessSecret! });
       setCsrfToken(recovery.csrfToken!);
-      setSecretConfirmed(true);
       if (!ok)
         setServerError(
           "Chưa tải lại được bản kê khai. Vui lòng quay lại trang tra cứu và thử lại.",
@@ -927,7 +906,7 @@ export function IntakeWizard() {
         // Giữ nguyên bước đầu: ngay sau khi tạo nháp/thư mục Drive, người dân tải ảnh CCCD tại
         // chính màn hình này thay vì phải đi qua toàn bộ biểu mẫu rồi mới quay lại.
         return;
-      } else if (!(await saveDraft())) {
+      } else if (!(await flushDraft())) {
         return;
       }
 
@@ -945,7 +924,7 @@ export function IntakeWizard() {
     step,
     receipt,
     draft.phone,
-    saveDraft,
+    flushDraft,
     challengeToken,
     refreshChallenge,
     adoptServerDraft,
@@ -1100,8 +1079,9 @@ export function IntakeWizard() {
       try {
         // Máy chủ chỉ nhận ảnh cho chủ sử dụng đã có trong bản nháp mà nó đang giữ. Người dân có
         // thể vừa bấm "Thêm người" xong là chọn ảnh ngay, lúc đó người mới chưa được lưu — nên
-        // đẩy bản nháp lên trước, rồi mới tải ảnh.
-        if (!(await saveDraft())) {
+        // đẩy bản nháp lên trước, rồi mới tải ảnh. `flushDraft` bỏ qua nếu nháp không đổi, nên
+        // tải mặt sau ngay sau mặt trước không tốn thêm một vòng PATCH.
+        if (!(await flushDraft())) {
           setUploadNote("");
           return;
         }
@@ -1136,7 +1116,7 @@ export function IntakeWizard() {
         uploadAbort.current = null;
       }
     },
-    [applyQrResult, identityPhotos, saveDraft, uploadFile],
+    [applyQrResult, identityPhotos, flushDraft, uploadFile],
   );
 
   const checkExistingRecords = useCallback(
@@ -1247,11 +1227,7 @@ export function IntakeWizard() {
           }
           accepted.push({ file: prepared, fileId, name: prepared.name, pageLabel: "" });
         }
-        setCertificatePhotos((current) => {
-          const next = [...current, ...accepted];
-          writeCertMeta(next);
-          return next;
-        });
+        updateCertificatePhotos((current) => [...current, ...accepted]);
         // Đếm theo tổng số ảnh của cả hồ sơ, không theo lượt chọn tệp vừa rồi — người dân chọn ảnh
         // làm nhiều lượt phải thấy con số cộng dồn đúng.
         const total = certificatePhotos.length + accepted.length;
@@ -1262,7 +1238,7 @@ export function IntakeWizard() {
         uploadAbort.current = null;
       }
     },
-    [uploadFile, certificatePhotos.length],
+    [uploadFile, updateCertificatePhotos, certificatePhotos.length],
   );
 
   const deleteCertificate = useCallback(
@@ -1283,38 +1259,35 @@ export function IntakeWizard() {
           );
           return;
         }
-        setCertificatePhotos((current) => {
-          const next = current.filter((photo) => photo.fileId !== fileId);
-          writeCertMeta(next);
-          return next;
-        });
+        updateCertificatePhotos((current) => current.filter((photo) => photo.fileId !== fileId));
       } finally {
         setBusy(false);
       }
     },
-    [csrfToken],
+    [csrfToken, updateCertificatePhotos],
   );
 
-  const moveCertificate = useCallback((index: number, direction: -1 | 1) => {
-    setCertificatePhotos((current) => {
-      const target = index + direction;
-      if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      writeCertMeta(next);
-      return next;
-    });
-  }, []);
+  const moveCertificate = useCallback(
+    (index: number, direction: -1 | 1) => {
+      updateCertificatePhotos((current) => {
+        const target = index + direction;
+        if (target < 0 || target >= current.length) return current;
+        const next = [...current];
+        [next[index], next[target]] = [next[target], next[index]];
+        return next;
+      });
+    },
+    [updateCertificatePhotos],
+  );
 
-  const setCertificateLabel = useCallback((fileId: string, label: string) => {
-    setCertificatePhotos((current) => {
-      const next = current.map((photo) =>
-        photo.fileId === fileId ? { ...photo, pageLabel: label } : photo,
+  const setCertificateLabel = useCallback(
+    (fileId: string, label: string) => {
+      updateCertificatePhotos((current) =>
+        current.map((photo) => (photo.fileId === fileId ? { ...photo, pageLabel: label } : photo)),
       );
-      writeCertMeta(next);
-      return next;
-    });
-  }, []);
+    },
+    [updateCertificatePhotos],
+  );
 
   /** Thay một ảnh GCN: tải ảnh mới lên trước, thành công mới xóa mềm ảnh cũ và giữ nguyên vị trí. */
   const replaceCertificate = useCallback(
@@ -1332,8 +1305,8 @@ export function IntakeWizard() {
           setUploadNote("");
           return;
         }
-        setCertificatePhotos((current) => {
-          const next = current.map((photo) =>
+        updateCertificatePhotos((current) =>
+          current.map((photo) =>
             photo.fileId === fileId
               ? {
                   file: prepared,
@@ -1342,10 +1315,8 @@ export function IntakeWizard() {
                   pageLabel: photo.pageLabel,
                 }
               : photo,
-          );
-          writeCertMeta(next);
-          return next;
-        });
+          ),
+        );
         setUploadNote("Đã thay ảnh Giấy chứng nhận.");
       } catch (error) {
         setServerError(
@@ -1358,7 +1329,7 @@ export function IntakeWizard() {
         uploadAbort.current = null;
       }
     },
-    [uploadFile],
+    [uploadFile, updateCertificatePhotos],
   );
 
   /**
@@ -1447,17 +1418,6 @@ export function IntakeWizard() {
     setErrors({});
     setStep((current) => Math.max(current - 1, 0));
   }, []);
-
-  const confirmSecret = useCallback(() => {
-    if (!receipt) return;
-    const expected = lastSecretGroup(receipt.secret);
-    if (secretEcho.trim().toUpperCase() === expected) {
-      setSecretConfirmed(true);
-      setErrors((current) => ({ ...current, secretEcho: "" }));
-    } else {
-      setErrors((current) => ({ ...current, secretEcho: "Nhóm ký tự chưa khớp. Kiểm tra lại." }));
-    }
-  }, [receipt, secretEcho]);
 
   const individualOwnerCount = useMemo(
     () => draft.owners.filter((owner) => requiresCitizenId(owner.ownerType)).length,
@@ -1651,51 +1611,6 @@ export function IntakeWizard() {
           </>
         ) : null}
 
-        {step === 1 ? (
-          <>
-            <Field label="Số phát hành GCN" required error={errors.issueNumber}>
-              <input
-                className="pc-input"
-                value={draft.certificate.issueNumber}
-                aria-invalid={errors.issueNumber ? "true" : undefined}
-                onChange={(event) =>
-                  update((next) => {
-                    next.certificate.issueNumber = event.target.value;
-                  })
-                }
-              />
-            </Field>
-            <Field label="Ngày cấp GCN" required error={errors.issueDate}>
-              <VietnameseDateInput
-                value={draft.certificate.issueDate}
-                invalid={Boolean(errors.issueDate)}
-                bounds={{ minYear: 1987 }}
-                groupLabel="Ngày cấp Giấy chứng nhận"
-                onChange={(iso) =>
-                  update((next) => {
-                    next.certificate.issueDate = iso;
-                  })
-                }
-              />
-              <p className="pc-field-hint">
-                Gõ thẳng ngày, tháng, năm bằng bàn phím số — không phải lùi từng tháng trên lịch.
-              </p>
-            </Field>
-            <Field label="Số vào sổ GCN" required error={errors.registryNumber}>
-              <input
-                className="pc-input"
-                value={draft.certificate.registryNumber}
-                aria-invalid={errors.registryNumber ? "true" : undefined}
-                onChange={(event) =>
-                  update((next) => {
-                    next.certificate.registryNumber = event.target.value;
-                  })
-                }
-              />
-            </Field>
-          </>
-        ) : null}
-
         {step === 0 && receipt ? (
           <>
             {draft.owners.map((owner, index) => (
@@ -1819,8 +1734,7 @@ export function IntakeWizard() {
                   </Field>
                   {isOrganisationOwner(owner.ownerType) ? (
                     <Field
-                      label="Địa chỉ trụ sở"
-                      required
+                      label="Địa chỉ trụ sở (nếu biết)"
                       error={errors[`owner-${index}-orgaddress`]}
                     >
                       <textarea
@@ -1839,7 +1753,7 @@ export function IntakeWizard() {
                   {requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser ? (
                     <>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <Field label="Ngày sinh" required error={errors[`owner-${index}-dob`]}>
+                        <Field label="Ngày sinh" error={errors[`owner-${index}-dob`]}>
                           <VietnameseDateInput
                             value={owner.dateOfBirth}
                             invalid={Boolean(errors[`owner-${index}-dob`])}
@@ -1853,7 +1767,7 @@ export function IntakeWizard() {
                             }
                           />
                         </Field>
-                        <Field label="Giới tính" required error={errors[`owner-${index}-gender`]}>
+                        <Field label="Giới tính" error={errors[`owner-${index}-gender`]}>
                           <select
                             className="pc-select"
                             value={owner.gender}
@@ -1870,11 +1784,7 @@ export function IntakeWizard() {
                           </select>
                         </Field>
                       </div>
-                      <Field
-                        label="Địa chỉ thường trú"
-                        required
-                        error={errors[`owner-${index}-address`]}
-                      >
+                      <Field label="Địa chỉ thường trú" error={errors[`owner-${index}-address`]}>
                         <textarea
                           className="pc-textarea"
                           value={owner.residenceAddress}
@@ -2172,7 +2082,6 @@ export function IntakeWizard() {
                       </p>
                       <Field
                         label="Tên người sử dụng hiện tại"
-                        required
                         error={errors[`owner-${index}-cu-name`]}
                       >
                         <input
@@ -2188,7 +2097,6 @@ export function IntakeWizard() {
                       </Field>
                       <Field
                         label="Số định danh cá nhân (CCCD)"
-                        required
                         error={errors[`owner-${index}-cu-id`]}
                         hint="Gồm đúng 12 chữ số."
                       >
@@ -2206,7 +2114,6 @@ export function IntakeWizard() {
                       </Field>
                       <Field
                         label="Địa chỉ thường trú (2 cấp)"
-                        required
                         error={errors[`owner-${index}-cu-address`]}
                       >
                         <textarea
@@ -2221,7 +2128,6 @@ export function IntakeWizard() {
                       </Field>
                       <Field
                         label="Lý do thay đổi"
-                        required
                         error={errors[`owner-${index}-cu-reason`]}
                         hint="Vì sao người trên GCN không còn là người sử dụng."
                       >
@@ -2240,10 +2146,9 @@ export function IntakeWizard() {
                     </div>
                   ) : null}
                   <Field
-                    label="Vai trò trên GCN"
-                    required
+                    label="Vai trò trên GCN (nếu biết)"
                     error={errors[`owner-${index}-role`]}
-                    hint="Ghi theo phần người sử dụng đất in trên bìa Giấy chứng nhận."
+                    hint="Ghi theo phần người sử dụng đất in trên bìa Giấy chứng nhận. Không rõ thì để trống."
                   >
                     <Select
                       value={owner.roleOnCertificate}
@@ -2336,8 +2241,327 @@ export function IntakeWizard() {
           </>
         ) : null}
 
+        {step === 1 ? (
+          <>
+            <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
+              <p className="font-semibold">Chụp rõ toàn bộ Giấy chứng nhận</p>
+              <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+                Không che góc, không lóa sáng, chụp đủ các trang có chữ. Đây là phần quan trọng nhất
+                — cán bộ đối chiếu mọi thông tin còn lại trên chính các ảnh này.
+              </p>
+            </div>
+            <Field
+              label="Ảnh Giấy chứng nhận"
+              required
+              error={errors.certificatePhotos}
+              hint={`Từ 1 đến ${MAX_CERTIFICATE_PHOTOS} ảnh, chụp đủ các trang có thông tin.`}
+            >
+              <label
+                className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+                  busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS
+                    ? "opacity-50 pointer-events-none"
+                    : "hover:bg-black/5"
+                }`}
+                style={{ borderColor: "var(--border-strong)", background: "var(--surface)" }}
+              >
+                <input
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                  type="file"
+                  accept={IMAGE_FILE_ACCEPT}
+                  multiple
+                  disabled={busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS}
+                  onChange={(event) => {
+                    void handleCertificateUpload(
+                      Array.from(event.target.files ?? []).slice(
+                        0,
+                        MAX_CERTIFICATE_PHOTOS - certificatePhotos.length,
+                      ),
+                    );
+                  }}
+                />
+                <div className="flex flex-col items-center text-center space-y-3 pointer-events-none">
+                  {busy ? (
+                    <>
+                      <div className="p-3">
+                        <svg
+                          className="w-8 h-8 animate-spin text-gray-500"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                      </div>
+                      <p className="font-bold text-lg">Đang xử lý ảnh...</p>
+                    </>
+                  ) : (
+                    <>
+                      <div
+                        className="p-4 rounded-full shadow-sm"
+                        style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}
+                      >
+                        <svg
+                          className="w-8 h-8"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={1.5}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                          />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-bold text-lg">Chạm để chụp ảnh / Chọn nhiều tệp</p>
+                        <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
+                          Có thể chọn nhiều ảnh cùng lúc
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </label>
+            </Field>
+            {certificatePhotos.length > 0 ? (
+              <ul className="space-y-3">
+                {certificatePhotos.map((photo, photoIndex) => (
+                  <li key={photo.fileId} className="pc-card">
+                    <div className="grid gap-3 sm:grid-cols-[9rem_1fr]">
+                      <div style={{ maxWidth: "9rem" }}>
+                        <FilePreview
+                          file={photo.file}
+                          fileId={photo.fileId}
+                          alt={`Ảnh Giấy chứng nhận ${photoIndex + 1}`}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold">
+                          Ảnh {photoIndex + 1}/{certificatePhotos.length}
+                        </p>
+                        <Field
+                          label="Nhãn trang (không bắt buộc)"
+                          hint="Ví dụ: trang 1 — mặt trước bìa; trang 2 — sơ đồ thửa."
+                        >
+                          <input
+                            className="pc-input"
+                            maxLength={120}
+                            value={photo.pageLabel}
+                            placeholder="Ghi trang này là gì"
+                            onChange={(event) =>
+                              setCertificateLabel(photo.fileId, event.target.value)
+                            }
+                          />
+                        </Field>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="pc-button-quiet"
+                            disabled={busy || photoIndex === 0}
+                            onClick={() => moveCertificate(photoIndex, -1)}
+                          >
+                            ↑ Lên
+                          </button>
+                          <button
+                            type="button"
+                            className="pc-button-quiet"
+                            disabled={busy || photoIndex === certificatePhotos.length - 1}
+                            onClick={() => moveCertificate(photoIndex, 1)}
+                          >
+                            ↓ Xuống
+                          </button>
+                          <label
+                            className="pc-button-quiet"
+                            style={{
+                              cursor: busy ? "default" : "pointer",
+                              color: "var(--accent)",
+                            }}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                                />
+                              </svg>
+                              <span className="font-medium">Thay ảnh</span>
+                            </div>
+                            <input
+                              type="file"
+                              accept={IMAGE_FILE_ACCEPT}
+                              hidden
+                              disabled={busy}
+                              onChange={(event) =>
+                                void replaceCertificate(
+                                  photo.fileId,
+                                  event.target.files?.[0] ?? null,
+                                )
+                              }
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="pc-button-quiet"
+                            style={{ color: "var(--danger)" }}
+                            disabled={busy}
+                            onClick={() => void deleteCertificate(photo.fileId)}
+                          >
+                            Xóa
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {uploadNote ? (
+              <div
+                className="mt-6 flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border shadow-sm transition-all pc-fade-in"
+                style={{
+                  background: "var(--surface)",
+                  borderColor: "var(--accent)",
+                  borderLeftWidth: "4px",
+                }}
+                aria-live="polite"
+              >
+                <div className="flex items-center gap-3">
+                  {busy ? (
+                    <svg
+                      className="w-5 h-5 animate-spin"
+                      style={{ color: "var(--accent)" }}
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                  ) : (
+                    <svg
+                      className="w-5 h-5 text-emerald-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  <p className="font-medium text-sm sm:text-base">
+                    {uploadNote}
+                    {busy && uploadPercent > 0 ? ` (${uploadPercent}%)` : ""}
+                  </p>
+                </div>
+                {busy ? (
+                  <button
+                    type="button"
+                    className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors"
+                    style={{ color: "var(--danger)" }}
+                    onClick={cancelUpload}
+                  >
+                    Hủy tải ảnh
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="pc-card">
+              <h3 className="text-base font-semibold">
+                Thông tin trên Giấy chứng nhận — nếu đọc được
+              </h3>
+              <p className="pc-field-hint mt-1 mb-4">
+                Ghi <strong>theo đúng Giấy chứng nhận</strong>. Không tìm thấy thì để trống — cán bộ
+                sẽ đối chiếu trên chính ảnh bạn vừa tải.
+              </p>
+              <div className="space-y-4">
+                <Field label="Số phát hành GCN" error={errors.issueNumber}>
+                  <input
+                    className="pc-input"
+                    value={draft.certificate.issueNumber}
+                    aria-invalid={errors.issueNumber ? "true" : undefined}
+                    onChange={(event) =>
+                      update((next) => {
+                        next.certificate.issueNumber = event.target.value;
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Ngày cấp GCN" error={errors.issueDate}>
+                  <VietnameseDateInput
+                    value={draft.certificate.issueDate}
+                    invalid={Boolean(errors.issueDate)}
+                    bounds={{ minYear: 1987 }}
+                    groupLabel="Ngày cấp Giấy chứng nhận"
+                    onChange={(iso) =>
+                      update((next) => {
+                        next.certificate.issueDate = iso;
+                      })
+                    }
+                  />
+                  <p className="pc-field-hint">
+                    Gõ thẳng ngày, tháng, năm bằng bàn phím số — không phải lùi từng tháng trên
+                    lịch.
+                  </p>
+                </Field>
+                <Field label="Số vào sổ GCN" error={errors.registryNumber}>
+                  <input
+                    className="pc-input"
+                    value={draft.certificate.registryNumber}
+                    aria-invalid={errors.registryNumber ? "true" : undefined}
+                    onChange={(event) =>
+                      update((next) => {
+                        next.certificate.registryNumber = event.target.value;
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+            </div>
+          </>
+        ) : null}
+
         {step === 2 ? (
           <>
+            <div className="pc-card">
+              <p className="font-semibold">Mọi ô ở bước này đều có thể để trống</p>
+              <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+                Chỉ ghi những gì bạn <strong>đọc được trên Giấy chứng nhận</strong>. Không chắc thì
+                bỏ qua và bấm Tiếp tục — cán bộ sẽ đọc trên ảnh bạn đã tải.
+              </p>
+            </div>
             {draft.parcels.map((parcel, index) => (
               <div key={parcel.id} className="pc-card">
                 <RepeatableHeading
@@ -2353,11 +2577,31 @@ export function IntakeWizard() {
                   }
                 />
                 <div className="space-y-4">
+                  <Field
+                    label="Tổ dân phố nơi có thửa đất (nếu biết)"
+                    hint="Là nơi có mảnh đất, không phải nơi bạn đang ở. Ở nơi khác hoặc không rõ thì chọn “Chưa xác định”."
+                  >
+                    <Select
+                      value={parcel.addressTwoLevel}
+                      onChange={(value) =>
+                        update((next) => {
+                          next.parcels[index].addressTwoLevel = value;
+                        })
+                      }
+                      placeholder="— Chưa chọn —"
+                      options={NEIGHBORHOOD_OPTIONS}
+                    />
+                  </Field>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Số tờ bản đồ" hint="Để trống nếu GCN không ghi.">
+                    <Field
+                      label="Số tờ bản đồ"
+                      error={errors[`parcel-${index}-mapsheet`]}
+                      hint="Ghi theo GCN."
+                    >
                       <input
                         className="pc-input"
                         value={parcel.mapSheetNumber}
+                        aria-invalid={errors[`parcel-${index}-mapsheet`] ? "true" : undefined}
                         onChange={(event) =>
                           update((next) => {
                             next.parcels[index].mapSheetNumber = event.target.value;
@@ -2365,10 +2609,15 @@ export function IntakeWizard() {
                         }
                       />
                     </Field>
-                    <Field label="Số thứ tự thửa" hint="Để trống nếu GCN không ghi.">
+                    <Field
+                      label="Số thửa"
+                      error={errors[`parcel-${index}-parcelnumber`]}
+                      hint="Ghi theo GCN."
+                    >
                       <input
                         className="pc-input"
                         value={parcel.parcelNumber}
+                        aria-invalid={errors[`parcel-${index}-parcelnumber`] ? "true" : undefined}
                         onChange={(event) =>
                           update((next) => {
                             next.parcels[index].parcelNumber = event.target.value;
@@ -2378,22 +2627,73 @@ export function IntakeWizard() {
                     </Field>
                   </div>
                   <Field
-                    label="Mã định danh thửa đất"
-                    hint="Nếu bạn không có mã này, để trống — cán bộ sẽ bổ sung."
+                    label="Diện tích (m²)"
+                    error={errors[`parcel-${index}-area`]}
+                    hint="Ghi theo GCN. Dùng dấu phẩy cho phần lẻ, ví dụ 29,16."
                   >
                     <input
                       className="pc-input"
-                      value={parcel.parcelIdCode}
+                      inputMode="decimal"
+                      value={parcel.area}
+                      aria-invalid={errors[`parcel-${index}-area`] ? "true" : undefined}
                       onChange={(event) =>
                         update((next) => {
-                          next.parcels[index].parcelIdCode = event.target.value;
+                          next.parcels[index].area = event.target.value;
+                        })
+                      }
+                    />
+                  </Field>
+                  {/*
+                    Ký hiệu loại đất: một ô chữ tự do thay cho danh mục 45 mục đích + nguồn gốc +
+                    hình thức + thời hạn của bản cũ. GCN đất nông nghiệp chỉ in ký hiệu ("LUC",
+                    "LUK", "màu", "vườn") chứ không in tên pháp lý — bắt hộ dân tự tra ra "đất
+                    chuyên trồng lúa" là bắt họ làm việc của cán bộ. Chuỗi gốc lưu nguyên vào
+                    `purposeFreeText` kèm mã "ghi theo bìa"; cán bộ chuẩn hóa ở `working_payload`.
+                  */}
+                  <Field
+                    label="Ký hiệu loại đất ghi trên GCN"
+                    error={errors[`use-${index}-0-purposefree`]}
+                    hint="Ví dụ: LUC, LUK, BHK, ONT… hoặc chữ ghi trên bìa như “màu”, “vườn”. Không biết có thể để trống."
+                  >
+                    <input
+                      className="pc-input"
+                      maxLength={MAX_PURPOSE_FREE_TEXT_LENGTH}
+                      value={parcel.landUses[0]?.purposeFreeText ?? ""}
+                      aria-invalid={errors[`use-${index}-0-purposefree`] ? "true" : undefined}
+                      onChange={(event) =>
+                        update((next) => {
+                          setRawLandPurpose(next.parcels[index], event.target.value);
+                        })
+                      }
+                      onBlur={(event) =>
+                        update((next) => {
+                          setRawLandPurpose(
+                            next.parcels[index],
+                            normalizeLandPurposeFreeText(event.target.value),
+                          );
                         })
                       }
                     />
                   </Field>
                   <Field
-                    label="Địa chỉ thửa đất ghi trên GCN"
-                    required
+                    label="Thửa đất thuộc đơn vị nào trước sáp nhập? (nếu biết)"
+                    error={errors[`parcel-${index}-oldward`]}
+                    hint="Xem tên xã/phường in trên bìa GCN. Giúp cán bộ đối chiếu số tờ bản đồ cũ với bản đồ hiện nay."
+                  >
+                    <Select
+                      value={parcel.oldWard}
+                      invalid={Boolean(errors[`parcel-${index}-oldward`])}
+                      onChange={(value) =>
+                        update((next) => {
+                          next.parcels[index].oldWard = value;
+                        })
+                      }
+                      placeholder="— Chưa chọn —"
+                      options={OLD_WARD_OPTIONS}
+                    />
+                  </Field>
+                  <Field
+                    label="Địa chỉ thửa đất ghi trên GCN (nếu chép được)"
                     error={errors[`parcel-${index}-address`]}
                     hint="Chép đúng như in trên bìa, kể cả khi là tên xã/huyện cũ."
                   >
@@ -2404,56 +2704,6 @@ export function IntakeWizard() {
                       onChange={(event) =>
                         update((next) => {
                           next.parcels[index].addressOnCertificate = event.target.value;
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label="Thửa đất thuộc đơn vị nào trước sáp nhập?"
-                    required
-                    error={errors[`parcel-${index}-oldward`]}
-                    hint="Xem tên xã/phường in trên bìa GCN. Cần thông tin này để đối chiếu số tờ bản đồ cũ với bản đồ hiện nay."
-                  >
-                    <Select
-                      value={parcel.oldWard}
-                      invalid={Boolean(errors[`parcel-${index}-oldward`])}
-                      onChange={(value) =>
-                        update((next) => {
-                          next.parcels[index].oldWard = value;
-                        })
-                      }
-                      placeholder="— Chọn —"
-                      options={OLD_WARD_OPTIONS}
-                    />
-                  </Field>
-                  <Field
-                    label="Tổ dân phố hiện nay"
-                    hint="Không bắt buộc. Nếu không chắc, để trống — cán bộ sẽ xác định khi duyệt."
-                  >
-                    <Select
-                      value={parcel.addressTwoLevel}
-                      onChange={(value) =>
-                        update((next) => {
-                          next.parcels[index].addressTwoLevel = value;
-                        })
-                      }
-                      placeholder="— Chưa rõ —"
-                      options={NEIGHBORHOOD_HINTS.map((name) => ({ code: name, label: name }))}
-                    />
-                  </Field>
-                  <Field
-                    label="Diện tích thửa đất (m²)"
-                    required
-                    error={errors[`parcel-${index}-area`]}
-                  >
-                    <input
-                      className="pc-input"
-                      inputMode="decimal"
-                      value={parcel.area}
-                      aria-invalid={errors[`parcel-${index}-area`] ? "true" : undefined}
-                      onChange={(event) =>
-                        update((next) => {
-                          next.parcels[index].area = event.target.value;
                         })
                       }
                     />
@@ -2476,536 +2726,66 @@ export function IntakeWizard() {
         ) : null}
 
         {step === 3 ? (
-          <>
-            <div
-              className="pc-card"
-              style={{ background: "var(--warning-surface)", borderColor: "var(--warning-border)" }}
-            >
-              <p className="text-sm">
-                Bốn thông tin dưới đây in ở mặt trong Giấy chứng nhận, phần &ldquo;Thửa đất&rdquo;.
-                Nếu không chắc, cứ chọn theo bìa — cán bộ sẽ kiểm tra lại khi duyệt.
-              </p>
-            </div>
-            {draft.parcels.map((parcel, parcelIndex) => (
-              <div key={parcel.id} className="pc-card">
-                <h3 className="mb-4 text-base font-semibold">
-                  Thửa {parcelIndex + 1}
-                  {parcel.parcelNumber ? ` — số thửa ${parcel.parcelNumber}` : ""}
-                </h3>
-                <div className="space-y-5">
-                  {parcel.landUses.map((landUse, useIndex) => {
-                    const key = `use-${parcelIndex}-${useIndex}`;
-                    return (
-                      <div
-                        key={landUse.id}
-                        className="space-y-4 border-t pt-4 first:border-t-0 first:pt-0"
-                        style={{ borderColor: "var(--border)" }}
-                      >
-                        <RepeatableHeading
-                          title={`Mục đích sử dụng ${useIndex + 1}`}
-                          removeLabel="Xóa"
-                          onRemove={
-                            parcel.landUses.length > 1
-                              ? () =>
-                                  update((next) => {
-                                    next.parcels[parcelIndex].landUses.splice(useIndex, 1);
-                                  })
-                              : undefined
-                          }
-                        />
-                        <Field
-                          label="Loại đất"
-                          required
-                          error={errors[`${key}-purpose`]}
-                          hint="Gõ vài chữ để tìm trong 45 loại đất. Không thấy loại phù hợp thì chọn một lối thoát ở cuối danh sách."
-                        >
-                          <SearchableSelect
-                            value={landUse.purposeCode}
-                            onChange={(value) =>
-                              update((next) => {
-                                const target = next.parcels[parcelIndex].landUses[useIndex];
-                                target.purposeCode = value;
-                                // Đổi sang loại có mã thì bỏ chữ tự do đã nhập cho "ghi theo bìa".
-                                if (value !== LAND_PURPOSE_GHI_THEO_BIA)
-                                  target.purposeFreeText = "";
-                              })
-                            }
-                            invalid={Boolean(errors[`${key}-purpose`])}
-                            placeholder="— Chọn hoặc gõ để tìm —"
-                            options={LAND_PURPOSE_SELECT_OPTIONS}
-                          />
-                        </Field>
-                        {landUse.purposeCode === LAND_PURPOSE_GHI_THEO_BIA ? (
-                          <Field
-                            label="Loại đất ghi trên bìa"
-                            required
-                            error={errors[`${key}-purposefree`]}
-                            hint="Ví dụ: đất thổ cư, đất vườn, đất ao — chép đúng chữ trên Giấy chứng nhận."
-                          >
-                            <input
-                              className="pc-input"
-                              value={landUse.purposeFreeText}
-                              aria-invalid={errors[`${key}-purposefree`] ? "true" : undefined}
-                              onChange={(event) =>
-                                update((next) => {
-                                  next.parcels[parcelIndex].landUses[useIndex].purposeFreeText =
-                                    event.target.value;
-                                })
-                              }
-                            />
-                          </Field>
-                        ) : null}
-                        <Field label="Nguồn gốc sử dụng" required error={errors[`${key}-origin`]}>
-                          <Select
-                            value={landUse.originCode}
-                            onChange={(value) =>
-                              update((next) => {
-                                next.parcels[parcelIndex].landUses[useIndex].originCode = value;
-                              })
-                            }
-                            invalid={Boolean(errors[`${key}-origin`])}
-                            placeholder="— Chọn —"
-                            options={LAND_ORIGIN_OPTIONS}
-                          />
-                        </Field>
-                        <Field label="Hình thức sử dụng" required error={errors[`${key}-form`]}>
-                          <Select
-                            value={landUse.formCode}
-                            onChange={(value) =>
-                              update((next) => {
-                                next.parcels[parcelIndex].landUses[useIndex].formCode = value;
-                              })
-                            }
-                            invalid={Boolean(errors[`${key}-form`])}
-                            placeholder="— Chọn —"
-                            options={LAND_USE_FORM_OPTIONS}
-                          />
-                        </Field>
-                        <Field label="Thời hạn sử dụng" required error={errors[`${key}-term`]}>
-                          <Select
-                            value={landUse.termCode}
-                            onChange={(value) =>
-                              update((next) => {
-                                next.parcels[parcelIndex].landUses[useIndex].termCode = value;
-                              })
-                            }
-                            invalid={Boolean(errors[`${key}-term`])}
-                            placeholder="— Chọn —"
-                            options={LAND_USE_TERM_OPTIONS}
-                          />
-                        </Field>
-                        <Field
-                          label="Diện tích theo mục đích này (m²)"
-                          hint="Không bắt buộc. Chỉ nhập khi GCN tách riêng diện tích từng loại đất."
-                        >
-                          <input
-                            className="pc-input"
-                            inputMode="decimal"
-                            value={landUse.area}
-                            onChange={(event) =>
-                              update((next) => {
-                                next.parcels[parcelIndex].landUses[useIndex].area =
-                                  event.target.value;
-                              })
-                            }
-                          />
-                        </Field>
-                      </div>
-                    );
-                  })}
-                  {errors[`parcel-${parcelIndex}-usearea`] ? (
-                    <p className="pc-field-error">{errors[`parcel-${parcelIndex}-usearea`]}</p>
-                  ) : null}
-                  {errors[`parcel-${parcelIndex}-usecount`] ? (
-                    <p className="pc-field-error">{errors[`parcel-${parcelIndex}-usecount`]}</p>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="pc-button-quiet"
-                    onClick={() =>
-                      update((next) => {
-                        next.parcels[parcelIndex].landUses.push(emptyLandUse(newId()));
-                      })
-                    }
-                    disabled={parcel.landUses.length >= MAX_LAND_USES_PER_PARCEL}
-                  >
-                    + Thêm mục đích sử dụng (tối đa {MAX_LAND_USES_PER_PARCEL})
-                  </button>
-                  {parcel.landUses.length >= MAX_LAND_USES_PER_PARCEL ? (
-                    <p className="pc-field-hint">
-                      Biểu mẫu tổng hợp của cơ quan chỉ có chỗ cho {MAX_LAND_USES_PER_PARCEL} loại
-                      đất mỗi thửa. Nếu Giấy chứng nhận ghi nhiều hơn, đề nghị liên hệ cán bộ hỗ
-                      trợ.
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </>
-        ) : null}
-
-        {step === 4 ? (
-          <>
-            <p style={{ color: "var(--muted)" }}>
-              Chỉ khai nếu Giấy chứng nhận có ghi tài sản gắn liền với đất (nhà ở, công trình, cây
-              lâu năm...). Không có thì bỏ qua bước này.
-            </p>
-            {draft.assets.map((asset, index) => (
-              <div key={asset.id} className="pc-card">
-                <RepeatableHeading
-                  title={`Tài sản ${index + 1}`}
-                  removeLabel="Xóa"
-                  onRemove={() =>
-                    update((next) => {
-                      next.assets.splice(index, 1);
-                    })
-                  }
-                />
-                <div className="space-y-4">
-                  <Field label="Loại tài sản">
-                    <Select
-                      value={asset.assetType}
-                      onChange={(value) =>
-                        update((next) => {
-                          next.assets[index].assetType = value;
-                        })
-                      }
-                      placeholder="— Chọn —"
-                      options={ASSET_TYPE_OPTIONS}
-                    />
-                  </Field>
-                  <Field label="Mô tả theo GCN">
-                    <textarea
-                      className="pc-textarea"
-                      value={asset.description}
-                      onChange={(event) =>
-                        update((next) => {
-                          next.assets[index].description = event.target.value;
-                        })
-                      }
-                    />
-                  </Field>
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="pc-button-quiet"
-              onClick={() =>
-                update((next) => {
-                  next.assets.push(emptyAsset(newId()));
-                })
-              }
-            >
-              + Thêm tài sản
-            </button>
-          </>
-        ) : null}
-
-        {step === 5 ? (
-          <>
-            {!secretConfirmed ? (
-              <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
-                <p className="font-semibold">Xác nhận bạn đã lưu mã bí mật</p>
-                <p className="pc-field-hint mb-4">
-                  Nhập lại <strong>nhóm 4 ký tự cuối cùng</strong> của mã bí mật ở trên. Chưa xác
-                  nhận thì chưa tải ảnh được.
-                </p>
-                <div className="flex flex-wrap items-start gap-3">
-                  <input
-                    className="pc-input"
-                    style={{ maxWidth: "180px" }}
-                    value={secretEcho}
-                    aria-invalid={errors.secretEcho ? "true" : undefined}
-                    onChange={(event) => setSecretEcho(event.target.value.toUpperCase())}
-                  />
-                  <button type="button" className="pc-button" onClick={confirmSecret}>
-                    Xác nhận
-                  </button>
-                </div>
-                {errors.secretEcho ? <p className="pc-field-error">{errors.secretEcho}</p> : null}
-              </div>
-            ) : (
-              <>
-                <Field
-                  label="Ảnh Giấy chứng nhận"
-                  required
-                  error={errors.certificatePhotos}
-                  hint={`Từ 1 đến ${MAX_CERTIFICATE_PHOTOS} ảnh, chụp đủ các trang có thông tin.`}
-                >
-                  <label
-                    className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
-                      busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS
-                        ? "opacity-50 pointer-events-none"
-                        : "hover:bg-black/5"
-                    }`}
-                    style={{ borderColor: "var(--border-strong)", background: "var(--surface)" }}
-                  >
-                    <input
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                      type="file"
-                      accept={IMAGE_FILE_ACCEPT}
-                      multiple
-                      disabled={busy || certificatePhotos.length >= MAX_CERTIFICATE_PHOTOS}
-                      onChange={(event) => {
-                        void handleCertificateUpload(
-                          Array.from(event.target.files ?? []).slice(
-                            0,
-                            MAX_CERTIFICATE_PHOTOS - certificatePhotos.length,
-                          ),
-                        );
-                      }}
-                    />
-                    <div className="flex flex-col items-center text-center space-y-3 pointer-events-none">
-                      {busy ? (
-                        <>
-                          <div className="p-3">
-                            <svg
-                              className="w-8 h-8 animate-spin text-gray-500"
-                              xmlns="http://www.w3.org/2000/svg"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                            >
-                              <circle
-                                className="opacity-25"
-                                cx="12"
-                                cy="12"
-                                r="10"
-                                stroke="currentColor"
-                                strokeWidth="4"
-                              ></circle>
-                              <path
-                                className="opacity-75"
-                                fill="currentColor"
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                              ></path>
-                            </svg>
-                          </div>
-                          <p className="font-bold text-lg">Đang xử lý ảnh...</p>
-                        </>
-                      ) : (
-                        <>
-                          <div
-                            className="p-4 rounded-full shadow-sm"
-                            style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}
-                          >
-                            <svg
-                              className="w-8 h-8"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={1.5}
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                              />
-                            </svg>
-                          </div>
-                          <div>
-                            <p className="font-bold text-lg">Chạm để chụp ảnh / Chọn nhiều tệp</p>
-                            <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-                              Có thể chọn nhiều ảnh cùng lúc
-                            </p>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </label>
-                </Field>
-                {certificatePhotos.length > 0 ? (
-                  <ul className="space-y-3">
-                    {certificatePhotos.map((photo, photoIndex) => (
-                      <li key={photo.fileId} className="pc-card">
-                        <div className="grid gap-3 sm:grid-cols-[9rem_1fr]">
-                          <div style={{ maxWidth: "9rem" }}>
-                            <FilePreview
-                              file={photo.file}
-                              fileId={photo.fileId}
-                              alt={`Ảnh Giấy chứng nhận ${photoIndex + 1}`}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <p className="text-sm font-semibold">
-                              Ảnh {photoIndex + 1}/{certificatePhotos.length}
-                            </p>
-                            <Field
-                              label="Nhãn trang (không bắt buộc)"
-                              hint="Ví dụ: trang 1 — mặt trước bìa; trang 2 — sơ đồ thửa."
-                            >
-                              <input
-                                className="pc-input"
-                                maxLength={120}
-                                value={photo.pageLabel}
-                                placeholder="Ghi trang này là gì"
-                                onChange={(event) =>
-                                  setCertificateLabel(photo.fileId, event.target.value)
-                                }
-                              />
-                            </Field>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                className="pc-button-quiet"
-                                disabled={busy || photoIndex === 0}
-                                onClick={() => moveCertificate(photoIndex, -1)}
-                              >
-                                ↑ Lên
-                              </button>
-                              <button
-                                type="button"
-                                className="pc-button-quiet"
-                                disabled={busy || photoIndex === certificatePhotos.length - 1}
-                                onClick={() => moveCertificate(photoIndex, 1)}
-                              >
-                                ↓ Xuống
-                              </button>
-                              <label
-                                className="pc-button-quiet"
-                                style={{
-                                  cursor: busy ? "default" : "pointer",
-                                  color: "var(--accent)",
-                                }}
-                              >
-                                <div className="flex items-center gap-1.5">
-                                  <svg
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth={2}
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                                    />
-                                  </svg>
-                                  <span className="font-medium">Thay ảnh</span>
-                                </div>
-                                <input
-                                  type="file"
-                                  accept={IMAGE_FILE_ACCEPT}
-                                  hidden
-                                  disabled={busy}
-                                  onChange={(event) =>
-                                    void replaceCertificate(
-                                      photo.fileId,
-                                      event.target.files?.[0] ?? null,
-                                    )
-                                  }
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                className="pc-button-quiet"
-                                style={{ color: "var(--danger)" }}
-                                disabled={busy}
-                                onClick={() => void deleteCertificate(photo.fileId)}
-                              >
-                                Xóa
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-
-                {uploadNote ? (
-                  <div
-                    className="mt-6 flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border shadow-sm transition-all pc-fade-in"
-                    style={{
-                      background: "var(--surface)",
-                      borderColor: "var(--accent)",
-                      borderLeftWidth: "4px",
-                    }}
-                    aria-live="polite"
-                  >
-                    <div className="flex items-center gap-3">
-                      {busy ? (
-                        <svg
-                          className="w-5 h-5 animate-spin"
-                          style={{ color: "var(--accent)" }}
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path>
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-5 h-5 text-emerald-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                      <p className="font-medium text-sm sm:text-base">
-                        {uploadNote}
-                        {busy && uploadPercent > 0 ? ` (${uploadPercent}%)` : ""}
-                      </p>
-                    </div>
-                    {busy ? (
-                      <button
-                        type="button"
-                        className="text-sm font-semibold underline px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors"
-                        style={{ color: "var(--danger)" }}
-                        onClick={cancelUpload}
-                      >
-                        Hủy tải ảnh
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </>
-        ) : null}
-
-        {step === 6 ? (
           <div className="space-y-4">
             <h2 className="text-xl font-bold">Kiểm tra lại trước khi gửi</h2>
             <p className="-mt-2 text-sm" style={{ color: "var(--muted)" }}>
-              Đọc kỹ toàn bộ nội dung dưới đây. Cần sửa mục nào, bấm “Sửa” ở góc phải mục đó để quay
-              lại đúng bước.
+              Cần sửa mục nào, bấm “Sửa” ở góc phải mục đó để quay lại đúng bước.
             </p>
 
-            <ReviewBlock title="Giấy chứng nhận" onEdit={() => setStep(1)}>
-              <dl className="space-y-1 text-sm">
-                <div>
-                  <dt className="inline font-semibold">Số phát hành: </dt>
-                  <dd className="inline">{draft.certificate.issueNumber || "—"}</dd>
-                </div>
-                <div>
-                  <dt className="inline font-semibold">Ngày cấp: </dt>
-                  <dd className="inline">{formatVnDate(draft.certificate.issueDate) || "—"}</dd>
-                </div>
-                <div>
-                  <dt className="inline font-semibold">Số vào sổ: </dt>
-                  <dd className="inline">{draft.certificate.registryNumber || "—"}</dd>
-                </div>
-              </dl>
-            </ReviewBlock>
+            {/*
+              Checklist chỉ liệt kê điều kiện BẮT BUỘC. Các thông tin còn lại nằm ở khối "Cán bộ
+              sẽ bổ sung" bên dưới và không được hiển thị như lỗi — người dân bỏ trống là đúng
+              thiết kế, không phải làm sai.
+            */}
+            <div className="pc-card">
+              <h3 className="text-base font-semibold">Điều kiện bắt buộc</h3>
+              <ul className="mt-3 space-y-2 text-sm">
+                {checklist.map((item) => (
+                  <li key={item.key} className="flex items-start gap-2">
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        color: item.done ? "var(--accent)" : "var(--danger)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {item.done ? "✓" : "✕"}
+                    </span>
+                    <span style={{ color: item.done ? undefined : "var(--danger)" }}>
+                      {item.label}
+                      <span className="sr-only">{item.done ? " — đã có" : " — còn thiếu"}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {checklist.every((item) => item.done) ? null : (
+                <p className="pc-field-error mt-3" aria-live="polite">
+                  Còn mục đánh dấu ✕ ở trên. Bấm “Sửa” ở khối tương ứng để bổ sung.
+                </p>
+              )}
+            </div>
 
-            <ReviewBlock title="Chủ sử dụng" onEdit={() => setStep(0)}>
+            <div className="pc-card">
+              <h3 className="text-base font-semibold">Thông tin không bắt buộc</h3>
+              <p className="pc-field-hint mt-1">
+                Bỏ trống không sao — cán bộ đối chiếu trên ảnh Giấy chứng nhận bạn đã tải.
+              </p>
+              <ul className="mt-3 space-y-2 text-sm">
+                {optionalItems.map((item) => (
+                  <li key={item.key} className="flex items-start justify-between gap-3">
+                    <span>{item.label}</span>
+                    <span
+                      className="shrink-0 text-sm font-semibold"
+                      style={{ color: item.done ? "var(--accent)" : "var(--muted)" }}
+                    >
+                      {item.done ? "Đã nhập" : "Cán bộ sẽ bổ sung"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <ReviewBlock title="Chủ sử dụng và CCCD" onEdit={() => setStep(0)}>
               <ul className="space-y-3 text-sm">
                 {draft.owners.map((owner, ownerIndex) => (
                   <li
@@ -3019,40 +2799,74 @@ export function IntakeWizard() {
                     </p>
                     <p>
                       {isOrganisationOwner(owner.ownerType) ? "Mã số thuế" : "CCCD"}:{" "}
-                      {owner.identityNumber || "—"}
+                      {owner.identityNumber || "cán bộ sẽ đọc trên ảnh"}
                     </p>
-                    {requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser ? (
-                      <>
-                        <p>
-                          Ngày sinh: {formatVnDate(owner.dateOfBirth) || "—"} · Giới tính:{" "}
-                          {genderText(owner.gender) || "—"}
-                        </p>
-                        <p>Địa chỉ: {owner.residenceAddress || "—"}</p>
-                        <p>
-                          Ảnh CCCD:{" "}
-                          {identityPhotos[owner.id]?.CITIZEN_ID_FRONT
-                            ? "mặt trước đã tải"
-                            : "thiếu mặt trước"}
-                          {", "}
-                          {identityPhotos[owner.id]?.CITIZEN_ID_BACK
-                            ? "mặt sau đã tải"
-                            : "thiếu mặt sau"}
-                        </p>
-                      </>
+                    {ownerNeedsIdentityPhotos(owner.ownerType, owner.hasDistinctCurrentUser) ? (
+                      <p
+                        style={{
+                          color:
+                            identityPhotos[owner.id]?.CITIZEN_ID_FRONT &&
+                            identityPhotos[owner.id]?.CITIZEN_ID_BACK
+                              ? undefined
+                              : "var(--danger)",
+                        }}
+                      >
+                        Ảnh CCCD:{" "}
+                        {identityPhotos[owner.id]?.CITIZEN_ID_FRONT
+                          ? "mặt trước đã tải"
+                          : "CHƯA CÓ mặt trước"}
+                        {", "}
+                        {identityPhotos[owner.id]?.CITIZEN_ID_BACK
+                          ? "mặt sau đã tải"
+                          : "CHƯA CÓ mặt sau"}
+                      </p>
                     ) : null}
                     {owner.hasDistinctCurrentUser ? (
                       <p style={{ color: "var(--muted)" }}>
-                        Người sử dụng hiện tại: {owner.currentUserName || "—"} —{" "}
-                        {optionLabel(CHANGE_REASON_OPTIONS, owner.changeReason)}
+                        Người sử dụng hiện tại: {owner.currentUserName || "—"}
+                        {owner.changeReason
+                          ? ` — ${optionLabel(CHANGE_REASON_OPTIONS, owner.changeReason)}`
+                          : ""}
                       </p>
                     ) : null}
-                    <p>
-                      Vai trò trên GCN:{" "}
-                      {optionLabel(CERTIFICATE_ROLE_OPTIONS, owner.roleOnCertificate) || "—"}
-                    </p>
                   </li>
                 ))}
               </ul>
+            </ReviewBlock>
+
+            <ReviewBlock title="Ảnh Giấy chứng nhận" onEdit={() => setStep(1)}>
+              {certificatePhotos.length > 0 ? (
+                <>
+                  <p className="text-sm">Đã tải {certificatePhotos.length} ảnh.</p>
+                  <ol className="mt-1 list-decimal pl-5 text-sm">
+                    {certificatePhotos.map((photo) => (
+                      <li key={photo.fileId}>{photo.pageLabel.trim() || "Chưa đặt nhãn trang"}</li>
+                    ))}
+                  </ol>
+                </>
+              ) : (
+                <p className="text-sm" style={{ color: "var(--danger)" }}>
+                  Chưa có ảnh Giấy chứng nhận.
+                </p>
+              )}
+              <dl className="mt-3 space-y-1 text-sm">
+                <div>
+                  <dt className="inline font-semibold">Số phát hành: </dt>
+                  <dd className="inline">{draft.certificate.issueNumber || "cán bộ sẽ bổ sung"}</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold">Ngày cấp: </dt>
+                  <dd className="inline">
+                    {formatVnDate(draft.certificate.issueDate) || "cán bộ sẽ bổ sung"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold">Số vào sổ: </dt>
+                  <dd className="inline">
+                    {draft.certificate.registryNumber || "cán bộ sẽ bổ sung"}
+                  </dd>
+                </div>
+              </dl>
             </ReviewBlock>
 
             <ReviewBlock title="Thửa đất" onEdit={() => setStep(2)}>
@@ -3067,69 +2881,25 @@ export function IntakeWizard() {
                       Thửa {parcelIndex + 1}
                       {parcel.parcelNumber ? ` — số thửa ${parcel.parcelNumber}` : ""}
                     </p>
-                    <p>Địa chỉ trên GCN: {parcel.addressOnCertificate || "—"}</p>
                     <p>
-                      Đơn vị cũ: {optionLabel(OLD_WARD_OPTIONS, parcel.oldWard) || "—"} · Diện tích:{" "}
-                      {parcel.area || "—"} m²
+                      Tổ dân phố:{" "}
+                      {optionLabel(NEIGHBORHOOD_OPTIONS, parcel.addressTwoLevel) ||
+                        "cán bộ sẽ xác định"}
+                    </p>
+                    <p>
+                      Số tờ: {parcel.mapSheetNumber || "—"} · Diện tích: {parcel.area || "—"} m²
+                    </p>
+                    <p>Ký hiệu loại đất: {landPurposeDisplay(parcel.landUses[0])}</p>
+                    <p style={{ color: "var(--muted)" }}>
+                      Đơn vị cũ: {optionLabel(OLD_WARD_OPTIONS, parcel.oldWard) || "—"} · Địa chỉ
+                      trên GCN: {parcel.addressOnCertificate || "—"}
                     </p>
                   </li>
                 ))}
               </ul>
             </ReviewBlock>
 
-            <ReviewBlock title="Loại đất" onEdit={() => setStep(3)}>
-              <ul className="space-y-3 text-sm">
-                {draft.parcels.map((parcel, parcelIndex) => (
-                  <li key={parcel.id}>
-                    <p className="font-semibold">Thửa {parcelIndex + 1}</p>
-                    <ul className="list-disc pl-5">
-                      {parcel.landUses.map((landUse) => (
-                        <li key={landUse.id}>
-                          {landPurposeDisplay(landUse)}
-                          {landUse.area ? ` — ${landUse.area} m²` : ""} ·{" "}
-                          {optionLabel(LAND_ORIGIN_OPTIONS, landUse.originCode) || "?"} ·{" "}
-                          {optionLabel(LAND_USE_FORM_OPTIONS, landUse.formCode) || "?"} ·{" "}
-                          {optionLabel(LAND_USE_TERM_OPTIONS, landUse.termCode) || "?"}
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-            </ReviewBlock>
-
-            <ReviewBlock title="Tài sản gắn liền với đất" onEdit={() => setStep(4)}>
-              {draft.assets.length > 0 ? (
-                <ul className="list-disc pl-5 text-sm">
-                  {draft.assets.map((asset) => (
-                    <li key={asset.id}>
-                      {optionLabel(ASSET_TYPE_OPTIONS, asset.assetType) || "(chưa chọn loại)"}
-                      {asset.description ? ` — ${asset.description}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm" style={{ color: "var(--muted)" }}>
-                  Không khai tài sản.
-                </p>
-              )}
-            </ReviewBlock>
-
-            <ReviewBlock title="Ảnh Giấy chứng nhận" onEdit={() => setStep(5)}>
-              {certificatePhotos.length > 0 ? (
-                <ol className="list-decimal pl-5 text-sm">
-                  {certificatePhotos.map((photo) => (
-                    <li key={photo.fileId}>{photo.pageLabel.trim() || "Chưa đặt nhãn trang"}</li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="text-sm" style={{ color: "var(--danger)" }}>
-                  Chưa có ảnh Giấy chứng nhận.
-                </p>
-              )}
-            </ReviewBlock>
-
-            <ReviewBlock title="Điện thoại liên hệ">
+            <ReviewBlock title="Điện thoại liên hệ" onEdit={() => setStep(0)}>
               <p className="text-sm">{draft.phone || "—"}</p>
             </ReviewBlock>
 

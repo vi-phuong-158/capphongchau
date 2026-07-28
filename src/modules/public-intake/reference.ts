@@ -203,3 +203,17 @@ export const NEIGHBORHOOD_HINTS: readonly string[] = [
   "Phúc Lợi",
   "Thống Nhất",
 ];
+
+/**
+ * Lối thoát cho ô "Tổ dân phố nơi có thửa đất".
+ *
+ * Cần thiết vì người có đất ở Phong Châu nhưng đang cư trú nơi khác không biết thửa của mình
+ * thuộc tổ nào — trước đây ô này để trống thì không phân biệt được với "chưa ai đụng tới", còn
+ * người dân thì đoán bừa một tổ. Chọn tường minh là chưa xác định thì cán bộ biết phải tra.
+ */
+export const NEIGHBORHOOD_UNKNOWN = "CHUA_XAC_DINH";
+
+export const NEIGHBORHOOD_OPTIONS: readonly ReferenceOption[] = [
+  ...NEIGHBORHOOD_HINTS.map((name) => ({ code: name, label: name })),
+  { code: NEIGHBORHOOD_UNKNOWN, label: "Chưa xác định — cán bộ sẽ tra giúp" },
+];
