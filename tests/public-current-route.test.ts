@@ -76,4 +76,32 @@ describe("PATCH /api/public/submissions/current", () => {
     });
     expect(mocks.saveDraft).not.toHaveBeenCalled();
   });
+
+  it("từ chối cả version chỉ cũ đúng một lượt và repository nhận expected version chính xác", async () => {
+    const draft = emptyDraft("owner-server", "parcel-server", "land-use-server");
+    draft.phone = "0912345678";
+    draft.consentAccepted = true;
+    mocks.resolvePublicRequest.mockResolvedValue({
+      requestId: "req-one-behind",
+      record: { submissionId: "submission-1", status: "DRAFT", version: 5, draft },
+    });
+    const stale = await PATCH(
+      new Request("http://localhost/api/public/submissions/current", {
+        method: "PATCH",
+        body: JSON.stringify({ draft, version: 4 }),
+      }),
+    );
+    expect(stale.status).toBe(409);
+    expect(mocks.saveDraft).not.toHaveBeenCalled();
+
+    mocks.saveDraft.mockResolvedValue(6);
+    const current = await PATCH(
+      new Request("http://localhost/api/public/submissions/current", {
+        method: "PATCH",
+        body: JSON.stringify({ draft, version: 5 }),
+      }),
+    );
+    expect(current.status).toBe(200);
+    expect(mocks.saveDraft).toHaveBeenCalledWith(expect.anything(), draft, "DRAFT", 5);
+  });
 });

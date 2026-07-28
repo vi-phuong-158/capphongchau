@@ -206,6 +206,22 @@ export function publicActorName(displayName: string): string {
   return name && !/\S+@\S+/.test(name) ? name : "Cán bộ phường";
 }
 
+function sanitizePublicTimelineText(value: string): string {
+  return value.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[đã ẩn]").trim();
+}
+
+/** DTO allowlist cho timeline công khai; sanitize lại dữ liệu lịch sử trước khi trả ra ngoài. */
+export function serializePublicTimelineEvent(input: PublicTimelineEvent): PublicTimelineEvent {
+  return {
+    eventId: input.eventId,
+    eventType: input.eventType,
+    label: sanitizePublicTimelineText(input.label),
+    actorDisplayName: publicActorName(input.actorDisplayName),
+    message: sanitizePublicTimelineText(input.message),
+    occurredAt: input.occurredAt,
+  };
+}
+
 export function newTimelineEvent(input: {
   eventType: string;
   label: string;

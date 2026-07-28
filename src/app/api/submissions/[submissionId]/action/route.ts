@@ -207,7 +207,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "UNDER_REVIEW",
           label: "Đang kiểm tra",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -254,7 +254,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "FORCE_CLAIMED",
           label: "Mở khóa cưỡng chế",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -301,7 +301,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "CLAIM_RELEASED",
           label: "Trả lại hàng chờ",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -364,7 +364,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "TRANSFERRED",
           label: "Chuyển giao xử lý",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -449,7 +449,7 @@ export async function POST(
       timelineEvent: newTimelineEvent({
         eventType: status,
         label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",
-        actorDisplayName: user.displayName,
+        actorDisplayName: publicActorName(user.displayName),
         message: body.data.message,
       }),
       requestId,

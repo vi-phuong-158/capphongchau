@@ -10,6 +10,7 @@ import { emptyDraft } from "@/modules/public-intake/types";
 import {
   hasCompleteExistingRecordLookupIdentity,
   maskCertificateNumber,
+  serializePublicTimelineEvent,
   unauthorizedSupplementChanges,
   type SupplementItem,
 } from "@/modules/public-intake/workflow";
@@ -44,6 +45,26 @@ describe("public recovery session", () => {
 });
 
 describe("existing record privacy and supplement locks", () => {
+  it("timeline công khai allowlist và sanitize lại email lịch sử", () => {
+    const serialized = serializePublicTimelineEvent({
+      eventId: "event-1",
+      eventType: "CLAIMED",
+      label: "Đã nhận xử lý",
+      actorDisplayName: "officer@example.test",
+      message: "Liên hệ officer@example.test",
+      occurredAt: "2026-07-29T00:00:00.000Z",
+    });
+    expect(serialized).toEqual({
+      eventId: "event-1",
+      eventType: "CLAIMED",
+      label: "Đã nhận xử lý",
+      actorDisplayName: "Cán bộ phường",
+      message: "Liên hệ [đã ẩn]",
+      occurredAt: "2026-07-29T00:00:00.000Z",
+    });
+    expect(JSON.stringify(serialized)).not.toMatch(/email|actorId|metadata|@/i);
+  });
+
   it("chỉ mở tra cứu khi đã quét QR — không cho gõ tay CCCD rồi dò", () => {
     expect(
       hasCompleteExistingRecordLookupIdentity({

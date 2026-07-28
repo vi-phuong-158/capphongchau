@@ -21,7 +21,7 @@ import {
   isValidDate,
   ORGANISATION_ID_PATTERN,
 } from "@/modules/public-intake/validation";
-import { newTimelineEvent } from "@/modules/public-intake/workflow";
+import { newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
 import { payloadLayerOf } from "@/modules/public-intake/payload-layers";
 import {
   isOwnerIdentityQrConfirmed,
@@ -446,7 +446,7 @@ export async function PATCH(
           timelineEvent: newTimelineEvent({
             eventType: "OFFICIAL_RECORD_AMENDED",
             label: "Cán bộ điều chỉnh hồ sơ đã tiếp nhận",
-            actorDisplayName: user.displayName,
+            actorDisplayName: publicActorName(user.displayName),
           }),
           requestId,
           idempotencyKey: scopedIdempotencyKey,
@@ -461,7 +461,7 @@ export async function PATCH(
           timelineEvent: newTimelineEvent({
             eventType: "STAFF_EDITED",
             label: "Cán bộ cập nhật thông tin hồ sơ",
-            actorDisplayName: user.displayName,
+            actorDisplayName: publicActorName(user.displayName),
           }),
           requestId,
           idempotencyKey: scopedIdempotencyKey,

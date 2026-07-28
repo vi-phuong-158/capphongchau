@@ -69,6 +69,14 @@ export function completionChecks(
     checks.push({ code, label, severity: "BLOCKING", message });
   };
 
+  if (payload.consentAccepted !== true) {
+    block(
+      "CONSENT_NOT_ACCEPTED",
+      "Thiếu xác nhận đồng ý",
+      "Hồ sơ chưa có bằng chứng người kê khai đã đồng ý thông báo xử lý dữ liệu.",
+    );
+  }
+
   checkCertificate(payload, block);
   checkOwners(payload, block);
   checkParcels(payload, block);
@@ -196,6 +204,20 @@ function checkOwner(owner: Owner, index: number, block: Blocker): void {
   }
 
   if (!requiresCitizenId(owner.ownerType)) return;
+
+  if (owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW") {
+    block(
+      `${prefix}_IDENTITY_OVERRIDE_PENDING`,
+      `Chủ ${nth} còn chờ duyệt thay đổi định danh`,
+      `Thông tin định danh của chủ sử dụng thứ ${nth} đã sửa sau xác nhận QR và chưa được duyệt.`,
+    );
+  } else if (owner.identityStatus !== "QR_CONFIRMED" && owner.identityStatus !== "MANUAL_COMPLETE") {
+    block(
+      `${prefix}_IDENTITY_NOT_CONFIRMED`,
+      `Chủ ${nth} chưa xác nhận định danh`,
+      `Thông tin định danh của chủ sử dụng thứ ${nth} chưa được xác nhận.`,
+    );
+  }
 
   if (!isValidDate(owner.dateOfBirth.trim())) {
     block(

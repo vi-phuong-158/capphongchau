@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
+import {
+  getPublicIntakeRepository,
+  SubmissionVersionConflictError,
+} from "@/modules/public-intake/repository";
 import {
   isEditable,
   publicError,
@@ -149,9 +152,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     }
   }
 
-  // `version` chỉ để phát hiện một thiết bị thứ hai đang sửa cùng bản khai. Trong cùng phiên
-  // thì ghi đè theo lần lưu mới nhất, tránh 409 giả trên mạng yếu (PLAN_NL §8.4).
-  if (typeof body.version === "number" && body.version < record.version - 1) {
+  if (typeof body.version !== "number" || body.version !== record.version) {
     return publicError(
       "VERSION_CONFLICT",
       "Bản kê khai này đang được mở ở một thiết bị khác. Tải lại trang để lấy bản mới nhất.",
@@ -159,11 +160,24 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     );
   }
 
-  const nextVersion = await getPublicIntakeRepository().saveDraft(
-    record,
-    body.draft as IntakeDraft,
-    record.status,
-  );
+  let nextVersion: number;
+  try {
+    nextVersion = await getPublicIntakeRepository().saveDraft(
+      record,
+      body.draft as IntakeDraft,
+      record.status,
+      body.version,
+    );
+  } catch (error) {
+    if (error instanceof SubmissionVersionConflictError) {
+      return publicError(
+        "VERSION_CONFLICT",
+        "Bản kê khai này đang được mở ở một thiết bị khác. Tải lại trang để lấy bản mới nhất.",
+        requestId,
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ version: nextVersion, savedAt: new Date().toISOString() });
 }

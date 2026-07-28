@@ -13,6 +13,7 @@ import {
   type PublicFileSummary,
   type PublicStatus,
   type PublicTimelineEvent,
+  serializePublicTimelineEvent,
   type SupplementItem,
   type SupplementRequest,
 } from "./workflow";
@@ -373,6 +374,17 @@ export class PublicIntakeRepository {
           now() + interval '24 hours'
         )
       `;
+      await this.insertAudit(transaction, {
+        actorEmail: assisted?.email ?? "PUBLIC",
+        action: assisted ? "ASSISTED_SUBMISSION_CREATED" : "PUBLIC_SUBMISSION_CREATED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          consentAccepted: true,
+          consentVersion: input.consentVersion,
+          intakeChannel: channel,
+        },
+      });
     });
   }
 
@@ -1313,14 +1325,16 @@ export class PublicIntakeRepository {
       from public.public_status_events where submission_id = ${submissionId}
       order by occurred_at
     `;
-    return rows.map((row) => ({
-      eventId: row.event_id,
-      eventType: row.event_type,
-      label: row.label,
-      actorDisplayName: row.actor_display_name || "Cán bộ phường",
-      message: row.message,
-      occurredAt: row.occurred_at.toISOString(),
-    }));
+    return rows.map((row) =>
+      serializePublicTimelineEvent({
+        eventId: row.event_id,
+        eventType: row.event_type,
+        label: row.label,
+        actorDisplayName: row.actor_display_name,
+        message: row.message,
+        occurredAt: row.occurred_at.toISOString(),
+      }),
+    );
   }
 
   async createSupplementRequest(input: {
@@ -1449,6 +1463,7 @@ export class PublicIntakeRepository {
     record: SubmissionRecord,
     draft: IntakeDraft,
     status: PublicStatus,
+    expectedVersion: number,
   ): Promise<number> {
     const database = getDatabase();
     const rows = await database<{ version: number }[]>`
@@ -1456,7 +1471,7 @@ export class PublicIntakeRepository {
         draft_json = ${JSON.stringify(draft)}::jsonb,
         phone = ${draft.phone || record.phone}, status = ${status}, version = version + 1,
         updated_at = now()
-      where submission_id = ${record.submissionId} and version = ${record.version}
+      where submission_id = ${record.submissionId} and version = ${expectedVersion}
       returning version
     `;
     if (!rows[0]) throw new SubmissionVersionConflictError();

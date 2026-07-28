@@ -236,6 +236,26 @@ describe("sau Phase 1: completionChecks là gác cổng đầy đủ (lỗ hổn
     const draft = fullDraft();
     expect(blockingCodes(recordWith({ draft, fileSummaries: completeFiles() }), draft)).toEqual([]);
   });
+
+  it("chặn hồ sơ legacy thiếu consent thay vì tự backfill", () => {
+    const draft = fullDraft();
+    draft.consentAccepted = false;
+    expect(blockingCodes(recordWith({ draft, fileSummaries: completeFiles() }), draft)).toContain(
+      "CONSENT_NOT_ACCEPTED",
+    );
+  });
+
+  it("chặn identity chưa xác nhận và QR override còn chờ duyệt", () => {
+    const draft = fullDraft();
+    draft.owners[0].identityStatus = "";
+    expect(blockingCodes(recordWith({ draft, fileSummaries: completeFiles() }), draft)).toContain(
+      "OWNER_0_IDENTITY_NOT_CONFIRMED",
+    );
+    draft.owners[0].identityStatus = "QR_OVERRIDE_PENDING_REVIEW";
+    expect(blockingCodes(recordWith({ draft, fileSummaries: completeFiles() }), draft)).toContain(
+      "OWNER_0_IDENTITY_OVERRIDE_PENDING",
+    );
+  });
 });
 
 describe("sau Phase 1: public submit chấp nhận hồ sơ tối thiểu", () => {

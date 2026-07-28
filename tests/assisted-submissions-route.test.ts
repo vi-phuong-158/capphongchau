@@ -63,14 +63,6 @@ vi.mock("@/modules/public-intake/create-submission", () => ({
   CreationConflictError: MockCreationConflictError,
 }));
 
-const mockAppendAudit = vi.fn().mockResolvedValue(undefined);
-
-vi.mock("@/modules/public-intake/repository", () => ({
-  getPublicIntakeRepository: vi.fn().mockReturnValue({
-    appendAudit: (...args: unknown[]) => mockAppendAudit(...args),
-  }),
-}));
-
 vi.mock("@/modules/public-intake/session", () => ({
   createPublicCsrfToken: vi.fn().mockReturnValue("csrf-token"),
   createSessionToken: vi.fn().mockReturnValue("session-token"),
@@ -173,16 +165,6 @@ describe("Cờ BẬT + vai trò ĐÚNG mới được phép", () => {
         assistedBy: { email: INTAKE_OFFICER.email, displayName: INTAKE_OFFICER.displayName },
       }),
     );
-    expect(mockAppendAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "ASSISTED_SUBMISSION_CREATED",
-        metadata: {
-          consentAccepted: true,
-          consentVersion: "v1",
-          intakeChannel: "OFFICER_ASSISTED",
-        },
-      }),
-    );
   });
 
   it("từ chối request thiếu consent trước khi tạo hồ sơ hoặc ghi audit", async () => {
@@ -195,7 +177,6 @@ describe("Cờ BẬT + vai trò ĐÚNG mới được phép", () => {
     expect(body.error.code).toBe("VALIDATION_FAILED");
     expect(body.error.message).toContain("đồng ý");
     expect(mockCreateIntakeSubmission).not.toHaveBeenCalled();
-    expect(mockAppendAudit).not.toHaveBeenCalled();
   });
 });
 

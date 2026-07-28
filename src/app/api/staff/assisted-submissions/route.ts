@@ -17,7 +17,6 @@ import {
   CreationConflictError,
 } from "@/modules/public-intake/create-submission";
 import { validateCreateSubmissionRequest } from "@/modules/public-intake/create-request";
-import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import {
   createPublicCsrfToken,
   createSessionToken,
@@ -130,18 +129,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       consentVersion: environment.CONSENT_NOTICE_VERSION,
       channel: "OFFICER_ASSISTED",
       assistedBy: { email: user.email, displayName: user.displayName },
-    });
-
-    await getPublicIntakeRepository().appendAudit({
-      actorEmail: user.email,
-      action: "ASSISTED_SUBMISSION_CREATED",
-      entityId: result.submissionId,
-      requestId,
-      metadata: {
-        consentAccepted,
-        consentVersion: environment.CONSENT_NOTICE_VERSION,
-        intakeChannel: "OFFICER_ASSISTED",
-      },
     });
 
     // Cùng cookie phiên với cổng công khai: wizard, upload và submit dùng lại nguyên vẹn.
