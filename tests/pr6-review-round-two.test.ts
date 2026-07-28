@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { adoptServerDraftSnapshot } from "@/modules/public-intake/draft-adoption";
+import type { IntakeDraft } from "@/modules/public-intake/types";
 import { emptyDraft } from "@/modules/public-intake/types";
 import {
   reportUploadMetricFailure,
@@ -124,17 +125,35 @@ describe("PATCH nháp: 409 giả trên mạng yếu phải tự gỡ", () => {
       wizard.indexOf("const flushDraft = useCallback"),
     );
     expect(saveDraft).toContain("if (response.status === 409)");
-    expect(saveDraft).toContain("adoptServerDraft({ localDraft: draftToSave })");
-    expect(saveDraft).toContain("response = await patch(adopted.draft, adopted.version)");
+    expect(saveDraft).toContain("adoptServerDraft({ localDraft: payload })");
+    expect(saveDraft).toContain("response = await patch(adopted.version)");
   });
 
-  it("chỉ thử lại đúng một lần — 409 thật vẫn nổi lên", () => {
+  it("chỉ thử lại khi máy chủ ĐÃ có đúng nội dung định ghi", () => {
+    /*
+     * Đây là hàng rào chống ghi đè. Bỏ điều kiện `!adopted.hasLocalChanges` thì lần thử lại dùng
+     * version vừa fetch nên LUÔN thành công — kể cả khi 409 đến từ một thiết bị khác đang sửa
+     * thật, và thay đổi của thiết bị kia biến mất im lặng.
+     */
     const saveDraft = wizard.slice(
       wizard.indexOf("const saveDraft = useCallback"),
       wizard.indexOf("const flushDraft = useCallback"),
     );
+    expect(saveDraft).toContain("if (adopted && !adopted.hasLocalChanges)");
     expect(saveDraft.match(/response\.status === 409/g)).toHaveLength(1);
     expect(saveDraft).toContain("if (!response.ok)");
+  });
+
+  it("payload gửi đi và payload đem so sánh là cùng một object", () => {
+    // So `draftToSave` (chưa gắn metadata ảnh GCN) với snapshot máy chủ (đã có) sẽ luôn ra
+    // "khác nhau", làm nhánh tự phục hồi không bao giờ chạy.
+    const saveDraft = wizard.slice(
+      wizard.indexOf("const saveDraft = useCallback"),
+      wizard.indexOf("const flushDraft = useCallback"),
+    );
+    expect(saveDraft).toContain("const payload = withCertificateMetadata(draftToSave");
+    expect(saveDraft).toContain("adoptServerDraft({ localDraft: payload })");
+    expect(saveDraft).toContain("body: JSON.stringify({ draft: payload, version })");
   });
 
   it("adoptServerDraft trả version ra ngoài, không chỉ gọi setState", () => {
@@ -144,7 +163,69 @@ describe("PATCH nháp: 409 giả trên mạng yếu phải tự gỡ", () => {
       wizard.indexOf("const adoptServerDraft = useCallback"),
       wizard.indexOf("const saveDraft = useCallback"),
     );
-    expect(adopt).toContain("return { draft: restoredDraft, version: adopted.version };");
+    expect(adopt).toContain("version: adopted.version,");
+    expect(adopt).toContain("hasLocalChanges: adopted.hasLocalChanges,");
+  });
+});
+
+describe("Quy tắc quyết định của nhánh 409 — hai tình huống, hai kết quả ngược nhau", () => {
+  /*
+   * `hasLocalChanges` là TOÀN BỘ căn cứ để wizard quyết định có thử lại PATCH hay không. Hai test
+   * dưới đây kiểm chính quy tắc đó bằng dữ liệu thật, không đọc mã nguồn — vì đây là chỗ mà một
+   * lỗi sẽ làm mất dữ liệu của người dân chứ không chỉ làm đỏ CI.
+   */
+  const seed = (): IntakeDraft => {
+    const draft = emptyDraft("owner-1", "parcel-1", "landuse-1");
+    draft.phone = "0912345678";
+    draft.owners[0].fullName = "Nguyễn Văn A";
+    return draft;
+  };
+
+  it("TÌNH HUỐNG 1 — PATCH đã commit, response rơi mất: cho phép thử lại", () => {
+    // Máy chủ đang giữ CHÍNH nội dung ta vừa gửi; chỉ số version là khác.
+    const sent = seed();
+    const serverDraft = structuredClone(sent);
+
+    const adopted = adoptServerDraftSnapshot({
+      serverDraft,
+      serverVersion: 7,
+      localDraft: sent,
+    });
+
+    expect(adopted?.hasLocalChanges).toBe(false);
+    expect(adopted?.version).toBe(7);
+  });
+
+  it("TÌNH HUỐNG 2 — thiết bị khác đã sửa: KHÔNG được thử lại", () => {
+    // Máy chủ giữ tên do thiết bị B nhập; máy ta giữ tên khác. Thử lại là xóa mất dữ liệu của B.
+    const local = seed();
+    local.owners[0].fullName = "Nguyễn Văn A";
+    const serverDraft = seed();
+    serverDraft.owners[0].fullName = "Trần Thị B";
+
+    const adopted = adoptServerDraftSnapshot({
+      serverDraft,
+      serverVersion: 9,
+      localDraft: local,
+    });
+
+    expect(adopted?.hasLocalChanges).toBe(true);
+  });
+
+  it("TÌNH HUỐNG 2b — thiết bị khác thêm dữ liệu ở trường ta để trống: vẫn là xung đột", () => {
+    // Trường hợp dễ lọt nhất: `{...server, ...local}` giữ chuỗi rỗng của local đè lên dữ liệu của
+    // server. Nếu quy tắc báo "không có thay đổi" ở đây thì ta sẽ xóa trắng ô cán bộ vừa điền.
+    const local = seed();
+    const serverDraft = seed();
+    serverDraft.certificate.issueNumber = "CG 123456";
+
+    const adopted = adoptServerDraftSnapshot({
+      serverDraft,
+      serverVersion: 4,
+      localDraft: local,
+    });
+
+    expect(adopted?.hasLocalChanges).toBe(true);
   });
 });
 

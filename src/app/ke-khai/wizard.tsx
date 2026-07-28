@@ -761,7 +761,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const adoptServerDraft = useCallback(
     async (options?: {
       localDraft?: IntakeDraft;
-    }): Promise<{ draft: IntakeDraft; version: number } | null> => {
+    }): Promise<{ draft: IntakeDraft; version: number; hasLocalChanges: boolean } | null> => {
       try {
         const response = await fetchApi("/api/public/submissions/current", { method: "GET" });
         if (!response.ok) {
@@ -821,7 +821,11 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         setCertificatePhotos(
           applyCertMeta(restoredCertificates, restoredDraft.certificateFileMetadata),
         );
-        return { draft: restoredDraft, version: adopted.version };
+        return {
+          draft: restoredDraft,
+          version: adopted.version,
+          hasLocalChanges: adopted.hasLocalChanges,
+        };
       } catch {
         return null;
       }
@@ -836,38 +840,44 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         return true;
       }
 
+      // Tính đúng MỘT lần: payload này vừa là thứ gửi đi, vừa là thứ đem so với snapshot máy chủ
+      // ở nhánh 409 bên dưới. Hai bên phải là cùng một object, nếu không phép so sánh vô nghĩa.
+      const payload = withCertificateMetadata(draftToSave, certificatePhotos);
+
       // `version` có thể là `null` khi chưa nhận được snapshot nào; máy chủ trả 409 và nhánh phục
       // hồi bên dưới lấy đúng version rồi thử lại, thay vì thất bại thẳng như trước.
-      const patch = (payload: IntakeDraft, version: number | null): Promise<Response> =>
+      const patch = (version: number | null): Promise<Response> =>
         fetchApi("/api/public/submissions/current", {
           method: "PATCH",
           headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
-          body: JSON.stringify({
-            draft: withCertificateMetadata(payload, certificatePhotos),
-            version,
-          }),
+          body: JSON.stringify({ draft: payload, version }),
         });
 
       setSaveStatus("SAVING");
       try {
-        let response = await patch(draftToSave, serverVersion);
+        let response = await patch(serverVersion);
 
         /*
-         * 409 = version trên máy chủ khác version trên máy. Máy chủ kiểm khớp TUYỆT ĐỐI, nên
-         * nguyên nhân thường gặp nhất KHÔNG phải "hai thiết bị cùng sửa" mà là: một lần PATCH đã
-         * ghi xong nhưng response rơi mất trên mạng yếu — lần thử lại gửi đúng version cũ và bị
-         * từ chối. Trước đây người dân kẹt luôn ở bước đó, kèm một thông báo sai sự thật.
+         * 409 = version trên máy chủ khác version trên máy. Có ĐÚNG HAI nguyên nhân, và chúng đòi
+         * hai cách xử lý ngược nhau — gộp chung là ghi đè mất dữ liệu:
          *
-         * Xử lý: lấy lại snapshot máy chủ, gộp dữ liệu đang có trên máy lên trên (chính
-         * `adoptServerDraftSnapshot` với `localDraft`), rồi thử lại đúng MỘT lần. Trường hợp mất
-         * response tự gỡ được vì snapshot mới chính là thứ vừa ghi. Nếu thật sự có thiết bị thứ
-         * hai đang sửa thì lần hai vẫn 409 và thông báo gốc được hiển thị — không nuốt lỗi thật,
-         * cũng không lặp vô hạn.
+         *   (1) Lần PATCH trước đã ghi xong nhưng response rơi mất trên mạng yếu. Máy chủ đang giữ
+         *       CHÍNH nội dung ta định ghi, chỉ khác mỗi số version. Thử lại là vô hại.
+         *   (2) Một thiết bị khác đã sửa thật. Máy chủ đang giữ dữ liệu ta CHƯA từng thấy. Thử lại
+         *       với version mới sẽ **ghi đè mất** thay đổi của thiết bị kia, im lặng.
+         *
+         * Phân biệt bằng `hasLocalChanges` của snapshot vừa lấy về: nó so sánh sâu bản gộp
+         * (local đè lên server) với chính bản server.
+         *   - `false` → gộp xong không khác gì server → server đã có đúng thứ ta muốn ghi → (1).
+         *   - `true`  → server đang giữ thứ khác → không phân biệt được (1) với (2) → coi như (2).
+         *
+         * Chỉ thử lại ở nhánh (1). Nhánh (2) để nguyên 409 rơi xuống dưới và người dân đọc đúng
+         * thông báo "đang mở ở một thiết bị khác" — thà bắt họ tải lại còn hơn ghi đè âm thầm.
          */
         if (response.status === 409) {
-          const adopted = await adoptServerDraft({ localDraft: draftToSave });
-          if (adopted) {
-            response = await patch(adopted.draft, adopted.version);
+          const adopted = await adoptServerDraft({ localDraft: payload });
+          if (adopted && !adopted.hasLocalChanges) {
+            response = await patch(adopted.version);
           }
         }
 

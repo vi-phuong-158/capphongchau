@@ -34,10 +34,31 @@ vừa insert).
 Kiểm khớp tuyệt đối là đúng và được giữ nguyên. Nhưng nguyên nhân 409 thường gặp nhất không phải
 hai thiết bị cùng sửa mà là một PATCH đã ghi xong rồi response rơi mất trên mạng yếu — lần thử lại
 gửi version cũ và bị từ chối, người dân kẹt kèm thông báo sai sự thật ("đang mở ở thiết bị khác").
-Client nay lấy lại snapshot, gộp dữ liệu trên máy lên trên rồi thử lại **đúng một lần**. Mất
-response tự gỡ được; xung đột thật vẫn 409 ở lần hai và thông báo gốc hiện ra. Không chọn phương
-án idempotency key cho PATCH vì `request_log.kind` có CHECK constraint, thêm kind mới là phải thêm
-migration — chi phí lớn hơn giá trị ở bước này.
+Client lấy lại snapshot rồi thử lại — nhưng **chỉ khi phân biệt được** đó là lần ghi của chính
+mình bị mất response, chứ không phải thiết bị khác đã sửa. Căn cứ là `hasLocalChanges` của snapshot
+vừa lấy về (so sánh sâu bản gộp local-đè-server với chính bản server):
+
+- `false` → gộp xong không khác gì server → server **đã có** đúng thứ ta định ghi → chỉ mất
+  response → thử lại vô hại;
+- `true` → server đang giữ nội dung ta chưa từng thấy → không phân biệt được → coi như xung đột
+  thật, **không** thử lại, để 409 nổi lên và người dân đọc đúng thông báo.
+
+Bản sửa đầu tiên của vòng này **thiếu điều kiện đó** và luôn thử lại: vì lần thử lại dùng version
+vừa fetch nên nó LUÔN thành công, kể cả khi 409 đến từ một thiết bị khác — tức là ghi đè mất dữ
+liệu của thiết bị kia trong im lặng. Ghi lại đây vì đó đúng là loại lỗi mà "tự phục hồi cho tiện"
+hay tạo ra.
+
+Điều kiện bắt buộc đi kèm: payload gửi đi và payload đem so sánh phải là **cùng một object** (đã
+qua `withCertificateMetadata`). So bản chưa gắn metadata với snapshot đã có sẽ luôn ra "khác nhau"
+và nhánh tự phục hồi không bao giờ chạy.
+
+Hạn chế còn lại, chấp nhận có ý thức: sau khi báo xung đột, `adoptServerDraft` đã cập nhật
+`serverVersion`, nên nếu người dân bấm lưu lần nữa thì lần đó **sẽ** ghi đè. Đây là hành động có ý
+thức sau khi đã được cảnh báo, khác hẳn với ghi đè tự động. Muốn chặn hẳn thì phải có giao diện
+hợp nhất thay đổi — ngoài phạm vi vòng này.
+
+Không chọn phương án idempotency key cho PATCH vì `request_log.kind` có CHECK constraint, thêm kind
+mới là phải thêm migration — chi phí lớn hơn giá trị ở bước này.
 
 **4. CCCD vào chỉ mục tra cứu với `kind = 'PENDING'`, bất kể ai gõ vào ô đó và ở lần gửi nào.**
 Từ V2, CCCD là **tùy chọn** với người dân. Trước quyết định này, `pendingIdentityHmacs` chỉ được

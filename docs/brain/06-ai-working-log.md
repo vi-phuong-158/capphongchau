@@ -15,8 +15,10 @@
   - migration `202607290001` bỏ `force row level security` (lệch mẫu 8 bảng còn lại, và có thể
     làm mọi insert số đo thất bại trong im lặng); hai chỗ nuốt lỗi đổi sang
     `reportUploadMetricFailure` — log một lần mỗi tiến trình, chỉ ghi mã lỗi Postgres;
-  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại **một lần** khi PATCH trả 409;
-    `adoptServerDraft` trả `{draft, version}` thay vì boolean;
+  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại khi PATCH trả 409, **chỉ khi**
+    `hasLocalChanges === false` (server đã có đúng nội dung định ghi). Bản sửa đầu thiếu điều kiện
+    này nên xung đột thật bị ghi đè im lặng — phát hiện ở vòng phản hồi của người dùng;
+    `adoptServerDraft` trả `{draft, version, hasLocalChanges}` thay vì boolean;
   - `appendUploadAttempt` có trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200`;
   - `hasLocalChanges` so sánh sâu thay cho `JSON.stringify` (nhạy thứ tự khóa);
   - `listFolderFileIds` escape `folderId` bằng `escapeQueryValue` có sẵn;

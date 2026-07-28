@@ -122,6 +122,8 @@ A	docs/handoffs/2026-07-29_pr6-review-round-one_CHATGPT_HANDOFF.md
 
 **Kết quả:** typecheck pass; lint 0 error / 5 warning có sẵn; unit test 590 pass / 10 skipped (baseline 570/10, +20 test); build pass.
 
+**Đính chính so với báo cáo trước:** bản sửa 409 đầu tiên (commit `ad81c35`) **luôn** thử lại sau khi lấy snapshot. Vì lần thử lại dùng version vừa fetch nên nó luôn thành công — kể cả khi 409 đến từ một thiết bị khác đang sửa thật, tức là ghi đè mất dữ liệu của thiết bị kia trong im lặng. Câu "lần hai vẫn 409" trong báo cáo trước là **sai**. Đã sửa: chỉ thử lại khi `hasLocalChanges === false`.
+
 **Đã hoàn thành toàn bộ.** Hạng mục cuối (AC-12 — chỉ mục tra cứu CCCD cho hồ sơ MỨC A) ban đầu bị chặn vì cần quyết định nghiệp vụ; người dùng đã chốt ngày 2026-07-29: ghi với `kind = 'PENDING'`, áp dụng cho cả `RESUBMITTED` và cả ba đường ghi của cán bộ. Đã thi công kèm test.
 
 **Trạng thái đề xuất:** `READY_FOR_COMMIT`. Chưa merge, chưa deploy, chưa chạy migration.
@@ -241,7 +243,7 @@ Chạy trong worktree tại commit `45b7fc9`, **trước** mọi thay đổi.
 | Không hỏi được Drive về thư mục cha | Không có bước này | Không xóa (fail-closed) | Test `KHÔNG dọn khi không hỏi được Drive về thư mục cha` |
 | Role kết nối không có BYPASSRLS, ghi bảng số đo | Insert trả 0 dòng, lỗi bị nuốt, không tín hiệu nào | `force` đã bỏ; nếu vẫn hỏng thì log 1 dòng có `pg_code` | `tests/pr6-review-round-two.test.ts` |
 | PATCH ghi xong nhưng response rơi, client retry | 409 → thông báo sai "đang mở ở thiết bị khác" → kẹt | Lấy lại snapshot, gộp local, thử lại 1 lần → thành công | Test đặc tả trong `pr6-review-round-two.test.ts` |
-| Hai thiết bị thật cùng sửa | 409 → kẹt | Thử lại 1 lần, vẫn 409 → hiện đúng thông báo gốc | Test `chỉ thử lại đúng một lần` |
+| Hai thiết bị thật cùng sửa | 409 → kẹt | KHÔNG thử lại (`hasLocalChanges === true`) → 409 nổi lên, hiện đúng thông báo gốc, không ghi đè | Test `TÌNH HUỐNG 2` + `TÌNH HUỐNG 2b` (dữ liệu thật, không đọc mã nguồn) |
 | Client bơm hàng loạt `/uploads/metrics` | Ghi không giới hạn | Dừng ở 200 dòng/hồ sơ | Test trần ghi |
 | Chạy `cleanup:e2e-preview-data` khi `NODE_ENV=production` | Chạy bình thường, xóa theo số điện thoại | Từ chối, exit 1 | 4 test |
 | Khôi phục phiên, nháp local trùng hệt server nhưng khác thứ tự khóa | `hasLocalChanges = true` → PATCH thừa | `false` | Test `deepEqual` |
@@ -342,7 +344,8 @@ Baseline 570 pass → sau sửa 590 pass: **+20 test**, 0 test bị xóa, 0 test
 | AC-02 | Mọi tình huống không chắc chắn đều nghiêng về GIỮ tệp | PASS | Test `.catch` hai chiều | |
 | AC-03 | Migration số đo không dùng `force row level security` | PASS | 2 test | |
 | AC-04 | Lỗi ghi số đo để lại tín hiệu, không lộ PII | PASS | 2 test | Log 1 lần/tiến trình |
-| AC-05 | 409 do mất response tự gỡ được | PASS | 3 test đặc tả | **Chưa** kiểm bằng E2E thật |
+| AC-05 | 409 do mất response tự gỡ được | PASS | 4 test đặc tả | **Chưa** kiểm bằng E2E thật |
+| AC-13 | 409 do thiết bị khác sửa **không** bị ghi đè im lặng | PASS | 3 test hành vi trên `adoptServerDraftSnapshot` (TÌNH HUỐNG 1 / 2 / 2b) | Phát hiện ở vòng phản hồi; xem mục 15 |
 | AC-06 | Kiểm version tuyệt đối ở máy chủ giữ nguyên | PASS | `current/route.ts` không đổi trong diff | |
 | AC-07 | Bảng số đo có trần ghi mỗi hồ sơ | PASS | 1 test | |
 | AC-08 | `hasLocalChanges` không phụ thuộc thứ tự khóa | PASS | 2 test | |
@@ -384,6 +387,7 @@ Người dùng đã trả lời ngày 2026-07-29:
 | Medium | AC-12 chưa được kiểm bằng dữ liệu thật | Chỉ mục ghi đúng theo test, nhưng chưa xác minh trên Postgres thật rằng `on conflict do nothing` không tạo dòng trùng khi cán bộ sửa nhiều lần | Kiểm trên preview: sửa CCCD 2 lần, đếm dòng trong `public_lookup_index` |
 | Medium | Migration `202607290001` sửa tại chỗ | Nếu đã chạy ở môi trường nào đó thì sửa tại chỗ không có tác dụng | Xác nhận chưa chạy; nếu đã chạy, thêm migration `no force row level security` |
 | Medium | AC-05 chỉ được phủ bằng test đặc tả đọc mã nguồn | Test kiểu này bắt được việc xóa mất hàng rào, nhưng **không** chứng minh luồng chạy đúng | Chạy kịch bản E2E mạng yếu (mục 14B) |
+| Medium | Sau khi báo xung đột, lần lưu KẾ TIẾP vẫn ghi đè | `adoptServerDraft` đã cập nhật `serverVersion`, nên nếu người dân bấm lưu lại thì thay đổi của thiết bị kia mất. Là hành động có ý thức sau cảnh báo, nhưng không có giao diện hợp nhất | Chấp nhận ở vòng này; cần UI merge nếu nghiệp vụ yêu cầu |
 | Medium | E2E chưa chạy lần nào | 7 cổng tích hợp của PR #6 vẫn treo nguyên | Giữ PR ở trạng thái Draft |
 | Low | Trần 200 dòng số đo là hằng số cứng | Không chỉnh được theo môi trường | Chấp nhận; đưa vào env nếu có nhu cầu thật |
 | Low | `npm run build` baseline không chạy riêng | Không phân biệt tuyệt đối được lỗi build có sẵn với lỗi mới | Build sau sửa PASS nên rủi ro thấp |
@@ -516,1262 +520,284 @@ Agent xác nhận:
 
 
 
+
 ```diff
-diff --git a/.gitattributes b/.gitattributes
-index 922d7fc..a745250 100644
---- a/.gitattributes
-+++ b/.gitattributes
-@@ -3,6 +3,14 @@
- # `npm run format:check` (Prettier mặc định endOfLine=lf) đỏ sau mỗi lần checkout/merge.
- * text=auto eol=lf
- 
-+# Báo cáo bàn giao nhúng nguyên văn unified diff (§9.1 của
-+# AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md yêu cầu diff dưới 150 KB phải nhúng đủ). Dòng context của
-+# một dòng trống trong diff là đúng một dấu cách, nên `git diff --check` trong CI báo "trailing
-+# whitespace" cho chính nội dung phải giữ nguyên byte. Tắt kiểm khoảng trắng cho riêng các file báo
-+# cáo — cắt khoảng trắng đi là làm hỏng diff, mà bỏ diff đi là vi phạm quy trình bàn giao.
-+CHATGPT_HANDOFF.md -whitespace
-+docs/handoffs/** -whitespace
-+
- # Nguồn nghiệp vụ và ảnh: nhị phân, tuyệt đối không chuẩn hóa nội dung.
- *.pdf binary
- *.docx binary
-diff --git a/.prettierignore b/.prettierignore
-index 8d74b6d..fd654ce 100644
---- a/.prettierignore
-+++ b/.prettierignore
-@@ -4,3 +4,9 @@ coverage/
- playwright-report/
- test-results/
- package-lock.json
-+
-+# Báo cáo bàn giao: nhúng nguyên văn unified diff (§9.1 của
-+# AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md). Prettier định dạng lại Markdown sẽ đụng vào nội dung
-+# trong code fence và làm sai lệch bằng chứng — thứ duy nhất khiến báo cáo có giá trị.
-+CHATGPT_HANDOFF.md
-+docs/handoffs/
 diff --git a/docs/brain/03-decisions.md b/docs/brain/03-decisions.md
-index 9aa6bc0..ff37e06 100644
+index ff37e06..4daa880 100644
 --- a/docs/brain/03-decisions.md
 +++ b/docs/brain/03-decisions.md
-@@ -7,6 +7,55 @@
- > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
- > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
+@@ -34,10 +34,31 @@ vừa insert).
+ Kiểm khớp tuyệt đối là đúng và được giữ nguyên. Nhưng nguyên nhân 409 thường gặp nhất không phải
+ hai thiết bị cùng sửa mà là một PATCH đã ghi xong rồi response rơi mất trên mạng yếu — lần thử lại
+ gửi version cũ và bị từ chối, người dân kẹt kèm thông báo sai sự thật ("đang mở ở thiết bị khác").
+-Client nay lấy lại snapshot, gộp dữ liệu trên máy lên trên rồi thử lại **đúng một lần**. Mất
+-response tự gỡ được; xung đột thật vẫn 409 ở lần hai và thông báo gốc hiện ra. Không chọn phương
+-án idempotency key cho PATCH vì `request_log.kind` có CHECK constraint, thêm kind mới là phải thêm
+-migration — chi phí lớn hơn giá trị ở bước này.
++Client lấy lại snapshot rồi thử lại — nhưng **chỉ khi phân biệt được** đó là lần ghi của chính
++mình bị mất response, chứ không phải thiết bị khác đã sửa. Căn cứ là `hasLocalChanges` của snapshot
++vừa lấy về (so sánh sâu bản gộp local-đè-server với chính bản server):
++
++- `false` → gộp xong không khác gì server → server **đã có** đúng thứ ta định ghi → chỉ mất
++  response → thử lại vô hại;
++- `true` → server đang giữ nội dung ta chưa từng thấy → không phân biệt được → coi như xung đột
++  thật, **không** thử lại, để 409 nổi lên và người dân đọc đúng thông báo.
++
++Bản sửa đầu tiên của vòng này **thiếu điều kiện đó** và luôn thử lại: vì lần thử lại dùng version
++vừa fetch nên nó LUÔN thành công, kể cả khi 409 đến từ một thiết bị khác — tức là ghi đè mất dữ
++liệu của thiết bị kia trong im lặng. Ghi lại đây vì đó đúng là loại lỗi mà "tự phục hồi cho tiện"
++hay tạo ra.
++
++Điều kiện bắt buộc đi kèm: payload gửi đi và payload đem so sánh phải là **cùng một object** (đã
++qua `withCertificateMetadata`). So bản chưa gắn metadata với snapshot đã có sẽ luôn ra "khác nhau"
++và nhánh tự phục hồi không bao giờ chạy.
++
++Hạn chế còn lại, chấp nhận có ý thức: sau khi báo xung đột, `adoptServerDraft` đã cập nhật
++`serverVersion`, nên nếu người dân bấm lưu lần nữa thì lần đó **sẽ** ghi đè. Đây là hành động có ý
++thức sau khi đã được cảnh báo, khác hẳn với ghi đè tự động. Muốn chặn hẳn thì phải có giao diện
++hợp nhất thay đổi — ngoài phạm vi vòng này.
++
++Không chọn phương án idempotency key cho PATCH vì `request_log.kind` có CHECK constraint, thêm kind
++mới là phải thêm migration — chi phí lớn hơn giá trị ở bước này.
  
-+## [2026-07-29] Review PR #6 vòng hai — ba quyết định về an toàn dữ liệu
-+
-+**1. Câu hỏi trước khi xóa tệp Drive là "có AI đang trỏ vào nó không", không phải "hồ sơ đang gọi
-+có trỏ vào nó không".**
-+`isDriveFileAdopted` trước đây lọc `submission_id = <hồ sơ đang gọi>`. Phần lớn nhánh gọi
-+`discardIfOrphan` truyền thẳng `body.driveFileId` — dữ liệu client chưa qua `verifyUploadedFile`.
-+Một ID trỏ sang hồ sơ khác khi đó thỏa "chưa ai nhận" và bị xóa: mất bằng chứng của một hộ dân
-+không liên quan. Nay truy vấn hỏi toàn bảng, **và** `discardIfOrphan` chỉ xóa khi Drive xác nhận
-+tệp nằm trong `record.driveFolderId`. Hai điều kiện thu phạm vi xóa về đúng những gì hộ dân đang
-+gọi tự tải lên. Đánh đổi: thêm một lần gọi Drive trên đường lỗi (hiếm) — chấp nhận được, vì hướng
-+sai còn lại là mất dữ liệu vĩnh viễn. Khai thác thực tế trước đây khó vì Drive ID không bao giờ
-+được trả ra cổng công khai và không đoán được; sửa vì hàng rào không nên chỉ dựa vào điều đó.
-+
-+**2. Không dùng `force row level security` cho bảng số đo.**
-+`force` áp RLS lên cả chủ sở hữu bảng; bảng không có policy nào nên với role không mang BYPASSRLS
-+thì mọi insert trả 0 dòng. Cả hai chỗ gọi `appendUploadAttempt` đều nuốt lỗi có chủ đích (số đo
-+không được làm hỏng một lượt tải đã thành công), nên hỏng kiểu đó **không phát ra tín hiệu nào** —
-+đúng cái bảng dùng để nghiệm thu ngưỡng hiệu năng và để mở cờ chuẩn hóa ảnh. Dùng `enable` +
-+`revoke` như 8 bảng còn lại: đúng mô hình đe dọa (chặn anon/authenticated) và không lệch mẫu. Kèm
-+theo, nuốt lỗi giờ đi qua `reportUploadMetricFailure` — ghi log **một lần** mỗi tiến trình và chỉ
-+ghi mã lỗi Postgres, không ghi `error.message` (thông báo Postgres có thể nhắc lại giá trị dòng
-+vừa insert).
-+
-+**3. PATCH nháp: giữ kiểm version tuyệt đối ở máy chủ, thêm tự phục hồi ở client.**
-+Kiểm khớp tuyệt đối là đúng và được giữ nguyên. Nhưng nguyên nhân 409 thường gặp nhất không phải
-+hai thiết bị cùng sửa mà là một PATCH đã ghi xong rồi response rơi mất trên mạng yếu — lần thử lại
-+gửi version cũ và bị từ chối, người dân kẹt kèm thông báo sai sự thật ("đang mở ở thiết bị khác").
-+Client nay lấy lại snapshot, gộp dữ liệu trên máy lên trên rồi thử lại **đúng một lần**. Mất
-+response tự gỡ được; xung đột thật vẫn 409 ở lần hai và thông báo gốc hiện ra. Không chọn phương
-+án idempotency key cho PATCH vì `request_log.kind` có CHECK constraint, thêm kind mới là phải thêm
-+migration — chi phí lớn hơn giá trị ở bước này.
-+
-+**4. CCCD vào chỉ mục tra cứu với `kind = 'PENDING'`, bất kể ai gõ vào ô đó và ở lần gửi nào.**
-+Từ V2, CCCD là **tùy chọn** với người dân. Trước quyết định này, `pendingIdentityHmacs` chỉ được
-+ghi ở `submit` khi `status === "SUBMITTED"`, nên hai nhóm nằm ngoài chỉ mục vĩnh viễn: người dân
-+điền CCCD ở lần **gửi bổ sung**, và cán bộ điền hộ lúc hoàn thiện/tiếp nhận. Đó đúng là hai nhóm
-+mà V2 sinh ra nhiều nhất, nên phát hiện trùng hồ sơ gần như không còn tác dụng với luồng mới.
-+
-+Chốt: ghi ở cả `SUBMITTED` lẫn `RESUBMITTED`, và ghi ở cả ba đường của cán bộ
-+(`commitStaffDraftEdit`, `commitWorkingPayload`, `commitOfficialAmendment`). Dùng `kind = 'PENDING'`
-+y như người dân tự khai — chỉ mục trả lời "có hồ sơ nào đang gắn với CCCD này", không phải "ai đã
-+gõ số đó vào". Không thêm `kind` mới vì sẽ phải đổi CHECK constraint trên `public_lookup_index` và
-+rà lại mọi chỗ đọc, đổi lấy một thông tin chưa ai cần. Insert đã có `on conflict do nothing` nên
-+ghi lặp là vô hại.
-+
-+Phân lớp giữ nguyên: **repository không bao giờ đọc biến môi trường**. Route tính HMAC từ
-+`DATA_HASH_PEPPER` rồi truyền xuống, đúng như `submit` đã làm từ trước. Có test khẳng định
-+`repository.ts` không chứa `DATA_HASH_PEPPER` lẫn `identityHmac(`.
-+
- ## [2026-07-29] Đóng 2 BLOCKER và 5 HIGH của review PR #6
- 
- - Upload complete tra `REQUEST_LOG` trước validation lượt mới; replay trả summary cũ và cleanup
-diff --git a/docs/brain/04-current-tasks.md b/docs/brain/04-current-tasks.md
-index a006a4a..69f38f4 100644
---- a/docs/brain/04-current-tasks.md
-+++ b/docs/brain/04-current-tasks.md
-@@ -8,7 +8,20 @@
- 
- ---
- 
--## [2026-07-29] Review bắt buộc PR #6 — đã sửa trong code
-+## [2026-07-29] Review PR #6 vòng hai — đã sửa trong code
-+
-+Đã sửa 3 phát hiện chính (xóa nhầm tệp Drive của hộ khác; RLS `force` làm telemetry hỏng im lặng;
-+409 giả làm người dân kẹt) và 4 phát hiện phụ (trần bảng số đo, so sánh sâu `hasLocalChanges`,
-+escape truy vấn Drive, guard môi trường cho script xóa dữ liệu E2E). Test 590 pass/10 skipped.
-+Chưa merge, chưa push, chưa deploy, chưa chạy migration.
-+
-+### Chỉ mục tra cứu CCCD — ĐÃ CHỐT VÀ ĐÃ LÀM
-+
-+Người dùng chốt ngày 2026-07-29: CCCD vào `public_lookup_index` với `kind = 'PENDING'`, ghi ở cả
-+`RESUBMITTED` và ở cả ba đường ghi của cán bộ. Chi tiết và lý do ở `03-decisions.md` cùng ngày.
-+Trước đó hồ sơ MỨC A không có CCCD lúc gửi đầu sẽ không bao giờ vào chỉ mục.
-+
-+## [2026-07-29] Review bắt buộc PR #6 — đã sửa trong code (vòng một)
- 
- Đã sửa 2 BLOCKER và 5 HIGH: upload replay, assisted submit, exact version, official gate, atomic
- consent audit, telemetry RLS và timeline privacy; đã thêm CI PR. Chưa merge/deploy/chạy migration.
+ **4. CCCD vào chỉ mục tra cứu với `kind = 'PENDING'`, bất kể ai gõ vào ô đó và ở lần gửi nào.**
+ Từ V2, CCCD là **tùy chọn** với người dân. Trước quyết định này, `pendingIdentityHmacs` chỉ được
 diff --git a/docs/brain/06-ai-working-log.md b/docs/brain/06-ai-working-log.md
-index 3c84e14..6c35e32 100644
+index 6c35e32..6252381 100644
 --- a/docs/brain/06-ai-working-log.md
 +++ b/docs/brain/06-ai-working-log.md
-@@ -4,6 +4,46 @@
- > trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
- > read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
- 
-+## [2026-07-29] Review PR #6 vòng hai — sửa 3 phát hiện chính + 4 phát hiện phụ
-+
-+- **Agent:** Claude Code.
-+- **Baseline:** branch `claude/land-declaration-process-feedback-126f2e`, HEAD `45b7fc9`;
-+  typecheck pass, lint 0 error/5 warning có sẵn, test 570 pass/10 skipped, build pass.
-+- **Thay đổi:**
-+  - `isDriveFileAdopted` bỏ lọc `submission_id` (hỏi toàn bảng), và `discardIfOrphan` thêm điều
-+    kiện tệp phải nằm đúng thư mục Drive của hồ sơ đang gọi (`storage.isFileInFolder`);
-+  - migration `202607290001` bỏ `force row level security` (lệch mẫu 8 bảng còn lại, và có thể
-+    làm mọi insert số đo thất bại trong im lặng); hai chỗ nuốt lỗi đổi sang
-+    `reportUploadMetricFailure` — log một lần mỗi tiến trình, chỉ ghi mã lỗi Postgres;
-+  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại **một lần** khi PATCH trả 409;
-+    `adoptServerDraft` trả `{draft, version}` thay vì boolean;
-+  - `appendUploadAttempt` có trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200`;
-+  - `hasLocalChanges` so sánh sâu thay cho `JSON.stringify` (nhạy thứ tự khóa);
-+  - `listFolderFileIds` escape `folderId` bằng `escapeQueryValue` có sẵn;
-+  - `cleanup-e2e-preview-data.ts` từ chối chạy khi `NODE_ENV=production` hoặc `APP_BASE_URL`
-+    không giống môi trường thử, trừ khi có cờ `--i-know-this-is-not-preview`.
-+- **File đã sửa:** `src/modules/public-intake/{repository,storage,upload-metrics,draft-adoption}.ts`,
-+  `src/app/api/public/submissions/current/uploads/{complete,metrics}/route.ts`,
-+  `src/app/ke-khai/wizard.tsx`, `supabase/migrations/202607290001_public_upload_attempts_rls.sql`,
-+  `scripts/cleanup-e2e-preview-data.ts`, `tests/pr6-review-round-two.test.ts` (mới),
-+  `tests/public-upload-{complete-route,legacy-draft}.test.ts`.
-+- **Lý do:** xem `docs/brain/03-decisions.md` cùng ngày — trọng tâm là hai chỗ có thể **mất dữ
-+  liệu** (xóa nhầm tệp Drive của hộ khác; telemetry hỏng im lặng) và một chỗ làm người dân **kẹt
-+  giữa chừng** (409 giả trên mạng yếu).
-+- **Kiểm tra:** typecheck pass; lint 0 error/5 warning có sẵn; test 590 pass/10 skipped
-+  (+20 test so với baseline); build pass. Test đặc tả cũ được **siết chặt** theo bất biến mới, không
-+  nới lỏng: `tests/public-upload-complete-route.test.ts` giờ khẳng định truy vấn adopt KHÔNG chứa
-+  `submission_id`.
-+  - sau khi người dùng chốt: CCCD vào `public_lookup_index` với `kind = 'PENDING'` — ghi ở cả
-+    `RESUBMITTED` (bỏ điều kiện `status === "SUBMITTED"`) và ở cả ba đường ghi của cán bộ
-+    (`commitStaffDraftEdit`, `commitWorkingPayload`, `commitOfficialAmendment`); route tính HMAC,
-+    repository vẫn không đọc biến môi trường.
-+- **File đã sửa (bổ sung cho phần chỉ mục):** `src/app/api/public/submissions/current/submit/route.ts`,
-+  `src/app/api/staff/assisted-submissions/current/submit/route.ts`,
-+  `src/app/api/submissions/[submissionId]/{route,working-payload/route,ai-draft/apply/route}.ts`,
-+  `tests/working-payload.test.ts`.
-+- **Không làm:** merge, deploy, chạy migration.
-+
- ## [2026-07-29] Sửa bắt buộc 2 BLOCKER + 5 HIGH của review PR #6
- 
- - **Agent:** Codex.
-diff --git a/scripts/cleanup-e2e-preview-data.ts b/scripts/cleanup-e2e-preview-data.ts
-index 6fdf43d..9e74e28 100644
---- a/scripts/cleanup-e2e-preview-data.ts
-+++ b/scripts/cleanup-e2e-preview-data.ts
-@@ -65,6 +65,31 @@ async function discoverChildTables(): Promise<string[]> {
-   return rows.map((row) => row.table_name);
- }
- 
-+/**
-+ * Chặn chạy nhầm trên production.
-+ *
-+ * Script này xóa theo **số điện thoại**, không theo một tiền tố mã do script tự sinh. Trên preview
-+ * đó là nhãn nhận diện đúng; trên production đúng số đó có thể là của một hộ dân thật, và lệnh xóa
-+ * đi qua khoảng 16 bảng con là không khôi phục được. Token xác nhận chỉ buộc người chạy nhìn danh
-+ * sách — nó không phân biệt được preview với production.
-+ *
-+ * Mặc định TỪ CHỐI khi `NODE_ENV=production` hoặc khi `APP_BASE_URL` không mang dấu hiệu môi
-+ * trường thử. Cần chạy trên một môi trường không khớp mẫu thì phải khai báo có ý thức bằng
-+ * `--i-know-this-is-not-preview`.
-+ */
-+function refusesToRunHere(argv: readonly string[]): string | null {
-+  if (argv.includes("--i-know-this-is-not-preview")) return null;
-+
-+  if (process.env.NODE_ENV === "production") {
-+    return "NODE_ENV=production";
-+  }
-+  const baseUrl = (process.env.APP_BASE_URL ?? "").toLowerCase();
-+  if (baseUrl && !/(localhost|127\.0\.0\.1|preview|staging|vercel\.app)/.test(baseUrl)) {
-+    return `APP_BASE_URL không giống môi trường thử (${baseUrl})`;
-+  }
-+  return null;
-+}
-+
- async function cleanup(options: Options): Promise<void> {
-   const database = getDatabase();
- 
-@@ -143,7 +168,18 @@ async function cleanup(options: Options): Promise<void> {
-   );
- }
- 
--cleanup(parseOptions(process.argv.slice(2)))
-+const argv = process.argv.slice(2);
-+const refusal = refusesToRunHere(argv);
-+if (refusal) {
-+  console.error(
-+    `Từ chối chạy: ${refusal}.\n` +
-+      "Script này xóa hồ sơ theo SỐ ĐIỆN THOẠI và không khôi phục được. Nếu bạn chắc chắn đây " +
-+      "không phải dữ liệu thật, chạy lại kèm --i-know-this-is-not-preview.",
-+  );
-+  process.exit(1);
-+}
-+
-+cleanup(parseOptions(argv))
-   .then(() => process.exit(process.exitCode ?? 0))
-   .catch((error: unknown) => {
-     console.error(error instanceof Error ? error.message : "Lỗi không rõ.");
-diff --git a/src/app/api/public/submissions/current/submit/route.ts b/src/app/api/public/submissions/current/submit/route.ts
-index e5cd120..af9a017 100644
---- a/src/app/api/public/submissions/current/submit/route.ts
-+++ b/src/app/api/public/submissions/current/submit/route.ts
-@@ -150,14 +150,19 @@ export async function POST(request: Request): Promise<NextResponse> {
-     );
-   }
- 
--  // Chỉ băm CCCD **hợp lệ**. Trước V2 mọi owner cá nhân đều được băm; khi CCCD được phép để trống,
--  // băm chuỗi rỗng sẽ cho mọi hồ sơ không nhập CCCD cùng một khóa tra cứu — đụng nhau hàng loạt.
--  const pendingIdentityHmacs =
--    status === "SUBMITTED"
--      ? citizenIdsForLookup(draft).map((identityNumber) =>
--          identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
--        )
--      : undefined;
-+  /*
-+   * Chỉ băm CCCD **hợp lệ**. Trước V2 mọi owner cá nhân đều được băm; khi CCCD được phép để trống,
-+   * băm chuỗi rỗng sẽ cho mọi hồ sơ không nhập CCCD cùng một khóa tra cứu — đụng nhau hàng loạt.
-+   *
-+   * Ghi cho CẢ `RESUBMITTED`, không riêng `SUBMITTED` (quyết định 2026-07-29). Ở MỨC A, CCCD là
-+   * tùy chọn, nên tình huống rất thường gặp là người dân gửi lần đầu không có CCCD, bị yêu cầu bổ
-+   * sung, rồi mới điền ở lần gửi lại — đúng lần mà điều kiện `=== "SUBMITTED"` cũ bỏ qua. Cùng dữ
-+   * liệu, cùng cửa vào, cùng người khai thì không có lý do gì phân biệt. Insert dùng
-+   * `on conflict do nothing` nên ghi lại ở mỗi lần gửi bổ sung là vô hại.
-+   */
-+  const pendingIdentityHmacs = citizenIdsForLookup(draft).map((identityNumber) =>
-+    identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
-+  );
- 
-   try {
-     await repository.submit({
-diff --git a/src/app/api/public/submissions/current/uploads/complete/route.ts b/src/app/api/public/submissions/current/uploads/complete/route.ts
-index 8bd27a7..5424981 100644
---- a/src/app/api/public/submissions/current/uploads/complete/route.ts
-+++ b/src/app/api/public/submissions/current/uploads/complete/route.ts
-@@ -19,6 +19,7 @@ import {
-   buildFileNormalizationMetadata,
-   buildUploadAttemptMetric,
-   clientUploadTelemetrySchema,
-+  reportUploadMetricFailure,
- } from "@/modules/public-intake/upload-metrics";
- 
- export const runtime = "nodejs";
-@@ -91,7 +92,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-   const replay = await repository.findStoredMutation(idempotencyKey, "PUBLIC_UPLOAD_COMPLETE");
-   if (replay) {
-     if (replay.mutationHash !== mutationHash) {
--      await discardIfOrphan(repository, record.submissionId, driveFileId);
-+      await discardIfOrphan(repository, record, driveFileId);
-       return publicError(
-         "IDEMPOTENCY_CONFLICT",
-         "Yêu cầu hoàn tất tải lên bị xung đột.",
-@@ -107,7 +108,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-   }
- 
-   if (!isEditable(record)) {
--    await discardIfOrphan(repository, record.submissionId, driveFileId);
-+    await discardIfOrphan(repository, record, driveFileId);
-     return publicError("INVALID_STATE", "Bản kê khai đang bị khóa.", requestId);
-   }
- 
-@@ -115,7 +116,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-   if (identityImage) {
-     const owners = record.draft?.owners;
-     if (!Array.isArray(owners)) {
--      await discardIfOrphan(repository, record.submissionId, driveFileId);
-+      await discardIfOrphan(repository, record, driveFileId);
-       return publicError(
-         "INVALID_STATE",
-         "Dữ liệu bản kê khai chưa đầy đủ. Tải lại trang và thử lại.",
-@@ -132,7 +133,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-       (file) => file.ownerId === ownerId && file.documentType === documentType,
-     );
-     if ((existing && existing.fileId !== replaceFileId) || (!existing && replaceFileId)) {
--      await discardIfOrphan(repository, record.submissionId, driveFileId);
-+      await discardIfOrphan(repository, record, driveFileId);
-       return publicError("INVALID_STATE", "Trạng thái thay ảnh CCCD không còn hợp lệ.", requestId);
-     }
-   } else if (replaceFileId) {
-@@ -144,7 +145,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-         file.status === "UPLOADED",
-     );
-     if (!existing) {
--      await discardIfOrphan(repository, record.submissionId, driveFileId);
-+      await discardIfOrphan(repository, record, driveFileId);
-       return publicError(
-         "INVALID_STATE",
-         "Ảnh Giấy chứng nhận cần thay không còn hợp lệ.",
-@@ -163,7 +164,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-   } catch (error) {
-     if (error instanceof UploadVerificationError) {
-       // Tệp không đạt phải rời khỏi Drive ngay, không để tích rác trong kho của quản trị viên.
--      await discardIfOrphan(repository, record.submissionId, driveFileId);
-+      await discardIfOrphan(repository, record, driveFileId);
-       return publicError("VALIDATION_FAILED", error.message, requestId);
-     }
-     throw error;
-@@ -207,7 +208,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-           telemetry,
-         }),
-       )
--      .catch(() => undefined);
-+      .catch(reportUploadMetricFailure);
- 
-     // Không trả Drive ID ra ngoài — người dân không cần và không được biết.
-     return NextResponse.json({ ok: true, fileId: summary.fileId, sizeBytes: verified.sizeBytes });
-@@ -216,7 +217,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-       // Xung đột idempotency nghĩa là khóa này đã dùng cho nội dung khác — tệp vừa xác minh
-       // KHÔNG phải tệp đã được nhận, nhưng cũng không chắc chưa ai nhận nó. Đi qua cùng một cửa
-       // dọn dẹp an toàn bên dưới thay vì xóa thẳng.
--      await discardIfOrphan(repository, record.submissionId, verified.driveFileId);
-+      await discardIfOrphan(repository, record, verified.driveFileId);
-       return publicError(
-         "IDEMPOTENCY_CONFLICT",
-         "Yêu cầu hoàn tất tải lên bị xung đột.",
-@@ -233,26 +234,42 @@ export async function POST(request: Request): Promise<NextResponse> {
-      * một Drive ID không còn tồn tại, và không cách nào lấy lại. Vì vậy chỉ xóa khi chắc chắn
-      * chưa ai nhận, và mọi tình huống không chắc đều nghiêng về **giữ lại**.
-      */
--    await discardIfOrphan(repository, record.submissionId, verified.driveFileId);
-+    await discardIfOrphan(repository, record, verified.driveFileId);
-     throw error;
-   }
- }
- 
- /**
-- * Xóa tệp trên Drive **chỉ khi** chắc chắn cơ sở dữ liệu chưa nhận nó.
-+ * Xóa tệp trên Drive **chỉ khi** cả hai điều kiện dưới đây cùng đúng.
-  *
-- * `.catch(() => true)` không phải là bỏ qua lỗi cho gọn: hỏi cơ sở dữ liệu mà không hỏi được thì
-- * mặc định coi như **đã nhận**, tức là không xóa. Sai theo hướng để lại một tệp thừa thì có script
-- * audit dọn sau; sai theo hướng kia thì mất bằng chứng của hồ sơ, vĩnh viễn.
-+ * 1. Chưa hồ sơ nào nhận tệp này (`isDriveFileAdopted`, hỏi toàn bảng chứ không lọc theo hồ sơ
-+ *    đang gọi).
-+ * 2. Tệp nằm đúng trong thư mục Drive của chính hồ sơ đang gọi.
-+ *
-+ * Vì sao cần điều kiện 2: phần lớn nhánh gọi hàm này truyền thẳng `body.driveFileId` — dữ liệu
-+ * client, chưa qua `verifyUploadedFile`. Chỉ với điều kiện 1, một `driveFileId` trỏ sang thư mục
-+ * hộ khác mà chưa kịp `complete` vẫn thỏa "chưa ai nhận" và sẽ bị xóa. Hai điều kiện cộng lại thu
-+ * hẹp phạm vi xóa về đúng những gì hộ dân đang gọi tự tải lên.
-+ *
-+ * `.catch(() => true)` / `.catch(() => false)` không phải là nuốt lỗi cho gọn: hỏi mà không hỏi
-+ * được thì mặc định coi như **đã nhận** và **không xác nhận được thư mục**, tức là không xóa. Sai
-+ * theo hướng để lại một tệp thừa thì có `scripts/audit-orphan-public-files.ts` dọn sau; sai theo
-+ * hướng kia thì mất bằng chứng của hồ sơ, vĩnh viễn.
-  */
- async function discardIfOrphan(
-   repository: ReturnType<typeof getPublicIntakeRepository>,
--  submissionId: string,
-+  record: { readonly driveFolderId: string },
-   driveFileId: string,
- ): Promise<void> {
--  const adopted = await repository.isDriveFileAdopted(submissionId, driveFileId).catch(() => true);
-+  if (!driveFileId) return;
-+  const adopted = await repository.isDriveFileAdopted(driveFileId).catch(() => true);
-   if (adopted) return;
--  await getPublicIntakeStorage()
--    .discardFile(driveFileId)
--    .catch(() => undefined);
-+
-+  const storage = getPublicIntakeStorage();
-+  const ownedByCaller = await storage
-+    .isFileInFolder(driveFileId, record.driveFolderId)
-+    .catch(() => false);
-+  if (!ownedByCaller) return;
-+
-+  await storage.discardFile(driveFileId).catch(() => undefined);
- }
-diff --git a/src/app/api/public/submissions/current/uploads/metrics/route.ts b/src/app/api/public/submissions/current/uploads/metrics/route.ts
-index 02d9999..78e24fe 100644
---- a/src/app/api/public/submissions/current/uploads/metrics/route.ts
-+++ b/src/app/api/public/submissions/current/uploads/metrics/route.ts
-@@ -6,6 +6,7 @@ import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
- import { publicError, resolvePublicRequest } from "@/modules/public-intake/route-context";
- import {
-   buildUploadAttemptMetric,
-+  reportUploadMetricFailure,
-   uploadFailureMetricSchema,
- } from "@/modules/public-intake/upload-metrics";
- 
-@@ -62,7 +63,7 @@ export async function POST(request: Request): Promise<NextResponse> {
-         failureCode: input.failureCode ?? "",
-       }),
-     )
--    .catch(() => undefined);
-+    .catch(reportUploadMetricFailure);
- 
-   return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } });
- }
-diff --git a/src/app/api/staff/assisted-submissions/current/submit/route.ts b/src/app/api/staff/assisted-submissions/current/submit/route.ts
-index a3e65c2..1381945 100644
---- a/src/app/api/staff/assisted-submissions/current/submit/route.ts
-+++ b/src/app/api/staff/assisted-submissions/current/submit/route.ts
-@@ -128,12 +128,11 @@ export async function POST(request: Request): Promise<NextResponse> {
-       requestId,
-       idempotencyKey,
-       mutationHash,
--      pendingIdentityHmacs:
--        status === "SUBMITTED"
--          ? citizenIdsForLookup(draft).map((value) =>
--              identityHmac(environment.DATA_HASH_PEPPER, value),
--            )
--          : undefined,
-+      // Ghi cho cả `RESUBMITTED`, xem lý do đầy đủ ở route submit công khai (quyết định
-+      // 2026-07-29): ở MỨC A, CCCD hay xuất hiện lần đầu đúng vào lần gửi bổ sung.
-+      pendingIdentityHmacs: citizenIdsForLookup(draft).map((value) =>
-+        identityHmac(environment.DATA_HASH_PEPPER, value),
-+      ),
-     });
-     return NextResponse.json({ receiptCode: record.receiptCode, status });
-   } catch (error) {
-diff --git a/src/app/api/submissions/[submissionId]/ai-draft/apply/route.ts b/src/app/api/submissions/[submissionId]/ai-draft/apply/route.ts
-index db0d0e1..43c2ad6 100644
---- a/src/app/api/submissions/[submissionId]/ai-draft/apply/route.ts
-+++ b/src/app/api/submissions/[submissionId]/ai-draft/apply/route.ts
-@@ -9,6 +9,8 @@ import { createApiErrorPayload } from "@/modules/common/api-error";
- import { applyClearAiFields } from "@/modules/ai-extraction/draft";
- import { getAiExtractionRepository } from "@/modules/ai-extraction/repository";
- import { loadServerEnvironment } from "@/modules/common/env";
-+import { citizenIdsForLookup } from "@/modules/public-intake/validation";
-+import { identityHmac } from "@/modules/public-intake/workflow";
- import {
-   getPublicIntakeRepository,
-   SubmissionIdempotencyConflictError,
-@@ -164,6 +166,11 @@ export async function POST(
-       requestId,
-       idempotencyKey: scopedKey,
-       mutationHash,
-+      // Cán bộ có thể điền CCCD mà người dân để trống ở MỨC A; ghi chỉ mục tra cứu ngay để hồ sơ
-+      // đó không nằm ngoài phát hiện trùng (quyết định 2026-07-29, kind = 'PENDING').
-+      pendingIdentityHmacs: citizenIdsForLookup(applied.draft).map((identityNumber) =>
-+        identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
-+      ),
-       aiApplication: {
-         resultId: resolved.draft.resultId,
-         jobId: resolved.draft.jobId,
-diff --git a/src/app/api/submissions/[submissionId]/route.ts b/src/app/api/submissions/[submissionId]/route.ts
-index 39df572..08e777d 100644
---- a/src/app/api/submissions/[submissionId]/route.ts
-+++ b/src/app/api/submissions/[submissionId]/route.ts
-@@ -17,11 +17,12 @@ import {
- import type { IntakeDraft } from "@/modules/public-intake/types";
- import { isOrganisationOwner } from "@/modules/public-intake/types";
- import {
-+  citizenIdsForLookup,
-   CITIZEN_ID_PATTERN,
-   isValidDate,
-   ORGANISATION_ID_PATTERN,
- } from "@/modules/public-intake/validation";
--import { newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
-+import { identityHmac, newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
- import { payloadLayerOf } from "@/modules/public-intake/payload-layers";
- import {
-   isOwnerIdentityQrConfirmed,
-@@ -435,6 +436,19 @@ export async function PATCH(
-           }
-         : changes;
- 
-+    /*
-+     * Cán bộ sửa/điền CCCD mà người dân để trống ở MỨC A thì hồ sơ phải vào chỉ mục tra cứu ngay
-+     * tại đây. Trước V2 mọi hồ sơ đều có CCCD lúc gửi nên chỉ cần ghi ở `submit`; từ khi CCCD là
-+     * tùy chọn, đường của cán bộ là đường DUY NHẤT mà một số CCCD có thể xuất hiện lần đầu.
-+     *
-+     * Dùng `kind = 'PENDING'` y như người dân tự khai (quyết định 2026-07-29): chỉ mục trả lời
-+     * "có hồ sơ nào đang gắn với CCCD này", không phân biệt ai gõ vào ô đó. Insert dùng
-+     * `on conflict do nothing` nên ghi lại ở mỗi lần sửa là vô hại.
-+     */
-+    const pendingIdentityHmacs = citizenIdsForLookup(draft).map((identityNumber) =>
-+      identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
-+    );
-+
-     const updated = isAmendment
-       ? await repository.commitOfficialAmendment({
-           record,
-@@ -451,6 +465,7 @@ export async function PATCH(
-           requestId,
-           idempotencyKey: scopedIdempotencyKey,
-           mutationHash,
-+          pendingIdentityHmacs,
-         })
-       : await repository.commitStaffDraftEdit({
-           record,
-@@ -466,6 +481,7 @@ export async function PATCH(
-           requestId,
-           idempotencyKey: scopedIdempotencyKey,
-           mutationHash,
-+          pendingIdentityHmacs,
-         });
- 
-     return NextResponse.json(
-diff --git a/src/app/api/submissions/[submissionId]/working-payload/route.ts b/src/app/api/submissions/[submissionId]/working-payload/route.ts
-index 65eb338..700728f 100644
---- a/src/app/api/submissions/[submissionId]/working-payload/route.ts
-+++ b/src/app/api/submissions/[submissionId]/working-payload/route.ts
-@@ -12,7 +12,8 @@ import {
-   SubmissionVersionConflictError,
- } from "@/modules/public-intake/repository";
- import type { IntakeDraft } from "@/modules/public-intake/types";
--import { draftSchema } from "@/modules/public-intake/validation";
-+import { citizenIdsForLookup, draftSchema } from "@/modules/public-intake/validation";
-+import { identityHmac } from "@/modules/public-intake/workflow";
- import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
- 
- export const runtime = "nodejs";
-@@ -125,15 +126,21 @@ export async function PUT(
-       );
-     }
- 
-+    const workingDraft = body.data.payload as unknown as IntakeDraft;
-     const updated = await repository.commitWorkingPayload({
-       record,
-       expectedVersion: body.data.expectedVersion,
--      draft: body.data.payload as unknown as IntakeDraft,
-+      draft: workingDraft,
-       actorEmail: user.email,
-       changeNote: body.data.changeNote,
-       requestId,
-       idempotencyKey: scopedIdempotencyKey,
-       mutationHash,
-+      // Cán bộ có thể điền CCCD mà người dân để trống ở MỨC A; ghi chỉ mục tra cứu ngay để hồ sơ
-+      // đó không nằm ngoài phát hiện trùng (quyết định 2026-07-29, kind = 'PENDING').
-+      pendingIdentityHmacs: citizenIdsForLookup(workingDraft).map((identityNumber) =>
-+        identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
-+      ),
-     });
- 
-     return NextResponse.json(
+@@ -15,8 +15,10 @@
+   - migration `202607290001` bỏ `force row level security` (lệch mẫu 8 bảng còn lại, và có thể
+     làm mọi insert số đo thất bại trong im lặng); hai chỗ nuốt lỗi đổi sang
+     `reportUploadMetricFailure` — log một lần mỗi tiến trình, chỉ ghi mã lỗi Postgres;
+-  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại **một lần** khi PATCH trả 409;
+-    `adoptServerDraft` trả `{draft, version}` thay vì boolean;
++  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại khi PATCH trả 409, **chỉ khi**
++    `hasLocalChanges === false` (server đã có đúng nội dung định ghi). Bản sửa đầu thiếu điều kiện
++    này nên xung đột thật bị ghi đè im lặng — phát hiện ở vòng phản hồi của người dùng;
++    `adoptServerDraft` trả `{draft, version, hasLocalChanges}` thay vì boolean;
+   - `appendUploadAttempt` có trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200`;
+   - `hasLocalChanges` so sánh sâu thay cho `JSON.stringify` (nhạy thứ tự khóa);
+   - `listFolderFileIds` escape `folderId` bằng `escapeQueryValue` có sẵn;
 diff --git a/src/app/ke-khai/wizard.tsx b/src/app/ke-khai/wizard.tsx
-index cbcb02c..e4a50ea 100644
+index e4a50ea..03cce3e 100644
 --- a/src/app/ke-khai/wizard.tsx
 +++ b/src/app/ke-khai/wizard.tsx
-@@ -743,80 +743,6 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
-   const checklist = useMemo(() => submitChecklist(validationInput), [validationInput]);
-   const optionalItems = useMemo(() => optionalSummary(draft), [draft]);
- 
--  /** Lưu nháp lên server. Chỉ gọi khi chuyển bước để giữ số lần ghi Sheets ở mức thấp. */
--  const saveDraft = useCallback(
--    async (draftToSave: IntakeDraft = draft): Promise<boolean> => {
--      if (!csrfToken) {
--        return true;
--      }
--
--      setSaveStatus("SAVING");
--      try {
--        const response = await fetchApi("/api/public/submissions/current", {
--          method: "PATCH",
--          headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
--          body: JSON.stringify({
--            draft: withCertificateMetadata(draftToSave, certificatePhotos),
--            version: serverVersion,
--          }),
--        });
--
--        if (!response.ok) {
--          setSaveStatus("FAILED");
--          setServerError(await readErrorMessage(response, "Chưa lưu được. Thử lại sau ít phút."));
--          return false;
--        }
--
--        const saved = (await response.json()) as { version?: unknown };
--        if (
--          typeof saved.version !== "number" ||
--          !Number.isInteger(saved.version) ||
--          saved.version < 1
--        ) {
--          setSaveStatus("FAILED");
--          setServerError("Máy chủ không trả phiên bản bản kê khai hợp lệ. Vui lòng thử lại.");
--          return false;
--        }
--
--        setServerVersion(saved.version);
--        setSaveStatus("SAVED");
--        setServerError("");
--        // Chỉ hạ cờ khi máy chủ đã nhận. Lưu hỏng mà hạ cờ là mất dữ liệu im lặng ở lần sau.
--        draftDirtyRef.current = false;
--        return true;
--      } catch {
--        setSaveStatus("OFFLINE");
--        setServerError("Mất kết nối. Dữ liệu bạn nhập vẫn còn trên màn hình, đừng đóng trang.");
--        return false;
--      }
--    },
--    [csrfToken, draft, certificatePhotos, serverVersion],
--  );
--
--  /**
--   * Lưu nháp **một lần** cho mỗi lô thay đổi.
--   *
--   * Hai việc:
--   * - bỏ qua hoàn toàn nếu bản nháp không đổi từ lần lưu trước (tải ảnh mặt sau ngay sau mặt
--   *   trước không PATCH lại);
--   * - gộp các lời gọi chồng nhau vào cùng một request đang bay, thay vì bắn song song rồi để hai
--   *   response ghi đè nhau theo thứ tự ngẫu nhiên.
--   */
--  const savePromiseRef = useRef<Promise<boolean> | null>(null);
--
--  const flushDraft = useCallback(
--    async (options?: { force?: boolean }): Promise<boolean> => {
--      if (!options?.force && !draftDirtyRef.current) return true;
--      if (savePromiseRef.current) return savePromiseRef.current;
--      const promise = saveDraft().finally(() => {
--        savePromiseRef.current = null;
--      });
--      savePromiseRef.current = promise;
--      return promise;
--    },
--    [saveDraft],
--  );
--
-   /**
-    * Lấy bản nháp mà máy chủ đang giữ về máy.
-    *
-@@ -826,20 +752,27 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
-    *
-    * Ở lần khôi phục (`recovered`), bản của máy chủ còn là bản duy nhất có dữ liệu đã lưu trước
-    * đó — nên phải lấy về, không được đẩy bản rỗng trên máy lên đè.
-+   *
-+   * Trả về bản nháp và version vừa nhận thay vì chỉ `true`/`false`: `setServerVersion` là state
-+   * setter nên giá trị mới **không** thấy được trong cùng closure đang chạy. `saveDraft` cần con
-+   * số đó ngay để thử lại PATCH sau một lần 409, nên nó phải đi ra theo đường trả về. Vẫn dùng
-+   * được như boolean ở các chỗ gọi cũ vì thất bại trả `null`.
-    */
+@@ -761,7 +761,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
    const adoptServerDraft = useCallback(
--    async (options?: { localDraft?: IntakeDraft }): Promise<boolean> => {
-+    async (options?: {
-+      localDraft?: IntakeDraft;
-+    }): Promise<{ draft: IntakeDraft; version: number } | null> => {
+     async (options?: {
+       localDraft?: IntakeDraft;
+-    }): Promise<{ draft: IntakeDraft; version: number } | null> => {
++    }): Promise<{ draft: IntakeDraft; version: number; hasLocalChanges: boolean } | null> => {
        try {
          const response = await fetchApi("/api/public/submissions/current", { method: "GET" });
          if (!response.ok) {
--          return false;
-+          return null;
-         }
-         const body = (await response.json()) as {
-           draft: (IntakeDraft & { owners?: unknown }) | null;
-           files?: ServerFileSummary[];
-           version?: unknown;
-         };
--        if (!body.draft || !Array.isArray(body.draft.owners)) return false;
-+        if (!body.draft || !Array.isArray(body.draft.owners)) return null;
-         // Nháp lưu trước 2026-07-22 mang mã vai trò cũ, không còn trong danh mục PL3. Đổi ngay lúc
-         // tải về, nếu không ô "Vai trò trên GCN" hiện trống và người dân không hiểu vì sao.
-         const serverDraft = {
-@@ -854,7 +787,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
-           serverVersion: body.version,
-           localDraft: options?.localDraft,
-         });
--        if (!adopted) return false;
-+        if (!adopted) return null;
-         const restoredDraft = adopted.draft;
-         setDraft(restoredDraft);
-         setServerVersion(adopted.version);
-@@ -888,14 +821,113 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
+@@ -821,7 +821,11 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
          setCertificatePhotos(
            applyCertMeta(restoredCertificates, restoredDraft.certificateFileMetadata),
          );
-+        return { draft: restoredDraft, version: adopted.version };
-+      } catch {
-+        return null;
-+      }
-+    },
-+    [],
-+  );
-+
-+  /** Lưu nháp lên server. Chỉ gọi khi chuyển bước để giữ số lần ghi Sheets ở mức thấp. */
-+  const saveDraft = useCallback(
-+    async (draftToSave: IntakeDraft = draft): Promise<boolean> => {
-+      if (!csrfToken) {
-+        return true;
-+      }
-+
-+      // `version` có thể là `null` khi chưa nhận được snapshot nào; máy chủ trả 409 và nhánh phục
-+      // hồi bên dưới lấy đúng version rồi thử lại, thay vì thất bại thẳng như trước.
-+      const patch = (payload: IntakeDraft, version: number | null): Promise<Response> =>
-+        fetchApi("/api/public/submissions/current", {
-+          method: "PATCH",
-+          headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
-+          body: JSON.stringify({
-+            draft: withCertificateMetadata(payload, certificatePhotos),
-+            version,
-+          }),
-+        });
-+
-+      setSaveStatus("SAVING");
-+      try {
-+        let response = await patch(draftToSave, serverVersion);
-+
-+        /*
-+         * 409 = version trên máy chủ khác version trên máy. Máy chủ kiểm khớp TUYỆT ĐỐI, nên
-+         * nguyên nhân thường gặp nhất KHÔNG phải "hai thiết bị cùng sửa" mà là: một lần PATCH đã
-+         * ghi xong nhưng response rơi mất trên mạng yếu — lần thử lại gửi đúng version cũ và bị
-+         * từ chối. Trước đây người dân kẹt luôn ở bước đó, kèm một thông báo sai sự thật.
-+         *
-+         * Xử lý: lấy lại snapshot máy chủ, gộp dữ liệu đang có trên máy lên trên (chính
-+         * `adoptServerDraftSnapshot` với `localDraft`), rồi thử lại đúng MỘT lần. Trường hợp mất
-+         * response tự gỡ được vì snapshot mới chính là thứ vừa ghi. Nếu thật sự có thiết bị thứ
-+         * hai đang sửa thì lần hai vẫn 409 và thông báo gốc được hiển thị — không nuốt lỗi thật,
-+         * cũng không lặp vô hạn.
-+         */
-+        if (response.status === 409) {
-+          const adopted = await adoptServerDraft({ localDraft: draftToSave });
-+          if (adopted) {
-+            response = await patch(adopted.draft, adopted.version);
-+          }
-+        }
-+
-+        if (!response.ok) {
-+          setSaveStatus("FAILED");
-+          setServerError(await readErrorMessage(response, "Chưa lưu được. Thử lại sau ít phút."));
-+          return false;
-+        }
-+
-+        const saved = (await response.json()) as { version?: unknown };
-+        if (
-+          typeof saved.version !== "number" ||
-+          !Number.isInteger(saved.version) ||
-+          saved.version < 1
-+        ) {
-+          setSaveStatus("FAILED");
-+          setServerError("Máy chủ không trả phiên bản bản kê khai hợp lệ. Vui lòng thử lại.");
-+          return false;
-+        }
-+
-+        setServerVersion(saved.version);
-+        setSaveStatus("SAVED");
-+        setServerError("");
-+        // Chỉ hạ cờ khi máy chủ đã nhận. Lưu hỏng mà hạ cờ là mất dữ liệu im lặng ở lần sau.
-+        draftDirtyRef.current = false;
-         return true;
+-        return { draft: restoredDraft, version: adopted.version };
++        return {
++          draft: restoredDraft,
++          version: adopted.version,
++          hasLocalChanges: adopted.hasLocalChanges,
++        };
        } catch {
-+        setSaveStatus("OFFLINE");
-+        setServerError("Mất kết nối. Dữ liệu bạn nhập vẫn còn trên màn hình, đừng đóng trang.");
-         return false;
+         return null;
        }
-     },
--    [],
-+    [csrfToken, draft, certificatePhotos, serverVersion, adoptServerDraft],
-+  );
-+
-+  /**
-+   * Lưu nháp **một lần** cho mỗi lô thay đổi.
-+   *
-+   * Hai việc:
-+   * - bỏ qua hoàn toàn nếu bản nháp không đổi từ lần lưu trước (tải ảnh mặt sau ngay sau mặt
-+   *   trước không PATCH lại);
-+   * - gộp các lời gọi chồng nhau vào cùng một request đang bay, thay vì bắn song song rồi để hai
-+   *   response ghi đè nhau theo thứ tự ngẫu nhiên.
-+   */
-+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
-+
-+  const flushDraft = useCallback(
-+    async (options?: { force?: boolean }): Promise<boolean> => {
-+      if (!options?.force && !draftDirtyRef.current) return true;
-+      if (savePromiseRef.current) return savePromiseRef.current;
-+      const promise = saveDraft().finally(() => {
-+        savePromiseRef.current = null;
-+      });
-+      savePromiseRef.current = promise;
-+      return promise;
-+    },
-+    [saveDraft],
-   );
- 
-+
-   useEffect(() => {
-     let recovery: {
-       receiptCode?: string;
-diff --git a/src/modules/public-intake/draft-adoption.ts b/src/modules/public-intake/draft-adoption.ts
-index be63127..2fdddef 100644
---- a/src/modules/public-intake/draft-adoption.ts
-+++ b/src/modules/public-intake/draft-adoption.ts
-@@ -63,6 +63,33 @@ function preserveLocalFields(local: IntakeDraft, server: IntakeDraft): IntakeDra
-   };
- }
- 
-+/**
-+ * So sánh sâu, không phụ thuộc thứ tự khóa.
-+ *
-+ * `JSON.stringify(a) !== JSON.stringify(b)` đọc thì gọn nhưng nhạy với **thứ tự chèn khóa**:
-+ * `preserveLocalFields` dựng đối tượng bằng `{...server, ...local}`, nên hôm nay thứ tự trùng
-+ * server và phép so sánh đúng. Chỉ cần một trường mới xuất hiện ở một phía là thứ tự lệch và
-+ * `hasLocalChanges` báo "có thay đổi" cho hai bản nháp giống hệt nhau — hệ quả là một PATCH thừa
-+ * mỗi lần khôi phục phiên. Giá trị này quyết định có ghi đè dữ liệu người dân hay không, nên nó
-+ * không nên phụ thuộc vào chi tiết dựng đối tượng ở nơi khác.
-+ */
-+function deepEqual(a: unknown, b: unknown): boolean {
-+  if (a === b) return true;
-+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-+  if (Array.isArray(a) !== Array.isArray(b)) return false;
-+  if (Array.isArray(a) && Array.isArray(b)) {
-+    return a.length === b.length && a.every((item, index) => deepEqual(item, b[index]));
-+  }
-+  const left = a as Record<string, unknown>;
-+  const right = b as Record<string, unknown>;
-+  const leftKeys = Object.keys(left);
-+  const rightKeys = Object.keys(right);
-+  if (leftKeys.length !== rightKeys.length) return false;
-+  return leftKeys.every(
-+    (key) => Object.prototype.hasOwnProperty.call(right, key) && deepEqual(left[key], right[key]),
-+  );
-+}
-+
- /**
-  * Nhận snapshot GET `/current`: version luôn thuộc server; dữ liệu local chỉ được giữ ở lần
-  * CREATE, còn các ID sinh phía server được thay vào theo vị trí để upload sau đó tham chiếu đúng.
-@@ -85,6 +112,6 @@ export function adoptServerDraftSnapshot(
-   return {
-     draft,
-     version: input.serverVersion,
--    hasLocalChanges: JSON.stringify(draft) !== JSON.stringify(input.serverDraft),
-+    hasLocalChanges: !deepEqual(draft, input.serverDraft),
-   };
- }
-diff --git a/src/modules/public-intake/repository.ts b/src/modules/public-intake/repository.ts
-index 1cadb06..d8b7658 100644
---- a/src/modules/public-intake/repository.ts
-+++ b/src/modules/public-intake/repository.ts
-@@ -29,6 +29,15 @@ export type { PublicStatus } from "./workflow";
-  * của mình, làm mất luôn ý nghĩa của việc phân biệt nguồn.
-  */
- export const INTAKE_CHANNELS = ["SELF_SERVICE", "OFFICER_ASSISTED"] as const;
-+
-+/**
-+ * Trần số bản ghi số đo tải ảnh cho MỘT hồ sơ.
-+ *
-+ * Đặt rất cao so với thực tế (một hộ tối đa 2 ảnh CCCD mỗi chủ sử dụng + 10 ảnh GCN, kể cả mạng
-+ * rất tệ cũng chỉ vài chục lượt kể cả thử lại). Trần này không nhằm giới hạn người dân mà nhằm
-+ * chặn một phiên hợp lệ bơm vô hạn dòng vào bảng qua `/uploads/metrics`.
-+ */
-+export const MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200;
- export type IntakeChannel = (typeof INTAKE_CHANNELS)[number];
- 
- /** Cán bộ ngồi nhập hộ. Mọi trường do máy chủ điền từ phiên đăng nhập. */
-@@ -776,6 +785,14 @@ export class PublicIntakeRepository {
-     requestId: string;
-     idempotencyKey: string;
-     mutationHash: string;
-+    /**
-+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
-+     *
-+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
-+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
-+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
-+     */
-+    pendingIdentityHmacs?: string[];
-   }): Promise<SubmissionRecord> {
-     const database = getDatabase();
-     return database.begin(async (transaction) => {
-@@ -805,7 +822,12 @@ export class PublicIntakeRepository {
-       const next = mapSubmission(rows[0]);
- 
-       if (input.record.status !== "DRAFT") {
--        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
-+        await this.refreshCanonicalProjection(
-+          transaction,
-+          input.record.submissionId,
-+          input.draft,
-+          input.pendingIdentityHmacs,
-+        );
+@@ -836,38 +840,44 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
+         return true;
        }
  
-       await this.insertAudit(transaction, {
-@@ -849,6 +871,14 @@ export class PublicIntakeRepository {
-       jobId: string;
-       appliedFieldPaths: readonly string[];
-     };
-+    /**
-+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
-+     *
-+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
-+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
-+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
-+     */
-+    pendingIdentityHmacs?: string[];
-   }): Promise<SubmissionRecord> {
-     const database = getDatabase();
-     return database.begin(async (transaction) => {
-@@ -897,7 +927,12 @@ export class PublicIntakeRepository {
-       `;
- 
-       if (input.record.status !== "DRAFT") {
--        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
-+        await this.refreshCanonicalProjection(
-+          transaction,
-+          input.record.submissionId,
-+          input.draft,
-+          input.pendingIdentityHmacs,
-+        );
-       }
- 
-       await this.insertAudit(transaction, {
-@@ -971,6 +1006,14 @@ export class PublicIntakeRepository {
-     requestId: string;
-     idempotencyKey: string;
-     mutationHash: string;
-+    /**
-+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
-+     *
-+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
-+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
-+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
-+     */
-+    pendingIdentityHmacs?: string[];
-   }): Promise<SubmissionRecord> {
-     const database = getDatabase();
-     return database.begin(async (transaction) => {
-@@ -1011,7 +1054,12 @@ export class PublicIntakeRepository {
-       if (!rows[0]) throw new SubmissionVersionConflictError();
-       const next = mapSubmission(rows[0]);
- 
--      await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
-+      await this.refreshCanonicalProjection(
-+          transaction,
-+          input.record.submissionId,
-+          input.draft,
-+          input.pendingIdentityHmacs,
-+        );
- 
-       const counts = await syncOfficialRecord(transaction, {
-         caseId: next.officialCaseId,
-@@ -1484,12 +1532,18 @@ export class PublicIntakeRepository {
-    * Dùng để quyết định có được xóa tệp trên Drive khi đường ghi hỏng hay không. Đọc **mọi** trạng
-    * thái, kể cả `REPLACED`/`DELETED`: một tệp đã bị thay vẫn là tệp đã từng được nhận, và xóa nó
-    * khỏi Drive sẽ làm mất bằng chứng của hồ sơ.
-+   *
-+   * CỐ Ý KHÔNG lọc theo `submission_id`. Câu hỏi cần trả lời trước khi xóa là "có hồ sơ NÀO đang
-+   * trỏ vào tệp này không", không phải "hồ sơ đang gọi có trỏ vào nó không". Lọc theo hồ sơ gọi
-+   * thì một `driveFileId` do client gửi lên trỏ sang hồ sơ khác sẽ bị coi là mồ côi và bị xóa —
-+   * mất bằng chứng của một hộ dân không liên quan. `driveFileId` tại các nhánh dọn dẹp trong
-+   * `uploads/complete` là dữ liệu client chưa qua xác minh, nên hàng rào phải nằm ở đây.
-    */
--  async isDriveFileAdopted(submissionId: string, driveFileId: string): Promise<boolean> {
-+  async isDriveFileAdopted(driveFileId: string): Promise<boolean> {
-     const database = getDatabase();
-     const rows = await database<{ count: string }[]>`
-       select count(*)::text as count from public.public_files
--      where submission_id = ${submissionId} and drive_file_id = ${driveFileId}
-+      where drive_file_id = ${driveFileId}
-     `;
-     return Number(rows[0]?.count ?? "0") > 0;
-   }
-@@ -1498,6 +1552,12 @@ export class PublicIntakeRepository {
-    * Ghi một lượt tải vào bảng số đo. Best-effort ở phía gọi — hàm này vẫn ném lỗi để bên gọi tự
-    * quyết định nuốt, chứ không tự nuốt ở đây (nuốt trong repository là cách chắc chắn để một bảng
-    * hỏng nằm im hàng tháng mà không ai biết).
-+   *
-+   * Trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION` áp ngay trong câu lệnh, không phải một lượt `select`
-+   * riêng: `/uploads/metrics` nhận số đo của các lượt HỎNG nên không có gì buộc client phải dừng,
-+   * và một phiên hợp lệ có thể bắn bao nhiêu bản ghi tùy ý. Một hộ dân thật tối đa vài chục lượt
-+   * kể cả khi mạng rất tệ, nên trần này không chạm dữ liệu thật; nó chỉ chặn việc bơm hàng loạt
-+   * dòng rác vào cơ sở dữ liệu.
-    */
-   async appendUploadAttempt(metric: UploadAttemptMetric): Promise<void> {
-     const database = getDatabase();
-@@ -1507,14 +1567,18 @@ export class PublicIntakeRepository {
-         prepare_duration_ms, initiate_duration_ms, upload_duration_ms, complete_duration_ms,
-         retry_count, client_platform, effective_connection_type, normalization_version,
-         failure_stage, failure_code
--      ) values (
-+      )
-+      select
-         ${metric.attemptId}, ${metric.submissionId}, ${metric.documentType}, ${metric.outcome},
-         ${metric.sourceSizeBytes}, ${metric.uploadSizeBytes},
-         ${metric.prepareDurationMs}, ${metric.initiateDurationMs},
-         ${metric.uploadDurationMs}, ${metric.completeDurationMs},
-         ${metric.retryCount}, ${metric.clientPlatform}, ${metric.effectiveConnectionType},
-         ${metric.normalizationVersion}, ${metric.failureStage}, ${metric.failureCode}
--      )
-+      where (
-+        select count(*) from public.public_upload_attempts
-+        where submission_id = ${metric.submissionId}
-+      ) < ${MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION}
-       on conflict (attempt_id) do nothing
-     `;
-   }
-diff --git a/src/modules/public-intake/storage.ts b/src/modules/public-intake/storage.ts
-index ab16dd3..ac827f6 100644
---- a/src/modules/public-intake/storage.ts
-+++ b/src/modules/public-intake/storage.ts
-@@ -199,7 +199,7 @@ export class PublicIntakeStorage {
-     let pageToken: string | undefined;
-     do {
-       const page = await drive.files.list({
--        q: `'${folderId}' in parents and trashed = false`,
-+        q: `'${escapeQueryValue(folderId)}' in parents and trashed = false`,
-         fields: "nextPageToken, files(id, size)",
-         pageSize: 200,
-         pageToken,
-@@ -212,6 +212,23 @@ export class PublicIntakeStorage {
-     return found;
-   }
- 
-+  /**
-+   * Tệp này có nằm trong đúng thư mục của bản kê khai đang gọi hay không.
-+   *
-+   * Tách khỏi `verifyUploadedFile` vì hai câu hỏi khác nhau: `verifyUploadedFile` hỏi "tệp có đạt
-+   * để nhận vào hồ sơ không" (định dạng, dung lượng, checksum), còn hàm này chỉ hỏi "tệp có thuộc
-+   * hộ dân đang gọi không" — dùng ngay trước khi XÓA. Một tệp sai định dạng vẫn thuộc thư mục của
-+   * người gọi và vẫn được xóa; một tệp đúng định dạng nhưng nằm ở thư mục hộ khác thì tuyệt đối
-+   * không.
-+   *
-+   * Ném lỗi được coi là "không xác nhận được" ở phía gọi, và phía gọi phải nghiêng về GIỮ tệp.
-+   */
-+  async isFileInFolder(driveFileId: string, folderId: string): Promise<boolean> {
-+    const { drive } = createGoogleWorkspaceClient(this.credentials);
-+    const response = await drive.files.get({ fileId: driveFileId, fields: "id,parents" });
-+    return response.data.parents?.includes(folderId) === true;
-+  }
++      // Tính đúng MỘT lần: payload này vừa là thứ gửi đi, vừa là thứ đem so với snapshot máy chủ
++      // ở nhánh 409 bên dưới. Hai bên phải là cùng một object, nếu không phép so sánh vô nghĩa.
++      const payload = withCertificateMetadata(draftToSave, certificatePhotos);
 +
-   /** Tệp không đạt xác minh phải rời khỏi Drive ngay, không để tích rác (PLAN_NL §6.3). */
-   async discardFile(driveFileId: string): Promise<void> {
-     const { drive } = createGoogleWorkspaceClient(this.credentials);
-diff --git a/src/modules/public-intake/upload-metrics.ts b/src/modules/public-intake/upload-metrics.ts
-index 34a11d2..ec34137 100644
---- a/src/modules/public-intake/upload-metrics.ts
-+++ b/src/modules/public-intake/upload-metrics.ts
-@@ -166,6 +166,35 @@ export function buildUploadAttemptMetric(input: BuildMetricInput): UploadAttempt
-   };
- }
+       // `version` có thể là `null` khi chưa nhận được snapshot nào; máy chủ trả 409 và nhánh phục
+       // hồi bên dưới lấy đúng version rồi thử lại, thay vì thất bại thẳng như trước.
+-      const patch = (payload: IntakeDraft, version: number | null): Promise<Response> =>
++      const patch = (version: number | null): Promise<Response> =>
+         fetchApi("/api/public/submissions/current", {
+           method: "PATCH",
+           headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
+-          body: JSON.stringify({
+-            draft: withCertificateMetadata(payload, certificatePhotos),
+-            version,
+-          }),
++          body: JSON.stringify({ draft: payload, version }),
+         });
  
-+/**
-+ * Báo một lần khi đường ghi số đo hỏng.
-+ *
-+ * Cả hai chỗ gọi `appendUploadAttempt` đều nuốt lỗi có chủ đích — một lượt tải ảnh đã thành công
-+ * không được hỏng vì bảng phụ. Nhưng nuốt mà không báo gì thì một bảng hỏng (thiếu migration, sai
-+ * quyền, sai RLS) nằm im hàng tháng, và lúc cần nghiệm thu ngưỡng hiệu năng mới phát hiện không có
-+ * số nào. Ghi **một** dòng cho mỗi tiến trình là đủ để thấy trong log Vercel mà không làm ngập log
-+ * khi sự cố kéo dài.
-+ *
-+ * Chỉ ghi mã lỗi Postgres (`42501`, `42P01`…), **không** ghi `error.message`: thông báo lỗi
-+ * Postgres có thể nhắc lại giá trị của dòng vừa insert.
-+ */
-+let uploadMetricFailureReported = false;
-+
-+export function reportUploadMetricFailure(error: unknown): void {
-+  if (uploadMetricFailureReported) return;
-+  uploadMetricFailureReported = true;
-+  const code = (error as { code?: unknown } | null)?.code;
-+  console.error(
-+    "[upload-metrics] Không ghi được public_upload_attempts; số đo tải ảnh đang mất. " +
-+      `pg_code=${typeof code === "string" ? code : "UNKNOWN"}`,
-+  );
-+}
-+
-+/** Chỉ dùng trong test: đặt lại cờ "đã báo" để mỗi ca kiểm tra chạy độc lập. */
-+export function resetUploadMetricFailureReport(): void {
-+  uploadMetricFailureReported = false;
-+}
-+
- export interface FileNormalizationMetadata {
-   readonly sourceSizeBytes: number | null;
-   readonly sourceMimeType: string | null;
-diff --git a/supabase/migrations/202607290001_public_upload_attempts_rls.sql b/supabase/migrations/202607290001_public_upload_attempts_rls.sql
-index 7cc38d6..a12ac02 100644
---- a/supabase/migrations/202607290001_public_upload_attempts_rls.sql
-+++ b/supabase/migrations/202607290001_public_upload_attempts_rls.sql
-@@ -1,6 +1,19 @@
- -- Telemetry tải ảnh chỉ được ghi qua repository server-side.
- -- Không có policy public; anon/authenticated không được đọc hay ghi trực tiếp.
-+--
-+-- CỐ Ý KHÔNG dùng `force row level security`, dù bản nháp đầu của migration này có dùng.
-+--
-+-- `force` bắt RLS áp cả lên chủ sở hữu bảng. Bảng không có policy nào, nên với bất kỳ role nào
-+-- không mang thuộc tính BYPASSRLS thì **mọi** lệnh insert đều trả về 0 dòng. Cả hai chỗ gọi
-+-- `appendUploadAttempt` đều bọc `.catch(...)` vì số đo là việc phụ — nghĩa là nếu role kết nối
-+-- không có BYPASSRLS thì bảng này sẽ rỗng vĩnh viễn mà không có một dòng log nào báo. Đúng cái
-+-- bảng được dựng để nghiệm thu ngưỡng hiệu năng và để mở cờ chuẩn hóa ảnh.
-+--
-+-- `enable` + `revoke` (không `force`) là đúng mô hình đe dọa ở đây và là mẫu đang dùng cho cả 8
-+-- bảng còn lại trong `supabase/migrations/` (xem 202607230001, 202607250002, 202607250005,
-+-- 202607260001): chặn anon/authenticated bằng cả RLS lẫn quyền cấp, còn đường ghi hợp lệ duy nhất
-+-- là repository chạy trên máy chủ. Giữ đúng một bảng lệch mẫu là cách chắc chắn để sau này không
-+-- ai nhớ vì sao nó khác.
- alter table public.public_upload_attempts enable row level security;
--alter table public.public_upload_attempts force row level security;
+       setSaveStatus("SAVING");
+       try {
+-        let response = await patch(draftToSave, serverVersion);
++        let response = await patch(serverVersion);
  
- revoke all on table public.public_upload_attempts from anon, authenticated;
-diff --git a/tests/public-upload-complete-route.test.ts b/tests/public-upload-complete-route.test.ts
-index 6f49f10..5a69ede 100644
---- a/tests/public-upload-complete-route.test.ts
-+++ b/tests/public-upload-complete-route.test.ts
-@@ -60,9 +60,23 @@ describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
-   });
+         /*
+-         * 409 = version trên máy chủ khác version trên máy. Máy chủ kiểm khớp TUYỆT ĐỐI, nên
+-         * nguyên nhân thường gặp nhất KHÔNG phải "hai thiết bị cùng sửa" mà là: một lần PATCH đã
+-         * ghi xong nhưng response rơi mất trên mạng yếu — lần thử lại gửi đúng version cũ và bị
+-         * từ chối. Trước đây người dân kẹt luôn ở bước đó, kèm một thông báo sai sự thật.
++         * 409 = version trên máy chủ khác version trên máy. Có ĐÚNG HAI nguyên nhân, và chúng đòi
++         * hai cách xử lý ngược nhau — gộp chung là ghi đè mất dữ liệu:
++         *
++         *   (1) Lần PATCH trước đã ghi xong nhưng response rơi mất trên mạng yếu. Máy chủ đang giữ
++         *       CHÍNH nội dung ta định ghi, chỉ khác mỗi số version. Thử lại là vô hại.
++         *   (2) Một thiết bị khác đã sửa thật. Máy chủ đang giữ dữ liệu ta CHƯA từng thấy. Thử lại
++         *       với version mới sẽ **ghi đè mất** thay đổi của thiết bị kia, im lặng.
++         *
++         * Phân biệt bằng `hasLocalChanges` của snapshot vừa lấy về: nó so sánh sâu bản gộp
++         * (local đè lên server) với chính bản server.
++         *   - `false` → gộp xong không khác gì server → server đã có đúng thứ ta muốn ghi → (1).
++         *   - `true`  → server đang giữ thứ khác → không phân biệt được (1) với (2) → coi như (2).
+          *
+-         * Xử lý: lấy lại snapshot máy chủ, gộp dữ liệu đang có trên máy lên trên (chính
+-         * `adoptServerDraftSnapshot` với `localDraft`), rồi thử lại đúng MỘT lần. Trường hợp mất
+-         * response tự gỡ được vì snapshot mới chính là thứ vừa ghi. Nếu thật sự có thiết bị thứ
+-         * hai đang sửa thì lần hai vẫn 409 và thông báo gốc được hiển thị — không nuốt lỗi thật,
+-         * cũng không lặp vô hạn.
++         * Chỉ thử lại ở nhánh (1). Nhánh (2) để nguyên 409 rơi xuống dưới và người dân đọc đúng
++         * thông báo "đang mở ở một thiết bị khác" — thà bắt họ tải lại còn hơn ghi đè âm thầm.
+          */
+         if (response.status === 409) {
+-          const adopted = await adoptServerDraft({ localDraft: draftToSave });
+-          if (adopted) {
+-            response = await patch(adopted.draft, adopted.version);
++          const adopted = await adoptServerDraft({ localDraft: payload });
++          if (adopted && !adopted.hasLocalChanges) {
++            response = await patch(adopted.version);
+           }
+         }
  
-   it("hỏi không được thì mặc định coi như ĐÃ nhận", () => {
--    // `.catch(() => false)` ở đây là lỗi mất dữ liệu, không phải lỗi phong cách.
--    expect(route).toContain("isDriveFileAdopted(submissionId, driveFileId).catch(() => true)");
--    expect(route).not.toContain(".catch(() => false)");
-+    // Đảo chiều `.catch` ở đây là lỗi mất dữ liệu, không phải lỗi phong cách.
-+    expect(route).toContain("isDriveFileAdopted(driveFileId).catch(() => true)");
-+  });
-+
-+  it("không xác nhận được thư mục thì KHÔNG xóa", () => {
-+    // Hai `.catch` ngược chiều nhau nhưng cùng một ý: không chắc thì giữ tệp lại.
-+    //   - hỏi cơ sở dữ liệu hỏng  → coi như ĐÃ nhận (`true`)  → không xóa;
-+    //   - hỏi Drive hỏng          → coi như KHÔNG thuộc (`false`) → không xóa.
-+    const guard = route.slice(route.indexOf("async function discardIfOrphan"));
-+    expect(guard).toContain(".isFileInFolder(driveFileId, record.driveFolderId)");
-+    expect(guard).toContain(".catch(() => false)");
-+    expect(guard).toMatch(/if \(!ownedByCaller\) return;/);
-+  });
-+
-+  it("kiểm thư mục đứng TRƯỚC lệnh xóa, không phải sau", () => {
-+    const guard = route.slice(route.indexOf("async function discardIfOrphan"));
-+    expect(guard.indexOf("isFileInFolder")).toBeLessThan(guard.indexOf("discardFile("));
-   });
+diff --git a/tests/pr6-review-round-two.test.ts b/tests/pr6-review-round-two.test.ts
+index 5ed2022..c07b92c 100644
+--- a/tests/pr6-review-round-two.test.ts
++++ b/tests/pr6-review-round-two.test.ts
+@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
+ import { describe, expect, it } from "vitest";
  
-   it("truy vấn adopt tính cả tệp đã REPLACED — tệp bị thay vẫn là bằng chứng của hồ sơ", () => {
-@@ -70,10 +84,24 @@ describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
-       repository.indexOf("async isDriveFileAdopted"),
-       repository.indexOf("async appendUploadAttempt"),
+ import { adoptServerDraftSnapshot } from "@/modules/public-intake/draft-adoption";
++import type { IntakeDraft } from "@/modules/public-intake/types";
+ import { emptyDraft } from "@/modules/public-intake/types";
+ import {
+   reportUploadMetricFailure,
+@@ -124,19 +125,37 @@ describe("PATCH nháp: 409 giả trên mạng yếu phải tự gỡ", () => {
+       wizard.indexOf("const flushDraft = useCallback"),
      );
--    expect(method).toContain("where submission_id = ");
-+    expect(method).toContain("where drive_file_id = ");
-     expect(method).not.toContain("status = 'UPLOADED'");
+     expect(saveDraft).toContain("if (response.status === 409)");
+-    expect(saveDraft).toContain("adoptServerDraft({ localDraft: draftToSave })");
+-    expect(saveDraft).toContain("response = await patch(adopted.draft, adopted.version)");
++    expect(saveDraft).toContain("adoptServerDraft({ localDraft: payload })");
++    expect(saveDraft).toContain("response = await patch(adopted.version)");
    });
  
-+  it("truy vấn adopt KHÔNG lọc theo hồ sơ đang gọi", () => {
+-  it("chỉ thử lại đúng một lần — 409 thật vẫn nổi lên", () => {
++  it("chỉ thử lại khi máy chủ ĐÃ có đúng nội dung định ghi", () => {
 +    /*
-+     * Hồi quy đã từng có thật: lọc thêm `submission_id = <hồ sơ đang gọi>` biến câu hỏi "có ai
-+     * đang trỏ vào tệp này không" thành "hồ sơ đang gọi có trỏ vào nó không". Một `driveFileId`
-+     * do client gửi lên trỏ sang hồ sơ khác khi đó bị coi là mồ côi và bị xóa — mất bằng chứng
-+     * của một hộ dân không liên quan.
++     * Đây là hàng rào chống ghi đè. Bỏ điều kiện `!adopted.hasLocalChanges` thì lần thử lại dùng
++     * version vừa fetch nên LUÔN thành công — kể cả khi 409 đến từ một thiết bị khác đang sửa
++     * thật, và thay đổi của thiết bị kia biến mất im lặng.
 +     */
-+    const method = repository.slice(
-+      repository.indexOf("async isDriveFileAdopted"),
-+      repository.indexOf("async appendUploadAttempt"),
+     const saveDraft = wizard.slice(
+       wizard.indexOf("const saveDraft = useCallback"),
+       wizard.indexOf("const flushDraft = useCallback"),
+     );
++    expect(saveDraft).toContain("if (adopted && !adopted.hasLocalChanges)");
+     expect(saveDraft.match(/response\.status === 409/g)).toHaveLength(1);
+     expect(saveDraft).toContain("if (!response.ok)");
+   });
+ 
++  it("payload gửi đi và payload đem so sánh là cùng một object", () => {
++    // So `draftToSave` (chưa gắn metadata ảnh GCN) với snapshot máy chủ (đã có) sẽ luôn ra
++    // "khác nhau", làm nhánh tự phục hồi không bao giờ chạy.
++    const saveDraft = wizard.slice(
++      wizard.indexOf("const saveDraft = useCallback"),
++      wizard.indexOf("const flushDraft = useCallback"),
 +    );
-+    expect(method).not.toContain("submission_id");
++    expect(saveDraft).toContain("const payload = withCertificateMetadata(draftToSave");
++    expect(saveDraft).toContain("adoptServerDraft({ localDraft: payload })");
++    expect(saveDraft).toContain("body: JSON.stringify({ draft: payload, version })");
 +  });
 +
-   it("phát lại idempotent trả bản ghi cũ, không chèn bản mới", () => {
-     // Nếu replay chèn thêm dòng thì tệp cũ mất tham chiếu và trở thành mồi cho script dọn rác.
-     const method = repository.slice(repository.indexOf("async appendFile"));
-diff --git a/tests/public-upload-legacy-draft.test.ts b/tests/public-upload-legacy-draft.test.ts
-index dace524..da93785 100644
---- a/tests/public-upload-legacy-draft.test.ts
-+++ b/tests/public-upload-legacy-draft.test.ts
-@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
-   listFiles: vi.fn(),
-   findStoredMutation: vi.fn(),
-   isDriveFileAdopted: vi.fn(),
-+  isFileInFolder: vi.fn(),
-   resolvePublicRequest: vi.fn(),
- }));
- 
-@@ -31,6 +32,7 @@ vi.mock("@/modules/public-intake/storage", () => ({
-   getPublicIntakeStorage: () => ({
-     createUploadSession: mocks.createUploadSession,
-     discardFile: mocks.discardFile,
-+    isFileInFolder: mocks.isFileInFolder,
-   }),
-   UploadVerificationError: class UploadVerificationError extends Error {},
- }));
-@@ -85,6 +87,9 @@ describe("public upload với nháp legacy thiếu owners", () => {
-     mocks.findStoredMutation.mockResolvedValue(null);
-     mocks.isDriveFileAdopted.mockReset();
-     mocks.isDriveFileAdopted.mockResolvedValue(false);
-+    mocks.isFileInFolder.mockReset();
-+    // Tệp nằm đúng thư mục của hộ dân đang gọi — điều kiện cần để được phép dọn.
-+    mocks.isFileInFolder.mockResolvedValue(true);
-     mocks.resolvePublicRequest.mockReset();
-     mocks.resolvePublicRequest.mockResolvedValue({
-       record: malformedRecord,
-@@ -110,4 +115,24 @@ describe("public upload với nháp legacy thiếu owners", () => {
-     expect(body.error.code).toBe("INVALID_STATE");
-     expect(mocks.discardFile).toHaveBeenCalledWith("drive-file-test");
+   it("adoptServerDraft trả version ra ngoài, không chỉ gọi setState", () => {
+     // `setServerVersion` là state setter: giá trị mới không thấy được trong cùng closure, nên
+     // version phải đi ra theo đường trả về thì `saveDraft` mới thử lại đúng được.
+@@ -144,7 +163,69 @@ describe("PATCH nháp: 409 giả trên mạng yếu phải tự gỡ", () => {
+       wizard.indexOf("const adoptServerDraft = useCallback"),
+       wizard.indexOf("const saveDraft = useCallback"),
+     );
+-    expect(adopt).toContain("return { draft: restoredDraft, version: adopted.version };");
++    expect(adopt).toContain("version: adopted.version,");
++    expect(adopt).toContain("hasLocalChanges: adopted.hasLocalChanges,");
++  });
++});
++
++describe("Quy tắc quyết định của nhánh 409 — hai tình huống, hai kết quả ngược nhau", () => {
++  /*
++   * `hasLocalChanges` là TOÀN BỘ căn cứ để wizard quyết định có thử lại PATCH hay không. Hai test
++   * dưới đây kiểm chính quy tắc đó bằng dữ liệu thật, không đọc mã nguồn — vì đây là chỗ mà một
++   * lỗi sẽ làm mất dữ liệu của người dân chứ không chỉ làm đỏ CI.
++   */
++  const seed = (): IntakeDraft => {
++    const draft = emptyDraft("owner-1", "parcel-1", "landuse-1");
++    draft.phone = "0912345678";
++    draft.owners[0].fullName = "Nguyễn Văn A";
++    return draft;
++  };
++
++  it("TÌNH HUỐNG 1 — PATCH đã commit, response rơi mất: cho phép thử lại", () => {
++    // Máy chủ đang giữ CHÍNH nội dung ta vừa gửi; chỉ số version là khác.
++    const sent = seed();
++    const serverDraft = structuredClone(sent);
++
++    const adopted = adoptServerDraftSnapshot({
++      serverDraft,
++      serverVersion: 7,
++      localDraft: sent,
++    });
++
++    expect(adopted?.hasLocalChanges).toBe(false);
++    expect(adopted?.version).toBe(7);
++  });
++
++  it("TÌNH HUỐNG 2 — thiết bị khác đã sửa: KHÔNG được thử lại", () => {
++    // Máy chủ giữ tên do thiết bị B nhập; máy ta giữ tên khác. Thử lại là xóa mất dữ liệu của B.
++    const local = seed();
++    local.owners[0].fullName = "Nguyễn Văn A";
++    const serverDraft = seed();
++    serverDraft.owners[0].fullName = "Trần Thị B";
++
++    const adopted = adoptServerDraftSnapshot({
++      serverDraft,
++      serverVersion: 9,
++      localDraft: local,
++    });
++
++    expect(adopted?.hasLocalChanges).toBe(true);
++  });
++
++  it("TÌNH HUỐNG 2b — thiết bị khác thêm dữ liệu ở trường ta để trống: vẫn là xung đột", () => {
++    // Trường hợp dễ lọt nhất: `{...server, ...local}` giữ chuỗi rỗng của local đè lên dữ liệu của
++    // server. Nếu quy tắc báo "không có thay đổi" ở đây thì ta sẽ xóa trắng ô cán bộ vừa điền.
++    const local = seed();
++    const serverDraft = seed();
++    serverDraft.certificate.issueNumber = "CG 123456";
++
++    const adopted = adoptServerDraftSnapshot({
++      serverDraft,
++      serverVersion: 4,
++      localDraft: local,
++    });
++
++    expect(adopted?.hasLocalChanges).toBe(true);
    });
-+
-+  it("KHÔNG dọn khi tệp không nằm trong thư mục Drive của hộ dân đang gọi", async () => {
-+    // `driveFileId` ở nhánh này là dữ liệu client chưa qua xác minh. Trỏ sang thư mục hộ khác
-+    // thì tuyệt đối không được xóa, kể cả khi chưa hồ sơ nào nhận tệp đó.
-+    mocks.isFileInFolder.mockResolvedValue(false);
-+
-+    const response = await completeUpload(completeRequest());
-+
-+    expect(response.status).toBe(409);
-+    expect(mocks.discardFile).not.toHaveBeenCalled();
-+  });
-+
-+  it("KHÔNG dọn khi không hỏi được Drive về thư mục cha", async () => {
-+    mocks.isFileInFolder.mockRejectedValue(new Error("drive unreachable"));
-+
-+    const response = await completeUpload(completeRequest());
-+
-+    expect(response.status).toBe(409);
-+    expect(mocks.discardFile).not.toHaveBeenCalled();
-+  });
  });
-diff --git a/tests/working-payload.test.ts b/tests/working-payload.test.ts
-index 7ef62d7..178b6ab 100644
---- a/tests/working-payload.test.ts
-+++ b/tests/working-payload.test.ts
-@@ -34,6 +34,8 @@ vi.mock("@/modules/auth/csrf", () => ({
- vi.mock("@/modules/common/env", () => ({
-   loadServerEnvironment: vi.fn().mockReturnValue({
-     AUTH_SECRET: "mock-secret-at-least-32-chars-long-security",
-+    // Route ghi chỉ mục tra cứu khi cán bộ điền CCCD người dân để trống ở MỨC A, nên cần pepper.
-+    DATA_HASH_PEPPER: "mock-pepper-at-least-32-chars-long-value",
-   }),
- }));
  
-@@ -150,6 +152,19 @@ describe("PUT /api/submissions/:id/working-payload route tests", () => {
-     expect(res.status).toBe(200);
-     const data = await res.json();
-     expect(data.submission.version).toBe(2);
-+
-+    /*
-+     * Cán bộ sửa `working_payload` là một trong những đường mà CCCD có thể xuất hiện LẦN ĐẦU: ở
-+     * MỨC A người dân được phép để trống ô đó. Không ghi chỉ mục ở đây thì hồ sơ vĩnh viễn nằm
-+     * ngoài phát hiện trùng (quyết định 2026-07-29).
-+     */
-+    const committed = mockCommitWorkingPayload.mock.calls[0][0] as {
-+      pendingIdentityHmacs?: string[];
-+    };
-+    expect(committed.pendingIdentityHmacs).toHaveLength(1);
-+    expect(committed.pendingIdentityHmacs?.[0]).toMatch(/^[0-9a-f]{64}$/);
-+    // Chỉ mục lưu HMAC, không bao giờ lưu CCCD thô.
-+    expect(committed.pendingIdentityHmacs?.[0]).not.toContain("025080001234");
-   });
- 
-   it("W2: not claimed by user -> 403 ACCESS_DENIED", async () => {
 diff --git a/tests/pr6-review-round-two.test.ts b/tests/pr6-review-round-two.test.ts
 new file mode 100644
-index 0000000..5ed2022
+index 0000000..c07b92c
 --- /dev/null
 +++ b/tests/pr6-review-round-two.test.ts
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,346 @@
 +/**
 + * Vòng rà soát PR #6 (lần hai) — khóa lại từng phát hiện đã sửa.
 + *
@@ -1786,6 +812,7 @@ index 0000000..5ed2022
 +import { describe, expect, it } from "vitest";
 +
 +import { adoptServerDraftSnapshot } from "@/modules/public-intake/draft-adoption";
++import type { IntakeDraft } from "@/modules/public-intake/types";
 +import { emptyDraft } from "@/modules/public-intake/types";
 +import {
 +  reportUploadMetricFailure,
@@ -1898,17 +925,35 @@ index 0000000..5ed2022
 +      wizard.indexOf("const flushDraft = useCallback"),
 +    );
 +    expect(saveDraft).toContain("if (response.status === 409)");
-+    expect(saveDraft).toContain("adoptServerDraft({ localDraft: draftToSave })");
-+    expect(saveDraft).toContain("response = await patch(adopted.draft, adopted.version)");
++    expect(saveDraft).toContain("adoptServerDraft({ localDraft: payload })");
++    expect(saveDraft).toContain("response = await patch(adopted.version)");
 +  });
 +
-+  it("chỉ thử lại đúng một lần — 409 thật vẫn nổi lên", () => {
++  it("chỉ thử lại khi máy chủ ĐÃ có đúng nội dung định ghi", () => {
++    /*
++     * Đây là hàng rào chống ghi đè. Bỏ điều kiện `!adopted.hasLocalChanges` thì lần thử lại dùng
++     * version vừa fetch nên LUÔN thành công — kể cả khi 409 đến từ một thiết bị khác đang sửa
++     * thật, và thay đổi của thiết bị kia biến mất im lặng.
++     */
 +    const saveDraft = wizard.slice(
 +      wizard.indexOf("const saveDraft = useCallback"),
 +      wizard.indexOf("const flushDraft = useCallback"),
 +    );
++    expect(saveDraft).toContain("if (adopted && !adopted.hasLocalChanges)");
 +    expect(saveDraft.match(/response\.status === 409/g)).toHaveLength(1);
 +    expect(saveDraft).toContain("if (!response.ok)");
++  });
++
++  it("payload gửi đi và payload đem so sánh là cùng một object", () => {
++    // So `draftToSave` (chưa gắn metadata ảnh GCN) với snapshot máy chủ (đã có) sẽ luôn ra
++    // "khác nhau", làm nhánh tự phục hồi không bao giờ chạy.
++    const saveDraft = wizard.slice(
++      wizard.indexOf("const saveDraft = useCallback"),
++      wizard.indexOf("const flushDraft = useCallback"),
++    );
++    expect(saveDraft).toContain("const payload = withCertificateMetadata(draftToSave");
++    expect(saveDraft).toContain("adoptServerDraft({ localDraft: payload })");
++    expect(saveDraft).toContain("body: JSON.stringify({ draft: payload, version })");
 +  });
 +
 +  it("adoptServerDraft trả version ra ngoài, không chỉ gọi setState", () => {
@@ -1918,7 +963,69 @@ index 0000000..5ed2022
 +      wizard.indexOf("const adoptServerDraft = useCallback"),
 +      wizard.indexOf("const saveDraft = useCallback"),
 +    );
-+    expect(adopt).toContain("return { draft: restoredDraft, version: adopted.version };");
++    expect(adopt).toContain("version: adopted.version,");
++    expect(adopt).toContain("hasLocalChanges: adopted.hasLocalChanges,");
++  });
++});
++
++describe("Quy tắc quyết định của nhánh 409 — hai tình huống, hai kết quả ngược nhau", () => {
++  /*
++   * `hasLocalChanges` là TOÀN BỘ căn cứ để wizard quyết định có thử lại PATCH hay không. Hai test
++   * dưới đây kiểm chính quy tắc đó bằng dữ liệu thật, không đọc mã nguồn — vì đây là chỗ mà một
++   * lỗi sẽ làm mất dữ liệu của người dân chứ không chỉ làm đỏ CI.
++   */
++  const seed = (): IntakeDraft => {
++    const draft = emptyDraft("owner-1", "parcel-1", "landuse-1");
++    draft.phone = "0912345678";
++    draft.owners[0].fullName = "Nguyễn Văn A";
++    return draft;
++  };
++
++  it("TÌNH HUỐNG 1 — PATCH đã commit, response rơi mất: cho phép thử lại", () => {
++    // Máy chủ đang giữ CHÍNH nội dung ta vừa gửi; chỉ số version là khác.
++    const sent = seed();
++    const serverDraft = structuredClone(sent);
++
++    const adopted = adoptServerDraftSnapshot({
++      serverDraft,
++      serverVersion: 7,
++      localDraft: sent,
++    });
++
++    expect(adopted?.hasLocalChanges).toBe(false);
++    expect(adopted?.version).toBe(7);
++  });
++
++  it("TÌNH HUỐNG 2 — thiết bị khác đã sửa: KHÔNG được thử lại", () => {
++    // Máy chủ giữ tên do thiết bị B nhập; máy ta giữ tên khác. Thử lại là xóa mất dữ liệu của B.
++    const local = seed();
++    local.owners[0].fullName = "Nguyễn Văn A";
++    const serverDraft = seed();
++    serverDraft.owners[0].fullName = "Trần Thị B";
++
++    const adopted = adoptServerDraftSnapshot({
++      serverDraft,
++      serverVersion: 9,
++      localDraft: local,
++    });
++
++    expect(adopted?.hasLocalChanges).toBe(true);
++  });
++
++  it("TÌNH HUỐNG 2b — thiết bị khác thêm dữ liệu ở trường ta để trống: vẫn là xung đột", () => {
++    // Trường hợp dễ lọt nhất: `{...server, ...local}` giữ chuỗi rỗng của local đè lên dữ liệu của
++    // server. Nếu quy tắc báo "không có thay đổi" ở đây thì ta sẽ xóa trắng ô cán bộ vừa điền.
++    const local = seed();
++    const serverDraft = seed();
++    serverDraft.certificate.issueNumber = "CG 123456";
++
++    const adopted = adoptServerDraftSnapshot({
++      serverDraft,
++      serverVersion: 4,
++      localDraft: local,
++    });
++
++    expect(adopted?.hasLocalChanges).toBe(true);
 +  });
 +});
 +
