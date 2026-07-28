@@ -187,6 +187,31 @@ export class PublicIntakeStorage {
     return created.data.id;
   }
 
+  /**
+   * Liệt kê tệp trong một thư mục — chỉ dùng cho script rà soát tệp mồ côi.
+   *
+   * Trả về `id` và `size`, **không** trả `name`: tên tệp có thể mang dấu vết của giấy tờ, mà báo
+   * cáo rà soát thì được đọc và dán qua lại giữa nhiều người. Đối chiếu mồ côi chỉ cần ID.
+   */
+  async listFolderFileIds(folderId: string): Promise<{ id: string; sizeBytes: number }[]> {
+    const { drive } = createGoogleWorkspaceClient(this.credentials);
+    const found: { id: string; sizeBytes: number }[] = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: "nextPageToken, files(id, size)",
+        pageSize: 200,
+        pageToken,
+      });
+      for (const file of page.data.files ?? []) {
+        if (file.id) found.push({ id: file.id, sizeBytes: Number(file.size ?? 0) });
+      }
+      pageToken = page.data.nextPageToken ?? undefined;
+    } while (pageToken);
+    return found;
+  }
+
   /** Tệp không đạt xác minh phải rời khỏi Drive ngay, không để tích rác (PLAN_NL §6.3). */
   async discardFile(driveFileId: string): Promise<void> {
     const { drive } = createGoogleWorkspaceClient(this.credentials);

@@ -15,6 +15,11 @@ import {
 } from "@/modules/public-intake/route-context";
 import { getPublicIntakeStorage, UploadVerificationError } from "@/modules/public-intake/storage";
 import { requiresCitizenId } from "@/modules/public-intake/types";
+import {
+  buildFileNormalizationMetadata,
+  buildUploadAttemptMetric,
+  clientUploadTelemetrySchema,
+} from "@/modules/public-intake/upload-metrics";
 
 export const runtime = "nodejs";
 
@@ -40,12 +45,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     documentType?: unknown;
     ownerId?: unknown;
     replaceFileId?: unknown;
+    clientUpload?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }
+
+  // Telemetry sai định dạng bị **bỏ qua**, không làm hỏng việc tải ảnh: người dân không mất công
+  // chụp lại vì một con số đo lệch. Trường lạ bị `strict()` loại chứ không đi tiếp xuống dưới.
+  const telemetryParse = clientUploadTelemetrySchema.safeParse(body.clientUpload ?? {});
+  const telemetry = telemetryParse.success ? telemetryParse.data : undefined;
+  const startedAt = Date.now();
 
   const driveFileId = typeof body.driveFileId === "string" ? body.driveFileId : "";
   const documentType = body.documentType;
@@ -134,8 +146,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
     .digest("hex");
 
+  const repository = getPublicIntakeRepository();
   try {
-    const summary = await getPublicIntakeRepository().appendFile(
+    const summary = await repository.appendFile(
       {
         fileId,
         submissionId: record.submissionId,
@@ -154,18 +167,69 @@ export async function POST(request: Request): Promise<NextResponse> {
         requestId,
         replaceFileId: replaceFileId || undefined,
       },
+      buildFileNormalizationMetadata(telemetry),
     );
+
+    // Số đo là việc phụ: bảng metric hỏng không được làm hỏng một lượt tải đã thành công. Người
+    // dân đã chụp, đã chờ tải xong; trả lỗi ở đây là bắt họ làm lại vì chuyện không liên quan.
+    await repository
+      .appendUploadAttempt(
+        buildUploadAttemptMetric({
+          attemptId: telemetry?.attemptId ?? randomUUID(),
+          submissionId: record.submissionId,
+          documentType,
+          outcome: "COMPLETED",
+          verifiedUploadSizeBytes: verified.sizeBytes,
+          completeDurationMs: Date.now() - startedAt,
+          telemetry,
+        }),
+      )
+      .catch(() => undefined);
 
     // Không trả Drive ID ra ngoài — người dân không cần và không được biết.
     return NextResponse.json({ ok: true, fileId: summary.fileId, sizeBytes: verified.sizeBytes });
   } catch (error) {
     if (error instanceof SubmissionIdempotencyConflictError) {
+      // Xung đột idempotency nghĩa là khóa này đã dùng cho nội dung khác — tệp vừa xác minh
+      // KHÔNG phải tệp đã được nhận, nhưng cũng không chắc chưa ai nhận nó. Đi qua cùng một cửa
+      // dọn dẹp an toàn bên dưới thay vì xóa thẳng.
+      await discardIfOrphan(repository, record.submissionId, verified.driveFileId);
       return publicError(
         "IDEMPOTENCY_CONFLICT",
         "Yêu cầu hoàn tất tải lên bị xung đột.",
         requestId,
       );
     }
+
+    /*
+     * Ghi cơ sở dữ liệu hỏng (mất kết nối, constraint, hết kết nối pool) sau khi tệp đã nằm trên
+     * Drive. Không dọn thì mỗi lần hỏng để lại một tệp mồ côi trong kho của quản trị viên, không
+     * ai biết nó thuộc hồ sơ nào.
+     *
+     * Nhưng dọn sai còn tệ hơn nhiều: xóa mất tệp mà cơ sở dữ liệu **đã** nhận là hồ sơ trỏ vào
+     * một Drive ID không còn tồn tại, và không cách nào lấy lại. Vì vậy chỉ xóa khi chắc chắn
+     * chưa ai nhận, và mọi tình huống không chắc đều nghiêng về **giữ lại**.
+     */
+    await discardIfOrphan(repository, record.submissionId, verified.driveFileId);
     throw error;
   }
+}
+
+/**
+ * Xóa tệp trên Drive **chỉ khi** chắc chắn cơ sở dữ liệu chưa nhận nó.
+ *
+ * `.catch(() => true)` không phải là bỏ qua lỗi cho gọn: hỏi cơ sở dữ liệu mà không hỏi được thì
+ * mặc định coi như **đã nhận**, tức là không xóa. Sai theo hướng để lại một tệp thừa thì có script
+ * audit dọn sau; sai theo hướng kia thì mất bằng chứng của hồ sơ, vĩnh viễn.
+ */
+async function discardIfOrphan(
+  repository: ReturnType<typeof getPublicIntakeRepository>,
+  submissionId: string,
+  driveFileId: string,
+): Promise<void> {
+  const adopted = await repository.isDriveFileAdopted(submissionId, driveFileId).catch(() => true);
+  if (adopted) return;
+  await getPublicIntakeStorage()
+    .discardFile(driveFileId)
+    .catch(() => undefined);
 }

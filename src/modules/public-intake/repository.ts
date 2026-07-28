@@ -8,6 +8,7 @@ import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository"
 import { getDatabase } from "@/modules/supabase/database";
 
 import type { IntakeDraft } from "./types";
+import type { FileNormalizationMetadata, UploadAttemptMetric } from "./upload-metrics";
 import {
   type PublicFileSummary,
   type PublicStatus,
@@ -1462,6 +1463,47 @@ export class PublicIntakeRepository {
     return rows[0].version;
   }
 
+  /**
+   * Drive file này đã được cơ sở dữ liệu nhận vào chưa?
+   *
+   * Dùng để quyết định có được xóa tệp trên Drive khi đường ghi hỏng hay không. Đọc **mọi** trạng
+   * thái, kể cả `REPLACED`/`DELETED`: một tệp đã bị thay vẫn là tệp đã từng được nhận, và xóa nó
+   * khỏi Drive sẽ làm mất bằng chứng của hồ sơ.
+   */
+  async isDriveFileAdopted(submissionId: string, driveFileId: string): Promise<boolean> {
+    const database = getDatabase();
+    const rows = await database<{ count: string }[]>`
+      select count(*)::text as count from public.public_files
+      where submission_id = ${submissionId} and drive_file_id = ${driveFileId}
+    `;
+    return Number(rows[0]?.count ?? "0") > 0;
+  }
+
+  /**
+   * Ghi một lượt tải vào bảng số đo. Best-effort ở phía gọi — hàm này vẫn ném lỗi để bên gọi tự
+   * quyết định nuốt, chứ không tự nuốt ở đây (nuốt trong repository là cách chắc chắn để một bảng
+   * hỏng nằm im hàng tháng mà không ai biết).
+   */
+  async appendUploadAttempt(metric: UploadAttemptMetric): Promise<void> {
+    const database = getDatabase();
+    await database`
+      insert into public.public_upload_attempts (
+        attempt_id, submission_id, document_type, outcome, source_size_bytes, upload_size_bytes,
+        prepare_duration_ms, initiate_duration_ms, upload_duration_ms, complete_duration_ms,
+        retry_count, client_platform, effective_connection_type, normalization_version,
+        failure_stage, failure_code
+      ) values (
+        ${metric.attemptId}, ${metric.submissionId}, ${metric.documentType}, ${metric.outcome},
+        ${metric.sourceSizeBytes}, ${metric.uploadSizeBytes},
+        ${metric.prepareDurationMs}, ${metric.initiateDurationMs},
+        ${metric.uploadDurationMs}, ${metric.completeDurationMs},
+        ${metric.retryCount}, ${metric.clientPlatform}, ${metric.effectiveConnectionType},
+        ${metric.normalizationVersion}, ${metric.failureStage}, ${metric.failureCode}
+      )
+      on conflict (attempt_id) do nothing
+    `;
+  }
+
   async appendFile(
     file: Omit<StoredFile, "status">,
     record?: SubmissionRecord,
@@ -1471,6 +1513,7 @@ export class PublicIntakeRepository {
       requestId: string;
       replaceFileId?: string;
     },
+    normalization?: FileNormalizationMetadata,
   ): Promise<PublicFileSummary> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -1505,10 +1548,16 @@ export class PublicIntakeRepository {
       const rows = await transaction<FileRow[]>`
         insert into public.public_files (
           file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
-          size_bytes, checksum_sha256, file_name
+          size_bytes, checksum_sha256, file_name,
+          source_size_bytes, source_mime_type, source_width, source_height,
+          upload_width, upload_height, normalization_version
         ) values (
           ${file.fileId}, ${file.submissionId}, ${file.ownerId}, ${file.documentType},
-          ${file.driveFileId}, ${file.mimeType}, ${file.sizeBytes}, ${file.checksum}, ${file.fileName}
+          ${file.driveFileId}, ${file.mimeType}, ${file.sizeBytes}, ${file.checksum}, ${file.fileName},
+          ${normalization?.sourceSizeBytes ?? null}, ${normalization?.sourceMimeType ?? null},
+          ${normalization?.sourceWidth ?? null}, ${normalization?.sourceHeight ?? null},
+          ${normalization?.uploadWidth ?? null}, ${normalization?.uploadHeight ?? null},
+          ${normalization?.normalizationVersion ?? ""}
         ) returning file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
           size_bytes, checksum_sha256, file_name, status, created_at, updated_at
       `;
