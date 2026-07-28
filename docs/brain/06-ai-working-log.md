@@ -11,7 +11,9 @@
   file untracked `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
 - **Sửa:** deletion-safe upload replay; assisted submit không Turnstile; exact version CAS;
   official consent/identity gate; consent audit atomic; telemetry RLS; timeline privacy; CI PR.
-- **Test tập trung:** 53/53 pass, gồm route simulation DB commit/response mất/retry.
+- **Test:** focused 53/53; final unit 570 pass/10 skipped; lint 0 error/5 warning có sẵn;
+  typecheck/build/diff checks pass. Assisted E2E được gọi nhưng Playwright báo 1 skipped do thiếu
+  rehearsal credential; không ghi nhận là pass.
 - **Không làm:** merge, deploy hoặc chạy migration.
 
 ## [2026-07-28] Public Intake V2 — rút luồng kê khai công khai còn 4 bước

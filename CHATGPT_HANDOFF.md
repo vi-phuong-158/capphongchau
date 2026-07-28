@@ -5,12 +5,15 @@
 - Branch: `claude/land-declaration-process-feedback-126f2e`
 - Base PR: `main` tại `79f4ae67448625c9e92fb20c356c889008a27940`
 - Baseline HEAD: `48f232d73b180acc7f4159ca0d7c95f0e6fc7c3d`
-- Commits mới: `5d8c73c`, `60be5ab`, `69c86ee`, `06f2e52`; commit docs/final HEAD báo sau push.
+- Commits mới: `5d8c73c`, `60be5ab`, `69c86ee`, `06f2e52`, `84178ad`, `0d470ed`;
+  commit chốt handoff/final HEAD báo sau push.
 - Đã đóng 2 BLOCKER + 5 HIGH; migration mới
   `202607290001_public_upload_attempts_rls.sql` chưa chạy.
-- Baseline: lint 0 error/5 warning có sẵn; typecheck pass; 558 pass/10 skipped; build pass.
+- Final verification: lint 0 error/5 warning có sẵn; typecheck pass; 570 pass/10 skipped; build
+  pass; `git diff --check` và full PR diff check pass.
 - Regression tập trung sau sửa: 53/53 pass, gồm route simulation DB commit/response mất/retry.
 - E2E assisted đầy đủ đã thêm; chỉ chạy thật khi có rehearsal credential, không ghi pass nếu skip.
+- Lần chạy thực tế: Playwright E2E-06b báo `1 skipped` do thiếu rehearsal credential/kill switch.
 - Không merge, deploy, chạy migration hoặc thay đổi `main`.
 - Giữ nguyên, không stage `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
 
