@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { TurnstileWidget } from "@/components/turnstile-widget";
 import { VietnameseDateInput } from "@/components/vietnamese-date-input";
+import { adoptServerDraftSnapshot } from "@/modules/public-intake/draft-adoption";
 import {
   CERTIFICATE_ROLE_OPTIONS,
   CHANGE_REASON_OPTIONS,
@@ -551,6 +552,8 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const [existingResults, setExistingResults] = useState<Record<string, ExistingLookupResult>>({});
 
   const [csrfToken, setCsrfToken] = useState("");
+  /** Version PostgreSQL gần nhất đã nhận từ GET/PATCH, gửi lại để phát hiện thiết bị sửa song song. */
+  const [serverVersion, setServerVersion] = useState<number | null>(null);
   // Token Turnstile gắn với đúng hành động sinh ra nó; đổi bước là token cũ hết giá trị.
   const [challenge, setChallenge] = useState<{ action: string; token: string }>({
     action: "",
@@ -754,6 +757,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           headers: { "content-type": "application/json", "x-public-csrf-token": csrfToken },
           body: JSON.stringify({
             draft: withCertificateMetadata(draftToSave, certificatePhotos),
+            version: serverVersion,
           }),
         });
 
@@ -763,6 +767,18 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           return false;
         }
 
+        const saved = (await response.json()) as { version?: unknown };
+        if (
+          typeof saved.version !== "number" ||
+          !Number.isInteger(saved.version) ||
+          saved.version < 1
+        ) {
+          setSaveStatus("FAILED");
+          setServerError("Máy chủ không trả phiên bản bản kê khai hợp lệ. Vui lòng thử lại.");
+          return false;
+        }
+
+        setServerVersion(saved.version);
         setSaveStatus("SAVED");
         setServerError("");
         // Chỉ hạ cờ khi máy chủ đã nhận. Lưu hỏng mà hạ cờ là mất dữ liệu im lặng ở lần sau.
@@ -774,7 +790,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         return false;
       }
     },
-    [csrfToken, draft, certificatePhotos],
+    [csrfToken, draft, certificatePhotos, serverVersion],
   );
 
   /**
@@ -811,62 +827,74 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
    * Ở lần khôi phục (`recovered`), bản của máy chủ còn là bản duy nhất có dữ liệu đã lưu trước
    * đó — nên phải lấy về, không được đẩy bản rỗng trên máy lên đè.
    */
-  const adoptServerDraft = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetchApi("/api/public/submissions/current", { method: "GET" });
-      if (!response.ok) {
-        return false;
-      }
-      const body = (await response.json()) as {
-        draft: (IntakeDraft & { owners?: unknown }) | null;
-        files?: ServerFileSummary[];
-      };
-      let restoredDraft: IntakeDraft | null = null;
-      if (body.draft) {
-        if (!Array.isArray(body.draft.owners)) return false;
+  const adoptServerDraft = useCallback(
+    async (options?: { localDraft?: IntakeDraft }): Promise<boolean> => {
+      try {
+        const response = await fetchApi("/api/public/submissions/current", { method: "GET" });
+        if (!response.ok) {
+          return false;
+        }
+        const body = (await response.json()) as {
+          draft: (IntakeDraft & { owners?: unknown }) | null;
+          files?: ServerFileSummary[];
+          version?: unknown;
+        };
+        if (!body.draft || !Array.isArray(body.draft.owners)) return false;
         // Nháp lưu trước 2026-07-22 mang mã vai trò cũ, không còn trong danh mục PL3. Đổi ngay lúc
         // tải về, nếu không ô "Vai trò trên GCN" hiện trống và người dân không hiểu vì sao.
-        restoredDraft = {
+        const serverDraft = {
           ...body.draft,
           owners: body.draft.owners.map((owner) => ({
             ...owner,
             roleOnCertificate: normalizeCertificateRole(owner.roleOnCertificate),
           })),
         } as IntakeDraft;
+        const adopted = adoptServerDraftSnapshot({
+          serverDraft,
+          serverVersion: body.version,
+          localDraft: options?.localDraft,
+        });
+        if (!adopted) return false;
+        const restoredDraft = adopted.draft;
         setDraft(restoredDraft);
-      }
-      const restoredIdentity: IdentityPhotos = {};
-      const restoredCertificates: UploadedCertificateImage[] = [];
-      for (const file of body.files ?? []) {
-        if (file.status !== "UPLOADED") continue;
-        if (file.documentType === "CERTIFICATE") {
-          restoredCertificates.push({
-            fileId: file.fileId,
-            name: "Ảnh GCN đã tải",
-            pageLabel: "",
-          });
-        } else {
-          restoredIdentity[file.ownerId] = {
-            ...restoredIdentity[file.ownerId],
-            [file.documentType]: {
+        setServerVersion(adopted.version);
+        // Nếu người dùng đã nhập thêm dữ liệu trong lúc CREATE đang bay, lần upload/chuyển bước kế
+        // tiếp phải PATCH phần được giữ lại; chỉ owner/parcel IDs và version là lấy từ server.
+        draftDirtyRef.current = adopted.hasLocalChanges;
+        const restoredIdentity: IdentityPhotos = {};
+        const restoredCertificates: UploadedCertificateImage[] = [];
+        for (const file of body.files ?? []) {
+          if (file.status !== "UPLOADED") continue;
+          if (file.documentType === "CERTIFICATE") {
+            restoredCertificates.push({
               fileId: file.fileId,
-              name:
-                file.documentType === "CITIZEN_ID_FRONT"
-                  ? "CCCD mặt trước đã tải"
-                  : "CCCD mặt sau đã tải",
-            },
-          };
+              name: "Ảnh GCN đã tải",
+              pageLabel: "",
+            });
+          } else {
+            restoredIdentity[file.ownerId] = {
+              ...restoredIdentity[file.ownerId],
+              [file.documentType]: {
+                fileId: file.fileId,
+                name:
+                  file.documentType === "CITIZEN_ID_FRONT"
+                    ? "CCCD mặt trước đã tải"
+                    : "CCCD mặt sau đã tải",
+              },
+            };
+          }
         }
+        setIdentityPhotos(restoredIdentity);
+        setCertificatePhotos(
+          applyCertMeta(restoredCertificates, restoredDraft.certificateFileMetadata),
+        );
+        return true;
+      } catch {
+        return false;
       }
-      setIdentityPhotos(restoredIdentity);
-      setCertificatePhotos(
-        applyCertMeta(restoredCertificates, restoredDraft?.certificateFileMetadata),
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     let recovery: {
@@ -944,7 +972,10 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
               {
                 method: "POST",
                 headers: createHeaders,
-                body: JSON.stringify({ phone: draft.phone }),
+                body: JSON.stringify({
+                  phone: draft.phone,
+                  consent: { accepted: draft.consentAccepted },
+                }),
               },
               CREATE_API_TIMEOUT_MS,
             );
@@ -982,7 +1013,6 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           accessSecret: string;
           csrfToken: string;
         };
-        setReceipt({ code: created.receiptCode, secret: created.accessSecret });
         setCsrfToken(created.csrfToken);
         createIdempotencyKey.current = null;
         try {
@@ -992,11 +1022,12 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         }
         // Đồng bộ ID chủ sử dụng với máy chủ trước khi người dân kịp chọn ảnh CCCD ở ngay bước
         // này; thiếu bước đồng bộ thì `ownerId` gửi kèm ảnh là ID lạ và máy chủ trả 400.
-        if (!(await adoptServerDraft())) {
+        if (!(await adoptServerDraft({ localDraft: draft }))) {
           setServerError(
             "Đã tạo được bản kê khai nhưng chưa tải được dữ liệu về máy. Ghi lại mã ở trên, kiểm tra mạng rồi bấm Tiếp tục để thử lại.",
           );
         }
+        setReceipt({ code: created.receiptCode, secret: created.accessSecret });
         // Giữ nguyên bước đầu: ngay sau khi tạo nháp/thư mục Drive, người dân tải ảnh CCCD tại
         // chính màn hình này thay vì phải đi qua toàn bộ biểu mẫu rồi mới quay lại.
         return;
@@ -1017,7 +1048,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     validate,
     step,
     receipt,
-    draft.phone,
+    draft,
     flushDraft,
     assisted,
     buildCreateHeaders,
@@ -1732,6 +1763,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     // vì PATCH tiếp vào bản kê khai vừa gửi.
     setReceipt(null);
     setCsrfToken("");
+    setServerVersion(null);
     createIdempotencyKey.current = null;
     try {
       sessionStorage.removeItem(CERT_META_STORAGE_KEY);

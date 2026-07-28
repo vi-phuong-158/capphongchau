@@ -16,6 +16,7 @@ import {
   creationFingerprint,
   CreationConflictError,
 } from "@/modules/public-intake/create-submission";
+import { validateCreateSubmissionRequest } from "@/modules/public-intake/create-request";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import {
   createPublicCsrfToken,
@@ -97,22 +98,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       return fail("VALIDATION_FAILED", "Thiếu hoặc sai khóa chống gửi trùng.", requestId, 400);
     }
 
-    let body: { phone?: unknown };
+    let body: unknown;
     try {
-      body = (await request.json()) as { phone?: unknown };
+      body = await request.json();
     } catch {
       return fail("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId, 400);
     }
 
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    if (!/^0\d{9}$/.test(phone)) {
-      return fail(
-        "VALIDATION_FAILED",
-        "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.",
-        requestId,
-        400,
-      );
+    const validated = validateCreateSubmissionRequest(body);
+    if (!validated.ok) {
+      return fail("VALIDATION_FAILED", validated.message, requestId, 400);
     }
+    const { phone, consentAccepted } = validated.value;
 
     const idempotencyKey = publicRequestLogKey(rawIdempotencyKey);
     const result = await createIntakeSubmission({
@@ -129,6 +126,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       accessPepper: environment.PUBLIC_ACCESS_CODE_PEPPER,
       // Không có Turnstile nên không có khái niệm "token đã dùng"; phiên đăng nhập là hàng rào.
       replayOnly: false,
+      consentAccepted,
       consentVersion: environment.CONSENT_NOTICE_VERSION,
       channel: "OFFICER_ASSISTED",
       assistedBy: { email: user.email, displayName: user.displayName },
@@ -139,6 +137,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       action: "ASSISTED_SUBMISSION_CREATED",
       entityId: result.submissionId,
       requestId,
+      metadata: {
+        consentAccepted,
+        consentVersion: environment.CONSENT_NOTICE_VERSION,
+        intakeChannel: "OFFICER_ASSISTED",
+      },
     });
 
     // Cùng cookie phiên với cổng công khai: wizard, upload và submit dùng lại nguyên vẹn.

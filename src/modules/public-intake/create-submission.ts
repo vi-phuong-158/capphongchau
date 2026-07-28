@@ -52,6 +52,8 @@ export interface CreateIntakeSubmissionInput {
   readonly sessionSecret: string;
   readonly accessPepper: string;
   readonly replayOnly: boolean;
+  /** Route chỉ truyền literal này sau khi đã validate `consent.accepted === true`. */
+  readonly consentAccepted: true;
   readonly consentVersion: string;
   /** Do route gán. `OFFICER_ASSISTED` chỉ đến từ route đã xác thực nhân viên. */
   readonly channel: IntakeChannel;
@@ -94,6 +96,7 @@ export async function createIntakeSubmission(
   const driveFolderId = await getPublicIntakeStorage().createSubmissionFolder(submissionId);
   const draft = emptyDraft(randomUUID(), randomUUID(), randomUUID());
   draft.phone = input.phone;
+  draft.consentAccepted = input.consentAccepted;
 
   await repository.create({
     submissionId,

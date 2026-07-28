@@ -15,6 +15,7 @@ import {
   StaleChallengeError,
   type CreationResult,
 } from "@/modules/public-intake/create-submission";
+import { validateCreateSubmissionRequest } from "@/modules/public-intake/create-request";
 import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
 import { publicError } from "@/modules/public-intake/route-context";
 import {
@@ -67,25 +68,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError("ACCESS_DENIED", "Yêu cầu không hợp lệ.", requestId);
   }
 
-  let body: { phone?: unknown };
+  let body: unknown;
   try {
-    body = (await request.json()) as { phone?: unknown };
+    body = await request.json();
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }
 
-  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-  if (!/^0\d{9}$/.test(phone)) {
-    return publicError(
-      "VALIDATION_FAILED",
-      "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.",
-      requestId,
-    );
+  const validated = validateCreateSubmissionRequest(body);
+  if (!validated.ok) {
+    return publicError("VALIDATION_FAILED", validated.message, requestId);
   }
-
-  // Người dân đã xác nhận đồng ý ở bước điều khoản trên giao diện; server ghi phiên bản thông báo
-  // đang hiệu lực (CONSENT_NOTICE_VERSION) làm bằng chứng thay vì bắt client gửi lại — client không
-  // thể tự biết phiên bản do đây là cấu hình phía server.
+  const { phone, consentAccepted } = validated.value;
 
   const rawIdempotencyKey = request.headers.get("idempotency-key");
   if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {
@@ -135,6 +129,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         sessionSecret: environment.PUBLIC_SESSION_SECRET,
         accessPepper: environment.PUBLIC_ACCESS_CODE_PEPPER,
         replayOnly: turnstile.duplicate,
+        consentAccepted,
         consentVersion: environment.CONSENT_NOTICE_VERSION,
         // Cổng công khai LUÔN là tự kê khai. Không có đường nào để client tự khai là cán bộ.
         channel: "SELF_SERVICE",

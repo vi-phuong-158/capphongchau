@@ -81,7 +81,12 @@ function drawScaled(source: ImageBitmap | HTMLImageElement): HTMLCanvasElement |
  * `tests/citizen-id-qr-decoding.test.ts` khóa lại kết luận đó.
  */
 export async function readCitizenIdQr(file: File): Promise<CitizenIdQrReadResult | null> {
-  const source = await loadBitmap(file);
+  let source: ImageBitmap | HTMLImageElement;
+  try {
+    source = await loadBitmap(file);
+  } catch {
+    return null;
+  }
   try {
     const canvas = drawScaled(source);
     if (!canvas) return null;
