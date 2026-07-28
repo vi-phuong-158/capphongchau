@@ -109,8 +109,14 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không 
 │       XHR đã đếm; thanh phần trăm tụt bị người dân đọc là "hỏng").
 ├── POST /api/public/submissions (PUBLIC_CREATE idempotency)
 │   └── src/modules/public-intake/create-submission.ts — DÙNG CHUNG với route cán bộ;
-│       `channel` là tham số BẮT BUỘC, cổng công khai gán cứng "SELF_SERVICE"
-├── PATCH /api/public/submissions/current (version) — qua flushDraft() single-flight + cờ dirty
+│       body bắt buộc `phone` + `consent.accepted === true`; route validate trước Turnstile/Drive,
+│       server tự gán consent version; `channel` là tham số BẮT BUỘC, cổng công khai gán cứng
+│       "SELF_SERVICE"
+├── GET /api/public/submissions/current → draft + server version
+│   └── draft-adoption.ts giữ dữ liệu local, thay owner/parcel/land-use ID bằng ID server sau
+│       CREATE; recovery dùng nguyên draft server
+├── PATCH /api/public/submissions/current (version) — qua flushDraft() single-flight + cờ dirty;
+│   client gửi version gần nhất và cập nhật version từ response
 ├── POST .../uploads/initiate → phiên resumable Drive
 │   ⚠️ tên tệp trong kho do MÁY CHỦ đặt, KHÔNG ghép body.fileName (tên máy ảnh hay mang CCCD,
 │   họ tên); chỉ đuôi mở rộng lấy từ mimeType đã qua canonicalImageMimeType
@@ -142,10 +148,12 @@ src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-
 ├── assisted-wizard.tsx → <IntakeWizard assisted={{ officerName }} />
 └── POST /api/staff/assisted-submissions
     ├── requireActiveUser + kill switch (cùng thứ tự trang) + verifyCsrfToken, KHÔNG Turnstile
+    ├── body bắt buộc `phone` + `consent.accepted === true`; thiếu consent trả 400 trước create/audit
     ├── createIntakeSubmission({ channel: "OFFICER_ASSISTED", assistedBy: từ phiên })
     │   ⚠️ client KHÔNG gửi được channel/assistedBy — nhận từ client là để ai cũng gắn nhãn
     │   "cán bộ đã nhập hộ" cho hồ sơ của mình
-    ├── audit ASSISTED_SUBMISSION_CREATED
+    ├── lưu consent version + assistedBy/assistedAt; audit ASSISTED_SUBMISSION_CREATED kèm metadata
+    │   consentAccepted/consentVersion/intakeChannel
     └── đặt CÙNG cookie phiên công khai → wizard/upload/submit dùng lại y nguyên
 
 src/app/submissions/page.tsx / [submissionId]

@@ -277,12 +277,13 @@ Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2.
    **ĐÃ XONG 2026-07-24**, xem chi tiết ở mục "Hoãn có chủ đích" phía trên và
    `03-decisions.md` [2026-07-24 — Diễn tập staging].
 
-**Đây là điều kiện chặn DUY NHẤT còn lại.** Ba mục dưới đây từng nằm trong danh sách này đã được
-chủ dự án **chấp nhận rủi ro và bỏ qua** ngày 2026-07-24 (không sửa code, không chặn nữa) — xem
-`03-decisions.md` [2026-07-24 — Chấp nhận rủi ro] để biết rủi ro cụ thể còn tồn tại trong hệ thống:
+**Đây là điều kiện chặn DUY NHẤT còn lại.** Ba mục dưới đây từng được chủ dự án chấp nhận rủi ro
+ngày 2026-07-24. Mục consent đã được sửa lại ngày 2026-07-28 theo yêu cầu mới; hai mục còn lại vẫn
+giữ quyết định cũ — xem `03-decisions.md` để biết phạm vi:
 
-- ~~Thông báo bảo vệ dữ liệu vẫn là placeholder, server ghi `consentVersion` không xác minh người
-  dân thật sự đã đọc/tick~~ (`submissions/route.ts`).
+- ✅ **Đã sửa 2026-07-28:** public và assisted create bắt buộc `consent.accepted === true`, server
+  validate trước create, lưu server consent version và assisted audit metadata. Thông báo bảo vệ
+  dữ liệu vẫn cần chốt nguyên văn trước vận hành thật.
 - ~~Lớp biên: `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` bật trên production; chưa có domain thật sau
   Cloudflare~~ — chấp nhận chạy trên `*.vercel.app`, bù bằng Turnstile (vẫn bật) + công tắc khẩn
   `PUBLIC_INTAKE_MODE=PAUSED`.

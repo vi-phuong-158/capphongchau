@@ -2173,3 +2173,53 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   không có `SUPABASE_DATABASE_URL` → thoát mã 1 với thông báo rõ (đúng kỳ vọng, không phải lỗi).
   **`npm run test:e2e:preview` và migration production/preview đều CHƯA chạy** trong phiên này —
   không có credential thật.
+
+## [2026-07-28] Sửa race đồng bộ `ownerId` trước upload CCCD ở Public Intake V2
+
+- **Agent:** Codex
+- **Thay đổi:** Ở `IntakeWizard.goNext`, chỉ hiển thị phần đã tạo hồ sơ (`receipt`) sau khi
+  `adoptServerDraft()` tải xong draft có ID chủ sử dụng do máy chủ sinh. `readCitizenIdQr()` coi
+  lỗi mở bitmap là QR không đọc được (`null`) thay vì đẩy lỗi kỹ thuật vào wizard; người dân vẫn
+  nhận thông báo nhập tay. E2E chờ phản hồi complete và trạng thái UI của ảnh CCCD trước khi đi
+  tiếp.
+- **Lý do:** Trước đó receipt render trước khi client thay ID tạm bằng ID server, nên upload CCCD
+  có thể gửi ownerId không tồn tại và bị từ chối. QR thất bại không được chặn lưu nháp hoặc upload.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`,
+  `src/modules/public-intake/citizen-id-qr.client.ts`,
+  `tests/e2e/public-intake-v2.spec.ts`, `docs/brain/06-ai-working-log.md`.
+- **Kiểm tra:** `npm.cmd run typecheck` đạt; `npm.cmd run test` đạt 552 passed, 10 skipped;
+  `npm.cmd run lint` không có error (5 warning có sẵn); `git diff --check` đạt. E2E-01 trên
+  rehearsal đã không còn alert ownerId không hợp lệ, nhưng còn 2/3 kịch bản fail do wizard không
+  chuyển sang bước 2 sau hai ảnh CCCD và timeout upload GCN. Chưa commit, chưa deploy, chưa chạy
+  migration.
+
+## [2026-07-28] Hoàn tất điều tra E2E Public Intake sau bàn giao
+
+- **Agent:** Codex
+- **Nguyên nhân:** Khi tách service `createIntakeSubmission`, draft mới không còn được đặt
+  `consentAccepted = true`. Sau đó wizard gọi `adoptServerDraft()` để lấy owner ID do server sinh,
+  ghi đè lựa chọn đồng ý của người dùng bằng giá trị mặc định `false`; bước 1 bị validator chặn
+  nhưng lỗi không có ô hiển thị tương ứng.
+- **Sửa:** Khôi phục `draft.consentAccepted = true` trong service tạo hồ sơ; thêm regression
+  assertion vào `tests/public-submission-create.test.ts`. Cập nhật selector E2E theo nhãn UI hiện
+  hành (`Ảnh N/M`, `Gửi bản kê khai`, `Mã tiếp nhận` exact), không đổi API/schema/migration.
+- **Kiểm tra:** `npm.cmd run test` 552 passed, 10 skipped; `npm.cmd run typecheck` đạt;
+  `npm.cmd run lint` đạt với 5 warning có sẵn; `npm.cmd run build` đạt; `git diff --check` đạt.
+  Rehearsal E2E-01 (3/3), E2E-02 và E2E-03 đều pass. Chưa commit, chưa deploy, chưa chạy
+  migration.
+
+## [2026-07-28] Siết contract consent và hợp nhất draft theo server version
+
+- **Agent:** Codex
+- **Review:** Public/assisted create chỉ parse phone; server không kiểm consent và service tự đặt
+  `consentAccepted = true`. Assisted flow có consent version + assistedBy nhưng chưa có tín hiệu
+  consent được validate từ request. `adoptServerDraft()` thay toàn bộ local draft và bỏ qua
+  `version` dù GET `/current` đã trả trường này.
+- **Sửa:** Thêm contract dùng chung bắt buộc `consent.accepted === true`; validate trước
+  Turnstile/Drive/database; service chỉ nhận literal consent đã validate. Assisted audit ghi
+  consentAccepted/version/channel. Thêm `draft-adoption.ts` để giữ phone, consent và trường local,
+  đồng bộ owner/parcel/land-use ID server; wizard lưu server version, gửi version ở PATCH và cập
+  nhật từ response.
+- **Test:** 18/18 test tập trung pass, gồm public/assisted thiếu consent và ba test adoption.
+  Rehearsal submit tối thiểu pass đến `KÊ KHAI THÀNH CÔNG`. Bộ typecheck/lint/unit/build đầy đủ
+  được chạy lại trước commit. Không migration, cleanup, deploy hoặc push.

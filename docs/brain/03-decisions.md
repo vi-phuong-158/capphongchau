@@ -7,6 +7,23 @@
 > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
 > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
 
+## [2026-07-28] Consent create phải được khai báo trong request và xác minh phía server
+
+- **Quyết định:** Cả `POST /api/public/submissions` và
+  `POST /api/staff/assisted-submissions` bắt buộc body có `consent.accepted === true`. Server kiểm
+  tra trước khi tạo submission, tự gán `CONSENT_NOTICE_VERSION`, rồi truyền literal
+  `consentAccepted: true` vào service dùng chung. Assisted flow còn lưu danh tính/thời điểm cán bộ
+  và audit metadata consent. Quyết định này **thay thế riêng phần chấp nhận rủi ro consent** ngày
+  2026-07-24; hai rủi ro edge guard và tra cứu tổ chức trong entry cũ vẫn giữ nguyên.
+- **Lý do:** Trạng thái checkbox UI không phải hàng rào server. Việc service tự đặt consent true
+  cho request chỉ có phone vừa tạo bằng chứng sai, vừa khiến `adoptServerDraft()` có thể ghi đè
+  state local. Contract rõ ràng cho phép route từ chối request thiếu consent trước Drive/database.
+- **Đồng bộ draft:** Sau CREATE, client hợp nhất snapshot server theo vị trí để nhận owner/parcel/
+  land-use ID do server sinh, nhưng giữ phone, consent và dữ liệu vừa nhập. Server version từ GET
+  trở thành version cho PATCH kế tiếp; recovery không trộn draft local rỗng.
+- **Kiểm tra bắt buộc:** Request public/assisted thiếu consent bị 400 và không tạo/audit; helper
+  adoption phải khóa ID, dữ liệu local và version; rehearsal tối thiểu phải gửi thành công.
+
 ## [2026-07-28] Public Intake V2 — tách điều kiện gửi của người dân khỏi điều kiện tiếp nhận chính thức
 
 - **Quyết định:** Cổng công khai chỉ còn bắt buộc **số điện thoại + đồng ý + tên chủ sử dụng + ảnh
