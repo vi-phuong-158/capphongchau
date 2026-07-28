@@ -91,6 +91,33 @@ describe("POST /api/public/submissions", () => {
     expect(stored.idempotencyKey).toBe(`PUBLIC_CREATE:${IDEMPOTENCY_KEY}`);
     expect(stored).not.toHaveProperty("accessSecret");
     expect(stored.accessCodeHash).not.toBe(body.accessSecret);
+    expect(stored.draft).toMatchObject({
+      phone: "0912345678",
+      consentAccepted: true,
+    });
+  });
+
+  it("từ chối request thiếu consent trước Turnstile, Drive và database", async () => {
+    const request = new Request("http://localhost/api/public/submissions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "123e4567-e89b-42d3-a456-426614174099",
+        "x-turnstile-token": "turnstile-token",
+      },
+      body: JSON.stringify({ phone: "0912345678" }),
+    });
+
+    const response = await POST(request);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.message).toContain("đồng ý");
+    expect(mocks.verifyTurnstileToken).not.toHaveBeenCalled();
+    expect(mocks.findCreationByIdempotencyKey).not.toHaveBeenCalled();
+    expect(mocks.createSubmissionFolder).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("trả lại đúng kết quả cũ khi response đầu bị mất, không ghi Drive hoặc Sheets lần hai", async () => {

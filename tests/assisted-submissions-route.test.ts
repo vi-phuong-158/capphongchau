@@ -87,7 +87,7 @@ const { POST } = await import("@/app/api/staff/assisted-submissions/route");
 
 const INTAKE_OFFICER = { email: "canbo@phongchau.gov.vn", displayName: "Trần Văn B" };
 
-function makeRequest(): NextRequest {
+function makeRequest(options?: { includeConsent?: boolean }): NextRequest {
   return new NextRequest("http://localhost:3000/api/staff/assisted-submissions", {
     method: "POST",
     headers: {
@@ -95,7 +95,10 @@ function makeRequest(): NextRequest {
       "idempotency-key": "11111111-1111-4111-8111-111111111111",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ phone: "0912345678" }),
+    body: JSON.stringify({
+      phone: "0912345678",
+      ...(options?.includeConsent === false ? {} : { consent: { accepted: true } }),
+    }),
   });
 }
 
@@ -166,12 +169,33 @@ describe("Cờ BẬT + vai trò ĐÚNG mới được phép", () => {
     expect(mockCreateIntakeSubmission).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "OFFICER_ASSISTED",
+        consentAccepted: true,
         assistedBy: { email: INTAKE_OFFICER.email, displayName: INTAKE_OFFICER.displayName },
       }),
     );
     expect(mockAppendAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "ASSISTED_SUBMISSION_CREATED" }),
+      expect.objectContaining({
+        action: "ASSISTED_SUBMISSION_CREATED",
+        metadata: {
+          consentAccepted: true,
+          consentVersion: "v1",
+          intakeChannel: "OFFICER_ASSISTED",
+        },
+      }),
     );
+  });
+
+  it("từ chối request thiếu consent trước khi tạo hồ sơ hoặc ghi audit", async () => {
+    mockRequireActiveUser.mockResolvedValue(INTAKE_OFFICER);
+
+    const response = await POST(makeRequest({ includeConsent: false }));
+    const body = (await response.json()) as { error: { code: string; message: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.message).toContain("đồng ý");
+    expect(mockCreateIntakeSubmission).not.toHaveBeenCalled();
+    expect(mockAppendAudit).not.toHaveBeenCalled();
   });
 });
 
@@ -195,6 +219,7 @@ describe('Public không thể tự khai "OFFICER_ASSISTED"', () => {
       },
       body: JSON.stringify({
         phone: "0912345678",
+        consent: { accepted: true },
         channel: "SELF_SERVICE",
         assistedBy: { email: "ke-mao-danh@example.com", displayName: "Kẻ mạo danh" },
       }),
@@ -207,6 +232,7 @@ describe('Public không thể tự khai "OFFICER_ASSISTED"', () => {
     expect(mockCreateIntakeSubmission).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "OFFICER_ASSISTED",
+        consentAccepted: true,
         assistedBy: { email: INTAKE_OFFICER.email, displayName: INTAKE_OFFICER.displayName },
       }),
     );
