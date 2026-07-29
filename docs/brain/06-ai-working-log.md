@@ -2662,3 +2662,20 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Còn lại:** test round-trip lease token nằm trong file integration, vẫn tự skip khi không có
   `ACCEPTANCE_SAGA_TEST_DATABASE_URL`. **Bắt buộc chạy file này với database rehearsal thật trước
   khi bật `LAZY_DRIVE_FOLDER_CREATION_ENABLED` ở Preview** — không unit test nào chạm tới lỗi trên.
+
+## [2026-07-29] Codex — đóng lỗi precision bind parameter Phase 3 trên rehearsal
+
+- **Phát hiện:** bản sửa PR #10 đã đọc `drive_folder_lease_until` bằng `::text`, nhưng hai checkpoint
+  vẫn bind token theo `${leaseToken}::timestamptz`. PostgreSQL rehearsal chứng minh driver làm tròn
+  `2026-07-29 16:15:36.185035+00` thành `.185+00` trước khi so sánh, khiến `READY`/`FAILED` khớp 0 dòng.
+- **Sửa tối thiểu:** trong `markSubmissionFolderReady` và `markSubmissionFolderFailed`, dùng
+  `(${leaseToken}::text)::timestamptz`; không đổi schema, lease 60 giây, trần 10, `Retry-After: 3`,
+  feature flag, API, auth/CSRF/Turnstile/consent hay Drive contract.
+- **Rehearsal thật:** migration `202607290005` đã có trên project tách biệt `ddiaaweuqfvutogjckwc`.
+  `tests/staging-rehearsal-acceptance-saga.integration.test.ts` PASS **12/12** với Postgres thật và
+  fake Drive: token `.185035` giữ nguyên; READY và FAILED mỗi nhánh checkpoint đúng 1 row; sai 1
+  micro-giây cập nhật 0 row; lease cũ không ghi đè lease mới; hai request đồng thời chỉ gọi Drive một
+  lần. Không gọi Google Drive thật.
+- **Kiểm tra:** focused folder unit 6/6 PASS; typecheck PASS; lint PASS; full Vitest 79 file/689 test
+  PASS (2 file/13 test skip không có rehearsal URL); webpack build PASS; preflight rehearsal PASS
+  **36/36**. Chưa deploy/merge, flag vẫn `false`; trạng thái chỉ `READY_FOR_PREVIEW_REHEARSAL`.

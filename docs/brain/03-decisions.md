@@ -1729,6 +1729,15 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Quyết định:** mọi truy vấn đọc cột này phải cast `::text`; kiểu dòng khai báo `string | null`;
   field trong snapshot tên là `leaseToken`, không phải `leaseUntil`. Đây là **token đối sánh**, không
   phải mốc thời gian để hiển thị hay tính toán — không được đưa qua `Date` ở bất kỳ đâu.
+- **Bổ sung sau rehearsal PostgreSQL:** cả **tham số checkpoint** cũng phải giữ text đến khi PostgreSQL
+  tự parse: `drive_folder_lease_until = ($leaseToken::text)::timestamptz` trong cả nhánh `READY` và
+  `FAILED`. Chỉ cast cột trả về là chưa đủ vì driver `postgres` vẫn có thể ép interpolation trực tiếp
+  `$leaseToken::timestamptz` sang `Date` mili-giây trước khi server so sánh.
+- **Bằng chứng:** rehearsal tách biệt xác nhận token cố định
+  `2026-07-29 16:15:36.185035+00` checkpoint được đúng một dòng ở cả hai nhánh; token lệch đúng một
+  micro-giây không checkpoint; worker lease cũ không ghi đè được lease mới; hai initiate đồng thời chỉ
+  tạo một folder Drive (mock). Điều này là điều kiện `READY_FOR_PREVIEW_REHEARSAL`, chưa phải bằng
+  chứng bật cờ hay deploy Production.
 - **Đã cân nhắc:** thêm cột `drive_folder_lease_token uuid` riêng do app sinh. Bền hơn về nguyên tắc
   nhưng cần sửa migration và thêm cột chỉ để giải một vấn đề đã đóng bằng `::text`. Chọn phương án
   nhỏ hơn; nếu sau này lease cần thêm ngữ nghĩa (chủ sở hữu, thế hệ) thì chuyển sang cột uuid.

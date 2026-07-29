@@ -1,39 +1,80 @@
 # CHATGPT HANDOFF REPORT
 
-## Rehearsal execution after PR #10 lease-token fix (2026-07-29)
+## Phase 3 lease-token rehearsal after PR #10 (2026-07-29)
 
-### Outcome: BLOCKED — do not enable the Phase 3 flag
+### Outcome: READY_FOR_PREVIEW_REHEARSAL — not Phase 3 PASS, not Production-ready
 
-- Local branch was fast-forwarded to `bb0ffd8` (`fix(public-intake): keep Drive folder lease token lossless`).
-- Migration `202607290005_lazy_drive_folder_creation.sql` was applied transactionally to the approved
-  isolated rehearsal project `ddiaaweuqfvutogjckwc`. Read-back confirmed all four folder columns,
-  the state CHECK constraint and the lease index. No Production database or `.env.local` credentials
-  were used.
-- Local regression checks passed: `npm.cmd run typecheck`; `npm.cmd test` = 79 files / 689 tests
-  passed, 2 files / 13 tests skipped.
-- Real PostgreSQL rehearsal command ran against that isolated database. The suite intentionally
-  truncates its synthetic rehearsal tables before each case; it does **not** call real Google Drive
-  (the harness supplies a fake Drive/stub storage).
-- Result: 10/12 integration cases passed; both new Phase 3 lease cases failed. Therefore Phase 3 is
-  not PASS and `LAZY_DRIVE_FOLDER_CREATION_ENABLED` must remain false.
+- **Branch/base:** `codex/phase3-lazy-drive-folder`, based on `8942d3c` (`origin/main` after PR #9);
+  it includes PR #10 and reviewer commit `bb0ffd8`. The corrective commit is
+  `fix(public-intake): preserve lease token parameter precision`.
+- **Git baseline:** clean branch at `fb2ddda`; local baseline typecheck and full Vitest had passed
+  (79 files / 689 tests; 2 files / 13 tests skipped). User work was preserved.
+- **Git status at handoff:** unrelated uncommitted PWA work (`next-env.d.ts`, `src/app/page.tsx`,
+  `src/components/pwa-install-button.tsx`, `src/lib/pwa-install.ts`, `tests/pwa-install.test.ts` and
+  its existing log entry) was present after the Phase 3 changes. It is deliberately not staged or
+  included in this corrective commit.
+- **Database scope:** migration `202607290005_lazy_drive_folder_creation.sql` was already applied to
+  approved isolated rehearsal project `ddiaaweuqfvutogjckwc`. All rehearsal commands read only
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL` from `.env.rehearsal.local`; Production database URL was removed
+  from the test process. No Production migration, merge, deploy, feature-flag change or real Google
+  Drive request was made.
 
-### Root cause proved on rehearsal Postgres
+### Root cause and exact correction
 
-`drive_folder_lease_until::text` returns microseconds correctly, for example
-`2026-07-29 16:15:36.185035+00`. But a bound parameter written as
-`${leaseToken}::timestamptz` is coerced by the driver to millisecond precision before PostgreSQL
-compares it: the diagnostic read-back became `...16:15:36.185+00`, a 35 microsecond mismatch.
-Consequently `markSubmissionFolderReady()` updates zero rows and the concurrent path has no winner.
+`drive_folder_lease_until::text` correctly returns microseconds, e.g.
+`2026-07-29 16:15:36.185035+00`; yet a direct parameter
+`${leaseToken}::timestamptz` is coerced by `postgres` through JavaScript millisecond precision before
+PostgreSQL compares it (`...185+00`, a 35-microsecond mismatch). `READY` and `FAILED` therefore updated
+zero rows, leaving a valid Drive folder uncheckpointed in `CREATING`.
 
-The minimal corrective patch is to force the parameter to stay text until PostgreSQL parses it:
-
-```sql
-drive_folder_lease_until = (${leaseToken}::text)::timestamptz
+```diff
+- and drive_folder_lease_until = ${leaseToken}::timestamptz
++ and drive_folder_lease_until = (${leaseToken}::text)::timestamptz
 ```
 
-in both `markSubmissionFolderReady` and `markSubmissionFolderFailed`, followed by the same rehearsal
-suite. Do not claim actual-Drive E2E: the dedicated rehearsal env contains only the Postgres URL, and
-using the OAuth settings from `.env.local` would violate the non-Production boundary.
+The expression is now present in both `markSubmissionFolderReady` and
+`markSubmissionFolderFailed`. The lease remains a string fencing token end-to-end: result columns use
+`drive_folder_lease_until::text`, `SubmissionFolderSnapshot.leaseToken` stays a string, and neither
+the folder service nor checkpoint path converts it to `Date`/ISO time.
+
+### Files and symbols changed
+
+| File | Symbols | Change |
+| --- | --- | --- |
+| `src/modules/public-intake/repository.ts` | `markSubmissionFolderReady`, `markSubmissionFolderFailed` | Cast bound lease token through text before `timestamptz` comparison. |
+| `tests/staging-rehearsal-acceptance-saga.integration.test.ts` | Phase 3 token/fencing and concurrent lease cases | Fixed `.185035` token, READY/FAILED, wrong-token, stale-worker and one-Drive-call proof. |
+| `docs/brain/03-decisions.md` | Phase 3 lease decision | Records text casting for both result and parameter paths. |
+| `docs/brain/06-ai-working-log.md` | newest Phase 3 entry | Records rehearsal evidence and limited status. |
+| `CHATGPT_HANDOFF.md` | this section | Official handoff update. |
+
+### Verification and acceptance
+
+| Check | Result |
+| --- | --- |
+| `npx.cmd vitest run tests/submission-folder.test.ts` | PASS — 1 file / 6 tests |
+| Rehearsal `npx.cmd vitest run tests/staging-rehearsal-acceptance-saga.integration.test.ts` | PASS — **1 file / 12 tests** (real Postgres, fake Drive only) |
+| fixed token `.185035` | READY and FAILED each checkpoint exactly one row |
+| token `.185036` | READY and FAILED checkpoint zero rows; row remains `CREATING` |
+| stale lease token | old worker cannot checkpoint after a new lease is acquired |
+| concurrent initiate | both callers may observe READY, but exactly one Drive call/folder checkpoint |
+| `npm.cmd run typecheck`; `npm.cmd run lint -- --quiet` | PASS |
+| `npm.cmd test` | PASS — 79 files / 689 tests; 2 files / 13 tests skipped |
+| `npm.cmd run build -- --webpack` | PASS — 23 routes |
+| `preflight:public-intake-v2-migrations` on rehearsal | PASS — **36/36** |
+| `git diff --check` | PASS |
+
+### Scope, risks and next step
+
+- No schema/API/security change: lease 60 seconds, attempt cap 10, `Retry-After: 3`, flag default false,
+  auth, role, CSRF, Turnstile, consent and phone masking are unchanged.
+- Build completed successfully. Next.js reported its normal environment discovery; no credential value
+  was printed, and no OAuth/Drive API was called. Rehearsal and preflight themselves ran from a fresh
+  temporary directory using only the isolated database URL.
+- `LAZY_DRIVE_FOLDER_CREATION_ENABLED` remains **false**. Do not call this Phase 3 PASS until an
+  authenticated Preview E2E exercises create, concurrent initiate, retry after a Drive interruption,
+  complete/delete and acceptance with the flag enabled in Preview only.
+- No Production deployment, no Production migration, no merge to `main`, and no actual Google Drive
+  claim occurred. The remaining risk is therefore Preview integration, not the PostgreSQL fencing bug.
 
 ## Sửa review PR #10 — lease token Phase 3 (2026-07-29, Claude Code)
 

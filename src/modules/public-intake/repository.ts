@@ -542,7 +542,7 @@ export class PublicIntakeRepository {
       where submission_id = ${submissionId}
         and drive_folder_id is null
         and drive_folder_state = 'CREATING'
-        and drive_folder_lease_until = ${leaseToken}::timestamptz
+        and drive_folder_lease_until = (${leaseToken}::text)::timestamptz
       returning drive_folder_id, drive_folder_state,
         drive_folder_lease_until::text as drive_folder_lease_until,
         drive_folder_attempts
@@ -560,7 +560,7 @@ export class PublicIntakeRepository {
       where submission_id = ${submissionId}
         and drive_folder_id is null
         and drive_folder_state = 'CREATING'
-        and drive_folder_lease_until = ${leaseToken}::timestamptz
+        and drive_folder_lease_until = (${leaseToken}::text)::timestamptz
     `;
   }
 

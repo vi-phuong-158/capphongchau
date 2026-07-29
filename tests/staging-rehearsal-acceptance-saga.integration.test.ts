@@ -172,10 +172,7 @@ import {
   SubmissionIdempotencyConflictError,
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
-import {
-  ensureSubmissionFolderReady,
-  SubmissionFolderBusyError,
-} from "@/modules/public-intake/submission-folder";
+import { ensureSubmissionFolderReady } from "@/modules/public-intake/submission-folder";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
 
 const TEST_DB_URL = process.env.ACCEPTANCE_SAGA_TEST_DATABASE_URL;
@@ -446,11 +443,89 @@ describe.skipIf(!hasTestDb)(
       };
     }
 
-    it(
-      "Phase 3: lease token round-trip nguyên vẹn qua PostgreSQL (micro-giây không bị cắt)",
-      async () => {
+    it("Phase 3: lease token text giữ nguyên micro-giây cho READY/FAILED và fencing", async () => {
+      const repository = getPublicIntakeRepository();
+      const fixedLeaseToken = "2026-07-29 16:15:36.185035+00";
+      const seedLease = async (leaseToken: string) => {
         const submissionId = `lazy-token-${randomUUID()}`;
         await bootstrapSql`
+            insert into public.public_submissions (
+              submission_id, receipt_code, status, phone, access_code_hash, consent_version,
+              drive_folder_id, drive_folder_state, drive_folder_lease_until, draft_json
+            ) values (
+              ${submissionId}, ${`PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`},
+              'DRAFT', '0912345678', 'hash', 'v1', null, 'CREATING',
+              (${leaseToken}::text)::timestamptz, '{}'::jsonb
+            )
+          `;
+        const snapshot = await repository.getSubmissionFolderSnapshot(submissionId);
+        expect(snapshot?.leaseToken).toBe(leaseToken);
+        return submissionId;
+      };
+
+      // `timestamptz` chính xác tới micro-giây. Bound parameter phải đi qua `text` trước khi
+      // PostgreSQL parse; nếu driver ép thành `Date`, .185035 thành .185 và fencing khớp 0 dòng.
+      const readySubmissionId = await seedLease(fixedLeaseToken);
+      const ready = await repository.markSubmissionFolderReady(
+        readySubmissionId,
+        "lazy-token-folder",
+        fixedLeaseToken,
+      );
+      expect(ready).not.toBeNull();
+      expect(ready).toMatchObject({ state: "READY", driveFolderId: "lazy-token-folder" });
+
+      const failedSubmissionId = await seedLease(fixedLeaseToken);
+      await repository.markSubmissionFolderFailed(failedSubmissionId, fixedLeaseToken);
+      const failed = await repository.getSubmissionFolderSnapshot(failedSubmissionId);
+      expect(failed).toMatchObject({ state: "FAILED", driveFolderId: null, leaseToken: "" });
+      const [{ failedCount }] = await bootstrapSql<{ failedCount: number }[]>`
+          select count(*)::integer as "failedCount"
+          from public.public_submissions
+          where submission_id = ${failedSubmissionId} and drive_folder_state = 'FAILED'
+        `;
+      expect(failedCount).toBe(1);
+
+      const wrongTokenSubmissionId = await seedLease(fixedLeaseToken);
+      const wrongToken = "2026-07-29 16:15:36.185036+00";
+      await expect(
+        repository.markSubmissionFolderReady(
+          wrongTokenSubmissionId,
+          "must-not-checkpoint",
+          wrongToken,
+        ),
+      ).resolves.toBeNull();
+      await repository.markSubmissionFolderFailed(wrongTokenSubmissionId, wrongToken);
+      await expect(
+        repository.getSubmissionFolderSnapshot(wrongTokenSubmissionId),
+      ).resolves.toMatchObject({
+        state: "CREATING",
+        driveFolderId: null,
+        leaseToken: fixedLeaseToken,
+      });
+
+      const staleLeaseToken = "2000-07-29 16:15:36.185035+00";
+      const staleSubmissionId = await seedLease(staleLeaseToken);
+      const newLease = await repository.tryAcquireSubmissionFolderLease(staleSubmissionId, 60);
+      expect(newLease?.leaseToken).not.toBe(staleLeaseToken);
+      await expect(
+        repository.markSubmissionFolderReady(
+          staleSubmissionId,
+          "stale-worker-folder",
+          staleLeaseToken,
+        ),
+      ).resolves.toBeNull();
+      await expect(
+        repository.getSubmissionFolderSnapshot(staleSubmissionId),
+      ).resolves.toMatchObject({
+        state: "CREATING",
+        driveFolderId: null,
+        leaseToken: newLease?.leaseToken,
+      });
+    }, 20_000);
+
+    it("Phase 3: hai request đồng thời chỉ một request thắng lease PostgreSQL và tạo folder", async () => {
+      const submissionId = `lazy-${randomUUID()}`;
+      await bootstrapSql`
           insert into public.public_submissions (
             submission_id, receipt_code, status, phone, access_code_hash, consent_version,
             drive_folder_id, drive_folder_state, draft_json
@@ -460,77 +535,44 @@ describe.skipIf(!hasTestDb)(
           )
         `;
 
-        const repository = getPublicIntakeRepository();
-        const acquired = await repository.tryAcquireSubmissionFolderLease(submissionId, 60);
-        expect(acquired).not.toBeNull();
-
-        // `timestamptz` chính xác tới micro-giây, `Date` của JS chỉ tới mili-giây. Nếu token
-        // lease đi qua `Date`, mệnh đề `= ${token}::timestamptz` khớp 0 dòng và checkpoint
-        // READY không bao giờ ghi được — hồ sơ kẹt CREATING vĩnh viễn.
-        const ready = await repository.markSubmissionFolderReady(
-          submissionId,
-          "lazy-token-folder",
-          acquired?.leaseToken ?? "",
-        );
-        expect(ready).not.toBeNull();
-        expect(ready).toMatchObject({ state: "READY", driveFolderId: "lazy-token-folder" });
-      },
-      20_000,
-    );
-
-    it(
-      "Phase 3: hai request đồng thời chỉ một request thắng lease PostgreSQL và tạo folder",
-      async () => {
-        const submissionId = `lazy-${randomUUID()}`;
-        await bootstrapSql`
-          insert into public.public_submissions (
-            submission_id, receipt_code, status, phone, access_code_hash, consent_version,
-            drive_folder_id, drive_folder_state, draft_json
-          ) values (
-            ${submissionId}, ${`PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`},
-            'DRAFT', '0912345678', 'hash', 'v1', null, 'PENDING', '{}'::jsonb
-          )
-        `;
-
-        const repository = getPublicIntakeRepository();
-        let driveCalls = 0;
-        const dependencies = {
-          repository,
-          storage: {
-            ensureSubmissionFolder: async () => {
-              driveCalls += 1;
-              await new Promise<void>((resolve) => setTimeout(resolve, 25));
-              return "lazy-originals-folder";
-            },
+      const repository = getPublicIntakeRepository();
+      let driveCalls = 0;
+      const dependencies = {
+        repository,
+        storage: {
+          ensureSubmissionFolder: async () => {
+            driveCalls += 1;
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+            return "lazy-originals-folder";
           },
-        };
-        const record = { submissionId, driveFolderId: null };
+        },
+      };
+      const record = { submissionId, driveFolderId: null };
 
-        const results = await Promise.allSettled([
-          ensureSubmissionFolderReady(record, dependencies),
-          ensureSubmissionFolderReady(record, dependencies),
-        ]);
+      const results = await Promise.allSettled([
+        ensureSubmissionFolderReady(record, dependencies),
+        ensureSubmissionFolderReady(record, dependencies),
+      ]);
 
-        expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-        const rejected = results.find((result) => result.status === "rejected");
-        expect(rejected?.status === "rejected" ? rejected.reason : null).toBeInstanceOf(
-          SubmissionFolderBusyError,
-        );
-        expect(driveCalls).toBe(1);
-        await expect(ensureSubmissionFolderReady(record, dependencies)).resolves.toBe(
-          "lazy-originals-folder",
-        );
-        expect(driveCalls).toBe(1);
+      // Với pool một connection, request thứ hai có thể quan sát READY sau checkpoint thay vì
+      // nhận 503. Dù lịch chạy nào, chỉ request thắng lease mới được gọi Drive/tạo folder.
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+      expect(
+        results.map((result) => (result.status === "fulfilled" ? result.value : null)),
+      ).toEqual(["lazy-originals-folder", "lazy-originals-folder"]);
+      expect(driveCalls).toBe(1);
+      await expect(ensureSubmissionFolderReady(record, dependencies)).resolves.toBe(
+        "lazy-originals-folder",
+      );
+      expect(driveCalls).toBe(1);
 
-        const checkpoint = await repository.getSubmissionFolderSnapshot(submissionId);
-        expect(checkpoint).toMatchObject({
-          state: "READY",
-          driveFolderId: "lazy-originals-folder",
-          attempts: 1,
-        });
-      },
-      20_000,
-    );
+      const checkpoint = await repository.getSubmissionFolderSnapshot(submissionId);
+      expect(checkpoint).toMatchObject({
+        state: "READY",
+        driveFolderId: "lazy-originals-folder",
+        attempts: 1,
+      });
+    }, 20_000);
 
     it(
       "Kịch bản 1: ngắt giữa chừng bước FILES_MOVED (di chuyển được 1/3 file) → retry cùng " +
