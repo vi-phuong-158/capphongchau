@@ -12,6 +12,7 @@
 ## [2026-07-29] Phase 4 pool Supabase và region — code sẵn sàng, chờ Preview benchmark
 
 - Code có `SUPABASE_POOL_MAX` 1–3 (default 1), `vercel.json` khóa `sin1` và benchmark runner không xuất dữ liệu nhạy cảm.
+- Trước khi chạy runner: dùng database synthetic/rehearsal, đặt `PERF_BENCHMARK_BASE_URL` là HTTPS root origin Preview, `PERF_BENCHMARK_EXPECTED_HOST` khớp chính xác và `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`; không dùng alias Production. Queue dùng `q`; đo `detail_page` SSR thực tế và `detail_api` diagnostic riêng. Detail/page/preview thành công append audit (tối đa 150 dòng/lượt đầy đủ), nên phải có kế hoạch dọn/reset audit rehearsal.
 - **Không được** đặt pool lớn hơn 1 hoặc kết luận PASS trước khi có Preview deployment Ready, session cán bộ benchmark riêng, dữ liệu tổng hợp và số connection quota từ Supabase dashboard.
 - Chạy lần lượt 1/2/3 với warm-up 10, đo 40 lượt/route, 4 worker; chọn giá trị cao hơn chỉ khi P95 tốt hơn ≥10%, error rate 0 và peak connection <70% quota. Không thao tác Production trong phase này.
 

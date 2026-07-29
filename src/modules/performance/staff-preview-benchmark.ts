@@ -11,6 +11,10 @@ const SAFE_SERVER_TIMING_NAMES = new Set([
   "preview_total",
 ]);
 
+export const STAFF_BENCHMARK_REHEARSAL_CONFIRMATION = "REHEARSAL_ONLY";
+
+const PRODUCTION_BENCHMARK_HOSTS = new Set(["capphongchau.vercel.app"]);
+
 export type StaffBenchmarkRoute =
   | "health_database"
   | "queue_all"
@@ -18,8 +22,89 @@ export type StaffBenchmarkRoute =
   | "queue_owner"
   | "queue_receipt"
   | "queue_issue"
-  | "detail"
+  | "detail_page"
+  | "detail_api"
   | "preview";
+
+export interface StaffBenchmarkRequest {
+  readonly label: StaffBenchmarkRoute;
+  readonly path: string;
+}
+
+export interface StaffBenchmarkRequestInput {
+  readonly ownerQuery: string;
+  readonly receiptQuery: string;
+  readonly issueQuery: string;
+  readonly submissionId: string;
+  readonly fileId: string;
+}
+
+export interface StaffBenchmarkTargetInput {
+  readonly baseUrl: string;
+  readonly expectedHost: string;
+  readonly rehearsalConfirmation: string;
+}
+
+/**
+ * Chỉ chấp nhận origin Preview rehearsal đã được người chạy xác nhận rõ ràng.
+ * Lỗi không phản chiếu URL/host đầu vào để tránh đưa giá trị nhạy cảm vào terminal.
+ */
+export function validateStaffBenchmarkTarget(input: StaffBenchmarkTargetInput): URL {
+  if (input.rehearsalConfirmation !== STAFF_BENCHMARK_REHEARSAL_CONFIRMATION) {
+    throw new Error("Cần xác nhận PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY.");
+  }
+
+  const expectedHost = input.expectedHost.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(expectedHost)) {
+    throw new Error("PERF_BENCHMARK_EXPECTED_HOST không hợp lệ.");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(input.baseUrl);
+  } catch {
+    throw new Error("PERF_BENCHMARK_BASE_URL phải là origin HTTPS Preview hợp lệ.");
+  }
+
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("PERF_BENCHMARK_BASE_URL phải là origin HTTPS Preview, không có thông tin xác thực hay path.");
+  }
+  if (!url.hostname.endsWith(".vercel.app") || PRODUCTION_BENCHMARK_HOSTS.has(url.hostname.toLowerCase())) {
+    throw new Error("PERF_BENCHMARK_BASE_URL phải trỏ tới Vercel Preview rehearsal, không phải Production.");
+  }
+  if (url.hostname.toLowerCase() !== expectedHost) {
+    throw new Error("PERF_BENCHMARK_BASE_URL không khớp PERF_BENCHMARK_EXPECTED_HOST.");
+  }
+  return url;
+}
+
+export function buildStaffBenchmarkRequests(input: StaffBenchmarkRequestInput): readonly StaffBenchmarkRequest[] {
+  const queuePath = (params: Readonly<Record<string, string>>): string => {
+    const search = new URLSearchParams(params);
+    return `/api/submissions?${search.toString()}`;
+  };
+  const submissionId = encodeURIComponent(input.submissionId);
+  const fileId = encodeURIComponent(input.fileId);
+  return [
+    { label: "health_database", path: "/api/health/database" },
+    { label: "queue_all", path: "/api/submissions" },
+    { label: "queue_status", path: queuePath({ status: "UNDER_REVIEW" }) },
+    { label: "queue_owner", path: queuePath({ q: input.ownerQuery }) },
+    { label: "queue_receipt", path: queuePath({ q: input.receiptQuery }) },
+    { label: "queue_issue", path: queuePath({ q: input.issueQuery }) },
+    { label: "detail_page", path: `/submissions/${submissionId}` },
+    { label: "detail_api", path: `/api/submissions/${submissionId}` },
+    { label: "preview", path: `/api/submissions/${submissionId}/files/${fileId}` },
+  ];
+}
 
 export interface BenchmarkSample {
   readonly route: StaffBenchmarkRoute;

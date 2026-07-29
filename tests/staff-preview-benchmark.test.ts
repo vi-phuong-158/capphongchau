@@ -4,9 +4,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildStaffBenchmarkRequests,
   parseSafeServerTiming,
   safeVercelRegion,
+  STAFF_BENCHMARK_REHEARSAL_CONFIRMATION,
   summarizeStaffBenchmark,
+  validateStaffBenchmarkTarget,
 } from "@/modules/performance/staff-preview-benchmark";
 
 describe("staff Preview benchmark", () => {
@@ -24,6 +27,59 @@ describe("staff Preview benchmark", () => {
   it("chỉ xuất nhãn region Vercel, không xuất deployment identifier", () => {
     expect(safeVercelRegion("sin1::abc123-private")).toBe("sin1");
     expect(safeVercelRegion("unexpected-value")).toBeNull();
+  });
+
+  it("chỉ chấp nhận đúng origin Vercel Preview rehearsal đã xác nhận", () => {
+    expect(
+      validateStaffBenchmarkTarget({
+        baseUrl: "https://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app",
+        expectedHost: "capphongchau-pr-9-vi-phuong-158s-projects.vercel.app",
+        rehearsalConfirmation: STAFF_BENCHMARK_REHEARSAL_CONFIRMATION,
+      }).origin,
+    ).toBe("https://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app");
+
+    const valid = {
+      expectedHost: "capphongchau-pr-9-vi-phuong-158s-projects.vercel.app",
+      rehearsalConfirmation: STAFF_BENCHMARK_REHEARSAL_CONFIRMATION,
+    };
+    for (const baseUrl of [
+      "http://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app",
+      "https://capphongchau.vercel.app",
+      "https://other-preview.vercel.app",
+      "https://user:secret@capphongchau-pr-9-vi-phuong-158s-projects.vercel.app",
+      "https://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app:8443",
+      "https://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app/submissions",
+      "https://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app?unsafe=true",
+    ]) {
+      expect(() => validateStaffBenchmarkTarget({ ...valid, baseUrl })).toThrow();
+    }
+    expect(() =>
+      validateStaffBenchmarkTarget({
+        ...valid,
+        baseUrl: "https://capphongchau-pr-9-vi-phuong-158s-projects.vercel.app",
+        rehearsalConfirmation: "YES",
+      }),
+    ).toThrow("PERF_BENCHMARK_CONFIRM_REHEARSAL");
+  });
+
+  it("tạo đúng q cho tìm kiếm queue và tách SSR detail khỏi API diagnostic", () => {
+    const requests = buildStaffBenchmarkRequests({
+      ownerQuery: "Nguyễn A%_",
+      receiptQuery: "PC-001",
+      issueQuery: "GCN-9",
+      submissionId: "sub/id",
+      fileId: "file/id",
+    });
+    const byRoute = new Map(requests.map((request) => [request.label, request.path]));
+    const baseUrl = "https://preview.example.vercel.app";
+
+    expect(new URL(byRoute.get("queue_owner")!, baseUrl).searchParams.get("q")).toBe("Nguyễn A%_");
+    expect(new URL(byRoute.get("queue_owner")!, baseUrl).searchParams.get("query")).toBeNull();
+    expect(new URL(byRoute.get("queue_receipt")!, baseUrl).searchParams.get("q")).toBe("PC-001");
+    expect(new URL(byRoute.get("queue_issue")!, baseUrl).searchParams.get("q")).toBe("GCN-9");
+    expect(byRoute.get("detail_page")).toBe("/submissions/sub%2Fid");
+    expect(byRoute.get("detail_api")).toBe("/api/submissions/sub%2Fid");
+    expect(byRoute.get("preview")).toBe("/api/submissions/sub%2Fid/files/file%2Fid");
   });
 
   it("tính P50/P95, error rate và chỉ tổng hợp status/timing an toàn", () => {

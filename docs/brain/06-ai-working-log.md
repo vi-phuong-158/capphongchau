@@ -2619,3 +2619,11 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **AI:** `AiDraftPanel` chỉ mount sau hành động mở phần “Đối chiếu AI”.
 - **Kiểm tra local:** typecheck, lint, 679 test pass/10 skip và webpack production build pass. Next/Turbopack build mặc định tại worktree bị lỗi symlink `node_modules` có sẵn; webpack không bị ảnh hưởng.
 - **Preview/E2E:** Chưa có P50/P95 authenticated vì không có session cán bộ Preview. Hai lần deploy local bằng Vercel CLI đều timeout không phát sinh deployment mới; không deploy Production.
+
+## [2026-07-29] Sửa review PR #9 — benchmark hiệu năng rehearsal đúng tuyến và đúng đích
+
+- **Agent:** Codex.
+- **Thay đổi:** `buildStaffBenchmarkRequests` dùng `q` (không còn `query`) cho ba tìm kiếm queue; tách `detail_page` (`/submissions/:id`, SSR thực tế) khỏi `detail_api` diagnostic; preview giữ riêng. `validateStaffBenchmarkTarget` yêu cầu HTTPS root origin, exact expected host, Vercel Preview và xác nhận `REHEARSAL_ONLY`; chặn Production alias, credential, port, path, query và hash trước khi đọc cookie.
+- **Audit/scope:** Không thêm audit bypass. Detail page, API detail và preview thành công vẫn append audit theo contract; một lượt đầy đủ 10 warm-up + 40 đo có thể thêm tối đa 150 audit rows. Chỉ chạy dữ liệu synthetic/rehearsal và dọn/reset audit sau đo.
+- **Tài liệu:** đồng bộ AGENTS, Code Graph, decision/task/baseline hiệu năng để không mô tả sai là “không ghi database”. Không đổi runtime API, role, schema hay migration.
+- **Kiểm tra ban đầu:** baseline 5 file/13 test PASS; focused runner test sau sửa 6/6 PASS. Chưa chạy authenticated Preview vì không có cookie/session rehearsal được cấp; không deploy/merge Production.

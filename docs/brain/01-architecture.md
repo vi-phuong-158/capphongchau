@@ -13,8 +13,11 @@ src/modules/common/env.ts
             └── supabaseDatabaseOptions → postgres(..., { prepare: false, max, SSL, timeouts })
 
 scripts/benchmark-staff-preview.ts
-└── explicit Preview session + synthetic IDs/queries (không in giá trị)
-    └── safe Server-Timing + region label → P50/P95/error-rate report không PII
+├── validateStaffBenchmarkTarget → HTTPS root origin + exact expected host + REHEARSAL_ONLY
+│   └── chỉ *.vercel.app Preview rehearsal, chặn Production alias/credential/path/query/hash trước cookie
+├── buildStaffBenchmarkRequests → queue `q`; SSR `detail_page` + API `detail_api` diagnostic + preview
+│   └── detail/page/preview thành công vẫn append audit theo contract, không có bypass
+└── safe Server-Timing + region label → P50/P95/error-rate report không PII
 ```
 
 Pool chỉ đổi khi runtime instance mới được tạo. Kết quả benchmark không được dùng để suy diễn
