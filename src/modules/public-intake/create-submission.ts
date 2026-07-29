@@ -10,6 +10,8 @@
 
 import { randomUUID } from "node:crypto";
 
+import { loadPublicIntakeEnvironment } from "@/modules/common/env";
+
 import {
   deriveAccessSecret,
   deriveCreationFingerprint,
@@ -93,7 +95,11 @@ export async function createIntakeSubmission(
 
   const submissionId = deriveSubmissionId(input.sessionSecret, input.rawIdempotencyKey);
   const receiptCode = deriveReceiptCode(input.sessionSecret, input.rawIdempotencyKey);
-  const driveFolderId = await getPublicIntakeStorage().createSubmissionFolder(submissionId);
+  const lazyDriveFolderCreation =
+    loadPublicIntakeEnvironment().LAZY_DRIVE_FOLDER_CREATION_ENABLED;
+  const driveFolderId = lazyDriveFolderCreation
+    ? null
+    : await getPublicIntakeStorage().createSubmissionFolder(submissionId);
   const draft = emptyDraft(randomUUID(), randomUUID(), randomUUID());
   draft.phone = input.phone;
   draft.consentAccepted = input.consentAccepted;

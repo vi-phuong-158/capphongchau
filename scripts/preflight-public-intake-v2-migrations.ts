@@ -18,6 +18,7 @@
  *   202607290002_full_pl3_editor.sql
  *   202607290003_drop_working_payload_override_columns.sql
  *   202607290004_queue_search_performance.sql
+ *   202607290005_lazy_drive_folder_creation.sql
  */
 
 import { loadEnvConfig } from "@next/env";
@@ -365,6 +366,51 @@ async function runChecks(): Promise<CheckResult[]> {
       const exists = await indexExists(index);
       check(`Index ${index} tồn tại (202607290004)`, exists, exists ? "OK" : "THIẾU INDEX");
     }
+  }
+
+  // 202607290005 — lease tạo thư mục Drive trì hoãn, không giữ transaction trong lúc gọi Google.
+  {
+    const driveFolderId = await columnExists("public_submissions", "drive_folder_id");
+    check(
+      "public_submissions.drive_folder_id cho phép NULL (202607290005)",
+      driveFolderId.exists && driveFolderId.nullable,
+      !driveFolderId.exists
+        ? "THIẾU CỘT"
+        : driveFolderId.nullable
+          ? "OK"
+          : "CỘT VẪN NOT NULL — migration 202607290005 chưa chạy",
+    );
+
+    const state = await columnExists("public_submissions", "drive_folder_state");
+    const lease = await columnExists("public_submissions", "drive_folder_lease_until");
+    const attempts = await columnExists("public_submissions", "drive_folder_attempts");
+    check(
+      "Có đủ cột trạng thái/lease/attempt tạo Drive folder (202607290005)",
+      state.exists &&
+        !state.nullable &&
+        state.hasDefault &&
+        lease.exists &&
+        attempts.exists &&
+        !attempts.nullable &&
+        attempts.hasDefault,
+      state.exists && lease.exists && attempts.exists
+        ? `state(nullable=${state.nullable},default=${state.hasDefault}); attempts(nullable=${attempts.nullable},default=${attempts.hasDefault})`
+        : "THIẾU ÍT NHẤT MỘT CỘT",
+    );
+
+    const stateCheck = await constraintExists("public_submissions_drive_folder_state_check");
+    check(
+      "CHECK public_submissions_drive_folder_state_check tồn tại",
+      stateCheck,
+      stateCheck ? "OK" : "THIẾU CONSTRAINT",
+    );
+
+    const leaseIndex = await indexExists("public_submissions_drive_folder_lease_idx");
+    check(
+      "Index public_submissions_drive_folder_lease_idx tồn tại",
+      leaseIndex,
+      leaseIndex ? "OK" : "THIẾU INDEX",
+    );
   }
 
   // Kiểm tra dữ liệu — hồ sơ cũ phải nhất quán, không phải chỉ schema đúng.

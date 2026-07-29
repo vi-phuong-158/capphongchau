@@ -117,6 +117,12 @@ async function getLatestSaga(sql: Sql, submissionId: string): Promise<SagaRow | 
  * khỏi transaction Database để phòng tránh deadlock trong môi trường connection pool max: 1.
  */
 export async function runOfficialAcceptance(input: AcceptanceInput): Promise<AcceptanceResult> {
+  if (!input.record.driveFolderId) {
+    throw new AcceptanceNotAllowedError(
+      "Bản kê khai chưa có thư mục ảnh sẵn sàng để tiếp nhận chính thức.",
+    );
+  }
+
   const database = getDatabase();
   const repository = getPublicIntakeRepository();
   const storage = getPublicIntakeStorage();

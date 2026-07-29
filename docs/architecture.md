@@ -128,6 +128,10 @@ riêng, loại trừ chính bản nháp và không coi `REJECTED`/`EXPIRED` là 
 - Dữ liệu GCN cũ append-only; reader chọn `row_version` mới nhất cho mỗi `existing_record_id`.
 - Cache miss khi tạo thư mục Drive được tuần tự hóa bằng `pg_advisory_xact_lock` theo `(parentId, name)`
   trong một transaction riêng; cache bộ nhớ chỉ là tối ưu, không phải khóa xuyên lambda.
+- Với thư mục riêng của bản kê khai, Phase 3 dùng lease trên `public_submissions` thay cho việc giữ
+  transaction trong lúc gọi Drive. Lease được commit trước; request thắng lease list-before-create
+  rồi checkpoint `READY`, request thua lease retry theo `Retry-After`. Advisory lock cũ chỉ còn cần
+  cho thư mục dùng chung như `01_INBOX`.
 - Một lần điều chỉnh hồ sơ đã tiếp nhận cập nhật `official_payload_*` cùng transaction với
   `draft_json` và các bảng chính thức, nên snapshot hiệu lực không thể cũ hơn dữ liệu chuẩn hóa.
 
@@ -143,11 +147,14 @@ Google Sign-In chỉ cấp session. Mỗi request bảo vệ đọc lại `users
    cần. Trên Preview và Production, `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` từ
    2026-07-29: CCCD tối đa 2400 px, GCN tối đa 3000 px, JPEG quality 0.88. Drive lưu bản tiếp nhận
    vận hành đã chuẩn hóa; metadata nguồn/đích được lưu nhưng byte camera không được tải lên.
-2. API tạo resumable upload session trong Google Drive.
-3. Browser PUT trực tiếp lên Drive và hiển thị tiến độ/retry.
-4. API complete xác minh folder cha, MIME, dung lượng và checksum.
-5. Metadata file được ghi vào Supabase; Drive ID/link không được trả trong lỗi hoặc log kỹ thuật.
-6. Saga tiếp nhận chính thức (`FILES_MOVED`) giữ thứ tự file nhưng chỉ xử lý tối đa hai file Drive
+2. Khi `LAZY_DRIVE_FOLDER_CREATION_ENABLED=true`, API upload đầu tiên giành lease 60 giây và bảo đảm
+   `01_INBOX/{submissionId}/originals` tồn tại; CREATE hồ sơ không gọi Drive. Cờ mặc định `false`
+   giữ đường eager để rollback.
+3. API tạo resumable upload session trong Google Drive.
+4. Browser PUT trực tiếp lên Drive và hiển thị tiến độ/retry.
+5. API complete xác minh folder cha, MIME, dung lượng và checksum.
+6. Metadata file được ghi vào Supabase; Drive ID/link không được trả trong lỗi hoặc log kỹ thuật.
+7. Saga tiếp nhận chính thức (`FILES_MOVED`) giữ thứ tự file nhưng chỉ xử lý tối đa hai file Drive
    song song. Sau từng nhóm, các file thành công được checkpoint cùng một transaction ngắn +
    advisory lock; nếu peer lỗi, retry cùng idempotency key bỏ qua file đã checkpoint. Không có
    migration, biến môi trường hay background/work-unit resume cho cơ chế này.

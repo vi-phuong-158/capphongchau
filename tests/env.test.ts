@@ -38,10 +38,29 @@ describe("cấu hình môi trường server", () => {
   it("đọc và chuẩn hóa cấu hình hợp lệ", () => {
     expect(loadServerEnvironment(validEnvironment)).toMatchObject({
       APP_BASE_URL: "http://localhost:3000",
+      LAZY_DRIVE_FOLDER_CREATION_ENABLED: false,
       MAX_UPLOAD_MB: 30,
       VERCEL_REGION: "sin1",
       SUPABASE_POOL_MAX: 1,
     });
+  });
+
+  it("Phase 3 chỉ bật lazy Drive folder bằng literal true và mặc định tắt", () => {
+    expect(loadPublicIntakeEnvironment(validEnvironment).LAZY_DRIVE_FOLDER_CREATION_ENABLED).toBe(
+      false,
+    );
+    expect(
+      loadPublicIntakeEnvironment({
+        ...validEnvironment,
+        LAZY_DRIVE_FOLDER_CREATION_ENABLED: "true",
+      }).LAZY_DRIVE_FOLDER_CREATION_ENABLED,
+    ).toBe(true);
+    expect(
+      loadPublicIntakeEnvironment({
+        ...validEnvironment,
+        LAZY_DRIVE_FOLDER_CREATION_ENABLED: "TRUE",
+      }).LAZY_DRIVE_FOLDER_CREATION_ENABLED,
+    ).toBe(false);
   });
 
   it("chỉ nêu tên biến cấu hình sai, không đưa giá trị secret vào lỗi", () => {

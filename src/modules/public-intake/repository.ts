@@ -72,7 +72,7 @@ export interface SubmissionRecord {
   readonly consentVersion: string;
   readonly consentedAt: string;
   readonly retentionUntil: string;
-  readonly driveFolderId: string;
+  readonly driveFolderId: string | null;
   readonly officialCaseId: string;
   readonly acceptStep: string;
   readonly claimedBy: string;
@@ -117,6 +117,15 @@ export interface SubmissionSummary {
   readonly claimedByDisplayName: string;
   readonly updatedAt: string;
   readonly rowIndex: number;
+}
+
+export type SubmissionFolderState = "PENDING" | "CREATING" | "READY" | "FAILED";
+
+export interface SubmissionFolderSnapshot {
+  readonly driveFolderId: string | null;
+  readonly state: SubmissionFolderState;
+  readonly leaseUntil: string;
+  readonly attempts: number;
 }
 
 export interface QueueSubmissionSummary {
@@ -207,7 +216,7 @@ interface SubmissionRow {
   readonly consented_at: Date;
   readonly retention_until: Date | null;
   readonly official_case_id: string | null;
-  readonly drive_folder_id: string;
+  readonly drive_folder_id: string | null;
   readonly accept_step: string | null;
   readonly claimed_by: string | null;
   readonly claimed_by_display_name: string | null;
@@ -246,6 +255,13 @@ interface FileRow {
   readonly status: StoredFile["status"];
   readonly created_at: Date;
   readonly updated_at: Date;
+}
+
+interface SubmissionFolderRow {
+  readonly drive_folder_id: string | null;
+  readonly drive_folder_state: SubmissionFolderState;
+  readonly drive_folder_lease_until: Date | null;
+  readonly drive_folder_attempts: number;
 }
 
 const SUBMISSION_SELECT = `
@@ -356,6 +372,15 @@ function mapFile(row: FileRow): StoredFile {
   };
 }
 
+function mapSubmissionFolder(row: SubmissionFolderRow): SubmissionFolderSnapshot {
+  return {
+    driveFolderId: row.drive_folder_id,
+    state: row.drive_folder_state,
+    leaseUntil: asIso(row.drive_folder_lease_until),
+    attempts: row.drive_folder_attempts,
+  };
+}
+
 function safeResponse(value: unknown): Record<string, string | number | null | string[]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -380,7 +405,7 @@ export class PublicIntakeRepository {
     mutationHash: string;
     requestId: string;
     phone: string;
-    driveFolderId: string;
+    driveFolderId: string | null;
     draft: IntakeDraft;
     consentVersion: string;
     /** Mặc định `SELF_SERVICE`; chỉ route nhân viên đã xác thực mới truyền giá trị khác. */
@@ -404,11 +429,12 @@ export class PublicIntakeRepository {
       await transaction`
         insert into public.public_submissions (
           submission_id, receipt_code, phone, access_code_hash, consent_version,
-          drive_folder_id, draft_json,
+          drive_folder_id, drive_folder_state, draft_json,
           intake_channel, assisted_by_email, assisted_by_display_name, assisted_at
         ) values (
           ${input.submissionId}, ${input.receiptCode}, ${input.phone}, ${input.accessCodeHash},
-          ${input.consentVersion}, ${input.driveFolderId}, ${JSON.stringify(input.draft)}::jsonb,
+          ${input.consentVersion}, ${input.driveFolderId},
+          ${input.driveFolderId ? "READY" : "PENDING"}, ${JSON.stringify(input.draft)}::jsonb,
           ${channel}, ${assisted?.email ?? null}, ${assisted?.displayName ?? null},
           ${assisted ? new Date().toISOString() : null}
         )
@@ -434,6 +460,89 @@ export class PublicIntakeRepository {
         },
       });
     });
+  }
+
+  /**
+   * Atomically claims the short-lived right to create one submission's Drive folder.
+   *
+   * The transaction ends before any Google request starts. A crashed worker therefore cannot
+   * retain a database connection; the next request can take over after the lease expires.
+   */
+  async tryAcquireSubmissionFolderLease(
+    submissionId: string,
+    leaseSeconds: number,
+  ): Promise<SubmissionFolderSnapshot | null> {
+    const database = getDatabase();
+    const rows = await database<SubmissionFolderRow[]>`
+      update public.public_submissions
+      set drive_folder_state = 'CREATING',
+          drive_folder_lease_until = now() + (${leaseSeconds} * interval '1 second'),
+          drive_folder_attempts = drive_folder_attempts + 1
+      where submission_id = ${submissionId}
+        and drive_folder_id is null
+        and (
+          drive_folder_state in ('PENDING', 'FAILED')
+          or (
+            drive_folder_state = 'CREATING'
+            and (
+              drive_folder_lease_until is null
+              or drive_folder_lease_until <= now()
+            )
+          )
+        )
+      returning drive_folder_id, drive_folder_state, drive_folder_lease_until,
+        drive_folder_attempts
+    `;
+    return rows[0] ? mapSubmissionFolder(rows[0]) : null;
+  }
+
+  async getSubmissionFolderSnapshot(
+    submissionId: string,
+  ): Promise<SubmissionFolderSnapshot | null> {
+    const database = getDatabase();
+    const rows = await database<SubmissionFolderRow[]>`
+      select drive_folder_id, drive_folder_state, drive_folder_lease_until,
+        drive_folder_attempts
+      from public.public_submissions
+      where submission_id = ${submissionId}
+      limit 1
+    `;
+    return rows[0] ? mapSubmissionFolder(rows[0]) : null;
+  }
+
+  async markSubmissionFolderReady(
+    submissionId: string,
+    driveFolderId: string,
+    leaseUntil: string,
+  ): Promise<SubmissionFolderSnapshot | null> {
+    const database = getDatabase();
+    const rows = await database<SubmissionFolderRow[]>`
+      update public.public_submissions
+      set drive_folder_id = ${driveFolderId},
+          drive_folder_state = 'READY',
+          drive_folder_lease_until = null
+      where submission_id = ${submissionId}
+        and drive_folder_id is null
+        and drive_folder_state = 'CREATING'
+        and drive_folder_lease_until = ${leaseUntil}::timestamptz
+      returning drive_folder_id, drive_folder_state, drive_folder_lease_until,
+        drive_folder_attempts
+    `;
+    return rows[0] ? mapSubmissionFolder(rows[0]) : null;
+  }
+
+  /** Store only a state transition; Drive errors can contain internal IDs and must not persist. */
+  async markSubmissionFolderFailed(submissionId: string, leaseUntil: string): Promise<void> {
+    const database = getDatabase();
+    await database`
+      update public.public_submissions
+      set drive_folder_state = 'FAILED',
+          drive_folder_lease_until = null
+      where submission_id = ${submissionId}
+        and drive_folder_id is null
+        and drive_folder_state = 'CREATING'
+        and drive_folder_lease_until = ${leaseUntil}::timestamptz
+    `;
   }
 
   async findCreationByIdempotencyKey(

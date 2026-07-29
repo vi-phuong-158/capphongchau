@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
@@ -23,6 +23,15 @@ vi.mock("@/modules/google/workspace-client", () => ({
 import { PublicIntakeStorage } from "@/modules/public-intake/storage";
 
 describe("PublicIntakeStorage distributed folder lock", () => {
+  beforeEach(() => {
+    mocks.events.length = 0;
+    mocks.lockSql = "";
+    mocks.lockValues = [];
+    mocks.begin.mockReset();
+    mocks.list.mockReset();
+    mocks.create.mockReset();
+  });
+
   it("holds a PostgreSQL advisory transaction lock before querying or creating a cache-miss folder", async () => {
     const transaction = Object.assign(
       async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -58,5 +67,32 @@ describe("PublicIntakeStorage distributed folder lock", () => {
     expect(mocks.events).toEqual(["lock", "list", "create"]);
     expect(mocks.lockSql).toContain("pg_advisory_xact_lock");
     expect(mocks.lockValues).toEqual(["DRIVE_FOLDER:parent-lock-test:case-lock-test"]);
+  });
+
+  it("lazy path locks only shared INBOX and adopts both existing descendants after a crash", async () => {
+    const transaction = async () => {
+      mocks.events.push("lock");
+      return [];
+    };
+    mocks.begin.mockImplementation(async (callback) => callback(transaction));
+    mocks.list
+      .mockResolvedValueOnce({ data: { files: [{ id: "inbox-existing" }] } })
+      .mockResolvedValueOnce({ data: { files: [{ id: "submission-existing" }] } })
+      .mockResolvedValueOnce({ data: { files: [{ id: "originals-existing" }] } });
+
+    const storage = new PublicIntakeStorage({
+      GOOGLE_DRIVE_CLIENT_ID: "test-client",
+      GOOGLE_DRIVE_CLIENT_SECRET: "test-secret",
+      GOOGLE_DRIVE_REFRESH_TOKEN: "test-refresh",
+      GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: "root-lazy-recovery",
+      MIN_DRIVE_FREE_GB: 1,
+    });
+
+    await expect(storage.ensureSubmissionFolder("submission-after-crash")).resolves.toBe(
+      "originals-existing",
+    );
+    expect(mocks.begin).toHaveBeenCalledOnce();
+    expect(mocks.list).toHaveBeenCalledTimes(3);
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 });

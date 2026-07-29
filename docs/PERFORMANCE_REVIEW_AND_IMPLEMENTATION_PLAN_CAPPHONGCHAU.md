@@ -587,6 +587,10 @@ Code-only. Revert component/service; không cần rollback schema.
 
 ## PHASE 3 — Tạo hồ sơ trước, tạo folder Drive khi tải ảnh đầu tiên
 
+> **Đã triển khai trên branch `codex/phase3-lazy-drive-folder` (2026-07-29), chưa deploy.**
+> Migration `202607290005` và code có thể được đưa lên trước trong khi feature flag vẫn mặc định
+> `false`. Chỉ bật trên Preview sau khi áp migration và chạy preflight mở rộng.
+
 ### Mức ưu tiên
 
 **P1 — hiệu quả cao nhưng có thay đổi schema và luồng idempotency; chỉ làm sau khi Phase 1–2 ổn định.**

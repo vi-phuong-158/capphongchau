@@ -1,5 +1,20 @@
 # Performance baseline — Phase 1 queue pagination/search
 
+## Phase 3 — lazy Drive folder creation (2026-07-29)
+
+- Branch/base: `codex/phase3-lazy-drive-folder` từ `8942d3c` (main sau PR #9).
+- Baseline trước sửa: typecheck/lint PASS; full Vitest 78 file/680 test PASS, 2 file/11 test skip;
+  webpack production build PASS 23/23 trang.
+- Thay đổi dự kiến khi bật cờ trên Preview: `POST /api/public/submissions` không còn chờ Google
+  Drive; thư mục `01_INBOX/{submissionId}/originals` được tạo ở upload initiate hợp lệ đầu tiên.
+  Lease DB 60 giây được commit trước Drive, list-before-create phục hồi request crash.
+- Migration: `202607290005_lazy_drive_folder_creation.sql`; preflight tăng từ 32 lên 36 check, gồm
+  nullable folder ID, ba cột điều phối, constraint state và partial lease index.
+- Trạng thái đo: **chưa deploy/chưa benchmark**. Không áp migration hoặc bật flag ở Preview/
+  Production trong lượt code này. Phase 3 chưa PASS cho tới khi Preview E2E xác minh CREATE không có
+  Drive timing, hai initiate đồng thời chỉ có một cây folder, retry crash không sinh orphan và luồng
+  upload/complete/delete/acceptance không regression.
+
 ## Phase 4 — pool Supabase và region (2026-07-29)
 
 - Branch: `codex/phase4-pool-region`; base: `d6cb796`.

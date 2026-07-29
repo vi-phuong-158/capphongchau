@@ -454,6 +454,10 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ## Đã hoàn thành gần đây
 
+- [2026-07-29] Phase 3 lazy Drive folder đã thi công trên
+  `codex/phase3-lazy-drive-folder`: migration `202607290005`, flag mặc định tắt, lease/checkpoint
+  ngoài Drive transaction, list-before-create và guard complete/delete/acceptance. Chưa deploy,
+  chưa áp migration/bật flag; cần Preview rehearsal trước khi kết luận PASS.
 - [2026-07-22] Phần code của lớp biên: chốt chặn `ORIGIN_SHARED_SECRET` chống gọi thẳng
   `*.vercel.app`, Turnstile fail-closed ở `create`/`submit`, token đã dùng chỉ mở đường replay
   idempotency. 82 test xanh. Phần cấu hình Cloudflare/Vercel còn chờ chủ dự án.

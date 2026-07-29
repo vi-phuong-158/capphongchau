@@ -141,6 +141,12 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
   không đi qua body của Vercel Function.
 - Browser kiểm tra JPEG, PNG, WebP, HEIC/HEIF; giới hạn 30 MB/file. HEIC/HEIF được chuyển sang JPEG tại thiết bị khi cần.
 - Backend tạo resumable upload session; browser upload trực tiếp Drive và hiển thị tiến độ/retry.
+- Phase 3 dùng `LAZY_DRIVE_FOLDER_CREATION_ENABLED` (mặc định `false`) để trì hoãn tạo
+  `01_INBOX/{submissionId}/originals` tới request upload hợp lệ đầu tiên. Khi bật, CREATE vẫn ghi
+  `public_submissions` + `request_log` + audit trong một transaction nhưng không gọi Drive.
+  `submission-folder.ts` dùng lease PostgreSQL 60 giây, commit trước khi gọi Drive và
+  list-before-create để retry sau crash không tạo cây thư mục thứ hai. Request thua lease trả
+  `503 SERVICE_UNAVAILABLE` kèm `Retry-After`; không lưu nội dung lỗi Drive.
 - Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
 - Xác minh file sau upload theo thư mục cha, metadata, dung lượng và checksum trước khi cập nhật trạng thái.
 - Lưu `file_id` nội bộ bất biến, tách khỏi `drive_file_id` để chuẩn bị cho migration sang Shared Drive về sau.
@@ -172,6 +178,10 @@ Tạo các bảng sau (tên vật lý dùng `snake_case` trong migration SQL):
   hiển thị và tìm kiếm hàng chờ. `GET /api/submissions` phải lọc/tìm/phân trang keyset trong
   PostgreSQL theo `(updated_at, submission_id)`, không đọc toàn bảng hoặc toàn bộ `draft_json` vào
   Node để chia trang.
+- `PUBLIC_SUBMISSIONS.drive_folder_id` cho phép `NULL` trong giai đoạn lazy; các cột
+  `drive_folder_state`, `drive_folder_lease_until`, `drive_folder_attempts` điều phối đúng một
+  request tạo thư mục. `uploads/complete`, delete và official acceptance phải từ chối rõ khi folder
+  chưa `READY`.
 - Khu vực tra cứu/đối chiếu bổ sung các bảng append-only: `PUBLIC_STATUS_EVENTS`,
   `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`,
   `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS` và
@@ -375,6 +385,7 @@ SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com
 DATA_HASH_PEPPER=
 MAX_UPLOAD_MB=30
 VERCEL_REGION=sin1
+LAZY_DRIVE_FOLDER_CREATION_ENABLED=false
 AI_EXTRACTION_ENABLED=false
 AI_WORKER_API_KEY=
 ```

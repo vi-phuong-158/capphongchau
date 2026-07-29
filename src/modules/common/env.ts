@@ -47,6 +47,17 @@ const serverEnvironmentBaseSchema = z.object({
     .optional()
     .transform((val) => val === "true")
     .default(false),
+  /**
+   * Phase 3: defer creating `01_INBOX/{submissionId}/originals` until the first valid upload.
+   *
+   * Fail closed to the established eager path. Preview must opt in explicitly; Production can
+   * remain on the old behavior while the migration is present.
+   */
+  LAZY_DRIVE_FOLDER_CREATION_ENABLED: z
+    .string()
+    .optional()
+    .transform((val) => val === "true")
+    .default(false),
   AI_EXTRACTION_ENABLED: z
     .string()
     .optional()
@@ -99,6 +110,7 @@ const publicIntakeEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   MAX_DRAFT_JSON_BYTES: true,
   PUBLIC_INTAKE_MODE: true,
   OFFICER_ASSISTED_INTAKE_ENABLED: true,
+  LAZY_DRIVE_FOLDER_CREATION_ENABLED: true,
 });
 
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;

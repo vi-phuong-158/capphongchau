@@ -236,13 +236,18 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │   └── src/modules/public-intake/create-submission.ts — DÙNG CHUNG với route cán bộ;
 │       body bắt buộc `phone` + `consent.accepted === true`; route validate trước Turnstile/Drive,
 │       server tự gán consent version; `channel` là tham số BẮT BUỘC, cổng công khai gán cứng
-│       "SELF_SERVICE"
+│       "SELF_SERVICE"; Phase 3 khi `LAZY_DRIVE_FOLDER_CREATION_ENABLED=true` ghi folder NULL/PENDING
+│       trong cùng transaction create và KHÔNG gọi Drive (cờ mặc định FALSE giữ eager rollback)
 ├── GET /api/public/submissions/current → draft + server version
 │   └── draft-adoption.ts giữ dữ liệu local, thay owner/parcel/land-use ID bằng ID server sau
 │       CREATE; recovery dùng nguyên draft server
 ├── PATCH /api/public/submissions/current (version) — qua flushDraft() single-flight + cờ dirty;
 │   client gửi version gần nhất và cập nhật version từ response
-├── POST .../uploads/initiate → phiên resumable Drive
+├── POST .../uploads/initiate → ensureSubmissionFolderReady → phiên resumable Drive
+│   ├── submission-folder.ts — lease PostgreSQL 60 giây, commit TRƯỚC Google; request thua lease
+│   │   trả 503 + Retry-After; expired lease cho retry tiếp tục
+│   ├── storage.ensureSubmissionFolder — list-before-create cho folder riêng; retry sau crash nhận
+│   │   lại folder đã tạo, không giữ transaction DB trong Drive call
 │   ⚠️ tên tệp trong kho do MÁY CHỦ đặt, KHÔNG ghép body.fileName (tên máy ảnh hay mang CCCD,
 │   họ tên); chỉ đuôi mở rộng lấy từ mimeType đã qua canonicalImageMimeType
 ├── POST .../uploads/complete → verifyUploadedFile → appendFile + số đo

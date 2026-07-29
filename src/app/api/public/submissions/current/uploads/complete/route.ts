@@ -111,6 +111,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     await discardIfOrphan(repository, record, driveFileId);
     return publicError("INVALID_STATE", "Bản kê khai đang bị khóa.", requestId);
   }
+  if (!record.driveFolderId) {
+    return publicError(
+      "INVALID_STATE",
+      "Thư mục tải ảnh chưa sẵn sàng. Vui lòng tải lại ảnh từ đầu.",
+      requestId,
+    );
+  }
+  const driveFolderId = record.driveFolderId;
 
   const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
   if (identityImage) {
@@ -158,7 +166,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     verified = await storage.verifyUploadedFile({
       driveFileId,
-      expectedFolderId: record.driveFolderId,
+      expectedFolderId: driveFolderId,
       maxBytes: environment.MAX_UPLOAD_MB * 1024 * 1024,
     });
   } catch (error) {
@@ -258,10 +266,10 @@ export async function POST(request: Request): Promise<NextResponse> {
  */
 async function discardIfOrphan(
   repository: ReturnType<typeof getPublicIntakeRepository>,
-  record: { readonly driveFolderId: string },
+  record: { readonly driveFolderId: string | null },
   driveFileId: string,
 ): Promise<void> {
-  if (!driveFileId) return;
+  if (!driveFileId || !record.driveFolderId) return;
   const adopted = await repository.isDriveFileAdopted(driveFileId).catch(() => true);
   if (adopted) return;
 

@@ -172,6 +172,10 @@ import {
   SubmissionIdempotencyConflictError,
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
+import {
+  ensureSubmissionFolderReady,
+  SubmissionFolderBusyError,
+} from "@/modules/public-intake/submission-folder";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
 
 const TEST_DB_URL = process.env.ACCEPTANCE_SAGA_TEST_DATABASE_URL;
@@ -243,7 +247,24 @@ async function bootstrapDatabase(sql: Sql): Promise<void> {
       where table_schema = 'public' and table_name = 'public_acceptance_sagas'
     ) as exists
   `;
-  if (alreadyApplied[0]?.exists) return;
+  if (alreadyApplied[0]?.exists) {
+    const phase3Applied = await sql<{ exists: boolean }[]>`
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'public_submissions'
+          and column_name = 'drive_folder_state'
+      ) as exists
+    `;
+    if (!phase3Applied[0]?.exists) {
+      const phase3Migration = readFileSync(
+        join(REPO_ROOT, "supabase", "migrations", "202607290005_lazy_drive_folder_creation.sql"),
+        "utf8",
+      );
+      await sql.unsafe(phase3Migration);
+    }
+    return;
+  }
 
   for (const relativePath of MIGRATION_FILES) {
     const sqlText = readFileSync(join(REPO_ROOT, relativePath), "utf8");
@@ -424,6 +445,60 @@ describe.skipIf(!hasTestDb)(
         requestId: `req-${randomUUID()}`,
       };
     }
+
+    it(
+      "Phase 3: hai request đồng thời chỉ một request thắng lease PostgreSQL và tạo folder",
+      async () => {
+        const submissionId = `lazy-${randomUUID()}`;
+        await bootstrapSql`
+          insert into public.public_submissions (
+            submission_id, receipt_code, status, phone, access_code_hash, consent_version,
+            drive_folder_id, drive_folder_state, draft_json
+          ) values (
+            ${submissionId}, ${`PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`},
+            'DRAFT', '0912345678', 'hash', 'v1', null, 'PENDING', '{}'::jsonb
+          )
+        `;
+
+        const repository = getPublicIntakeRepository();
+        let driveCalls = 0;
+        const dependencies = {
+          repository,
+          storage: {
+            ensureSubmissionFolder: async () => {
+              driveCalls += 1;
+              await new Promise<void>((resolve) => setTimeout(resolve, 25));
+              return "lazy-originals-folder";
+            },
+          },
+        };
+        const record = { submissionId, driveFolderId: null };
+
+        const results = await Promise.allSettled([
+          ensureSubmissionFolderReady(record, dependencies),
+          ensureSubmissionFolderReady(record, dependencies),
+        ]);
+
+        expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+        const rejected = results.find((result) => result.status === "rejected");
+        expect(rejected?.status === "rejected" ? rejected.reason : null).toBeInstanceOf(
+          SubmissionFolderBusyError,
+        );
+        expect(driveCalls).toBe(1);
+        await expect(ensureSubmissionFolderReady(record, dependencies)).resolves.toBe(
+          "lazy-originals-folder",
+        );
+        expect(driveCalls).toBe(1);
+
+        const checkpoint = await repository.getSubmissionFolderSnapshot(submissionId);
+        expect(checkpoint).toMatchObject({
+          state: "READY",
+          driveFolderId: "lazy-originals-folder",
+          attempts: 1,
+        });
+      },
+      20_000,
+    );
 
     it(
       "Kịch bản 1: ngắt giữa chừng bước FILES_MOVED (di chuyển được 1/3 file) → retry cùng " +

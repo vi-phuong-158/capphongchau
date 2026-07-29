@@ -67,7 +67,15 @@ export class PublicIntakeStorage {
   }
 
   async ensureSubmissionFolder(submissionId: string): Promise<string> {
-    return this.createSubmissionFolder(submissionId);
+    // `01_INBOX` is shared by every submission, so retain the existing advisory-lock helper for
+    // that one folder. The per-submission lease in `submission-folder.ts` is the coordinator for
+    // both descendants; no database transaction remains open while those Drive calls run.
+    const inbox = await this.findOrCreateFolder(
+      "01_INBOX",
+      this.environment.GOOGLE_MY_DRIVE_ROOT_FOLDER_ID,
+    );
+    const submissionFolder = await this.findOrCreateFolderWithoutDatabaseLock(submissionId, inbox);
+    return this.findOrCreateFolderWithoutDatabaseLock("originals", submissionFolder);
   }
 
   /**
@@ -327,6 +335,47 @@ export class PublicIntakeStorage {
       PublicIntakeStorage.folderCache.set(cacheKey, folderId);
       return folderId;
     });
+  }
+
+  /**
+   * List-before-create recovery for a path already serialized by the submission-folder lease.
+   * This deliberately performs no database work so a slow Google call cannot occupy Supavisor.
+   */
+  private async findOrCreateFolderWithoutDatabaseLock(
+    name: string,
+    parentId: string,
+  ): Promise<string> {
+    const cacheKey = `${parentId}:${name}`;
+    const cachedId = PublicIntakeStorage.folderCache.get(cacheKey);
+    if (cachedId) return cachedId;
+
+    const drive = createGoogleWorkspaceClient(this.credentials).drive;
+    const existing = await drive.files.list({
+      q: [
+        `name = '${escapeQueryValue(name)}'`,
+        `mimeType = '${FOLDER_MIME_TYPE}'`,
+        `'${parentId}' in parents`,
+        "trashed = false",
+      ].join(" and "),
+      fields: "files(id)",
+      pageSize: 1,
+    });
+    const existingId = existing.data.files?.[0]?.id;
+    if (existingId) {
+      PublicIntakeStorage.folderCache.set(cacheKey, existingId);
+      return existingId;
+    }
+
+    const created = await drive.files.create({
+      requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
+      fields: "id",
+    });
+    const folderId = created.data.id;
+    if (!folderId) {
+      throw new Error(`Google Drive không tạo được thư mục: ${name}`);
+    }
+    PublicIntakeStorage.folderCache.set(cacheKey, folderId);
+    return folderId;
   }
 }
 

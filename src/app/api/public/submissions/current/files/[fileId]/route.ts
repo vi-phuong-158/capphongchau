@@ -78,6 +78,13 @@ export async function DELETE(
   if (!isValidPublicIdempotencyKey(request.headers.get("idempotency-key"))) {
     return publicError("VALIDATION_FAILED", "Thiếu khóa chống gửi trùng.", access.requestId);
   }
+  if (!access.record.driveFolderId) {
+    return publicError(
+      "INVALID_STATE",
+      "Thư mục ảnh của bản kê khai chưa sẵn sàng.",
+      access.requestId,
+    );
+  }
   const { fileId } = await context.params;
   const file = (await getPublicIntakeRepository().listFiles(access.record.submissionId)).find(
     (candidate) =>

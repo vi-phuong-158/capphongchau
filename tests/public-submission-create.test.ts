@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   createSubmissionFolder: vi.fn(),
   findCreationByIdempotencyKey: vi.fn(),
+  lazyDriveFolderCreationEnabled: false,
   verifyTurnstileToken: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("@/modules/common/env", () => ({
     APP_BASE_URL: "http://localhost:3000",
     CONSENT_NOTICE_VERSION: "v1",
     PUBLIC_INTAKE_MODE: "LIVE",
+    LAZY_DRIVE_FOLDER_CREATION_ENABLED: mocks.lazyDriveFolderCreationEnabled,
   }),
 }));
 
@@ -68,6 +70,7 @@ describe("POST /api/public/submissions", () => {
     mocks.createSubmissionFolder.mockReset();
     mocks.findCreationByIdempotencyKey.mockReset();
     mocks.findCreationByIdempotencyKey.mockResolvedValue(null);
+    mocks.lazyDriveFolderCreationEnabled = false;
     mocks.createSubmissionFolder.mockResolvedValue("drive-folder-internal");
     mocks.create.mockResolvedValue(undefined);
     mocks.verifyTurnstileToken.mockReset();
@@ -95,6 +98,19 @@ describe("POST /api/public/submissions", () => {
       phone: "0912345678",
       consentAccepted: true,
     });
+  });
+
+  it("Phase 3 tạo nháp không gọi Drive khi cờ lazy được bật", async () => {
+    mocks.lazyDriveFolderCreationEnabled = true;
+
+    const response = await POST(
+      createRequest("0912345678", "123e4567-e89b-42d3-a456-426614174010"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createSubmissionFolder).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(mocks.create.mock.calls[0][0]).toMatchObject({ driveFolderId: null });
   });
 
   it("từ chối request thiếu consent trước Turnstile, Drive và database", async () => {

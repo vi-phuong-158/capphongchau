@@ -12,6 +12,11 @@ import {
 } from "@/modules/public-intake/route-context";
 import { canonicalImageMimeType } from "@/modules/public-intake/image-format";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
+import {
+  ensureSubmissionFolderReady,
+  SubmissionFolderBusyError,
+  SubmissionFolderUnavailableError,
+} from "@/modules/public-intake/submission-folder";
 import { requiresCitizenId } from "@/modules/public-intake/types";
 
 export const runtime = "nodejs";
@@ -184,8 +189,30 @@ export async function POST(request: Request): Promise<NextResponse> {
   // `mimeType`; chỉ phần mở rộng đã kiểm mới được dùng lại, không phải phần thân tên.
   const fileName = `${documentType}-${Date.now()}-${randomUUID().slice(0, 8)}.${extensionFromMimeType(mimeType)}`;
 
+  let folderId: string;
+  try {
+    folderId = await ensureSubmissionFolderReady(record);
+  } catch (error) {
+    if (
+      error instanceof SubmissionFolderBusyError ||
+      error instanceof SubmissionFolderUnavailableError
+    ) {
+      const response = publicError(
+        "SERVICE_UNAVAILABLE",
+        "Kho ảnh đang được chuẩn bị. Vui lòng thử lại sau ít giây.",
+        requestId,
+      );
+      response.headers.set(
+        "Retry-After",
+        String(error instanceof SubmissionFolderBusyError ? error.retryAfterSeconds : 2),
+      );
+      return response;
+    }
+    throw error;
+  }
+
   const session = await getPublicIntakeStorage().createUploadSession({
-    folderId: record.driveFolderId,
+    folderId,
     fileName,
     mimeType,
     sizeBytes,

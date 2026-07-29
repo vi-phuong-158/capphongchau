@@ -1708,3 +1708,14 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **AI:** Chỉ mount `AiDraftPanel` khi mở phần “Đối chiếu AI”, nên không tạo request AI trong initial load.
 - **Đo lường:** Response thành công phát `Server-Timing` chỉ gồm duration `detail_*` hoặc `preview_*`; không chứa PII, Drive ID/link, query hay token.
 - **Đánh đổi:** Không có nút “Xem tất cả” trong Phase 2; cán bộ mở từng ảnh để tránh tải/audit hàng loạt. Không có migration, rollback là revert code.
+
+## [2026-07-29] Phase 3 — Tạo Drive folder ở upload đầu tiên bằng lease
+
+- **Quyết định:** thêm migration additive `202607290005_lazy_drive_folder_creation.sql`; cho phép
+  `drive_folder_id` NULL và điều phối qua `PENDING/CREATING/READY/FAILED`, lease 60 giây, số lần thử.
+- **Luồng:** khi `LAZY_DRIVE_FOLDER_CREATION_ENABLED=true`, CREATE chỉ ghi PostgreSQL transaction
+  hiện hữu và trả receipt/session. Upload initiate hợp lệ mới gọi `ensureSubmissionFolderReady`.
+  Request thắng lease commit DB trước khi gọi Drive, list-before-create rồi checkpoint `READY`;
+  request thua lease nhận 503 có `Retry-After`. Complete/delete/acceptance fail closed nếu thiếu folder.
+- **An toàn và rollback:** cờ mặc định `false`, nên Production tiếp tục eager cho tới khi có Preview
+  E2E/orphan evidence. Không lưu thông báo lỗi Drive, ID hay link; tắt cờ không cần rollback schema.

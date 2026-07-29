@@ -2627,3 +2627,14 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Audit/scope:** Không thêm audit bypass. Detail page, API detail và preview thành công vẫn append audit theo contract; một lượt đầy đủ 10 warm-up + 40 đo có thể thêm tối đa 150 audit rows. Chỉ chạy dữ liệu synthetic/rehearsal và dọn/reset audit sau đo.
 - **Tài liệu:** đồng bộ AGENTS, Code Graph, decision/task/baseline hiệu năng để không mô tả sai là “không ghi database”. Không đổi runtime API, role, schema hay migration.
 - **Kiểm tra ban đầu:** baseline 5 file/13 test PASS; focused runner test sau sửa 6/6 PASS. Chưa chạy authenticated Preview vì không có cookie/session rehearsal được cấp; không deploy/merge Production.
+## [2026-07-29] Codex — triển khai Phase 3 lazy Drive folder trên branch riêng
+
+- Base `origin/main` sau PR #9: `8942d3c`; branch `codex/phase3-lazy-drive-folder`.
+- Baseline trước sửa: typecheck, lint, 78 test files/680 tests và webpack build 23/23 đều PASS.
+- Thêm migration `202607290005`, feature flag mặc định tắt, repository lease/checkpoint và
+  `submission-folder.ts`; CREATE lazy không gọi Drive, initiate bảo đảm folder trước resumable
+  session, complete/delete/official acceptance guard folder nullable.
+- Drive call cho folder riêng chạy ngoài database transaction và list-before-create để phục hồi
+  crash; `01_INBOX` dùng chung vẫn giữ advisory lock. Lỗi Drive chỉ chuyển state `FAILED`.
+- Bổ sung test feature flag/create, lease/READY/busy/recovery/failure và mở rộng preflight để kiểm
+  migration mới. Chưa áp migration, chưa deploy Preview/Production và chưa bật cờ ở môi trường nào.
