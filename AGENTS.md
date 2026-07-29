@@ -2,6 +2,12 @@
 
 ## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
 
+## Bổ sung Phase 2 hiệu năng chi tiết hồ sơ (2026-07-29)
+
+- Chi tiết cán bộ phải được server-prime sau `requireActiveUser`; client không được tự gọi lại GET detail ở lần mount đầu. GET detail vẫn giữ cho refresh có chủ đích.
+- Ảnh chỉ được đặt `src` sau thao tác xem rõ ràng. Preview route phải dùng lookup đúng một file active thuộc submission; không đọc toàn hồ sơ/danh sách file, không trả Drive ID/link, và chỉ audit sau khi đọc preview thành công.
+- AI draft không được fetch lúc mở hồ sơ; chỉ mount khi cán bộ mở phần đối chiếu. Server-Timing chỉ được chứa duration an toàn, không chứa PII hoặc định danh Drive.
+
 - Trong `UNDER_REVIEW`, `WorkingPayloadEditor` là nơi duy nhất sửa PL3; nút hành động chỉ mở tab
   Chủ sử dụng. `PUT /working-payload` phải so sánh payload hiệu lực ở server: sửa họ tên/CCCD/ngày
   sinh/giới tính sau `QR_CONFIRMED` cần lý do và server chuyển sang `QR_OVERRIDE_PENDING_REVIEW`;

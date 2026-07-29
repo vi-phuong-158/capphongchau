@@ -1919,6 +1919,20 @@ export class PublicIntakeRepository {
     return rows.map(mapFile);
   }
 
+  async findActiveFile(submissionId: string, fileId: string): Promise<StoredFile | null> {
+    const database = getDatabase();
+    const rows = await database<FileRow[]>`
+      select file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+        size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      from public.public_files
+      where submission_id = ${submissionId}
+        and file_id = ${fileId}
+        and status = 'UPLOADED'
+      limit 1
+    `;
+    return rows[0] ? mapFile(rows[0]) : null;
+  }
+
   async markFileReplaced(submissionId: string, fileId: string): Promise<void> {
     await this.markFileStatus(submissionId, fileId, "REPLACED");
   }

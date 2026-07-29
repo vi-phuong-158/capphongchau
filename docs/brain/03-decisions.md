@@ -1681,3 +1681,10 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
   thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
   `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.
+## [2026-07-29] Phase 2 dùng SSR initial detail, lazy preview và lazy AI
+
+- **Quyết định:** Trang chi tiết cán bộ tự kiểm quyền rồi gọi `loadStaffSubmissionDetail` ở Server Component; `SubmissionDetail` nhận `initialSubmission` và không fetch detail khi mount. GET detail giữ nguyên contract để refresh sau mutation/direct access.
+- **Ảnh:** `DocumentViewer` không đặt `img.src` cho đến khi cán bộ bấm “Xem ảnh”; mỗi preview lookup dùng `findActiveFile(submissionId, fileId)` thay vì đọc toàn hồ sơ/danh sách file. File sai scope hoặc không còn `UPLOADED` trả 404 an toàn.
+- **AI:** Chỉ mount `AiDraftPanel` khi mở phần “Đối chiếu AI”, nên không tạo request AI trong initial load.
+- **Đo lường:** Response thành công phát `Server-Timing` chỉ gồm duration `detail_*` hoặc `preview_*`; không chứa PII, Drive ID/link, query hay token.
+- **Đánh đổi:** Không có nút “Xem tất cả” trong Phase 2; cán bộ mở từng ảnh để tránh tải/audit hàng loạt. Không có migration, rollback là revert code.

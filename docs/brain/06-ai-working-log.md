@@ -2589,3 +2589,11 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
 - **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
 - **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.
+## [2026-07-29] Phase 2 — server-prime chi tiết, lazy preview và lazy AI
+
+- **Agent:** Codex.
+- **Thay đổi:** `page.tsx` kiểm quyền và nạp `initialSubmission` từ service server dùng chung; `SubmissionDetail` khởi tạo state từ prop, không fetch detail lúc mount. GET detail được giữ để refresh có chủ đích và thêm `Server-Timing` an toàn.
+- **Preview ảnh:** `DocumentViewer` chỉ đặt ảnh sau nút “Xem ảnh”. Preview route dùng `findActiveFile(submissionId, fileId)` để xác minh đúng file `UPLOADED` thuộc hồ sơ trước Drive; không còn đọc toàn hồ sơ/danh sách file; audit chỉ sau đọc Drive thành công.
+- **AI:** `AiDraftPanel` chỉ mount sau hành động mở phần “Đối chiếu AI”.
+- **Kiểm tra local:** typecheck, lint, 679 test pass/10 skip và webpack production build pass. Next/Turbopack build mặc định tại worktree bị lỗi symlink `node_modules` có sẵn; webpack không bị ảnh hưởng.
+- **Preview/E2E:** Chưa có P50/P95 authenticated vì không có session cán bộ Preview. Hai lần deploy local bằng Vercel CLI đều timeout không phát sinh deployment mới; không deploy Production.

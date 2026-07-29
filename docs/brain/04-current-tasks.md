@@ -465,3 +465,7 @@ Theo thứ tự mốc trong `PLAN.md`:
 - [2026-07-21] Khởi tạo bộ não dự án AI dùng chung: `CLAUDE.md`, `docs/brain/00-06` (merge với `AGENTS.md` hiện có, không ghi đè).
 
 - [2026-07-23] PR #1: code sửa import ngày sinh, backfill append-only, staff action atomic và reset idempotent đã hoàn tất; còn dry-run/backup/apply Google Sheet và xác nhận Preview.
+# Phase 2 hiệu năng chi tiết hồ sơ — đã thi công, chờ nghiệm thu Preview
+
+- Không có migration. Cần kiểm tra server-prime detail, ảnh/AI lazy, `findActiveFile` scope, audit và `Server-Timing` trên Preview bằng session cán bộ hợp lệ.
+- Chỉ đánh dấu PASS khi P95 mở metadata/preview được ghi bằng evidence; không deploy Production trong đợt này.

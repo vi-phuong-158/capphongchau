@@ -1,5 +1,29 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-29 — Phase 2 mở chi tiết/lazy preview
+
+```text
+src/app/submissions/[submissionId]/page.tsx
+└── requireActiveUser(SUBMISSION_READ_ROLES)
+    └── loadStaffSubmissionDetail → initialSubmission → SubmissionDetail
+        ├── record + active files, audit mở chi tiết một lần khi SSR navigation
+        └── không fetch GET /api/submissions/:id khi client mount
+
+GET /api/submissions/:id
+└── requireActiveUser → loadStaffSubmissionDetail → DTO tương thích + Server-Timing
+
+DocumentViewer
+├── chưa đặt img.src khi mở hồ sơ
+├── cán bộ bấm “Xem ảnh” → đúng một preview URL cho file đang chọn
+└── GET /api/submissions/:id/files/:fileId
+    ├── requireActiveUser(SUBMISSION_READ_ROLES)
+    ├── PublicIntakeRepository.findActiveFile(submissionId, fileId)
+    ├── Drive readPreview(file.driveFileId)
+    └── audit preview + Server-Timing, không trả Drive ID/link
+
+AiDraftPanel chỉ mount/fetch sau khi cán bộ mở “Đối chiếu AI”.
+```
+
 > Cập nhật PR #8 (2026-07-29): `PUT /api/submissions/:id/working-payload` so sánh payload hiệu lực
 > trước khi commit. Sửa bốn trường định danh sau `QR_CONFIRMED` bắt buộc lý do và server chuyển sang
 > `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` xóa dấu xác nhận và về

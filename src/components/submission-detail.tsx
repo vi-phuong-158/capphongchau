@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
-import type { IntakeDraft } from "@/modules/public-intake/types";
 import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
@@ -19,30 +18,7 @@ import {
   assignedOfficerAccount,
   assignedOfficerLabel,
 } from "@/modules/submissions/assigned-officer";
-
-type Submission = {
-  submissionId: string;
-  receiptCode: string;
-  status: string;
-  phone: string;
-  version: number;
-  claimedBy: string | null;
-  claimedByDisplayName?: string | null;
-  intakeChannel?: string | null;
-  assistedByDisplayName?: string | null;
-  claimedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  officialCaseId: string | null;
-  acceptStep: string | null;
-  canResetAccessSecret: boolean;
-  draft: IntakeDraft | null;
-  files: {
-    fileId: string;
-    documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
-    ownerId: string;
-  }[];
-};
+import type { StaffSubmissionDetail } from "@/modules/submissions/detail-types";
 
 const labels: Record<string, string> = {
   SUBMITTED: "Chờ tiếp nhận",
@@ -62,10 +38,10 @@ async function csrfToken() {
   return ((await response.json()) as { csrfToken: string }).csrfToken;
 }
 
-async function loadSubmission(id: string): Promise<Submission> {
+async function loadSubmission(id: string): Promise<StaffSubmissionDetail> {
   const response = await fetch(`/api/submissions/${id}`, { cache: "no-store" });
   if (!response.ok) throw new Error();
-  return ((await response.json()) as { submission: Submission }).submission;
+  return ((await response.json()) as { submission: StaffSubmissionDetail }).submission;
 }
 
 type EditableOwner = {
@@ -117,15 +93,15 @@ const EDITABLE_OWNER_FIELDS = [
 ] as const;
 
 export function SubmissionDetail({
-  submissionId,
+  initialSubmission,
   currentUserEmail,
   isAdministrator,
 }: {
-  readonly submissionId: string;
+  readonly initialSubmission: StaffSubmissionDetail;
   readonly currentUserEmail: string;
   readonly isAdministrator: boolean;
 }) {
-  const [submission, setSubmission] = useState<Submission | null>(null);
+  const [submission, setSubmission] = useState<StaffSubmissionDetail>(initialSubmission);
   const [message, setMessage] = useState<string | null>(null);
   const [acceptanceIssues, setAcceptanceIssues] = useState<AcceptanceBlockingIssue[]>([]);
   const [busy, setBusy] = useState(false);
@@ -150,21 +126,17 @@ export function SubmissionDetail({
   });
   const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
   const [workingPayloadTab, setWorkingPayloadTab] = useState<WorkingPayloadEditorTab>("all");
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   /** Giữ nguyên qua các lần bấm lại để saga tiếp tục từ checkpoint, không tạo hồ sơ chính thức mới. */
   const acceptKeyRef = useRef("");
   const isClaimedByMe =
-    (submission?.claimedBy || "").trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
+    (submission.claimedBy || "").trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
   const workingPayload = useWorkingPayload(
-    submissionId,
-    submission?.draft ?? null,
-    submission?.version ?? 0,
+    submission.submissionId,
+    submission.draft,
+    submission.version,
     isClaimedByMe,
   );
-  useEffect(() => {
-    loadSubmission(submissionId)
-      .then(setSubmission)
-      .catch(() => setMessage("Không thể tải hồ sơ."));
-  }, [submissionId]);
   function openEdit(mode: "EDIT" | "AMEND" = "EDIT") {
     if (!submission?.draft) return;
     setAmendMode(mode === "AMEND");
@@ -801,16 +773,37 @@ export function SubmissionDetail({
             </div>
           ) : null}
 
-          {/* AI Extraction Panel */}
-          <AiDraftPanel
-            submissionId={submission.submissionId}
-            version={submission.version}
-            mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
-            onApplied={async () => {
-              const refreshed = await loadSubmission(submission.submissionId);
-              setSubmission(refreshed);
-            }}
-          />
+          <section className="rounded-xl border border-stone-200 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-stone-900">Đối chiếu AI</h2>
+                <p className="mt-1 text-xs text-stone-600">
+                  Chỉ tải kết quả AI khi cán bộ mở phần này.
+                </p>
+              </div>
+              <button
+                className="pc-button-quiet text-xs"
+                type="button"
+                aria-expanded={aiPanelOpen}
+                onClick={() => setAiPanelOpen((current) => !current)}
+              >
+                {aiPanelOpen ? "Đóng đối chiếu AI" : "Mở đối chiếu AI"}
+              </button>
+            </div>
+            {aiPanelOpen && (
+              <div className="mt-4">
+                <AiDraftPanel
+                  submissionId={submission.submissionId}
+                  version={submission.version}
+                  mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
+                  onApplied={async () => {
+                    const refreshed = await loadSubmission(submission.submissionId);
+                    setSubmission(refreshed);
+                  }}
+                />
+              </div>
+            )}
+          </section>
 
           {/* Reset Access Secret Section */}
           {submission.canResetAccessSecret && (

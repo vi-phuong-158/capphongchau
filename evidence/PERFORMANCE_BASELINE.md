@@ -1,5 +1,14 @@
 # Performance baseline — Phase 1 queue pagination/search
 
+## Phase 2 — mở chi tiết và preview theo yêu cầu (2026-07-29)
+
+- Branch: `codex/phase2-detail-lazy-preview`; base: `c17254c`.
+- Không migration, không thay đổi dữ liệu. Initial detail chuyển sang Server Component; client không còn GET detail khi mount. Ảnh và AI chỉ tạo request sau thao tác mở rõ ràng.
+- `Server-Timing` mới: detail `detail_db`, `detail_total`; preview `preview_db`, `preview_drive`, `preview_total`. Header không chứa PII, query, Drive ID/link hay token.
+- Local verification: typecheck/lint pass; unit test 75 files pass, 2 skip; 669 pass, 10 skip; webpack production build pass.
+- Benchmark authenticated/P50/P95 Preview: **BLOCKED**. Không có credential/session cán bộ Preview. Hai lần `vercel --yes` local timeout và không tạo deployment mới, nên không suy diễn số đo từ Preview cũ hay Production.
+- Acceptance chưa PASS cho đến khi Preview deployment từ branch này chạy và E2E có session cán bộ xác minh: SSR không có GET detail client, không preview trước click, scope file 404, role/phone masking và P95 metadata ≤ 1,5 giây hoặc có phân tích nguyên nhân.
+
 - Ngày ghi: 2026-07-29
 - Branch: `codex/perf-queue-sql-pagination`
 - Base commit: `2fca1f363c8c6212692ca048c61e3929750493e8`

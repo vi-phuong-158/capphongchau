@@ -1,5 +1,56 @@
 # CHATGPT HANDOFF REPORT
 
+## Phase 2 performance report — detail server-prime/lazy preview (2026-07-29)
+
+### Report metadata
+
+- Project: Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu (`land-ocr-180`)
+- Repository: `D:\04. Github\capphongchau-acceptance-visibility`
+- Branch/base: `codex/phase2-detail-lazy-preview` from `c17254c`
+- Phase 2 commit: `perf(submissions): server-prime detail previews` (the final commit ID is recorded in the delivery message).
+- Git state after commit: clean before remote push; only the Phase 2 files listed in this report are included.
+- Status: `READY_FOR_DEPLOY_REVIEW`; authenticated Preview E2E remains blocked.
+- Source: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md` §6 Phase 2.
+
+### Implemented scope
+
+- Server page calls shared `loadStaffSubmissionDetail` after `requireActiveUser` and passes `initialSubmission`; client no longer fetches detail when mounting.
+- Detail GET retains its contract for deliberate refresh, detail/preview successful responses expose safe duration-only `Server-Timing` values.
+- `DocumentViewer` has no image `src` until “Xem ảnh”; AI panel mounts only after “Mở đối chiếu AI”.
+- Repository `findActiveFile(submissionId, fileId)` scopes preview to a single `UPLOADED` file; the preview route no longer reads the whole submission/file list before Drive.
+- No migration, data change, Production deployment, or Phase 3 work.
+
+### Security/data impact
+
+- Authentication/roles remain `requireActiveUser(SUBMISSION_READ_ROLES)`.
+- DTOs continue to omit Drive IDs/links; a missing, inactive, or cross-submission file returns generic 404 before Drive access.
+- Detail audit remains one event per SSR/API entrypoint; preview audit occurs only after successful Drive preview read. Timing headers contain no PII, query, Drive ID/link, or token.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| Baseline `npm.cmd test` | 664 pass, 10 skip; exit 0 |
+| Final `npm.cmd test` | 669 pass, 10 skip; exit 0 |
+| `npm.cmd run typecheck` | pass |
+| `npm.cmd run lint -- --quiet` | pass |
+| `npm.cmd run build -- --webpack` | pass |
+| Default Turbopack build | blocked by pre-existing worktree `node_modules` symlink restriction; webpack validates the same source. |
+| Local Vercel Preview deploy | two CLI attempts timed out; no new deployment created. |
+
+New tests cover shared detail loading/audit, missing-record no-audit, initial SSR/no mount fetch, deferred AI/image source, scoped active-file query and timing contract.
+
+### Acceptance and next action
+
+| Criterion | Status | Evidence/next action |
+| --- | --- | --- |
+| No initial client detail fetch | PASS | server-prime + structural test |
+| No preview before explicit click | PASS | `previewFileId` gate + test |
+| One active file scoped before Drive | PASS | repository/route test |
+| Preview deployment and authenticated E2E P50/P95 | BLOCKED | Resolve Vercel CLI deployment or deploy pushed branch; supply approved Preview test session. |
+
+Rollback is code-only: revert this Phase 2 commit. No database rollback/backfill is required. Do not mark Phase 2 PASS until Preview E2E verifies role, phone masking, cross-submission 404, image/AI laziness, `Server-Timing`, and P95 metadata ≤ 1.5 s (or documents the cause).
+
 ## Phase 1 performance report — SQL queue pagination/search (2026-07-29)
 
 ### 1. Report metadata

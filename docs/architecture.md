@@ -178,3 +178,6 @@ Không chạy ETL khi production còn ghi. Không xóa spreadsheet sau cutover; 
 ## Hướng nâng cấp
 
 Shared Drive/kho lưu trữ cơ quan vẫn là nâng cấp riêng. Khi chuyển file, giữ nguyên `file_id`/`case_id`, cập nhật `drive_file_id`, kiểm checksum và audit theo lô. OCR CCCD, đối soát dân cư và tích hợp CSDL đất đai chỉ triển khai khi có cơ sở pháp lý và kênh kỹ thuật chính thức.
+# Cập nhật Phase 2 — chi tiết cán bộ và xem ảnh theo yêu cầu
+
+`/submissions/:submissionId` kiểm quyền và server-prime DTO chi tiết trước khi render client. Initial render không gọi lại `GET /api/submissions/:submissionId`; endpoint này vẫn giữ cho refresh sau thao tác ghi. `DocumentViewer` không đặt `src` ảnh trước hành động “Xem ảnh”; preview route xác minh đúng một file `UPLOADED` thuộc submission bằng repository trước khi gọi Drive. AI draft chỉ tải khi cán bộ mở phần đối chiếu. Detail/preview response thành công có `Server-Timing` không chứa PII.
