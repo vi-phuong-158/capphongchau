@@ -1,5 +1,6 @@
 /**
- * Preflight schema — xác nhận bốn migration Public Intake V2 đã áp đúng, SAU khi chạy migration,
+ * Preflight schema — xác nhận các migration Public Intake V2 và migration phụ thuộc đã áp đúng,
+ * SAU khi chạy migration,
  * TRƯỚC khi deploy code mới.
  *
  *     npx tsx scripts/preflight-public-intake-v2-migrations.ts
@@ -8,11 +9,15 @@
  * — dùng được thẳng làm bước gate trong quy trình triển khai (CI hoặc chạy tay), xem
  * `evidence/PUBLIC_INTAKE_V2_PREVIEW_MIGRATION_RUNBOOK.md`.
  *
- * Bốn migration được kiểm:
+ * Các migration được kiểm gồm:
  *   202607280001_assigned_officer_display_name.sql
  *   202607280002_officer_assisted_intake.sql
  *   202607280003_upload_attempt_metrics.sql
  *   202607280004_public_file_normalization_metadata.sql
+ *   202607290001_public_upload_attempts_rls.sql
+ *   202607290002_full_pl3_editor.sql
+ *   202607290003_drop_working_payload_override_columns.sql
+ *   202607290004_queue_search_performance.sql
  */
 
 import { loadEnvConfig } from "@next/env";
@@ -30,10 +35,12 @@ interface CheckResult {
 async function columnExists(
   table: string,
   column: string,
-): Promise<{ exists: boolean; nullable: boolean; hasDefault: boolean }> {
+): Promise<{ exists: boolean; nullable: boolean; hasDefault: boolean; isGenerated: boolean }> {
   const database = getDatabase();
-  const rows = await database<{ is_nullable: string; column_default: string | null }[]>`
-    select is_nullable, column_default from information_schema.columns
+  const rows = await database<
+    { is_nullable: string; column_default: string | null; is_generated: string }[]
+  >`
+    select is_nullable, column_default, is_generated from information_schema.columns
     where table_schema = 'public' and table_name = ${table} and column_name = ${column}
   `;
   const row = rows[0];
@@ -41,6 +48,7 @@ async function columnExists(
     exists: Boolean(row),
     nullable: row?.is_nullable === "YES",
     hasDefault: row?.column_default !== null && row?.column_default !== undefined,
+    isGenerated: row?.is_generated === "ALWAYS",
   };
 }
 
@@ -69,6 +77,14 @@ async function indexExists(name: string): Promise<boolean> {
     select exists (
       select 1 from pg_indexes where schemaname = 'public' and indexname = ${name}
     ) as exists
+  `;
+  return rows[0]?.exists ?? false;
+}
+
+async function extensionExists(name: string): Promise<boolean> {
+  const database = getDatabase();
+  const rows = await database<{ exists: boolean }[]>`
+    select exists (select 1 from pg_extension where extname = ${name}) as exists
   `;
   return rows[0]?.exists ?? false;
 }
@@ -245,6 +261,110 @@ async function runChecks(): Promise<CheckResult[]> {
             "phải thêm migration mới: alter table public.public_upload_attempts no force row level security;"
           : "relforcerowsecurity=false",
     );
+  }
+
+  // 202607290002 — toàn bộ cột lưu bền vững cho Bàn biên tập đầy đủ và PL3 B–AX.
+  {
+    const requiredColumns: ReadonlyArray<readonly [table: string, column: string]> = [
+      ["public_owners", "organisation_name"],
+      ["public_owners", "organisation_identity_number"],
+      ["public_parcels", "cadastral_map_sheet_number"],
+      ["public_parcels", "cadastral_map_sheet_override_reason"],
+      ["public_parcels", "cadastral_parcel_number"],
+      ["public_assets", "parcel_id"],
+      ["public_assets", "mixed_use_building_name"],
+      ["public_assets", "apartment_building_name"],
+      ["public_assets", "apartment_number"],
+      ["public_assets", "construction_area"],
+      ["public_assets", "floor_area"],
+      ["public_assets", "ownership_form"],
+      ["public_assets", "ownership_term"],
+      ["public_assets", "grade"],
+      ["owners", "data_json"],
+      ["official_parcels", "parcel_id_code"],
+      ["official_parcels", "address_two_level"],
+      ["official_parcels", "cadastral_map_sheet_number"],
+      ["official_parcels", "cadastral_map_sheet_override_reason"],
+      ["official_parcels", "cadastral_parcel_number"],
+      ["official_land_uses", "purpose_free_text"],
+    ];
+    const columns = await Promise.all(
+      requiredColumns.map(async ([table, column]) => ({
+        table,
+        column,
+        ...(await columnExists(table, column)),
+      })),
+    );
+    const missing = columns
+      .filter((column) => !column.exists)
+      .map((column) => `${column.table}.${column.column}`);
+    check(
+      "Có đủ cột lưu PL3 B–AX (202607290002)",
+      missing.length === 0,
+      missing.length === 0 ? "OK" : `THIẾU CỘT: ${missing.join(", ")}`,
+    );
+
+    const assetIndex = await indexExists("public_assets_parcel_idx");
+    check(
+      "Index public_assets_parcel_idx tồn tại (202607290002)",
+      assetIndex,
+      assetIndex ? "OK" : "THIẾU INDEX",
+    );
+  }
+
+  // 202607290003 — `working_payload_json` là nguồn sự thật duy nhất cho ghi đè cột B và AX.
+  // Bốn cột song song phải KHÔNG còn tồn tại; còn cột nghĩa là migration chưa chạy và nguy cơ
+  // ai đó ghi lại vào đó vẫn còn.
+  {
+    const droppedColumns = [
+      "ward_admin_code_override",
+      "ward_admin_code_override_reason",
+      "scanned_file_names_override",
+      "scanned_file_names_override_reason",
+    ];
+    const stillPresent: string[] = [];
+    for (const column of droppedColumns) {
+      const { exists } = await columnExists("public_submissions", column);
+      if (exists) stillPresent.push(`public_submissions.${column}`);
+    }
+    check(
+      "Đã gỡ cột ghi đè song song trên public_submissions (202607290003)",
+      stillPresent.length === 0,
+      stillPresent.length === 0 ? "OK" : `CÒN CỘT SONG SONG: ${stillPresent.join(", ")}`,
+    );
+  }
+
+  // 202607290004 — projection và index phục vụ hàng chờ SQL keyset/tìm kiếm.
+  {
+    const columns = await Promise.all(
+      ["queue_owner_name", "queue_issue_number"].map((column) =>
+        columnExists("public_submissions", column),
+      ),
+    );
+    const allGenerated = columns.every((column) => column.exists && column.isGenerated);
+    check(
+      "public_submissions có đủ cột hàng chờ sinh tự động (202607290004)",
+      allGenerated,
+      allGenerated ? "OK" : "THIẾU CỘT GENERATED — migration 202607290004 chưa chạy đúng/đủ",
+    );
+
+    const trigram = await extensionExists("pg_trgm");
+    check(
+      "Extension pg_trgm tồn tại (202607290004)",
+      trigram,
+      trigram ? "OK" : "THIẾU EXTENSION pg_trgm",
+    );
+
+    for (const index of [
+      "public_submissions_queue_page_idx",
+      "public_submissions_queue_all_page_idx",
+      "public_submissions_queue_receipt_trgm_idx",
+      "public_submissions_queue_issue_trgm_idx",
+      "public_submissions_queue_owner_trgm_idx",
+    ]) {
+      const exists = await indexExists(index);
+      check(`Index ${index} tồn tại (202607290004)`, exists, exists ? "OK" : "THIẾU INDEX");
+    }
   }
 
   // Kiểm tra dữ liệu — hồ sơ cũ phải nhất quán, không phải chỉ schema đúng.

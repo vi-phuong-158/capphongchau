@@ -1,6 +1,6 @@
 import type { Sql } from "postgres";
 
-import type { IntakeDraft } from "@/modules/public-intake/types";
+import { isOrganisationOwner, type IntakeDraft } from "@/modules/public-intake/types";
 
 /**
  * Ghi/đồng bộ dữ liệu chính thức của một hồ sơ (`case_id`) từ bản kê khai.
@@ -67,7 +67,12 @@ export async function syncOfficialRecord(
   const parcelIds = parcels.map((parcel, index) => officialChildId(submissionId, parcel.id, index));
   const assetIds = assets.map((asset, index) => officialChildId(submissionId, asset.id, index));
   const certificateId = `ACC:${submissionId}:CERT`;
-  const landUserName = owners[0]?.fullName || "";
+  const primaryOwner = owners[0];
+  const landUserName = primaryOwner
+    ? isOrganisationOwner(primaryOwner.ownerType)
+      ? primaryOwner.organisationName || primaryOwner.fullName || ""
+      : primaryOwner.fullName || ""
+    : "";
 
   // --- Giấy chứng nhận -------------------------------------------------------------------------
   if (certificate) {
@@ -96,11 +101,11 @@ export async function syncOfficialRecord(
   for (const [index, owner] of owners.entries()) {
     await transaction`
       insert into public.owners (
-        owner_id, case_id, full_name, citizen_id, date_of_birth, gender, address, source
+        owner_id, case_id, full_name, citizen_id, date_of_birth, gender, address, source, data_json
       ) values (
         ${ownerIds[index]}, ${caseId}, ${owner.fullName || ""}, ${owner.identityNumber || ""},
         ${owner.dateOfBirth || ""}, ${owner.gender || ""}, ${owner.residenceAddress || ""},
-        ${owner.identitySource || "MANUAL"}
+        ${owner.identitySource || "MANUAL"}, ${JSON.stringify(owner)}::jsonb
       )
       on conflict (owner_id) do update set
         full_name = excluded.full_name,
@@ -109,6 +114,7 @@ export async function syncOfficialRecord(
         gender = excluded.gender,
         address = excluded.address,
         source = excluded.source,
+        data_json = excluded.data_json,
         updated_at = now()
     `;
   }
@@ -133,17 +139,27 @@ export async function syncOfficialRecord(
     await transaction`
       insert into public.official_parcels (
         official_parcel_id, official_case_id, submission_id, map_sheet_number,
-        parcel_number, address_on_cert, old_ward, area
+        parcel_number, parcel_id_code, address_on_cert, address_two_level, old_ward,
+        cadastral_map_sheet_number, cadastral_map_sheet_override_reason,
+        cadastral_parcel_number, area
       ) values (
         ${officialParcelId}, ${caseId}, ${submissionId}, ${parcel.mapSheetNumber || ""},
-        ${parcel.parcelNumber || ""}, ${parcel.addressOnCertificate || ""},
-        ${parcel.oldWard || ""}, ${areaNum}
+        ${parcel.parcelNumber || ""}, ${parcel.parcelIdCode || ""},
+        ${parcel.addressOnCertificate || ""}, ${parcel.addressTwoLevel || ""},
+        ${parcel.oldWard || ""}, ${parcel.cadastralMapSheetNumber || ""},
+        ${parcel.cadastralMapSheetOverrideReason || ""}, ${parcel.cadastralParcelNumber || ""},
+        ${areaNum}
       )
       on conflict (official_parcel_id) do update set
         map_sheet_number = excluded.map_sheet_number,
         parcel_number = excluded.parcel_number,
+        parcel_id_code = excluded.parcel_id_code,
         address_on_cert = excluded.address_on_cert,
+        address_two_level = excluded.address_two_level,
         old_ward = excluded.old_ward,
+        cadastral_map_sheet_number = excluded.cadastral_map_sheet_number,
+        cadastral_map_sheet_override_reason = excluded.cadastral_map_sheet_override_reason,
+        cadastral_parcel_number = excluded.cadastral_parcel_number,
         area = excluded.area
     `;
 
@@ -155,14 +171,16 @@ export async function syncOfficialRecord(
       const luAreaNum = lu.area !== undefined && lu.area !== "" ? Number(lu.area) : null;
       await transaction`
         insert into public.official_land_uses (
-          official_land_use_id, official_parcel_id, purpose_code, origin_code,
+          official_land_use_id, official_parcel_id, purpose_code, purpose_free_text, origin_code,
           form_code, term_code, area
         ) values (
-          ${officialLuId}, ${officialParcelId}, ${lu.purposeCode || ""}, ${lu.originCode || ""},
+          ${officialLuId}, ${officialParcelId}, ${lu.purposeCode || ""},
+          ${lu.purposeFreeText || ""}, ${lu.originCode || ""},
           ${lu.formCode || ""}, ${lu.termCode || ""}, ${luAreaNum}
         )
         on conflict (official_land_use_id) do update set
           purpose_code = excluded.purpose_code,
+          purpose_free_text = excluded.purpose_free_text,
           origin_code = excluded.origin_code,
           form_code = excluded.form_code,
           term_code = excluded.term_code,

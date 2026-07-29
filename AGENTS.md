@@ -1,5 +1,16 @@
 # AGENTS.md
 
+## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
+
+- Trong `UNDER_REVIEW`, `WorkingPayloadEditor` là nơi duy nhất sửa PL3; nút hành động chỉ mở tab
+  Chủ sử dụng. `PUT /working-payload` phải so sánh payload hiệu lực ở server: sửa họ tên/CCCD/ngày
+  sinh/giới tính sau `QR_CONFIRMED` cần lý do và server chuyển sang `QR_OVERRIDE_PENDING_REVIEW`;
+  sửa sau `MANUAL_COMPLETE` làm mất xác nhận, về `PENDING_CONFIRMATION`. Client không được tự đặt
+  trạng thái, nguồn hay thời điểm xác nhận.
+- GET chi tiết cán bộ chỉ trả `files[].ownerId` nội bộ để gắn nhãn CCCD đúng chủ; không trả Drive
+  ID/link hay PII mới. Xác nhận `MANUAL_COMPLETE` vẫn chỉ qua PATCH riêng, CSRF + idempotency + audit
+  không chứa PII, dành cho cán bộ đang giữ hồ sơ.
+
 > Dành riêng cho **Codex**. Claude Code dùng `CLAUDE.md`.
 >
 > **BẮT BUỘC: đọc `docs/brain/` trước khi code**, đặc biệt **Code Graph** trong
@@ -112,7 +123,11 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 
 - My Drive và file phải ở chế độ `Restricted`; không tạo link công khai.
 - Không chia sẻ thư mục gốc cho cán bộ. Mọi truy cập đi qua ứng dụng và quyền trong `USERS`.
-- Giữ nguyên file gốc. Tạo preview JPEG tối đa 2.5 MB để giao diện xem qua Vercel; ảnh gốc không đi qua body của Vercel Function.
+- Mặc định giữ nguyên file nguồn. Ngoại lệ đã được chủ dự án chốt ngày 2026-07-29: khi
+  `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`, cổng kê khai lưu **bản tiếp nhận vận hành**
+  đã chuẩn hóa trên thiết bị (CCCD tối đa 2400 px, GCN tối đa 3000 px, JPEG quality 0.88), không
+  cam kết byte trùng tệp camera; metadata nguồn/đích phải được giữ để đo và audit kỹ thuật. Ảnh
+  không đi qua body của Vercel Function.
 - Browser kiểm tra JPEG, PNG, WebP, HEIC/HEIF; giới hạn 30 MB/file. HEIC/HEIF được chuyển sang JPEG tại thiết bị khi cần.
 - Backend tạo resumable upload session; browser upload trực tiếp Drive và hiển thị tiến độ/retry.
 - Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
@@ -142,11 +157,18 @@ Tạo các bảng sau (tên vật lý dùng `snake_case` trong migration SQL):
 - `FILES`: `file_id`, `case_id`, `owner_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
 - `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, `owner_id`, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
 - `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX`.
+- `PUBLIC_SUBMISSIONS` có hai generated column `queue_owner_name`/`queue_issue_number` chỉ phục vụ
+  hiển thị và tìm kiếm hàng chờ. `GET /api/submissions` phải lọc/tìm/phân trang keyset trong
+  PostgreSQL theo `(updated_at, submission_id)`, không đọc toàn bảng hoặc toàn bộ `draft_json` vào
+  Node để chia trang.
 - Khu vực tra cứu/đối chiếu bổ sung các bảng append-only: `PUBLIC_STATUS_EVENTS`,
   `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`,
   `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS` và
   `PUBLIC_LOOKUP_INDEX` (256 bucket HMAC).
-- Tạo sẵn `PARCELS`, `ASSETS`, `OCR_FIELDS` để tương thích nâng cấp nhưng không đưa vào quy trình hiện tại.
+- `PARCELS`, `LAND_USES` và `ASSETS` đang hoạt động trong Bàn làm việc biên tập đầy đủ và PL3
+  export. Payload phải giữ riêng tổ chức/người đại diện, cột địa chính thủ công, tối đa ba mục đích
+  mỗi thửa, nhóm tài sản AO–AW và lý do ghi đè các trường tự động B/V/AX. `OCR_FIELDS` vẫn chỉ giữ
+  chỗ cho nâng cấp.
 
 Không xóa bảng/cột hoặc dữ liệu đã dùng. Nếu thay đổi schema phải có migration, cập nhật tài liệu và bảo toàn dữ liệu cũ.
 
@@ -366,6 +388,11 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
   hiện có, không xác nhận hồ sơ và mọi lần nạp/ghi đè phải audit.
 - Địa chỉ thường trú sửa bình thường. Sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý
   do, lưu audit và chuyển `QR_OVERRIDE_PENDING_REVIEW`; QR đã tách không bị xóa.
+- Khi hồ sơ đang `UNDER_REVIEW`, chỉ cán bộ đang giữ hồ sơ mới được xác nhận định danh thủ công sau
+  khi đối chiếu CCCD/bản giấy tờ. `PATCH /api/submissions/:submissionId` nhận
+  `manualIdentityConfirmation.ownerIds`; server tự đặt `MANUAL_COMPLETE`, `identitySource = MANUAL`
+  và `identityConfirmedAt`, ghi audit không có PII, request log idempotent và cập nhật
+  `working_payload_json` (không được chỉ sửa `draft_json`). Không nới `completionChecks`.
 
 ## 7. Kiểm thử và Definition of Done
 

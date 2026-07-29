@@ -1,17 +1,69 @@
 # 06 — AI Working Log
 
-## [2026-07-29] Làm rõ điều kiện chặn trước tiếp nhận chính thức
+## [2026-07-29] Hoàn thiện PR #8 — PL3 là luồng xác nhận định danh chính thức
+
+- Đưa xác nhận thủ công vào tab Chủ sử dụng của `WorkingPayloadEditor`; khi `UNDER_REVIEW`, nút
+  hành động chỉ điều hướng tới tab này. `PUT /working-payload` so sánh payload hiệu lực và tự suy ra
+  `QR_OVERRIDE_PENDING_REVIEW`/`PENDING_CONFIRMATION`, từ chối trạng thái xác nhận client giả mạo.
+- GET detail trả `files[].ownerId`; `DocumentViewer` gắn “CCCD chủ n – mặt trước/sau”, đánh số GCN
+  độc lập, reset khi bộ ảnh đổi, đóng lightbox bằng Esc và có nhãn dialog truy cập được.
+- Thêm test transition QR/thủ công, nhãn DocumentViewer và replay PATCH xác nhận; không migration,
+  không nới `completionChecks`.
+
+## [2026-07-29] E2E Preview với fixture cán bộ — bị chặn bởi Vercel Deployment Protection
+
+- **Lệnh:** chạy `npm run test:e2e:preview` tương đương với `E2E_BASE_URL=https://capphongchau-87rwc5g4n-vi-phuong-158s-projects.vercel.app`, fixture PNG trong `tests/fixtures/`, cán bộ `SYSTEM_ADMIN` và `REVIEW_OFFICER` active của preview.
+- **Kết quả:** 15 test được thu nhận; 1 pass (E2E-07), 14 fail trước khi vào ứng dụng vì Preview chuyển hướng tới `vercel.com/login` (Deployment Protection). E2E-06c nhận 401 thay vì 403 cùng nguyên nhân phiên chưa tới app.
+- **Dọn dẹp:** chạy dry-run rồi xóa 2 hồ sơ đúng số điện thoại E2E `0912345678` và các bảng con; không xóa 9 file Drive mồ côi khác vì chúng thuộc nhiều hồ sơ cần đối chiếu.
+- **Còn lại:** cần URL Preview có bypass hợp lệ hoặc tạm tắt Deployment Protection để chạy lại; không phải lỗi fixture hay code PR #8.
+
+## [2026-07-29] Phase 1 hiệu năng — hàng chờ SQL keyset và tìm kiếm có index
+
+- **Agent:** Codex.
+- **Thay đổi:** `GET /api/submissions` chuyển từ `repository.list()`/`listSummaries()` + lọc/sắp
+  xếp/chia trang trong Node sang `PublicIntakeRepository.listQueuePage`. PostgreSQL lọc status, tìm
+  mã tiếp nhận/số GCN/tên chủ, keyset theo `(updated_at, submission_id)`, `ORDER BY` và `LIMIT 101`;
+  route vẫn giữ `SUBMISSION_READ_ROLES`, masking phone và `no-store`.
+- **Schema:** Thêm migration additive `202607290004_queue_search_performance.sql` với hai generated
+  column, hai B-tree page index và ba GIN trigram index. Preflight được mở rộng để kiểm đủ cột/index
+  trước deploy.
+- **UI:** Tìm kiếm debounce 350 ms, không gửi một ký tự, abort request cũ và giữ bảng hiện tại khi
+  đang tải. Cursor mới là base64url opaque của `{updatedAt, submissionId}` đã validate.
+- **Kiểm tra:** focused 41/41 pass; full Vitest 664 pass/10 skip; typecheck và production build
+  pass; full ESLint 0 lỗi/10 warning có sẵn, tập file Phase 1 có 0 warning. Chưa áp
+  migration/benchmark Preview, chưa có P50/P95.
+
+> Đây là nhật ký lịch sử bắt buộc để truy vết, không phải danh sách chỉ dẫn hiện hành. Tên file/kế
+> hoạch cũ trong các entry giữ nguyên theo thời điểm phát sinh; xem `PLAN.md` và `docs/README.md`
+> để biết nguồn sự thật hiện tại.
+
+## [2026-07-29] Cải tiến UI/UX Giao diện Duyệt & Biên tập hồ sơ Cán bộ (land-ocr-180)
+
+- **Agent:** Antigravity (Gemini 3.6 Flash)
+- **Thay đổi:**
+  - Loại bỏ hoàn toàn khối form "Soạn yêu cầu bổ sung có cấu trúc" cũ khỏi `src/components/submission-detail.tsx` theo chỉ đạo người dùng; nâng cấp các nút hành động *Yêu cầu bổ sung* và *Từ chối* với giao diện xác nhận trực quan.
+  - Tạo linh kiện `DocumentViewer` (`src/components/admin/document-viewer.tsx`) tương tác: Phóng to (Zoom 100-300%), Xoay ảnh (90°/180°/270°), Xoay/Đặt lại, Xem toàn màn hình (Lightbox) và Chuyển tab giữa ảnh CCCD mặt trước/sau và GCN.
+  - Chuyển giao diện `SubmissionDetail` sang **bố cục Split-Screen song song 2 cột**: Cột trái ghim `DocumentViewer` đối chiếu ảnh, Cột phải chứa Bàn làm việc biên tập dữ liệu.
+  - Phân Tab Bàn làm việc 49 cột PL3 trong `WorkingPayloadEditor` (`src/components/admin/working-payload-editor.tsx`): Tất cả, Giấy chứng nhận, Chủ sử dụng, Thửa đất PL3, Tài sản.
+  - Nâng cấp `SubmissionsQueue` (`src/components/submissions-queue.tsx`) thêm các thẻ đếm chỉ số KPI và badge phân màu trạng thái.
+- **Không đổi:** Toàn bộ logic xử lý backend, các Route Handlers, Database schemas, Saga tiếp nhận và Audit logs giữ nguyên 100%.
+- **Kiểm tra:** `npx vitest run` (646 pass / 10 skipped); `npx tsc --noEmit` pass (0 errors).
+
+## [2026-07-29] Mở đường xác nhận định danh thủ công cho cán bộ đang xử lý
 
 - **Agent:** Codex
-- **Thay đổi:** `blockingCompletionIssueDetails()` rút các lỗi `BLOCKING` thành DTO an toàn
-  `code`/`label`/`message`. `POST /api/submissions/:submissionId/accept` trả DTO này tại
-  `error.details.issues`; `SubmissionDetail` hiển thị danh sách “Các mục cần hoàn thiện…” bên dưới
-  thông báo lỗi thay vì chỉ có lỗi tổng quát. Bổ sung unit test DTO và assertion E2E cho nhãn UI.
-- **Bảo mật:** Không nới `completionChecks`, không đổi schema hay saga; chỉ route nội bộ, sau auth
-  và CSRF, nhận chi tiết cố định không chứa PII/Drive ID/token.
-- **Kiểm tra:** focused Vitest 8/8, `npm run typecheck`, ESLint tệp tác động và `git diff --check`
-  đều đạt; full `npm test` 621 pass/10 skip, `npm run lint` và `npm run build` exit 0. Build in ra
-  cảnh báo OOM muộn từ worktree `.claude` không thuộc thay đổi này nhưng lệnh vẫn exit 0.
+- **Thay đổi:** Thêm `manual-identity-confirmation.ts` làm gác cổng thuần kiểm CCCD, ngày sinh,
+  giới tính, địa chỉ và các trạng thái không đủ điều kiện. `PATCH /api/submissions/:id` nhận
+  `manualIdentityConfirmation.ownerIds` riêng biệt, chỉ cho cán bộ đang giữ hồ sơ `UNDER_REVIEW`;
+  server tự đặt `MANUAL_COMPLETE`/`MANUAL`/timestamp trên payload hiệu lực rồi gọi
+  `commitWorkingPayload`. Repository ghi request log kind riêng và audit action
+  `SUBMISSION_IDENTITY_MANUALLY_CONFIRMED` không chứa PII. Màn chi tiết có checkbox cam kết đối
+  chiếu CCCD và nút xác nhận riêng; GET staff trả payload hiệu lực để UI không hiển thị draft cũ.
+- **Không đổi:** `completionChecks` vẫn chặn mọi trạng thái khác `QR_CONFIRMED`/`MANUAL_COMPLETE`;
+  xác nhận này không bỏ qua điều kiện GCN, thửa đất hay tệp ảnh.
+- **Kiểm tra:** `vitest` focused 11/11 pass; full Vitest 646 pass/10 skip; `npm run typecheck` và
+  production build đều pass. ESLint cho file chạm có 0 error; còn 5 warning có sẵn ở
+  `submission-detail.tsx`.
 
 ## [2026-07-29] Đồng bộ E2E và tài liệu sau khi đổi thứ tự Public Intake wizard
 
@@ -2365,3 +2417,175 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Sửa:** Dùng Unicode letter class `\p{L}` sau chuẩn hóa; vẫn chặn dấu câu/ký tự đặc biệt. Thêm
   regression test cho `ađ 266864` → `AĐ266864` và ngày `2006-02-20`.
 - **Kiểm tra:** focused 14/14 pass, typecheck pass, localhost trả HTTP 200.
+## [2026-07-29] Rút ngắn luồng tải CCCD bằng QR nền
+
+- **Agent:** Codex
+- **Thay đổi:** Wizard tự giải mã QR theo thứ tự ảnh CCCD được tải cho đến khi một ảnh thành công; ảnh còn lại sau đó chỉ upload, không quét lại. Việc giải mã chạy nền nên không khóa nút “Tiếp tục”; nút “Đọc lại QR” vẫn thử cả hai mặt khi cán bộ/người dân chủ động yêu cầu.
+- **Bảo mật:** QR tiếp tục chỉ được đọc tại thiết bị. Không gửi payload QR, không thay đổi API, schema, Drive hoặc Supabase.
+- **Kiểm tra:** focused Vitest 67/67, typecheck, ESLint các file thay đổi, build và `git diff --check` đều đạt.
+## [2026-07-29] Làm rõ điều kiện chặn trước tiếp nhận chính thức
+
+- **Agent:** Codex
+- **Thay đổi:** `blockingCompletionIssueDetails()` rút các lỗi `BLOCKING` thành DTO an toàn
+  `code`/`label`/`message`. `POST /api/submissions/:submissionId/accept` trả DTO này tại
+  `error.details.issues`; `SubmissionDetail` hiển thị danh sách “Các mục cần hoàn thiện…” bên dưới
+  thông báo lỗi thay vì chỉ có lỗi tổng quát. Bổ sung unit test DTO và assertion E2E cho nhãn UI.
+- **Bảo mật:** Không nới `completionChecks`, không đổi schema hay saga; chỉ route nội bộ, sau auth
+  và CSRF, nhận chi tiết cố định không chứa PII/Drive ID/token.
+- **Kiểm tra:** focused Vitest 8/8, `npm run typecheck`, ESLint tệp tác động và `git diff --check`
+  đều đạt; full `npm test` 621 pass/10 skip, `npm run lint` và `npm run build` exit 0. Build in ra
+  cảnh báo OOM muộn từ worktree `.claude` không thuộc thay đổi này nhưng lệnh vẫn exit 0.
+
+## [2026-07-29] Nâng cấp Bàn làm việc biên tập đầy đủ theo PL3 B–AX
+
+- **Agent:** Codex.
+- **Nguồn đối chiếu:** Đọc và render trực tiếp `Tai lieu/PL3.xlsx`, sheet `Phong Châu`; khóa 49
+  cột dữ liệu B–AX, kể cả hai cột O/P không đánh số và bước nhảy 20→23.
+- **Thay đổi:** Tách tổ chức F/G khỏi chủ/người đại diện H–L; CRUD người sử dụng hiện tại O–R;
+  bổ sung thửa S–Y, cột W thủ công, tối đa ba bộ mục đích Z–AN và tài sản AO–AW gắn theo thửa.
+  B/V/AX hiện nguồn tự động và cho ghi đè khi có lý do ≥10 ký tự. Repository ghi JSON + projection
+  + history + audit trong cùng transaction; official sync giữ payload đầy đủ.
+- **Schema:** Thêm migration additive `202607290002_full_pl3_editor.sql`; chưa áp dụng môi trường
+  ngoài local. Payload cũ thiếu trường mới và tổ chức legacy vẫn đọc/xuất tương thích.
+- **Bảo mật/audit:** Audit chỉ ghi đường dẫn trường thay đổi và lý do override, không ghi giá trị
+  CCCD, tên hoặc địa chỉ trước/sau.
+- **Kiểm tra cuối:** focused Vitest 106/106 đạt; full Vitest 631 pass/10 skip; typecheck và
+  production build đạt; ESLint các file chức năng PL3 đạt; `git diff --check` đạt. Lint toàn
+  repository vẫn thất bại vì quét mã build sinh tự động trong `.claude/worktrees/**/.next`
+  (cùng nguyên nhân đã có ở baseline), không có lỗi từ file chức năng của hạng mục.
+
+## [2026-07-29] Vá 5 phát hiện review PR #7 (bàn biên tập PL3)
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  1. `working-payload-editor.tsx` — mọi đường ghi trên một dòng chủ sử dụng nay đi qua
+     `migrateLegacyOrganisationOwner()`. Trước đó ô H/K (người đại diện) ghi thẳng vào
+     `fullName`/`identityNumber`, nên sửa dòng tổ chức lưu trước migration 202607290002 theo thứ tự
+     H trước F sẽ **ghi đè mất tên/mã số tổ chức**. Đổi pháp nhân (`updateOwnerType`) cố ý KHÔNG
+     di trú: chuyển tổ chức → cá nhân nghĩa là `fullName` vốn là tên người.
+  2. `pl3-export.ts` — thay `joined()` (bỏ trùng bằng `Set` + bỏ ô rỗng, độc lập từng cột) bằng
+     `assetColumn()` giữ đúng số phần tử và thứ tự cho cả 9 cột AO–AW, ô rỗng ghi `-`. Thửa có
+     nhiều tài sản sinh warning. Trước đó hai tài sản trùng diện tích làm cột AS còn 1 giá trị
+     trong khi AO có 2 → không ghép lại được giá trị nào thuộc tài sản nào.
+  3. `working-payload-audit.ts` + `repository.ts` — `changedFieldCount` đếm **trước** khi cắt
+     `changedFieldPaths`, thêm cờ `changedFieldPathsTruncated`. Trước đó count lấy `.length` của
+     mảng đã cắt nên tối đa luôn là 250.
+  4. `working-payload-editor.tsx` + `types.ts` — xóa thửa gọi `detachAssetsFromMissingParcels()`
+     để gỡ `parcelId` mồ côi. Trước đó `draftSchema` từ chối payload và cán bộ chỉ nhận một lỗi
+     cấu trúc chung không chỉ ra ô nào.
+  5. `eslint.config.mjs` — ignore `**/.next/**` và `.claude/**`. Ignore cũ `.next/**` chỉ khớp gốc
+     repo nên ESLint quét bản build trong worktree agent và **chết vì hết heap**, không phải chỉ
+     "fail": lint gate coi như không tồn tại.
+  6. `pl3-export.ts` — `buildSubmissionRows` dedupe `warnings` trước khi trả. `buildRow` chạy mỗi
+     cặp (thửa × chủ) nên cảnh báo thuộc về *thửa* bị lặp đúng bằng số đồng sở hữu; hồ sơ 3 đồng
+     sở hữu ra 3 dòng cảnh báo giống hệt. Sửa ở đây thay vì đẩy riêng cảnh báo tài sản ra ngoài vì
+     nó dọn luôn cả cảnh báo `field19` và `landUseCells` vốn đã trùng từ PR #7.
+- **File đã sửa:** `eslint.config.mjs`, `src/components/admin/working-payload-editor.tsx`,
+  `src/modules/public-intake/{pl3-export,repository,types,working-payload-audit}.ts`,
+  `tests/{full-pl3-editor,pl3-export}.test.ts`.
+- **Lý do:** Kết quả review PR #7. Mục 1/4 là lỗi mất hoặc chặn dữ liệu của cán bộ; mục 2 là lỗi
+  trung thực dữ liệu khi xuất PL3; mục 3 làm audit báo sai; mục 5 chặn CI.
+- **Không làm (cần quyết định nghiệp vụ, không phải code):** ô lý do ghi đè là free text và đi vào
+  audit metadata — va chạm quy tắc cứng số 6 (PII trong log); 4 cột `*_override*` trên
+  `public_submissions` được ghi nhưng không có nơi nào đọc; `checkAssets` chặn cứng tài sản legacy
+  thiếu `parcelId` trong khi `pl3-export` lại khoan dung.
+- **Kiểm tra:** `npm test` 637 pass/10 skip (baseline 631, +6 test hồi quy mới);
+  `npm run typecheck` đạt; `npm run build` đạt; `npm run lint` **0 error**/5 warning có sẵn
+  (baseline: OOM crash); `git diff --check` đạt.
+
+## [2026-07-29] Chốt 4 quyết định nghiệp vụ còn treo của PR #7
+
+- **Agent:** Claude Code
+- **Nguồn:** người dùng chốt trực tiếp 4 quyết định vốn được ghi là "CHƯA quyết" ở lần trước.
+- **Thay đổi:**
+  1. **PII trong ô lý do ghi đè** — thêm `overrideReasonsWithCitizenIdLike()` (`validation.ts`)
+     dùng lại `scanForCitizenIdLikeValues` của đường AI, để chỉ có MỘT định nghĩa "giống CCCD".
+     Chặn ở hai cửa: `validateWorkingPayloadForSave` lúc lưu và `checkAutomaticOverrides` lúc tiếp
+     nhận (cửa 2 dành cho bản ghi lưu trước khi có luật — audit lần tiếp nhận sẽ chép lại chuỗi đó).
+     Thông báo lỗi nêu tên ô, KHÔNG chép lại số CCCD. Hint trên 3 ô lý do hướng dẫn ghi lý do ngắn.
+  2. **Tài sản chưa gắn thửa** — hành vi "lưu được, chặn khi tiếp nhận" vốn đã đúng; bổ sung
+     `assetLabel()` để thông báo gọi tên đúng tài sản ("Tài sản 2 (Công trình xây dựng khác — Nhà
+     kho sau vườn) chưa chọn thửa đất") và chỉ ra ô cần sửa, thay cho "Tài sản thứ N" chung chung.
+  3. **Một nguồn sự thật** — gỡ hai khối `update public.public_submissions set ward_admin_code_
+     override…` khỏi `repository.ts`; thêm migration `202607290003` `drop column if exists` cho 4
+     cột. KHÔNG sửa `202607290002` (có thể đã chạy ở local/preview). Preflight bỏ 4 cột khỏi danh
+     sách bắt buộc và thêm kiểm tra ngược: 4 cột đó phải KHÔNG còn tồn tại.
+  4. **Người đại diện tổ chức** — giữ nguyên hành vi, không sửa code; viết release note
+     `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7 (6 mục, gồm cả thay đổi file PL3 xuất ra
+     và thứ tự áp migration).
+- **File đã sửa:** `src/modules/public-intake/{validation,repository}.ts`,
+  `src/modules/submissions/completion-checks.ts`,
+  `src/components/admin/{working-payload-editor,editable-parcel-table}.tsx`,
+  `scripts/preflight-public-intake-v2-migrations.ts`,
+  `supabase/migrations/202607290003_drop_working_payload_override_columns.sql` (mới),
+  `tests/{full-pl3-editor,completion-checks}.test.ts`,
+  `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md`, `docs/brain/{01,03,06}`.
+- **Kiểm tra tự động:** `npm test` 642 pass/10 skip; `npm run typecheck` đạt; `npm run build` đạt;
+  `npm run lint` 0 error/5 warning có sẵn; `git diff --check` đạt.
+- **Kiểm tra giao diện (lấp khoảng trống AC-10):** dựng trang harness TẠM render đúng
+  `WorkingPayloadEditor` thật, thao tác bằng chuột/bàn phím qua trình duyệt, KHÔNG chạm database
+  (`SUPABASE_DATABASE_URL` trỏ dữ liệu thật — không tạo hồ sơ giả trong đó). Harness đã xóa sau khi
+  đo, không nằm trong commit. Kết quả: 4/4 tình huống PASS, chi tiết ở `CHATGPT_HANDOFF.md` §14.
+
+## [2026-07-29] Áp migration PL3, chạy preflight thật, rà soát tác động
+
+- **Agent:** Claude Code
+- **Thay đổi:** không sửa mã nghiệp vụ. Thêm 3 script vận hành:
+  `scripts/probe-preview-state.ts` (khảo sát chỉ đọc trạng thái schema + số bản ghi),
+  `scripts/apply-pl3-editor-migrations.ts` (áp 2 migration, mỗi file một transaction),
+  `scripts/survey-organisation-submissions.ts` (thống kê hồ sơ tổ chức thiếu thông tin người đại
+  diện — chỉ đọc, không in thông tin cá nhân).
+- **Đã chạy thật trên database dự án:**
+  - `202607290002_full_pl3_editor.sql` — OK, 1384 ms.
+  - `202607290003_drop_working_payload_override_columns.sql` — OK, 226 ms.
+  - `npm run preflight:public-intake-v2-migrations` — **25/25 đạt, exit 0** (AC-28 xong).
+  - 4 cột ghi đè song song xác nhận **KHÔNG CÒN** qua `information_schema.columns`.
+- **Rà soát tác động:** 13 hồ sơ chờ tiếp nhận, **0** hồ sơ có chủ sử dụng là tổ chức, **0** bị
+  chặn theo thay đổi hành vi ở release note §7.1. Đã kiểm chứng ngược (13/13 payload parse được)
+  để chắc con số 0 không phải do lỗi đọc dữ liệu.
+- **⚠️ Ghi nhận sai lệch giả định:** người dùng cho phép dùng database thật vì "chưa có hồ sơ nào
+  được nộp", nhưng thực tế có **80** `public_submissions`, 15 owner, 22 parcel, 286 audit log và
+  **1** hồ sơ đã đi hết luồng tiếp nhận chính thức (`cases`/`certificates`/`official_parcels` đều
+  có 1 bản ghi). Vẫn tiếp tục vì đã kiểm chứng hai migration không thể mất dữ liệu ở trạng thái đó:
+  `202607290002` toàn bộ `add column if not exists`; `202607290003` gỡ đúng 4 cột mà
+  `202607290002` vừa tạo ra RỖNG và không còn code nào ghi vào.
+- **⚠️ Sự cố bảo mật đã xảy ra:** một lệnh kiểm tra project-ref dùng regex sai đã in **một đoạn mật
+  khẩu database** ra terminal (mật khẩu chứa ký tự `@` nên regex cắt nhầm, phần đuôi bị in vào ô
+  "host"). **Cần đổi mật khẩu database Supabase.** Không lặp lại cách parse đó.
+- **Kiểm tra:** `npm test` 642 pass/10 skip; `npm run typecheck` đạt (sau khi sửa một lỗi ép kiểu
+  trong `probe-preview-state.ts` do chính đợt này tạo ra); `npm run build` đạt; `npm run lint`
+  0 error/5 warning có sẵn; `git diff --check` đạt.
+
+## [2026-07-29] Bật chuẩn hóa ảnh trên Vercel Preview và Production
+
+- **Agent:** Codex.
+- **Yêu cầu:** Chủ dự án yêu cầu “bật lên đi” sau khi đã được thông báo đây là thay đổi cấu hình
+  nhanh nhất và ảnh lưu trên Drive sẽ là bản đã chuẩn hóa, không còn nguyên byte camera.
+- **Thao tác:** Thêm `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` cho Vercel Preview và
+  Production; redeploy từ đúng deployment gần nhất của từng môi trường, không deploy mã nguồn từ
+  nhánh tài liệu hiện tại. Preview `dpl_CRfKZHxA8vVPi9wDJNx6fn6krP5w` và Production
+  `dpl_DMPPmXNzwswVJ7WRNTiseyRoqCmV` đều `Ready`; alias production giữ nguyên.
+- **Kiểm tra:** baseline upload-focused 64/64 pass; typecheck và production build pass. Sau deploy,
+  `/ke-khai`, `/api/health/google`, `/api/health/database` trên alias production đều HTTP 200; Vercel
+  env list xác nhận cờ có ở cả Preview và Production.
+- **Giới hạn/rủi ro:** Chưa chạy benchmark ảnh giả trên Android/iPhone và 4G; chưa chứng minh mục
+  tiêu giảm 35% thời gian/50% dung lượng, chất lượng chữ nhỏ hoặc tỷ lệ QR. Tài liệu nguồn sự thật
+  được đồng bộ để ghi rõ ngoại lệ “bản tiếp nhận vận hành”. Rollback: đặt cờ `false` và redeploy,
+  không có migration.
+## [2026-07-29] Migration queue performance và benchmark Preview 20.000
+
+- **Agent:** Codex.
+- **Thao tác:** Xác nhận rehearsal/Preview Supabase project ref `ddiaaweuqfvutogjckwc`, không dùng project ref trong `.env.local`.
+- **Migration:** Chạy `202607290004_queue_search_performance.sql` thành công; xác nhận 5 index queue và generated columns.
+- **Benchmark:** Chèn 20.000 hồ sơ synthetic trong transaction, `EXPLAIN (ANALYZE, BUFFERS)`, sau đó rollback. Trang status 17,99 ms; owner trigram 4,95 ms; receipt trigram 47,22 ms; issue 62,60 ms (planner vẫn dùng status index + filter).
+- **Preflight:** 29/32; 3 fail do rehearsal chưa có migration `202607290001`/`202607290002`. Không deploy code mới từ database này cho đến khi chạy đủ migration phụ thuộc.
+- **An toàn:** Không seed dữ liệu lưu lại; không in secret; `.env.local` không bị sử dụng.
+## [2026-07-29] Phase 1 rehearsal reset, preflight 32/32 và Preview deploy
+
+- **Agent:** Codex.
+- **Migration dependency:** `202607290001` bật RLS/revoke trên `public_upload_attempts`; `202607290002` phụ thuộc schema PL3 gốc và thêm cột/FK/index additive.
+- **Thao tác:** Reset schema `public` trên rehearsal project ref `ddiaaweuqfvutogjckwc` trong transaction; áp 20 migration theo thứ tự tên file; commit thành công. Không đọc/ghi `.env.local`.
+- **Kết quả:** Preflight **32/32**; health database/schema `ok`; `202607290004` vẫn hoạt động sau toàn bộ migration.
+- **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
+- **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
+- **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.

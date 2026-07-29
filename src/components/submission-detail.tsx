@@ -9,8 +9,12 @@ import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
 import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
-import { WorkingPayloadEditor } from "@/components/admin/working-payload-editor";
+import {
+  WorkingPayloadEditor,
+  type WorkingPayloadEditorTab,
+} from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
+import { DocumentViewer } from "@/components/admin/document-viewer";
 import {
   assignedOfficerAccount,
   assignedOfficerLabel,
@@ -36,6 +40,7 @@ type Submission = {
   files: {
     fileId: string;
     documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
+    ownerId: string;
   }[];
 };
 
@@ -65,6 +70,8 @@ async function loadSubmission(id: string): Promise<Submission> {
 
 type EditableOwner = {
   id: string;
+  ownerType: string;
+  hasDistinctCurrentUser: boolean;
   fullName: string;
   identityNumber: string;
   dateOfBirth: string;
@@ -142,6 +149,7 @@ export function SubmissionDetail({
     registryNumber: "",
   });
   const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
+  const [workingPayloadTab, setWorkingPayloadTab] = useState<WorkingPayloadEditorTab>("all");
   /** Giữ nguyên qua các lần bấm lại để saga tiếp tục từ checkpoint, không tạo hồ sơ chính thức mới. */
   const acceptKeyRef = useRef("");
   const isClaimedByMe =
@@ -165,6 +173,8 @@ export function SubmissionDetail({
     setEditOwners(
       submission.draft.owners.map((owner) => ({
         id: owner.id,
+        ownerType: owner.ownerType,
+        hasDistinctCurrentUser: owner.hasDistinctCurrentUser,
         fullName: owner.fullName,
         identityNumber: owner.identityNumber,
         dateOfBirth: owner.dateOfBirth,
@@ -247,6 +257,41 @@ export function SubmissionDetail({
       setBusy(false);
     }
   }
+  async function confirmManualIdentity(ownerId: string): Promise<boolean> {
+    if (!submission || workingPayload.isDirty) return false;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const token = await csrfToken();
+      const response = await fetch(`/api/submissions/${submission.submissionId}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          version: submission.version,
+          manualIdentityConfirmation: { ownerIds: [ownerId] },
+        }),
+      });
+      const data = (await response.json()) as {
+        submission?: { version: number };
+        error?: { message: string };
+      };
+      if (!response.ok || !data.submission) {
+        throw new Error(data.error?.message ?? "Không thể xác nhận định danh.");
+      }
+      setSubmission(await loadSubmission(submission.submissionId));
+      setMessage("Đã ghi nhận cán bộ đối chiếu và xác nhận định danh thủ công.");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể xác nhận định danh.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
   async function action(action: "CLAIM" | "REQUEST_SUPPLEMENT" | "REJECT") {
     if (!submission) return;
     setBusy(true);
@@ -265,16 +310,21 @@ export function SubmissionDetail({
           version: submission.version,
           ...(action === "REQUEST_SUPPLEMENT"
             ? {
-                reasonCode: supplementReason,
-                message: supplementMessage,
+                reasonCode: supplementReason || "MISSING_INFORMATION",
+                message: supplementMessage.trim() || "Yêu cầu bổ sung thông tin hồ sơ",
                 items: [
                   {
-                    itemType: supplementKind,
+                    itemType: supplementKind || "FIELD",
                     targetEntityType: "SUBMISSION",
                     targetEntityId: "",
-                    fieldPath: supplementKind === "FIELD" ? supplementTarget : "",
-                    documentType: supplementKind === "FILE" ? supplementDocument : "",
-                    instruction: supplementInstruction,
+                    fieldPath:
+                      supplementKind === "FIELD" ? supplementTarget.trim() || "certificate" : "",
+                    documentType:
+                      supplementKind === "FILE" ? supplementDocument || "CERTIFICATE" : "",
+                    instruction:
+                      supplementInstruction.trim() ||
+                      supplementMessage.trim() ||
+                      "Vui lòng kiểm tra và bổ sung hồ sơ theo hướng dẫn.",
                   },
                 ],
               }
@@ -416,12 +466,46 @@ export function SubmissionDetail({
       </main>
     );
   const draft = submission.draft;
+  const statusLabels: Record<string, { label: string; color: string }> = {
+    SUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
+    UNDER_REVIEW: { label: "Đang xử lý", color: "bg-sky-100 text-sky-900 border-sky-300" },
+    NEEDS_SUPPLEMENT: {
+      label: "Cần bổ sung",
+      color: "bg-orange-100 text-orange-900 border-orange-300",
+    },
+    RESUBMITTED: { label: "Đã gửi lại", color: "bg-blue-100 text-blue-900 border-blue-300" },
+    REJECTED: { label: "Từ chối", color: "bg-rose-100 text-rose-900 border-rose-300" },
+    ACCEPTING: {
+      label: "Đang tiếp nhận",
+      color: "bg-emerald-100 text-emerald-900 border-emerald-300 animate-pulse",
+    },
+    ACCEPTED: {
+      label: "Đã tiếp nhận",
+      color: "bg-emerald-100 text-emerald-900 border-emerald-300",
+    },
+    DRAFT: { label: "Nháp", color: "bg-stone-100 text-stone-700 border-stone-300" },
+    EXPIRED: { label: "Hết hạn", color: "bg-stone-100 text-stone-600 border-stone-300" },
+  };
+  const statusBadge = statusLabels[submission.status] || {
+    label: labels[submission.status] ?? submission.status,
+    color: "bg-stone-100 text-stone-700 border-stone-300",
+  };
+
   return (
-    <main className="mx-auto min-h-screen max-w-5xl px-4 py-8 sm:px-6">
-      <Link className="text-sm font-semibold text-emerald-800 underline" href="/submissions">
-        ← Hàng chờ tiếp nhận
-      </Link>
-      <div className="mt-5">
+    <main className="mx-auto min-h-screen max-w-[1600px] px-4 py-6 sm:px-6">
+      <div className="flex items-center justify-between">
+        <Link
+          className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-800 hover:underline"
+          href="/submissions"
+        >
+          ← Hàng chờ tiếp nhận
+        </Link>
+        <span className="text-xs text-stone-500">
+          Mã tiếp nhận: <strong className="text-stone-900">{submission.receiptCode}</strong>
+        </span>
+      </div>
+
+      <div className="mt-3">
         <SubmissionClaimBanner
           submissionId={submission.submissionId}
           version={submission.version}
@@ -433,45 +517,43 @@ export function SubmissionDetail({
           onRefresh={() => loadSubmission(submission.submissionId).then(setSubmission)}
         />
       </div>
-      <section className="mt-2 rounded-xl border border-stone-200 bg-white p-5 sm:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+
+      {/* Main Sticky Header & Action Bar */}
+      <section className="mt-3 rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-emerald-800">{submission.receiptCode}</p>
-            <h1 className="mt-1 text-3xl font-bold text-stone-950">Bản kê khai hồ sơ đất đai</h1>
-            <p className="mt-2 text-stone-600">
-              Trạng thái: {labels[submission.status] ?? submission.status}
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-stone-950">Bản kê khai hồ sơ đất đai</h1>
+              <span
+                className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold ${statusBadge.color}`}
+              >
+                {statusBadge.label}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-stone-500">
+              Liên hệ: <span className="font-semibold text-stone-800">{submission.phone}</span> ·
+              Phụ trách:{" "}
+              <span className="font-semibold text-stone-800">
+                {assignedOfficerLabel({
+                  claimedBy: submission.claimedBy ?? "",
+                  claimedByDisplayName: submission.claimedByDisplayName ?? "",
+                })}
+              </span>
+              {submission.officialCaseId && (
+                <>
+                  {" "}
+                  · Mã chính thức:{" "}
+                  <strong className="text-emerald-800">{submission.officialCaseId}</strong>
+                </>
+              )}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+
+          {/* Action Toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Primary Workflow Action: Official Acceptance */}
             <button
-              className="pc-button-quiet"
-              disabled={busy}
-              onClick={() => action("CLAIM")}
-              type="button"
-            >
-              Nhận xử lý
-            </button>
-            <button
-              className="rounded-lg border border-sky-700 px-4 py-2 font-semibold text-sky-800 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW" || !submission.draft}
-              onClick={() => openEdit("EDIT")}
-              type="button"
-            >
-              Chỉnh sửa thông tin
-            </button>
-            {submission.status === "ACCEPTED" ? (
-              <button
-                className="rounded-lg border border-orange-700 px-4 py-2 font-semibold text-orange-800 disabled:opacity-50"
-                disabled={busy || !submission.draft}
-                onClick={() => openEdit("AMEND")}
-                title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
-                type="button"
-              >
-                Điều chỉnh hồ sơ chính thức
-              </button>
-            ) : null}
-            <button
-              className="rounded-lg border border-emerald-800 px-4 py-2 font-semibold text-emerald-900 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50 transition"
               disabled={
                 busy ||
                 !submission.draft ||
@@ -488,38 +570,99 @@ export function SubmissionDetail({
               }
               type="button"
             >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
               {submission.status === "ACCEPTING" ? "Tiếp tục tiếp nhận" : "Tiếp nhận chính thức"}
             </button>
+
+            {/* Secondary Actions */}
+            {submission.status !== "UNDER_REVIEW" && (
+              <button
+                className="rounded-lg border border-stone-300 bg-stone-50 px-3.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+                disabled={busy}
+                onClick={() => action("CLAIM")}
+                type="button"
+              >
+                Nhận xử lý
+              </button>
+            )}
             <button
-              className="rounded-lg border border-amber-700 px-4 py-2 font-semibold text-amber-800 disabled:opacity-50"
-              disabled={
-                busy ||
-                submission.status !== "UNDER_REVIEW" ||
-                !supplementMessage.trim() ||
-                !supplementInstruction.trim() ||
-                (supplementKind === "FIELD" ? !supplementTarget.trim() : !supplementDocument)
-              }
-              onClick={() => action("REQUEST_SUPPLEMENT")}
+              className="rounded-lg border border-sky-700 bg-sky-50 px-3.5 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
+              disabled={busy || submission.status !== "UNDER_REVIEW" || !workingPayload.draft}
+              onClick={() => {
+                setWorkingPayloadTab("owners");
+                document
+                  .getElementById("working-payload-editor")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+              type="button"
+            >
+              Mở tab Chủ sử dụng
+            </button>
+            {submission.status === "ACCEPTED" && (
+              <button
+                className="rounded-lg border border-orange-700 bg-orange-50 px-3.5 py-2 text-xs font-semibold text-orange-800 hover:bg-orange-100 disabled:opacity-50"
+                disabled={busy || !submission.draft}
+                onClick={() => openEdit("AMEND")}
+                title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
+                type="button"
+              >
+                Điều chỉnh chính thức
+              </button>
+            )}
+
+            {/* Exceptions */}
+            <button
+              className="rounded-lg border border-amber-700 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              disabled={busy || submission.status !== "UNDER_REVIEW"}
+              onClick={() => {
+                setSupplementMessage("");
+                setSupplementInstruction("");
+                const promptMsg = window.prompt(
+                  "Nhập nội dung thông báo yêu cầu bổ sung gửi người dân:",
+                );
+                if (promptMsg && promptMsg.trim()) {
+                  setSupplementMessage(promptMsg.trim());
+                  setSupplementInstruction(promptMsg.trim());
+                  void action("REQUEST_SUPPLEMENT");
+                }
+              }}
               type="button"
             >
               Yêu cầu bổ sung
             </button>
             <button
-              className="rounded-lg border border-red-700 px-4 py-2 font-semibold text-red-800 disabled:opacity-50"
+              className="rounded-lg border border-rose-700 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-50"
               disabled={busy || submission.status !== "UNDER_REVIEW"}
-              onClick={() => action("REJECT")}
+              onClick={() => {
+                if (
+                  window.confirm("Xác nhận TỪ CHỐI hồ sơ này? Thao tác này không thể hoàn tác.")
+                ) {
+                  void action("REJECT");
+                }
+              }}
               type="button"
             >
               Từ chối
             </button>
           </div>
         </div>
-        {message ? (
-          <p aria-live="polite" className="mt-4 rounded-lg bg-stone-100 p-3 text-sm text-stone-700">
+
+        {message && (
+          <p
+            aria-live="polite"
+            className="mt-3 rounded-lg bg-stone-100 p-3 text-sm text-stone-700 border border-stone-200"
+          >
             {message}
           </p>
-        ) : null}
-        {acceptanceIssues.length > 0 ? (
+        )}
+        {acceptanceIssues.length > 0 && (
           <section
             aria-live="polite"
             className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
@@ -533,318 +676,178 @@ export function SubmissionDetail({
               ))}
             </ul>
           </section>
-        ) : null}
-        <dl className="mt-6 grid gap-4 border-y border-stone-200 py-5 sm:grid-cols-3">
-          <div>
-            <dt className="text-sm text-stone-500">Điện thoại</dt>
-            <dd className="font-semibold text-stone-900">{submission.phone}</dd>
-          </div>
-          <div>
-            <dt className="text-sm text-stone-500">Cán bộ tiếp nhận</dt>
-            {/* Tên đứng trước, email ở dòng phụ — cán bộ hỏi "ai đang xử lý", không hỏi "địa
-                chỉ thư nào". Hồ sơ nhận trước 2026-07-28 chưa có tên nên lùi về email. */}
-            <dd className="font-semibold text-stone-900">
-              {assignedOfficerLabel({
-                claimedBy: submission.claimedBy ?? "",
-                claimedByDisplayName: submission.claimedByDisplayName ?? "",
-              })}
-            </dd>
-            {assignedOfficerAccount({
-              claimedBy: submission.claimedBy ?? "",
-              claimedByDisplayName: submission.claimedByDisplayName ?? "",
-            }) ? (
-              <dd className="text-sm text-stone-500">
-                Tài khoản:{" "}
-                {assignedOfficerAccount({
-                  claimedBy: submission.claimedBy ?? "",
-                  claimedByDisplayName: submission.claimedByDisplayName ?? "",
-                })}
-              </dd>
-            ) : null}
-          </div>
-          <div>
-            <dt className="text-sm text-stone-500">Nguồn hồ sơ</dt>
-            {/* Hồ sơ cán bộ nhập hộ có độ tin cậy khác hồ sơ hộ dân tự khai — cán bộ cầm giấy
-                tờ gốc trên tay. Người duyệt cần biết điều đó ngay khi mở hồ sơ. */}
-            <dd className="font-semibold text-stone-900">
-              {submission.intakeChannel === "OFFICER_ASSISTED"
-                ? `Cán bộ nhập hộ${
-                    submission.assistedByDisplayName ? ` — ${submission.assistedByDisplayName}` : ""
-                  }`
-                : "Hộ dân tự kê khai"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-stone-500">Cập nhật</dt>
-            <dd className="font-semibold text-stone-900">
-              {submission.updatedAt ? formatDateTime(submission.updatedAt) : "-"}
-            </dd>
-          </div>
-          {submission.officialCaseId ? (
-            <div>
-              <dt className="text-sm text-stone-500">Mã hồ sơ chính thức</dt>
-              <dd className="font-semibold text-emerald-900">{submission.officialCaseId}</dd>
-            </div>
-          ) : null}
-          {submission.status === "ACCEPTING" && submission.acceptStep ? (
-            <div>
-              <dt className="text-sm text-stone-500">Bước tiếp nhận dở dang</dt>
-              <dd className="font-semibold text-amber-800">{submission.acceptStep}</dd>
-            </div>
-          ) : null}
-        </dl>
+        )}
       </section>
-      {submission.status === "UNDER_REVIEW" ? (
-        <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-5">
-          <h2 className="text-lg font-bold text-amber-950">Soạn yêu cầu bổ sung có cấu trúc</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label>
-              <span className="pc-field-label">Lý do</span>
-              <select
-                className="pc-select"
-                value={supplementReason}
-                onChange={(event) => setSupplementReason(event.target.value)}
-              >
-                <option value="MISSING_INFORMATION">Thiếu thông tin</option>
-                <option value="UNREADABLE_IMAGE">Ảnh không đọc được</option>
-                <option value="INCONSISTENT_INFORMATION">Thông tin chưa thống nhất</option>
-                <option value="WRONG_DOCUMENT">Sai loại tài liệu</option>
-                <option value="OTHER">Lý do khác</option>
-              </select>
-            </label>
-            <label>
-              <span className="pc-field-label">Loại nội dung</span>
-              <select
-                className="pc-select"
-                value={supplementKind}
-                onChange={(event) => setSupplementKind(event.target.value as "FIELD" | "FILE")}
-              >
-                <option value="FIELD">Sửa trường thông tin</option>
-                <option value="FILE">Thay/bổ sung ảnh</option>
-              </select>
-            </label>
+
+      {/* Main Split-Screen Section */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
+        {/* Left Column: Interactive Document Viewer (5 Cols on large screen) */}
+        <div className="lg:col-span-5">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-stone-800 uppercase tracking-wider">
+              1. Ảnh giấy tờ đối chiếu
+            </h2>
+            <span className="text-xs text-stone-500">{submission.files.length} ảnh</span>
           </div>
-          <label className="mt-3 block">
-            <span className="pc-field-label">Thông báo chung cho người nộp</span>
-            <textarea
-              className="pc-textarea"
-              value={supplementMessage}
-              onChange={(event) => setSupplementMessage(event.target.value)}
-            />
-          </label>
-          {supplementKind === "FIELD" ? (
-            <label className="mt-3 block">
-              <span className="pc-field-label">Đường dẫn trường được phép sửa</span>
-              <input
-                className="pc-input"
-                value={supplementTarget}
-                onChange={(event) => setSupplementTarget(event.target.value)}
-                placeholder="Ví dụ: certificate.issueNumber"
-              />
-            </label>
-          ) : (
-            <label className="mt-3 block">
-              <span className="pc-field-label">Ảnh cần bổ sung/thay</span>
-              <select
-                className="pc-select"
-                value={supplementDocument}
-                onChange={(event) =>
-                  setSupplementDocument(event.target.value as typeof supplementDocument)
-                }
-              >
-                <option value="">— Chọn —</option>
-                <option value="CITIZEN_ID_FRONT">CCCD mặt trước</option>
-                <option value="CITIZEN_ID_BACK">CCCD mặt sau</option>
-                <option value="CERTIFICATE">Ảnh Giấy chứng nhận</option>
-              </select>
-            </label>
-          )}
-          <label className="mt-3 block">
-            <span className="pc-field-label">Hướng dẫn cụ thể</span>
-            <textarea
-              className="pc-textarea"
-              value={supplementInstruction}
-              onChange={(event) => setSupplementInstruction(event.target.value)}
-            />
-          </label>
-          <p className="mt-2 text-sm text-amber-900">
-            Sau khi gửi, người nộp chỉ sửa được đúng trường hoặc loại ảnh đã chọn; các nội dung khác
-            bị khóa.
-          </p>
-        </section>
-      ) : null}
-      {submission.canResetAccessSecret ? (
-        <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5">
-          <h2 className="text-lg font-bold">Cấp lại mã bí mật</h2>
-          <p className="mt-1 text-sm text-stone-600">
-            Chỉ thực hiện sau khi người dân đến trực tiếp và cán bộ đã đối chiếu giấy tờ. Nhập “ĐÃ
-            XÁC MINH” để xác nhận.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <input
-              className="pc-input max-w-xs"
-              value={resetConfirmation}
-              onChange={(event) => setResetConfirmation(event.target.value.toUpperCase())}
-            />
-            <button
-              className="pc-button-quiet"
-              type="button"
-              disabled={busy || resetConfirmation !== "ĐÃ XÁC MINH"}
-              onClick={() => void resetAccessSecret()}
+          <DocumentViewer
+            submissionId={submission.submissionId}
+            files={submission.files}
+            ownerIds={draft?.owners.map((owner) => owner.id) ?? []}
+          />
+        </div>
+
+        {/* Right Column: Information & Working Payload Editor (7 Cols on large screen) */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Metadata Summary Info */}
+          <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm text-xs grid gap-3 sm:grid-cols-3">
+            <div>
+              <span className="text-stone-500 block">Kênh tiếp nhận</span>
+              <strong className="text-stone-900">
+                {submission.intakeChannel === "OFFICER_ASSISTED"
+                  ? `Cán bộ nhập hộ${submission.assistedByDisplayName ? ` (${submission.assistedByDisplayName})` : ""}`
+                  : "Hộ dân tự kê khai"}
+              </strong>
+            </div>
+            <div>
+              <span className="text-stone-500 block">Cập nhật lần cuối</span>
+              <strong className="text-stone-900">
+                {submission.updatedAt ? formatDateTime(submission.updatedAt) : "-"}
+              </strong>
+            </div>
+            <div>
+              <span className="text-stone-500 block">Mã chính thức</span>
+              <strong className="text-emerald-800">
+                {submission.officialCaseId || "Chưa cấp (bản nháp)"}
+              </strong>
+            </div>
+          </div>
+
+          {/* Working Payload Editor (Full 49 PL3 columns tabbed) */}
+          {submission.status === "UNDER_REVIEW" && workingPayload.draft ? (
+            <section
+              id="working-payload-editor"
+              className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm"
             >
-              Tạo mã bí mật mới
-            </button>
-          </div>
-          {newAccessSecret ? (
-            <div className="mt-4 rounded-lg bg-amber-50 p-3">
-              <p className="font-semibold">Mã mới — chỉ hiển thị lần này</p>
-              <p className="mt-1 select-all font-mono text-lg font-bold">{newAccessSecret}</p>
+              <div className="mb-3">
+                <h2 className="text-base font-bold text-stone-900">
+                  2. Bàn làm việc biên tập 49 cột PL3
+                </h2>
+                <p className="text-xs text-stone-500">
+                  {isClaimedByMe
+                    ? "Sửa thông tin GCN, Chủ sử dụng, Thửa đất và Tài sản. Dữ liệu sẽ lưu vào Bản làm việc."
+                    : "Bạn đang xem ở chế độ chỉ đọc (Chỉ cán bộ nhận xử lý mới sửa được)."}
+                </p>
+              </div>
+              <WorkingPayloadEditor
+                submissionId={submission.submissionId}
+                version={submission.version}
+                draft={workingPayload.draft}
+                readOnly={!isClaimedByMe}
+                onChange={workingPayload.updateDraft}
+                onSave={async (changeNote) => {
+                  const ok = await workingPayload.saveWorkingPayload(changeNote);
+                  if (ok) {
+                    const refreshed = await loadSubmission(submission.submissionId);
+                    setSubmission(refreshed);
+                  }
+                  return ok;
+                }}
+                isDirty={workingPayload.isDirty}
+                saving={workingPayload.saving}
+                saveError={workingPayload.saveError}
+                saveSuccess={workingPayload.saveSuccess}
+                activeTab={workingPayloadTab}
+                onTabChange={setWorkingPayloadTab}
+                onConfirmManualIdentity={confirmManualIdentity}
+                identityConfirmationBusy={busy}
+              />
+            </section>
+          ) : draft ? (
+            /* Fallback Read-Only Draft View if not in UNDER_REVIEW */
+            <div className="space-y-4">
+              <section className="rounded-xl border border-stone-200 bg-white p-4">
+                <h2 className="text-sm font-bold text-stone-900 mb-2">Giấy chứng nhận</h2>
+                <dl className="grid gap-2 text-xs sm:grid-cols-3">
+                  <div>
+                    <dt className="text-stone-500">Số phát hành</dt>
+                    <dd className="font-semibold">{draft.certificate.issueNumber || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-stone-500">Ngày cấp</dt>
+                    <dd className="font-semibold">{draft.certificate.issueDate || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-stone-500">Số vào sổ</dt>
+                    <dd className="font-semibold">{draft.certificate.registryNumber || "-"}</dd>
+                  </div>
+                </dl>
+              </section>
+              <section className="rounded-xl border border-stone-200 bg-white p-4">
+                <h2 className="text-sm font-bold text-stone-900 mb-2">
+                  Chủ sử dụng ({draft.owners.length})
+                </h2>
+                <div className="space-y-2 text-xs">
+                  {draft.owners.map((owner, idx) => (
+                    <div key={idx} className="rounded bg-stone-50 p-2.5 border border-stone-200">
+                      <p className="font-semibold">{owner.fullName || "Chưa khai"}</p>
+                      <p className="text-stone-600">
+                        CCCD: {owner.identityNumber || "-"} · Sinh: {owner.dateOfBirth || "-"} ·
+                        Giới tính: {owner.gender || "-"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
             </div>
           ) : null}
-        </section>
-      ) : null}
-      {draft ? (
-        <div className="mt-5 grid gap-5">
-          <section className="rounded-xl border border-stone-200 bg-white p-5">
-            <h2 className="text-xl font-bold">Ảnh giấy tờ</h2>
-            <p className="mt-1 text-sm text-stone-600">
-              Ảnh xem trước được lấy qua ứng dụng, không dùng link Google Drive công khai.
-            </p>
-            {submission.files.length === 0 ? (
-              <p className="mt-4 rounded-lg bg-stone-50 p-4 text-sm text-stone-600">
-                Người dân chưa tải ảnh giấy tờ.
+
+          {/* AI Extraction Panel */}
+          <AiDraftPanel
+            submissionId={submission.submissionId}
+            version={submission.version}
+            mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
+            onApplied={async () => {
+              const refreshed = await loadSubmission(submission.submissionId);
+              setSubmission(refreshed);
+            }}
+          />
+
+          {/* Reset Access Secret Section */}
+          {submission.canResetAccessSecret && (
+            <section className="rounded-xl border border-stone-200 bg-white p-4 text-xs">
+              <h2 className="font-bold text-stone-900">Cấp lại mã bí mật cho người dân</h2>
+              <p className="mt-1 text-stone-600">
+                Chỉ thực hiện khi người dân đến trực tiếp và cán bộ đã đối chiếu giấy tờ. Nhập “ĐÃ
+                XÁC MINH”.
               </p>
-            ) : (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {submission.files.map((file) => (
-                  <figure
-                    className="overflow-hidden rounded-lg border border-stone-200"
-                    key={file.fileId}
-                  >
-                    {/* Preview is an authenticated no-store route, so next/image cannot optimize it safely. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      alt={
-                        file.documentType === "CITIZEN_ID_FRONT"
-                          ? "CCCD mặt trước"
-                          : file.documentType === "CITIZEN_ID_BACK"
-                            ? "CCCD mặt sau"
-                            : "Giấy chứng nhận"
-                      }
-                      className="aspect-[4/3] w-full bg-stone-100 object-contain"
-                      src={`/api/submissions/${submission.submissionId}/files/${file.fileId}`}
-                    />
-                    <figcaption className="border-t border-stone-200 px-3 py-2 text-sm font-semibold text-stone-700">
-                      {file.documentType === "CITIZEN_ID_FRONT"
-                        ? "CCCD mặt trước"
-                        : file.documentType === "CITIZEN_ID_BACK"
-                          ? "CCCD mặt sau"
-                          : "Giấy chứng nhận"}
-                    </figcaption>
-                  </figure>
-                ))}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <input
+                  className="pc-input max-w-xs text-xs"
+                  value={resetConfirmation}
+                  onChange={(event) => setResetConfirmation(event.target.value.toUpperCase())}
+                />
+                <button
+                  className="pc-button-quiet text-xs"
+                  type="button"
+                  disabled={busy || resetConfirmation !== "ĐÃ XÁC MINH"}
+                  onClick={() => void resetAccessSecret()}
+                >
+                  Tạo mã bí mật mới
+                </button>
               </div>
-            )}
-          </section>
-          <section className="rounded-xl border border-stone-200 bg-white p-5">
-            <h2 className="text-xl font-bold">Giấy chứng nhận</h2>
-            <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-              <div>
-                <dt className="text-sm text-stone-500">Số phát hành</dt>
-                <dd>{draft.certificate.issueNumber || "-"}</dd>
-              </div>
-              <div>
-                <dt className="text-sm text-stone-500">Ngày cấp</dt>
-                <dd>{draft.certificate.issueDate || "-"}</dd>
-              </div>
-              <div>
-                <dt className="text-sm text-stone-500">Số vào sổ</dt>
-                <dd>{draft.certificate.registryNumber || "-"}</dd>
-              </div>
-            </dl>
-          </section>
-          <section className="rounded-xl border border-stone-200 bg-white p-5">
-            <h2 className="text-xl font-bold">Chủ sử dụng</h2>
-            <div className="mt-4 space-y-3">
-              {draft.owners.map((owner, index) => (
-                <div className="rounded-lg bg-stone-50 p-4" key={index}>
-                  <p className="font-semibold">{owner.fullName || "Chưa khai"}</p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    {owner.ownerType} · CCCD/định danh: {owner.identityNumber || "-"}
-                  </p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    Sinh: {owner.dateOfBirth || "-"} · Giới tính: {owner.gender || "-"}
-                  </p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    Thường trú: {owner.residenceAddress || "-"}
-                  </p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    Vai trò: {owner.roleOnCertificate || "-"}
+              {newAccessSecret && (
+                <div className="mt-3 rounded bg-amber-50 p-2.5 border border-amber-200">
+                  <p className="font-semibold text-amber-900">Mã mới — chỉ hiển thị lần này</p>
+                  <p className="mt-1 select-all font-mono text-base font-bold text-amber-950">
+                    {newAccessSecret}
                   </p>
                 </div>
-              ))}
-            </div>
-          </section>
-          <section className="rounded-xl border border-stone-200 bg-white p-5">
-            <h2 className="text-xl font-bold">Thửa đất</h2>
-            <div className="mt-4 space-y-4">
-              {draft.parcels.map((parcel, index) => (
-                <div className="rounded-lg bg-stone-50 p-4" key={index}>
-                  <p className="font-semibold">
-                    Thửa {parcel.parcelNumber || "chưa khai"} · Tờ bản đồ{" "}
-                    {parcel.mapSheetNumber || "-"}
-                  </p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    {parcel.addressTwoLevel || parcel.addressOnCertificate || "Chưa khai địa chỉ"} ·{" "}
-                    {parcel.area || "-"} m²
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
+              )}
+            </section>
+          )}
         </div>
-      ) : null}
-      {submission.status === "UNDER_REVIEW" && workingPayload.draft ? (
-        <section className="mt-5 rounded-xl border border-stone-200 bg-white p-5 sm:p-7">
-          <h2 className="text-xl font-bold">Bản làm việc (biên tập đầy đủ)</h2>
-          <p className="mt-1 text-sm text-stone-600">
-            {isClaimedByMe
-              ? "Sửa đầy đủ giấy chứng nhận, chủ sử dụng và thửa đất. Thay đổi chỉ áp dụng cho bản làm việc của hồ sơ này."
-              : "Chỉ cán bộ đang nhận xử lý hồ sơ này mới sửa được — bạn đang xem ở chế độ chỉ đọc."}
-          </p>
-          <div className="mt-4">
-            <WorkingPayloadEditor
-              submissionId={submission.submissionId}
-              version={submission.version}
-              draft={workingPayload.draft}
-              readOnly={!isClaimedByMe}
-              onChange={workingPayload.updateDraft}
-              onSave={async (changeNote) => {
-                const ok = await workingPayload.saveWorkingPayload(changeNote);
-                if (ok) {
-                  const refreshed = await loadSubmission(submission.submissionId);
-                  setSubmission(refreshed);
-                }
-                return ok;
-              }}
-              isDirty={workingPayload.isDirty}
-              saving={workingPayload.saving}
-              saveError={workingPayload.saveError}
-              saveSuccess={workingPayload.saveSuccess}
-            />
-          </div>
-        </section>
-      ) : null}
-      <AiDraftPanel
-        submissionId={submission.submissionId}
-        version={submission.version}
-        mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
-        onApplied={async () => {
-          const refreshed = await loadSubmission(submission.submissionId);
-          setSubmission(refreshed);
-        }}
-      />
-      <p className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
+      </div>
+      <p className="mt-5 rounded-xl border border-stone-200 bg-stone-50 p-4 text-xs text-stone-600">
         Ảnh xem trước đã sẵn sàng để đối chiếu. Danh mục loại đất theo Thông tư 08/2024/TT-BTNMT.
       </p>
       {editOpen && submission.draft ? (

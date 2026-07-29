@@ -1,5 +1,12 @@
 # Kiến trúc hệ thống
 
+> Bổ sung PR #8 (2026-07-29): trong `UNDER_REVIEW`, mọi sửa PL3 đi qua
+> `WorkingPayloadEditor`/`PUT /working-payload`. Server so sánh payload ứng viên với payload hiệu lực:
+> sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý do và thành
+> `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` về `PENDING_CONFIRMATION`. Không nhận
+> trạng thái/nguồn/thời điểm xác nhận do client tự gửi. GET detail cán bộ trả `files[].ownerId` chỉ để
+> nhãn “CCCD chủ n – mặt trước/sau”, không mở rộng Drive ID/link.
+
 ## Tổng quan
 
 | Thành phần                              | Trách nhiệm                                                                  |
@@ -52,6 +59,25 @@ trong `REQUEST_LOG` để retry cùng key trả lại đúng phản hồi.
 
 ## Mô hình dữ liệu
 
+### Bàn làm việc PL3 đầy đủ
+
+`PUT /api/submissions/:submissionId/working-payload` lưu nguyên tử bản làm việc đủ cột B–AX vào
+`working_payload_json` và `draft_json`, đồng thời làm mới các bảng chuẩn hóa. Migration
+`202607290002_full_pl3_editor.sql` bổ sung tổ chức/người đại diện, số tờ/thửa địa chính, liên kết
+tài sản→thửa và các cột AO–AW; dữ liệu cũ vẫn nằm nguyên trong JSON và được đọc tương thích.
+
+Với chủ cá nhân còn `PENDING_CONFIRMATION` hoặc `QR_OVERRIDE_PENDING_REVIEW`, cán bộ đang giữ hồ sơ
+phải tích xác nhận đã đối chiếu CCCD/bản giấy tờ. `PATCH /api/submissions/:submissionId` nhận danh
+sách owner ID, server kiểm đủ trường định danh, tự đóng dấu `MANUAL_COMPLETE`/thời điểm và dùng cùng
+transaction `commitWorkingPayload`; audit chỉ ghi loại thao tác và số dòng, không chứa CCCD. Đây là
+xác nhận thao tác của cán bộ, không phải kết luận pháp lý và không làm các điều kiện tiếp nhận khác
+tự đạt.
+
+Ba trường tự động có quy tắc rõ: B lấy mã Phường Phong Châu, V suy từ ĐVHC cũ + số tờ trên GCN,
+AX lấy tên file đã xác minh/đổi tên trên Drive. Cán bộ có thể ghi đè nhưng phải nhập lý do tối thiểu
+10 ký tự; audit chỉ ghi đường dẫn trường và lý do, không ghi giá trị CCCD/tên/địa chỉ trước-sau.
+PL3 export dùng đúng 49 cột B–AX và không tự đổi nhãn cột của `Tai lieu/PL3.xlsx`.
+
 Các nhóm bảng chính trong `supabase/migrations/202607230001_supabase_schema.sql`:
 
 - Truy cập/vận hành: `users`, `audit_logs`, `request_log`, `reference_data`, `id_reservations`, `search_index`.
@@ -62,6 +88,18 @@ Các nhóm bảng chính trong `supabase/migrations/202607230001_supabase_schema
 - Báo cáo: `export_jobs`.
 
 `legacy_row_index` trên `public_submissions` giữ locator ổn định cho cookie phiên v2 trong giai đoạn chuyển đổi; nó không còn mang nghĩa “số dòng Sheet” trong runtime mới.
+
+### Hàng chờ cán bộ
+
+`GET /api/submissions` gọi `PublicIntakeRepository.listQueuePage()`: PostgreSQL thực hiện `WHERE`,
+tìm kiếm, `ORDER BY updated_at DESC, submission_id DESC` và `LIMIT 101`; Node chỉ ánh xạ tối đa 100
+dòng trả về. Cursor là base64url của `{updatedAt, submissionId}` đã validate và dùng keyset, nên các
+hồ sơ có cùng `updated_at` không bị lẫn vị trí.
+
+Migration `202607290004_queue_search_performance.sql` thêm generated column
+`queue_owner_name`/`queue_issue_number`, index trang và trigram index cho mã tiếp nhận, số GCN, tên
+chủ. Đây là projection tìm kiếm, không phải nguồn dữ liệu nghiệp vụ; nguồn vẫn là `draft_json`.
+Client debounce 350 ms, không gửi tìm kiếm một ký tự và giữ bảng cũ trong lúc tải trang mới.
 
 ### Tra cứu công khai theo GCN
 
@@ -96,7 +134,10 @@ Google Sign-In chỉ cấp session. Mỗi request bảo vệ đọc lại `users
 
 ## File và upload
 
-1. Browser kiểm tra JPEG/PNG/WebP/HEIC/HEIF, tối đa 30 MB; HEIC/HEIF chuyển JPEG client-side khi cần.
+1. Browser kiểm tra JPEG/PNG/WebP/HEIC/HEIF, tối đa 30 MB; HEIC/HEIF chuyển JPEG client-side khi
+   cần. Trên Preview và Production, `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` từ
+   2026-07-29: CCCD tối đa 2400 px, GCN tối đa 3000 px, JPEG quality 0.88. Drive lưu bản tiếp nhận
+   vận hành đã chuẩn hóa; metadata nguồn/đích được lưu nhưng byte camera không được tải lên.
 2. API tạo resumable upload session trong Google Drive.
 3. Browser PUT trực tiếp lên Drive và hiển thị tiến độ/retry.
 4. API complete xác minh folder cha, MIME, dung lượng và checksum.

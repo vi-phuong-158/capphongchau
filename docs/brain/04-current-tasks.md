@@ -2,11 +2,33 @@
 
 > Cập nhật mỗi khi bắt đầu hoặc hoàn thành task. Agent đọc đây để biết được phép làm gì.
 >
-> **Kế hoạch đang có hiệu lực là [`PLAN2.md`](../../PLAN2.md)** (bản cập nhật 2026-07-22).
-> `PLAN.md` (M0–M5) và `PLAN_NL.md` là bối cảnh lịch sử — các mốc M0–M2 đã xong, nhưng thứ tự ưu
-> tiên và mục tiêu dữ liệu đã thay đổi. Khi ba tài liệu mâu thuẫn, **`PLAN2.md` thắng**.
+> **Roadmap đang có hiệu lực là [`PLAN.md`](../../PLAN.md).**
+> `PLAN2`, `PLAN_NL` và kế hoạch thi công Claude là tài liệu lịch sử đã lưu trong `docs/archive/`;
+> không dùng chúng để đảo ngược trạng thái hiện tại. Chi tiết được phép làm nằm trong file này và
+> các quyết định mới nhất ở `03-decisions.md`.
 
 ---
+
+## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
+
+- `GET /api/submissions` đã chuyển lọc/tìm/phân trang sang
+  `PublicIntakeRepository.listQueuePage`; mỗi request chỉ lấy tối đa 101 dòng và dùng cursor
+  `(updated_at, submission_id)`.
+- UI tìm kiếm debounce 350 ms, không gửi một ký tự và giữ bảng cũ khi đang tải.
+- **Chưa chạy migration:** áp `202607290004_queue_search_performance.sql` trên Preview sau các
+  migration đang chờ theo đúng thứ tự, rồi chạy `EXPLAIN (ANALYZE, BUFFERS)` với 500/5.000/20.000
+  hồ sơ giả. Không deploy code Phase 1 trước migration.
+- Chưa có P50/P95 Preview; không tuyên bố đạt mục tiêu ≤ 1,5 giây cho tới khi có số đo thật.
+
+## [2026-07-29] Bàn làm việc biên tập đầy đủ PL3 — đã triển khai trong code
+
+- Đã đối chiếu trực tiếp `Tai lieu/PL3.xlsx`, sheet `Phong Châu`, toàn bộ cột B–AX.
+- `WorkingPayloadEditor` có CRUD cho chủ/tổ chức/người đại diện, người sử dụng hiện tại, thửa,
+  tối đa ba mục đích/thửa và tài sản AO–AW. B/V/AX hiện nguồn và bắt lý do khi ghi đè.
+- Payload JSON, Zod, projection repository, audit, official sync và PL3 export đã mở rộng tương ứng;
+  test khóa đúng 49 nhãn và một dòng đủ 49 giá trị.
+- **Chưa chạy migration:** phải áp dụng `202607290002_full_pl3_editor.sql` trên preview rồi production
+  trước khi deploy code. Sau migration cần lưu→tải lại→tiếp nhận→xuất một hồ sơ giả đủ B–AX.
 
 ## [2026-07-29] Review PR #6 vòng hai — đã sửa trong code
 
@@ -29,7 +51,7 @@ E2E assisted phải báo skipped khi thiếu rehearsal credential.
 
 ## [2026-07-28] PUBLIC INTAKE V2 — luồng kê khai công khai còn 4 bước
 
-Thi công theo `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md`, trên nhánh
+Thi công theo [kế hoạch V2 đã lưu](../archive/plans/CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2-2026-07-28.md), trên nhánh
 `claude/land-declaration-process-feedback-126f2e`. **Chưa merge, chưa deploy, chưa chạy migration
 production.**
 
@@ -40,7 +62,7 @@ production.**
 | 0 | Baseline + test characterization khóa lỗ hổng `completionChecks` | `1cc7d93` |
 | 1 | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức) | `e938bab` |
 | 2 | Wizard 7 bước → 4 bước | `fe3e2e3` |
-| 3 | Chuẩn hóa ảnh trên thiết bị (cờ, mặc định TẮT) | `814eee7` |
+| 3 | Chuẩn hóa ảnh trên thiết bị (source default TẮT; Vercel Preview/Production đã BẬT 2026-07-29) | `814eee7` |
 | 4 | Tiến độ tải thật qua XHR + hàng đợi 2 luồng | `bdbf180` |
 | 6 | Màn hình thành công + kê khai hồ sơ tiếp theo | `ee30ee8` |
 | 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
@@ -69,9 +91,10 @@ render và E2E chưa chạy lần nào.
 3. **Bật `OFFICER_ASSISTED_INTAKE_ENABLED=true`** trên preview trước khi chạy các kịch bản
    E2E-06b/E2E-06c — kill switch server-side mặc định TẮT (2026-07-28, vòng rà soát lần hai).
 4. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` (đã có bảng so
-   sánh nguồn↔sau chuẩn hóa theo từng ảnh) trước khi đặt
-   `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`. Chưa có số đo nào; **không được** tuyên
-   bố tăng tốc.
+   sánh nguồn↔sau chuẩn hóa theo từng ảnh). Chủ dự án đã yêu cầu bật
+   `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` trên Preview/Production ngày 2026-07-29
+   trước khi hoàn tất benchmark. Chưa có số đo trước/sau; **không được** tuyên bố đạt mục tiêu tăng
+   tốc cho tới khi bảng được điền. Nếu chữ nhỏ, hướng ảnh hoặc QR trượt, rollback cờ ngay.
 5. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
    resume và tiến độ không tụt.
 6. **Xác nhận danh sách vai trò `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,
@@ -232,7 +255,7 @@ Còn lại — không chặn code, nhưng nên xác nhận trước khi coi pilo
 3. Thiết lập backup/PITR và `pg_dump` mã hóa ra nơi độc lập (Supabase project Singapore).
 4. Giữ Google Sheet cũ ở chế độ read-only/restricted — không ghi lại vào Sheet, không chạy lại ETL.
 
-Quyết định “giữ Sheets, không PostgreSQL” trong `PLAN2.md` và mục “Đã chốt” bên dưới là lịch sử,
+Quyết định “giữ Sheets, không PostgreSQL” trong kế hoạch cũ và mục “Đã chốt” bên dưới là lịch sử,
 đã bị yêu cầu mới của chủ dự án thay thế.
 
 ---
@@ -240,8 +263,10 @@ Quyết định “giữ Sheets, không PostgreSQL” trong `PLAN2.md` và mục
 ## Thay đổi lớn về mục tiêu (2026-07-22)
 
 **Đích xuất là `Tai lieu/PL3.xlsx` — 49 trường, không phải 15 trường Phụ lục 8.** Mỗi dòng là một
-(GCN × thửa × người), giá trị ghi bằng chữ chứ không phải mã. Hệ thống hiện thu trọn vẹn ~11/49.
-Xem quyết định cùng ngày trong `03-decisions.md` và bảng đối chiếu đầy đủ ở Phụ lục `PLAN2.md`.
+(GCN × thửa × người), giá trị ghi bằng chữ chứ không phải mã. Từ 2026-07-29 Bàn làm việc cán bộ
+đã biên tập đủ B–AX; cổng người dân vẫn chỉ bắt buộc MỨC A và để cán bộ hoàn thiện phần còn lại.
+Xem quyết định cùng ngày trong `03-decisions.md`; bảng đối chiếu đầy đủ nằm trong kế hoạch cũ ở
+`docs/archive/plans/PLAN2-2026-07-22.md`.
 
 **Quy mô mục tiêu nâng lên 20.000 hồ sơ** (trước là 500). Đã có phương án: **không sharding**, giữ
 một Supabase PostgreSQL database và tối ưu tầng truy cập dữ liệu — xem `03-decisions.md`.
@@ -290,7 +315,7 @@ Script nay còn nối được cột thiếu vào tab đã tồn tại, không c
 
 ### Chặn trước khi đưa cổng công khai vào dữ liệu thật
 
-Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2.
+Danh sách đầy đủ kèm ước công nằm trong kế hoạch lịch sử `docs/archive/plans/PLAN2-2026-07-22.md` §2.
 
 1. ~~Gác cổng trước khi đảo `OFFICIAL_ACCEPTANCE_ENABLED = true` (diễn tập staging 3 kịch bản)~~ —
    **ĐÃ XONG 2026-07-24**, xem chi tiết ở mục "Hoãn có chủ đích" phía trên và
@@ -327,7 +352,7 @@ giữ quyết định cũ — xem `03-decisions.md` để biết phạm vi:
 - **Danh mục `Loại đất` / `Nguồn gốc` / `Hình thức` / `Thời hạn`.** Câu quan trọng nhất: giá trị
   _"Nhận chuyển nhượng đất được Công nhận QSDĐ như giao đất có thu tiền sử dụng đất"_ là **một mục
   trong danh mục** hay **ghép hai ý**? Đáp án quyết định biểu mẫu có một ô chọn hay hai. Bộ câu hỏi
-  đã soạn sẵn ở `PLAN2.md` §9.
+  đã soạn sẵn ở kế hoạch lịch sử `docs/archive/plans/PLAN2-2026-07-22.md` §9.
 - ~~**Trường 21 và 22 của PL3 là gì**, và cột O, P không đánh số có thuộc bộ 49 không.~~
   **[ĐÃ TRẢ LỜI 2026-07-25]** Bỏ trường 21/22 (nguồn dữ liệu hiện dùng là loại đưa vào sử dụng
   ngay), nhưng khâu **thu thập** vẫn phải có cột O, P vì nhiều trường hợp chủ trên GCN đã mất.

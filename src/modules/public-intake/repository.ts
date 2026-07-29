@@ -6,6 +6,11 @@ import type { Sql } from "postgres";
 import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository";
 import { getDatabase } from "@/modules/supabase/database";
+import {
+  decodeQueueCursor,
+  encodeQueueCursor,
+  type QueueCursor,
+} from "@/modules/submissions/queue-pagination";
 
 import type { IntakeDraft } from "./types";
 import {
@@ -17,6 +22,7 @@ import {
   CERTIFICATE_LOOKUP_RATE_WINDOW_SECONDS,
 } from "./certificate-lookup";
 import type { FileNormalizationMetadata, UploadAttemptMetric } from "./upload-metrics";
+import { summarizeWorkingPayloadChanges } from "./working-payload-audit";
 import {
   type PublicFileSummary,
   type PublicStatus,
@@ -111,6 +117,24 @@ export interface SubmissionSummary {
   readonly claimedByDisplayName: string;
   readonly updatedAt: string;
   readonly rowIndex: number;
+}
+
+export interface QueueSubmissionSummary {
+  readonly submissionId: string;
+  readonly receiptCode: string;
+  readonly status: PublicStatus;
+  readonly phone: string;
+  readonly version: number;
+  readonly claimedBy: string;
+  readonly claimedByDisplayName: string;
+  readonly updatedAt: string;
+  readonly issueNumber: string;
+  readonly ownerName: string;
+}
+
+export interface QueueSubmissionPage {
+  readonly items: readonly QueueSubmissionSummary[];
+  readonly nextCursor: string | null;
 }
 
 export interface StoredFile {
@@ -970,6 +994,13 @@ export class PublicIntakeRepository {
       appliedFieldPaths: readonly string[];
     };
     /**
+     * Cán bộ đã đối chiếu CCCD và xác nhận thủ công một hay nhiều chủ sử dụng. Chỉ lưu số lượng
+     * để audit không chứa mã định danh hoặc dữ liệu người dân.
+     */
+    manualIdentityConfirmationOwnerCount?: number;
+    /** Loại request log riêng để phát lại thao tác xác nhận không lẫn với lần lưu bàn làm việc. */
+    requestLogKind?: "WORKING_PAYLOAD_EDIT" | "MANUAL_IDENTITY_CONFIRMATION";
+    /**
      * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
      *
      * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
@@ -1033,9 +1064,17 @@ export class PublicIntakeRepository {
         );
       }
 
+      const auditSummary = summarizeWorkingPayloadChanges(
+        input.record.workingPayload ?? input.record.citizenPayload ?? input.record.draft,
+        input.draft,
+      );
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
-        action: input.aiApplication ? "AI_DRAFT_APPLIED" : "SUBMISSION_WORKING_PAYLOAD_EDITED",
+        action: input.aiApplication
+          ? "AI_DRAFT_APPLIED"
+          : input.manualIdentityConfirmationOwnerCount
+            ? "SUBMISSION_IDENTITY_MANUALLY_CONFIRMED"
+            : "SUBMISSION_WORKING_PAYLOAD_EDITED",
         entityId: input.record.submissionId,
         requestId: input.requestId,
         metadata: input.aiApplication
@@ -1044,8 +1083,25 @@ export class PublicIntakeRepository {
               aiJobId: input.aiApplication.jobId,
               appliedFieldPaths: input.aiApplication.appliedFieldPaths.join(","),
               changeNote: input.changeNote || "",
+              changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+              changedFieldCount: auditSummary.changedFieldCount,
+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
+              automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
             }
-          : { changeNote: input.changeNote || "" },
+          : {
+              changeNote: input.changeNote || "",
+              changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+              changedFieldCount: auditSummary.changedFieldCount,
+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
+              automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
+              ...(input.manualIdentityConfirmationOwnerCount
+                ? {
+                    manualIdentityConfirmation: true,
+                    manualIdentityConfirmationOwnerCount:
+                      input.manualIdentityConfirmationOwnerCount,
+                  }
+                : {}),
+            },
       });
 
       if (input.aiApplication && input.aiApplication.appliedFieldPaths.length > 0) {
@@ -1063,7 +1119,7 @@ export class PublicIntakeRepository {
         insert into public.request_log
           (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (
-          ${input.idempotencyKey}, ${input.requestId}, 'WORKING_PAYLOAD_EDIT', ${input.mutationHash},
+          ${input.idempotencyKey}, ${input.requestId}, ${input.requestLogKind ?? "WORKING_PAYLOAD_EDIT"}, ${input.mutationHash},
           ${JSON.stringify({
             version: next.version,
             updatedAt: next.updatedAt,
@@ -1164,6 +1220,10 @@ export class PublicIntakeRepository {
         submissionId: input.record.submissionId,
         draft: input.draft,
       });
+      const auditSummary = summarizeWorkingPayloadChanges(
+        input.record.officialPayload ?? input.record.workingPayload ?? input.record.draft,
+        input.draft,
+      );
 
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
@@ -1174,6 +1234,10 @@ export class PublicIntakeRepository {
           ...input.auditMetadata,
           officialCaseId: next.officialCaseId,
           amendmentReason: input.amendmentReason,
+          changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+          changedFieldCount: auditSummary.changedFieldCount,
+          changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
+          automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
           ownerCount: counts.ownerCount,
           parcelCount: counts.parcelCount,
           assetCount: counts.assetCount,
@@ -1348,6 +1412,91 @@ export class PublicIntakeRepository {
         break;
       }
     }
+  }
+
+  /**
+   * Hàng chờ cán bộ được lọc, tìm và phân trang hoàn toàn trong PostgreSQL.
+   *
+   * `limit + 1` chỉ dùng để phát hiện trang kế; route không còn tải toàn bảng hoặc `draft_json`.
+   */
+  async listQueuePage(input: {
+    status?: PublicStatus;
+    query?: string;
+    cursor?: string | null;
+    limit?: number;
+  }): Promise<QueueSubmissionPage> {
+    const database = getDatabase();
+    const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
+    const cursor: QueueCursor | null = decodeQueueCursor(input.cursor);
+    const normalizedQuery = input.query?.trim() ?? "";
+    const searchPattern = normalizedQuery
+      ? `%${normalizedQuery.replace(/[!%_]/g, (character) => `!${character}`)}%`
+      : null;
+    const rows = await database.unsafe<
+      {
+        submission_id: string;
+        receipt_code: string;
+        status: PublicStatus;
+        phone: string;
+        version: number;
+        claimed_by: string | null;
+        claimed_by_display_name: string | null;
+        updated_at: Date;
+        queue_issue_number: string;
+        queue_owner_name: string;
+      }[]
+    >(
+      `select submission_id, receipt_code::text, status, phone, version, claimed_by,
+         claimed_by_display_name, updated_at, queue_issue_number, queue_owner_name
+       from public.public_submissions
+       where ($1::text is null or status = $1)
+         and (
+           $2::text is null
+           or receipt_code::text ilike $2 escape '!'
+           or queue_issue_number ilike $2 escape '!'
+           or queue_owner_name ilike $2 escape '!'
+         )
+         and (
+           $3::timestamptz is null
+           or updated_at < $3::timestamptz
+           or (updated_at = $3::timestamptz and submission_id < $4)
+         )
+       order by updated_at desc, submission_id desc
+       limit $5`,
+      [
+        input.status ?? null,
+        searchPattern,
+        cursor?.updatedAt ?? null,
+        cursor?.submissionId ?? null,
+        pageLimit + 1,
+      ],
+    );
+
+    const pageRows = rows.slice(0, pageLimit);
+    const items = pageRows.map((row) => ({
+      submissionId: row.submission_id,
+      receiptCode: row.receipt_code,
+      status: row.status,
+      phone: row.phone,
+      version: row.version,
+      claimedBy: row.claimed_by ?? "",
+      claimedByDisplayName: row.claimed_by_display_name ?? "",
+      updatedAt: row.updated_at.toISOString(),
+      issueNumber: row.queue_issue_number,
+      ownerName: row.queue_owner_name,
+    }));
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        rows.length > pageLimit && lastItem
+          ? encodeQueueCursor({
+              updatedAt: lastItem.updatedAt,
+              submissionId: lastItem.submissionId,
+            })
+          : null,
+    };
   }
 
   async listSummaries(): Promise<SubmissionSummary[]> {
@@ -2037,6 +2186,7 @@ export class PublicIntakeRepository {
       await transaction`
         insert into public.public_owners (
           owner_id, submission_id, owner_type, full_name, identity_number, role_on_certificate,
+          organisation_name, organisation_identity_number,
           date_of_birth, gender, residence_address, identity_source, qr_payload_hash,
           qr_decoder_version, qr_parser_version, identity_status, identity_confirmed_at,
           identity_override_reason,
@@ -2044,7 +2194,9 @@ export class PublicIntakeRepository {
           current_user_address, change_reason
         ) values (
           ${owner.id}, ${submissionId}, ${owner.ownerType}, ${owner.fullName},
-          ${owner.identityNumber}, ${owner.roleOnCertificate}, ${owner.dateOfBirth},
+          ${owner.identityNumber}, ${owner.roleOnCertificate},
+          ${owner.organisationName ?? ""}, ${owner.organisationIdentityNumber ?? ""},
+          ${owner.dateOfBirth},
           ${owner.gender}, ${owner.residenceAddress}, ${owner.identitySource},
           ${owner.qrPayloadHash}, ${owner.qrDecoderVersion}, ${owner.qrParserVersion},
           ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.identityOverrideReason ?? ""},
@@ -2058,11 +2210,16 @@ export class PublicIntakeRepository {
       await transaction`
         insert into public.public_parcels (
           parcel_id, submission_id, parcel_id_code, map_sheet_number, parcel_number,
-          address_on_certificate, address_two_level, area, old_ward
+          address_on_certificate, address_two_level, area, old_ward,
+          cadastral_map_sheet_number, cadastral_map_sheet_override_reason,
+          cadastral_parcel_number
         ) values (
           ${parcel.id}, ${submissionId}, ${parcel.parcelIdCode},
           ${parcel.mapSheetNumber}, ${parcel.parcelNumber}, ${parcel.addressOnCertificate},
-          ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard}
+          ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard},
+          ${parcel.cadastralMapSheetNumber ?? ""},
+          ${parcel.cadastralMapSheetOverrideReason ?? ""},
+          ${parcel.cadastralParcelNumber ?? ""}
         )
       `;
       for (const landUse of parcel.landUses || []) {
@@ -2080,8 +2237,17 @@ export class PublicIntakeRepository {
     }
     for (const asset of draft.assets || []) {
       await transaction`
-        insert into public.public_assets (asset_id, submission_id, asset_type, description)
-        values (${asset.id}, ${submissionId}, ${asset.assetType}, ${asset.description})
+        insert into public.public_assets (
+          asset_id, submission_id, parcel_id, asset_type, description,
+          mixed_use_building_name, apartment_building_name, apartment_number,
+          construction_area, floor_area, ownership_form, ownership_term, grade
+        ) values (
+          ${asset.id}, ${submissionId}, ${asset.parcelId ?? null}, ${asset.assetType},
+          ${asset.description}, ${asset.mixedUseBuildingName ?? ""},
+          ${asset.apartmentBuildingName ?? ""}, ${asset.apartmentNumber ?? ""},
+          ${asset.constructionArea ?? ""}, ${asset.floorArea ?? ""},
+          ${asset.ownershipForm ?? ""}, ${asset.ownershipTerm ?? ""}, ${asset.grade ?? ""}
+        )
       `;
     }
     for (const hmac of pendingIdentityHmacs ?? []) {

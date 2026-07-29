@@ -5,6 +5,7 @@ import {
 } from "@/modules/submissions/completion-checks";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
 import {
+  emptyAsset,
   emptyLandUse,
   emptyOwner,
   emptyParcel,
@@ -171,5 +172,43 @@ describe("Completion checks validation rules", () => {
     });
     const checks = completionChecks(rec, draft);
     expect(checks.some((c) => c.code === "PARCEL_0_LAND_USES_EXCEEDED")).toBe(true);
+  });
+
+  it("CC-ASSET: tài sản chưa chọn thửa bị chặn, thông báo chỉ rõ tài sản nào", () => {
+    const rec = makeRecord();
+    const draft = makeDraft({
+      assets: [
+        { ...emptyAsset("a1", "p1"), assetType: "NHA_O" },
+        // Tài sản mồ côi sau khi cán bộ xóa thửa — lưu được, nhưng không tiếp nhận được.
+        { ...emptyAsset("a2", ""), assetType: "CONG_TRINH", description: "Nhà kho sau vườn" },
+      ],
+    });
+
+    const detail = blockingCompletionIssueDetails(completionChecks(rec, draft)).find(
+      (issue) => issue.code === "ASSET_1_PARCEL_INVALID",
+    );
+    expect(detail).toBeDefined();
+    // Phải gọi tên đúng tài sản thứ 2, không phải một câu chung chung.
+    expect(detail?.label).toBe("Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất");
+    expect(detail?.message).toContain("Thửa đất liên quan");
+    // Tài sản đã gắn thửa không bị báo.
+    expect(
+      completionChecks(rec, draft).some((check) => check.code === "ASSET_0_PARCEL_INVALID"),
+    ).toBe(false);
+  });
+
+  it("CC-PII: lý do ghi đè chứa CCCD bị chặn tiếp nhận", () => {
+    const rec = makeRecord();
+    const draft = makeDraft({
+      wardAdministrativeCodeOverride: "07999",
+      wardAdministrativeCodeOverrideReason: "Theo hồ sơ của ông A 012345678901 đã nộp",
+    });
+
+    const detail = blockingCompletionIssueDetails(completionChecks(rec, draft)).find(
+      (issue) => issue.code === "OVERRIDE_REASON_CONTAINS_CITIZEN_ID",
+    );
+    expect(detail).toBeDefined();
+    // Thông báo trả ra màn hình cán bộ không được chép lại chính số CCCD.
+    expect(JSON.stringify(detail)).not.toContain("012345678901");
   });
 });

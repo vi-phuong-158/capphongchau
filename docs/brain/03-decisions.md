@@ -1,11 +1,90 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] PR #8: server là nguồn chuyển trạng thái định danh
+
+- **Quyết định:** Tab Chủ sử dụng của `WorkingPayloadEditor` là luồng xác nhận trong
+  `UNDER_REVIEW`; `PUT /working-payload` không tin trạng thái/nguồn/thời điểm định danh của client.
+  Server so sánh payload hiệu lực, yêu cầu lý do cho sửa định danh QR và tự suy ra
+  `QR_OVERRIDE_PENDING_REVIEW` hoặc `PENDING_CONFIRMATION`.
+- **Lý do:** Tránh trạng thái QR cũ hoặc `MANUAL_COMPLETE` giả sau khi sửa PL3; PATCH xác nhận thủ
+  công tách biệt tiếp tục là đường duy nhất đặt `MANUAL_COMPLETE` với audit/request log idempotent.
+- **Bảo mật:** GET detail chỉ thêm `ownerId` nội bộ cho nhãn ảnh, không trả Drive ID/link hay PII mới.
+
 > Ghi lại quyết định kỹ thuật quan trọng để agent sau không "phát minh lại" hoặc đảo ngược
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
 >
 > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
 > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
+>
+> Các tên `PLAN2`, `PLAN_NL` và kế hoạch Claude/Gemini xuất hiện trong các entry cũ chỉ là nguồn
+> lịch sử; bản đã lưu nằm trong `docs/archive/`. Không dùng các entry đó để đảo ngược quyết định mới.
+
+## [2026-07-29] Hàng chờ dùng SQL keyset và projection tìm kiếm sinh tự động
+
+- **Quyết định:** `GET /api/submissions` không gọi `repository.list()`/`listSummaries()` rồi lọc ở
+  Node. Repository mới `listQueuePage` đưa status, tìm chứa chuỗi, thứ tự và giới hạn xuống
+  PostgreSQL; mỗi lượt đọc `limit + 1` (tối đa 101) và cursor gồm cả `updated_at` lẫn
+  `submission_id`.
+- **Schema:** Migration `202607290004_queue_search_performance.sql` thêm generated column
+  `queue_owner_name`/`queue_issue_number`, B-tree index cho trang và GIN trigram index cho ba trường
+  tìm kiếm. Hai cột là projection từ `draft_json`, không phải nguồn dữ liệu thứ hai và không có
+  đường ghi riêng.
+- **API/UI:** `nextCursor` đổi từ raw `submissionId` sang base64url opaque của object đã validate;
+  component hiện hữu chỉ chuyển tiếp cursor nên tương thích nội bộ. Cursor/status hỏng trả
+  `400 VALIDATION_FAILED`. Tìm kiếm debounce 350 ms, dưới hai ký tự không gửi truy vấn và bảng cũ
+  vẫn hiển thị trong lúc tải.
+- **Bảo mật/đánh đổi:** Giữ nguyên `SUBMISSION_READ_ROLES`, masking số điện thoại, response
+  no-store và không log từ khóa/PII. `pg_trgm` và generated columns làm migration nặng hơn; phải áp
+  trên Preview, chạy `EXPLAIN (ANALYZE, BUFFERS)` với dữ liệu giả rồi mới deploy code.
+
+## [2026-07-29] Xác nhận định danh thủ công phải ghi đúng working payload
+
+- **Quyết định:** Giữ nguyên `completionChecks`: chỉ `QR_CONFIRMED` hoặc `MANUAL_COMPLETE` mới qua
+  cổng định danh. Khi cán bộ đang giữ hồ sơ `UNDER_REVIEW` đã trực tiếp đối chiếu CCCD/bản giấy tờ,
+  họ dùng checkbox rõ ràng trên màn chi tiết. `PATCH /api/submissions/:id` chỉ nhận owner ID; server
+  kiểm đủ CCCD 12 số, ngày sinh, giới tính và địa chỉ rồi tự đặt `MANUAL_COMPLETE`, nguồn `MANUAL` và
+  thời điểm server.
+- **Lý do:** `PENDING_CONFIRMATION` là trạng thái chưa có hành động xác nhận, không phải báo CCCD sai.
+  Sửa riêng `draft_json` không giải quyết được hồ sơ đã claim vì tiếp nhận đọc `working_payload`.
+  Luồng mới dùng `commitWorkingPayload` trong một transaction để cập nhật lớp có hiệu lực, projection,
+  idempotency/request log và audit cùng nhau.
+- **Bảo mật/đánh đổi:** Không có tự xác nhận, không cho kèm chỉnh sửa dữ liệu trong cùng request, chỉ
+  cán bộ đang giữ hồ sơ gọi được và audit chỉ lưu loại thao tác/số chủ, không lưu CCCD. Đây là xác nhận
+  thao tác của cán bộ, không phải kết luận pháp lý; các thiếu sót GCN/thửa đất vẫn chặn tiếp nhận.
+
+## [2026-07-29] Bật chuẩn hóa ảnh trên Vercel Preview và Production
+
+- **Quyết định:** Theo yêu cầu trực tiếp “bật lên đi” của chủ dự án sau khi đã được cảnh báo về
+  thay đổi byte nguồn, đặt `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` cho cả Preview và
+  Production rồi redeploy từ đúng deployment gần nhất của từng môi trường.
+- **Hành vi:** CCCD được giới hạn cạnh dài 2400 px, GCN 3000 px, JPEG quality 0.88; ảnh dưới 4 MiB
+  và trong giới hạn cạnh giữ nguyên. HEIC vẫn chuyển JPEG như trước. Drive lưu **bản tiếp nhận vận
+  hành** sau chuẩn hóa; không cam kết byte trùng tệp camera. Metadata nguồn/đích vẫn đi qua schema
+  số đo đóng, không có tên tệp hay PII tự do.
+- **Bằng chứng vận hành:** Preview deployment `dpl_CRfKZHxA8vVPi9wDJNx6fn6krP5w` và Production
+  `dpl_DMPPmXNzwswVJ7WRNTiseyRoqCmV` đều `Ready`; alias production
+  `https://capphongchau.vercel.app` trả 200, health Google và database đều trả 200.
+- **Giới hạn:** Bộ benchmark chất lượng ảnh thật vẫn chưa được điền; không tuyên bố đã đạt mục tiêu
+  giảm 35% thời gian/50% dung lượng. Cần kiểm thủ công chữ nhỏ, hướng ảnh và QR trên thiết bị thật.
+  Rollback bằng cách đặt cờ `false` và redeploy; không có migration.
+
+## [2026-07-29] Bàn làm việc biên tập đầy đủ là nguồn hoàn thiện 49 cột B–AX của PL3
+
+- **Quyết định:** `WorkingPayloadEditor` phải cho cán bộ xem/thêm/sửa/xóa toàn bộ dữ liệu nhập tay
+  của `Tai lieu/PL3.xlsx`: GCN; tổ chức tách khỏi người đại diện; chủ và người sử dụng hiện tại;
+  thửa đất; tối đa ba mục đích/thửa; tài sản AO–AW. Cột W được nhập tay, không còn để rỗng cố định.
+- **Trường tự động:** B = mã Phường Phong Châu; V = kết quả quy đổi ĐVHC cũ + số tờ trên GCN;
+  AX = tên file thực tế trên Drive. Mỗi trường cho phép ghi đè nhưng lý do phải dài tối thiểu 10 ký
+  tự. Export dùng override nếu có, nếu không dùng nguồn tự động; audit không ghi giá trị PII
+  trước/sau, chỉ ghi đường dẫn trường và lý do.
+- **Tương thích dữ liệu:** Migration `202607290002_full_pl3_editor.sql` chỉ thêm cột. Payload cũ
+  thiếu trường mới vẫn hợp lệ; tổ chức legacy đang dùng `fullName`/`identityNumber` tiếp tục xuất
+  tương thích cho tới khi cán bộ tách tổ chức/người đại diện trong bàn làm việc.
+- **Xuất PL3:** `PL3_COLUMNS` giữ nguyên từng nhãn B–AX từ workbook, gồm cột AQ “Nhà chung cư” và
+  một cột AW “Cấp hạng”; không dùng bộ nhãn rút gọn cũ “Hạng nhà/Cấp nhà”. Mỗi dòng vẫn là
+  GCN × thửa × người; nhiều tài sản cùng thửa được giữ bằng dấu `;` theo từng cột, không bỏ âm thầm.
+- **Người quyết định:** Chủ dự án qua yêu cầu ngày 2026-07-29.
 
 ## [2026-07-29] Hiển thị điều kiện chặn tiếp nhận cho cán bộ
 
@@ -162,7 +241,7 @@ Phân lớp giữ nguyên: **repository không bao giờ đọc biến môi trư
   - Diện tích kiểu Việt (`29,16`) bị `Number()` trả `NaN` ở máy chủ trong khi client dùng
     `parseVietnameseDecimal` và chấp nhận — hồ sơ hợp lệ bị từ chối với thông báo khó hiểu. Cả hai
     tầng nay dùng chung `parseVietnameseDecimal`.
-- **Người quyết định:** Chủ dự án (đầu bài `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md` §2.1),
+- **Người quyết định:** Chủ dự án (đầu bài `docs/archive/plans/CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2-2026-07-28.md` §2.1),
   thi công bởi Claude Opus 5.
 
 ## [2026-07-28] Ký hiệu loại đất: một ô chữ tự do thay cho danh mục 45 mục đích
@@ -1483,12 +1562,12 @@ agent đầy đủ là dấu vân tay nhận dạng được thiết bị.
 Số đo là best-effort ở cả hai đường ghi: metric hỏng không được làm hỏng lượt tải ảnh.
 `uploadSizeBytes` cố ý lấy từ Drive đã xác minh, không tin số client gửi.
 
-## [2026-07-28] Chế độ cán bộ hỗ trợ không có feature flag
+## [LỊCH SỬ - ĐÃ THAY THẾ 2026-07-28] Review về auth/CSRF cho chế độ cán bộ hỗ trợ
 
-Cờ phía client không bao giờ là hàng rào bảo mật — ai cũng đặt được biến trong bundle đã tải về.
-Hàng rào thật là ba lớp máy chủ: proxy Edge, `requireActiveUser(ASSISTED_INTAKE_ROLES)` ở trang và
-ở API, cộng CSRF. Thêm một cờ server chỉ tạo ảo giác về lớp bảo vệ thứ tư mà không thêm gì thật;
-muốn tắt chế độ này thì thu hồi vai trò.
+Đây là kết luận của vòng review trước và đã bị thay thế ngay trong cùng ngày. Vòng review nhấn mạnh
+rằng cờ phía client không bao giờ là hàng rào bảo mật — ai cũng đặt được biến trong bundle đã tải về.
+Sau đó chủ dự án đã chốt thêm kill switch server-side độc lập với phân quyền; xem quyết định ngay
+bên dưới. Nguồn hiện hành luôn là quyết định kill switch và mã nguồn.
 
 ## [2026-07-28] Kill switch server-side cho chế độ cán bộ hỗ trợ, tách khỏi ASSISTED_INTAKE_ROLES
 
@@ -1532,3 +1611,73 @@ làm yếu điều đang được kiểm.
 nhận). Không có Postgres/Drive thật trong môi trường CI hiện tại; tách phần thuần ra là cách duy
 nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nhóm, tính tỷ lệ nén trên mẫu thiếu số
 đo) mà không cần hạ tầng đó. Phần chạm DB/Drive trong hai script gốc không đổi hành vi.
+## [2026-07-29] Hiển thị điều kiện chặn tiếp nhận cho cán bộ
+
+- **Quyết định:** Giữ nguyên toàn bộ `completionChecks` ở server; khi còn lỗi `BLOCKING`, route
+  `POST /api/submissions/:submissionId/accept` trả thêm `error.details.issues[]` gồm `code`,
+  `label`, `message`. Màn hình chi tiết hồ sơ hiển thị danh sách này ngay dưới thông báo lỗi.
+- **Lý do:** Thông báo chung “Hồ sơ chưa đủ điều kiện tiếp nhận chính thức” làm cán bộ không biết
+  trường nào cần hoàn thiện, dù kiểm tra server đã có nhãn và hướng dẫn cụ thể.
+- **Bảo mật:** Chỉ route nội bộ sau `requireActiveUser`/CSRF nhận chi tiết; payload chỉ có mã và câu
+  hướng dẫn cố định, không có CCCD, họ tên, Drive ID/link, token hoặc dữ liệu tệp.
+- **Đánh đổi:** Không tự sửa hoặc nới validation; cán bộ vẫn phải hoàn thiện dữ liệu rồi bấm lại với
+  cùng khóa idempotency trong phiên nếu cần tiếp tục saga.
+
+## [2026-07-29] Gộp nhiều tài sản trên cùng thửa vào AO–AW: giữ vị trí, không bỏ trùng
+
+- **Quyết định:** `assetColumn()` trong `pl3-export.ts` gộp N tài sản của một thửa bằng `"; "` với
+  ràng buộc **mọi cột trong 9 cột AO–AW phải có cùng số phần tử theo cùng thứ tự**; ô rỗng ghi
+  `ASSET_EMPTY_PLACEHOLDER = "-"`. Thửa có >1 tài sản sinh warning ra sheet "Canh bao".
+- **Lý do:** PL3 chỉ có một bộ 9 cột cho mỗi thửa nên gộp là bắt buộc. Nhưng bản gộp đầu tiên
+  (`joined()`, PR #7) bỏ trùng bằng `Set` và bỏ ô rỗng **độc lập từng cột**, nên hai tài sản cùng
+  `constructionArea = "100"` cho ra AO hai phần tử và AS một phần tử — người đọc PL3 không còn ghép
+  lại được giá trị nào thuộc tài sản nào. Mất tương ứng nguy hiểm hơn ô trùng lặp nhìn thừa.
+- **Đánh đổi:** Ô xuất dài hơn và có ký tự giữ chỗ `-` trông lạ với người quen đọc bảng. Chấp nhận:
+  một tài sản (trường hợp áp đảo) vẫn xuất giá trị trần, không có ký tự giữ chỗ nào.
+- **Chưa quyết:** PL3 không có cách biểu diễn nhiều tài sản đúng chuẩn. Nếu nghiệp vụ yêu cầu mỗi
+  tài sản một dòng, phải đổi mô hình dòng (thửa × chủ) thành (thửa × chủ × tài sản) — ngoài phạm vi.
+
+## [2026-07-29] ESLint bỏ qua `**/.next/**` và `.claude/**`
+
+- **Quyết định:** Đổi ignore từ `.next/**` sang `**/.next/**`, thêm `.claude/**`.
+- **Lý do:** `.next/**` chỉ khớp bản build ở gốc repo. Worktree agent dưới `.claude/worktrees/*/`
+  có `.next/` riêng, và ESLint quét chúng thì **hết heap và chết** — không phải fail có thông báo.
+  Lint gate coi như không tồn tại trong suốt thời gian đó.
+- **Đánh đổi:** Không có. `.claude/` đã nằm trong `.gitignore`, không phải mã nguồn của dự án.
+
+## [2026-07-29] Ô lý do ghi đè KHÔNG được chứa CCCD — fail-closed ở cả hai cửa
+
+- **Quyết định:** ba ô lý do ghi đè (cột B, cột V mỗi thửa, cột AX) bị từ chối lưu nếu chứa chuỗi
+  giống số định danh cá nhân. Dùng chung `scanForCitizenIdLikeValues` với đường AI extraction —
+  **một** định nghĩa duy nhất cho "trông giống CCCD" (12 số, cho phép dấu cách/chấm/gạch xen giữa).
+- **Vì sao hai cửa:** `validateWorkingPayloadForSave` chặn lúc lưu; `completionChecks` chặn lúc tiếp
+  nhận. Cửa thứ hai không thừa — bản ghi lưu TRƯỚC khi có luật này vẫn nằm trong kho, và audit của
+  lần tiếp nhận sẽ chép lại chính chuỗi đó. Không có thế bí: đường lưu đã sạch nên cán bộ sửa được.
+- **Đánh đổi:** fail-closed như bên AI. Một chuỗi 12 số hợp lệ về nghiệp vụ (nếu có) sẽ bị từ chối
+  oan; đổi lại cán bộ chỉ cần viết lại câu lý do, còn PII lọt vào `audit_logs` thì không gỡ ra được.
+  Đã kiểm: lý do có số bình thường (số tờ, số thửa, năm) KHÔNG bị báo nhầm.
+- **Thông báo lỗi không chép lại chuỗi PII** — chỉ nêu tên ô. Có test khóa điều này.
+
+## [2026-07-29] `working_payload_json` là nguồn sự thật DUY NHẤT cho ghi đè cột B và AX
+
+- **Quyết định:** gỡ bốn cột `ward_admin_code_override*` / `scanned_file_names_override*` trên
+  `public_submissions`. `repository.ts` không ghi chúng nữa.
+- **Lý do:** bốn cột đó chỉ từng được GHI, không có đường đọc nào — `pl3-export` luôn lấy giá trị từ
+  payload JSON. Giữ lại là duy trì hai nguồn có thể lệch nhau, và bất kỳ ai sau này đọc nhầm cột sẽ
+  thấy dữ liệu cũ.
+- **Cách xử lý migration:** KHÔNG sửa `202607290002` vì file đó có thể đã chạy ở local/preview. Thêm
+  `202607290003_drop_working_payload_override_columns.sql` dùng `drop column if exists` — idempotent,
+  đúng trong cả hai trạng thái môi trường. Preflight kiểm **cả hai chiều**: cột PL3 phải có, cột ghi
+  đè song song phải không còn.
+- **An toàn dữ liệu:** mọi giá trị từng ghi vào bốn cột đều được sao chép từ payload trong cùng
+  transaction, nên không có dữ liệu nào chỉ tồn tại ở đó. Không cần backfill trước khi gỡ.
+
+## [2026-07-29] GIỮ yêu cầu người đại diện tổ chức đủ họ tên, ngày sinh, giới tính, địa chỉ
+
+- **Quyết định:** giữ nguyên hành vi PR #7 (bỏ `return` sớm ở nhánh tổ chức trong `checkOwner`).
+  Dòng tổ chức phải có đủ F/G (tổ chức) **và** H/I/J/L (người đại diện) trước khi tiếp nhận.
+- **Lý do:** PL3 có các cột đó và mô hình mới tách đúng tổ chức khỏi người đại diện. Nới ra là mở
+  đường cho hồ sơ tổ chức thiếu người đại diện đi vào dữ liệu chính thức.
+- **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
+  thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
+  `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.

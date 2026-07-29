@@ -150,7 +150,7 @@ Checklist trước deploy:
 - Vercel ưu tiên region `sin1`; đặt `SUPABASE_DATABASE_URL` pooler cho đúng môi trường.
 - OAuth consent screen Google phải `In production` trước dữ liệu thật.
 - Cloudflare proxy dùng SSL Full (strict), Transform Rule gắn `X-Origin-Auth`, bypass cache cho
-  `/api/*` và `/ke-khai*`, Turnstile/rate limit theo `PLAN2.md`.
+  `/api/*` và `/ke-khai*`, Turnstile/rate limit theo `AGENTS.md` và `docs/brain/04-current-tasks.md`.
 - Xóa `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` trước dữ liệu thật; URL `*.vercel.app` gọi thẳng API public
   phải bị từ chối.
 - Preview chỉ dùng dữ liệu giả/ẩn danh và database project/schema tách phù hợp.

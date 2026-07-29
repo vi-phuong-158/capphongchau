@@ -74,4 +74,6 @@ npm run build
 - [Runbook test/deploy](docs/brain/05-testing-and-deploy.md)
 - [Quyết định kỹ thuật](docs/brain/03-decisions.md)
 - [Chỉ dẫn coding agent](AGENTS.md)
-- [`PLAN2.md`](PLAN2.md) là bối cảnh kế hoạch nghiệp vụ; quyết định dữ liệu “giữ Google Sheets” trong bản kế hoạch đó đã bị thay thế ngày 2026-07-23 bởi kiến trúc Supabase.
+- [Roadmap hiện hành](PLAN.md)
+- [Bản đồ tài liệu](docs/README.md)
+- Các kế hoạch cũ và báo cáo agent nằm trong [kho lưu trữ](docs/archive/README.md), không phải nguồn chỉ dẫn hiện hành.

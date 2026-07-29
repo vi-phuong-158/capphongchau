@@ -1,5 +1,33 @@
 # 01 — Architecture
 
+> Cập nhật PR #8 (2026-07-29): `PUT /api/submissions/:id/working-payload` so sánh payload hiệu lực
+> trước khi commit. Sửa bốn trường định danh sau `QR_CONFIRMED` bắt buộc lý do và server chuyển sang
+> `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` xóa dấu xác nhận và về
+> `PENDING_CONFIRMATION`. Client không tự gán trạng thái/nguồn/thời điểm định danh. GET detail trả
+> `files[].ownerId` nội bộ để `DocumentViewer` gắn đúng chủ ảnh CCCD.
+
+## Cập nhật Code Graph 2026-07-29 — Phase 1 hiệu năng hàng chờ
+
+```text
+src/components/submissions-queue.tsx
+├── query < 2 ký tự → không gửi tìm kiếm
+├── query hợp lệ → debounce 350 ms + AbortController request cũ
+└── GET /api/submissions?status&q&cursor
+    ├── requireActiveUser(SUBMISSION_READ_ROLES)
+    ├── validate status + decode cursor base64url {updatedAt, submissionId}
+    └── PublicIntakeRepository.listQueuePage
+        └── PostgreSQL:
+            WHERE status/search
+            + keyset (updated_at, submission_id)
+            + ORDER BY updated_at DESC, submission_id DESC
+            + LIMIT 101 → trả tối đa 100
+
+202607290004_queue_search_performance.sql
+├── generated: queue_owner_name, queue_issue_number
+├── btree: status/updated_at/submission_id + all-status page
+└── pg_trgm GIN: receipt_code, queue_issue_number, queue_owner_name
+```
+
 ## Cập nhật Code Graph 2026-07-29 — review PR #6
 
 ```text
@@ -68,7 +96,14 @@ supabase/migrations/
 ├── 202607250004_submission_claim_guard.sql                 claim_note/claim_released_at + index
 ├── 202607250005_ai_extraction_tables.sql                   ai_extraction_jobs/results
 ├── 202607250007_land_uses_cascade_delete.sql                FK public_land_uses → on delete cascade
-└── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+├── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+├── 202607290002_full_pl3_editor.sql                         cột PL3 còn thiếu cho owner/parcel/
+│   asset + official projection + override B/V/AX
+└── 202607290003_drop_working_payload_override_columns.sql   GỠ 4 cột ward_admin_code_override*/
+    scanned_file_names_override* trên public_submissions. `working_payload_json` là nguồn sự thật
+    DUY NHẤT cho ghi đè cột B và AX — 4 cột đó chỉ từng được ghi, không có đường đọc.
+    `drop column if exists` nên chạy được dù 202607290002 đã áp hay chưa; KHÔNG sửa 202607290002
+    vì file đó có thể đã chạy ở local/preview. Preflight kiểm cả hai chiều.
     (202607250001 hiện TỰ DO — file untracked từng chiếm số này đã bị xóa 2026-07-25, xem
      03-decisions.md; 202607250006 chưa cấp, dành cho Phase 12 — đổi quy ước `-1/-2` → `-01/-02`
      ĐÃ làm ở file-naming.ts nhưng CHƯA có migration đổi tên file cũ đã có trên Drive)
@@ -137,9 +172,11 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │       ⚠️ TRƯỚC V2 `validate()` trong wizard chép lại luật bằng regex riêng — hai bản lệch nhau.
 │       Sửa luật nghiệp vụ thì sửa validation.ts, KHÔNG sửa lại ở wizard.
 ├── src/modules/public-intake/image-normalization.client.ts (cờ
-│   NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED, mặc định FALSE)
+│   NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED; source default FALSE, Vercel Preview +
+│   Production TRUE từ 2026-07-29 theo quyết định trực tiếp của chủ dự án)
 │   └── normalizeIntakeImage → CCCD 2400px / GCN 3000px, JPEG q0.88, không phóng to,
-│       imageOrientation:"from-image" (thiếu là ảnh dọc bị xoay ngang), mọi lỗi → trả tệp nguồn
+│       imageOrientation:"from-image" (thiếu là ảnh dọc bị xoay ngang), mọi lỗi → trả tệp nguồn;
+│       khi có chuẩn hóa, Drive giữ bản tiếp nhận vận hành chứ không giữ byte camera
 ├── src/modules/public-intake/upload-queue.ts (thuần)
 │   └── runWithConcurrency — GCN tối đa 2 luồng, 1 khi saveData/2g; một ảnh hỏng KHÔNG
 │       hủy ảnh khác (trước V2 vòng lặp `break` làm mất cả các ảnh chưa thử)
@@ -199,7 +236,9 @@ src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-
 
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
-    ├── list/listSummaries/findById
+    ├── listQueuePage — hàng chờ SQL keyset; không đọc toàn bảng/draft_json
+    ├── list/listSummaries — giữ cho đường gọi cũ/nội bộ, không dùng ở GET hàng chờ
+    ├── findById
     ├── commitStaffAction (transaction) — CLAIM/FORCE_CLAIM/RELEASE/TRANSFER (2026-07-25, Phase 5)
     │   ├── UPDATE mang điều kiện atomic ngay trong SQL:
     │   │   `and ($force = true or claimed_by is null or claimed_by = '' or claimed_by = $actor)`
@@ -215,7 +254,27 @@ src/app/submissions/page.tsx / [submissionId]
     │   ├── Chỉ cán bộ đang giữ (claimedBy === actor) + status UNDER_REVIEW mới gọi được
     │   ├── Ghi working_payload_json VÀ draft_json cùng lúc (khớp quyết định 2026-07-24 "Cho phép
     │   │   cán bộ sửa trực tiếp draft_json" — không phải lỗi, staff edit cố ý hiển thị cho dân)
-    │   └── refreshCanonicalProjection nếu status khác DRAFT
+    │   ├── refreshCanonicalProjection nếu status khác DRAFT
+    │   ├── audit chỉ ghi changedFieldPaths + lý do override, không ghi giá trị PII trước/sau
+    │   ├── PATCH manualIdentityConfirmation cũng đi qua transaction này: chỉ cán bộ đang giữ hồ sơ
+    │   │   `UNDER_REVIEW`, server tự đặt `MANUAL_COMPLETE`/thời điểm sau khi kiểm trường CCCD;
+    │   │   audit action `SUBMISSION_IDENTITY_MANUALLY_CONFIRMED` chỉ lưu số dòng
+    │   │   ⚠️ changedFieldPaths CẮT ở MAX_AUDIT_FIELD_PATHS=250 nhưng changedFieldCount đếm
+    │   │   TRƯỚC khi cắt, kèm cờ changedFieldPathsTruncated (sửa 2026-07-29, review PR #7 —
+    │   │   trước đó count lấy .length của mảng đã cắt nên luôn ≤250)
+    │   │   ⚠️ `reason` của override là free text và ĐI VÀO audit metadata, nên bị quét PII
+    │   │   fail-closed ở HAI cửa (2026-07-29): validateWorkingPayloadForSave lúc lưu +
+    │   │   completionChecks lúc tiếp nhận (cửa 2 dành cho dữ liệu lưu trước khi có luật). Cả hai
+    │   │   gọi overrideReasonsWithCitizenIdLike → scanForCitizenIdLikeValues, DÙNG CHUNG một định
+    │   │   nghĩa "giống CCCD" với đường AI extraction. Thông báo lỗi KHÔNG chép lại chuỗi PII.
+    │   └── WorkingPayloadEditor bao phủ B–AX: owner/org/representative/current user, parcel,
+    │       tối đa 3 land-use và asset AO–AW; B/V/AX hiện nguồn + override có lý do
+    │       ├── MỌI đường ghi owner đi qua migrateLegacyOrganisationOwner (types.ts): dòng tổ
+    │       │   chức lưu trước 202607290002 giữ tên tổ chức trong `fullName`, mà form mới dùng ô
+    │       │   đó cho NGƯỜI ĐẠI DIỆN. Không di trú trước thì gõ vào H là mất tên tổ chức.
+    │       │   Đổi ownerType KHÔNG di trú (tổ chức → cá nhân = fullName vốn là tên người).
+    │       └── xóa thửa gọi detachAssetsFromMissingParcels: draftSchema từ chối asset.parcelId
+    │           mồ côi và chỉ trả lỗi cấu trúc chung, cán bộ không biết ô nào sai
     ├── commitOfficialAmendment (transaction) — PATCH sửa hồ sơ ĐÃ tiếp nhận (Q2, 2026-07-25)
     │   ├── mayAmendOfficialRecord — ACCEPTED + có official_case_id + (người giữ | admin)
     │   ├── bắt buộc amendmentReason >= 10 ký tự → audit OFFICIAL_RECORD_AMENDED
@@ -276,6 +335,16 @@ src/app/api/submissions/[submissionId]/accept/route.ts
 
 src/modules/public-intake/pl3-export.ts (thuần, không I/O)
 ├── buildPl3Content / createPl3Accumulator → tách sheet PL3 (ACCEPTED) / Ton dong (đang xử lý)
+├── PL3_COLUMNS khóa nguyên văn 49 nhãn B–AX của `Tai lieu/PL3.xlsx`
+├── cột W lấy `cadastralParcelNumber`; AO–AW lấy tài sản gắn theo thửa, không để rỗng cố định
+│   ⚠️ PL3 chỉ có MỘT bộ 9 cột AO–AW cho mỗi thửa. Nhiều tài sản cùng thửa → assetColumn() gộp
+│   bằng "; " GIỮ NGUYÊN số phần tử và thứ tự ở cả 9 cột, ô rỗng ghi ASSET_EMPTY_PLACEHOLDER "-".
+│   KHÔNG được bỏ trùng hay bỏ ô rỗng (bug đã sửa 2026-07-29, review PR #7): làm vậy thì cột AS
+│   còn 1 giá trị trong khi AO có 2, người đọc không ghép lại được giá trị nào thuộc tài sản nào.
+├── buildSubmissionRows dedupe `warnings` trước khi trả: buildRow chạy mỗi cặp (thửa × chủ) nên
+│   cảnh báo thuộc về THỬA bị lặp đúng bằng số đồng sở hữu. Thêm cảnh báo mới vào buildRow thì
+│   không cần lo trùng, nhưng cảnh báo phải là chuỗi tất định (đừng nhét timestamp/random vào).
+├── B/V/AX dùng nguồn tự động trừ khi working payload có override + lý do hợp lệ
 ├── scannedFileNames (trường 49) → buildOriginalFileNames cùng file-naming.ts,
 │   dùng chung quy ước với bước FILES_MOVED để tên không lệch nhau
 └── POST /api/exports (route.ts) — ĐÃ SỬA (Phase 2, 2026-07-25): dùng
@@ -388,7 +457,8 @@ POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — 
                                                         best-effort, luôn 204)
 GET /api/submissions
 GET /api/submissions/:submissionId
-PATCH /api/submissions/:submissionId
+PATCH /api/submissions/:submissionId                         (sửa hẹp; `manualIdentityConfirmation`
+                                                        xác nhận CCCD thủ công vào working payload)
 PUT /api/submissions/:submissionId/working-payload   (2026-07-25, Phase 6 — sửa đầy đủ bản làm
                                                         việc: thửa đất, mục đích sử dụng)
 POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/

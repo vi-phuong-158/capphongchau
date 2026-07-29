@@ -1,7 +1,7 @@
 # PUBLIC INTAKE V2 — BASELINE (Phase 0)
 
 Ghi hiện trạng **trước** khi sửa, theo yêu cầu §5 của
-`CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md`.
+`docs/archive/plans/CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2-2026-07-28.md`.
 
 ## Repo
 
@@ -11,7 +11,7 @@ Ghi hiện trạng **trước** khi sửa, theo yêu cầu §5 của
 | Worktree | `.claude/worktrees/land-declaration-process-feedback-126f2e` |
 | Nhánh | `claude/land-declaration-process-feedback-126f2e` |
 | Base commit | `79f4ae67448625c9e92fb20c356c889008a27940` |
-| `git status --short` | sạch (chỉ thêm `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md` do người dùng cung cấp) |
+| `git status --short` | sạch (chỉ thêm kế hoạch V2 đã lưu trong `docs/archive/plans/`) |
 | Node / npm | v24.11.0 / 11.6.1 |
 | Ngày đo | 2026-07-28 |
 

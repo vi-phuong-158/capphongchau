@@ -1,4 +1,4 @@
-import type { IntakeDraft, Owner, Parcel } from "@/modules/public-intake/types";
+import type { Asset, IntakeDraft, Owner, Parcel } from "@/modules/public-intake/types";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
 import {
   CERTIFICATE_ROLE_CODES,
@@ -10,12 +10,14 @@ import {
   LAND_USE_FORM_OPTIONS,
   LAND_USE_TERM_OPTIONS,
   OLD_WARD_OPTIONS,
+  ASSET_TYPE_OPTIONS,
 } from "@/modules/public-intake/reference";
 import {
   CITIZEN_ID_PATTERN,
   LAND_USE_AREA_TOLERANCE_M2,
   ORGANISATION_ID_PATTERN,
   isValidDate,
+  overrideReasonsWithCitizenIdLike,
 } from "@/modules/public-intake/validation";
 import {
   isOrganisationOwner,
@@ -89,6 +91,8 @@ export function completionChecks(
   checkCertificate(payload, block);
   checkOwners(payload, block);
   checkParcels(payload, block);
+  checkAssets(payload, block);
+  checkAutomaticOverrides(payload, block);
   checkFiles(record, payload, block);
 
   return checks;
@@ -146,21 +150,20 @@ function checkOwner(owner: Owner, index: number, block: Blocker): void {
   }
 
   if (isOrganisationOwner(owner.ownerType)) {
-    if (!ORGANISATION_ID_PATTERN.test(owner.identityNumber.trim())) {
+    if (!owner.organisationName?.trim()) {
+      block(
+        `${prefix}_ORG_NAME_MISSING`,
+        `Chủ ${nth} thiếu tên tổ chức`,
+        `Dòng thứ ${nth} là tổ chức nhưng chưa nhập tên tổ chức ở cột F của PL3.`,
+      );
+    }
+    if (!ORGANISATION_ID_PATTERN.test(owner.organisationIdentityNumber?.trim() ?? "")) {
       block(
         `${prefix}_ORG_ID_INVALID`,
         `Chủ ${nth} mã số tổ chức không hợp lệ`,
-        `Chủ sử dụng thứ ${nth} phải có mã số thuế gồm 10 chữ số (hoặc kèm 3 số đơn vị trực thuộc).`,
+        `Tổ chức thứ ${nth} phải có mã số gồm 10 chữ số (hoặc kèm 3 số đơn vị trực thuộc) ở cột G.`,
       );
     }
-    if (!owner.residenceAddress.trim()) {
-      block(
-        `${prefix}_ORG_ADDRESS_MISSING`,
-        `Chủ ${nth} thiếu địa chỉ trụ sở`,
-        `Chủ sử dụng thứ ${nth} là tổ chức nhưng chưa có địa chỉ trụ sở.`,
-      );
-    }
-    return;
   }
 
   // Người trên GCN đã mất / đã sang tên: miễn định danh của họ, đổi lại phải khai đủ người sử
@@ -212,20 +215,23 @@ function checkOwner(owner: Owner, index: number, block: Blocker): void {
     );
   }
 
-  if (!requiresCitizenId(owner.ownerType)) return;
-
-  if (owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW") {
-    block(
-      `${prefix}_IDENTITY_OVERRIDE_PENDING`,
-      `Chủ ${nth} còn chờ duyệt thay đổi định danh`,
-      `Thông tin định danh của chủ sử dụng thứ ${nth} đã sửa sau xác nhận QR và chưa được duyệt.`,
-    );
-  } else if (owner.identityStatus !== "QR_CONFIRMED" && owner.identityStatus !== "MANUAL_COMPLETE") {
-    block(
-      `${prefix}_IDENTITY_NOT_CONFIRMED`,
-      `Chủ ${nth} chưa xác nhận định danh`,
-      `Thông tin định danh của chủ sử dụng thứ ${nth} chưa được xác nhận.`,
-    );
+  if (requiresCitizenId(owner.ownerType)) {
+    if (owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW") {
+      block(
+        `${prefix}_IDENTITY_OVERRIDE_PENDING`,
+        `Chủ ${nth} còn chờ duyệt thay đổi định danh`,
+        `Thông tin định danh của chủ sử dụng thứ ${nth} đã sửa sau xác nhận QR và chưa được duyệt.`,
+      );
+    } else if (
+      owner.identityStatus !== "QR_CONFIRMED" &&
+      owner.identityStatus !== "MANUAL_COMPLETE"
+    ) {
+      block(
+        `${prefix}_IDENTITY_NOT_CONFIRMED`,
+        `Chủ ${nth} chưa xác nhận định danh`,
+        `Thông tin định danh của chủ sử dụng thứ ${nth} chưa được xác nhận.`,
+      );
+    }
   }
 
   if (!isValidDate(owner.dateOfBirth.trim())) {
@@ -249,6 +255,98 @@ function checkOwner(owner: Owner, index: number, block: Blocker): void {
       `Chủ sử dụng thứ ${nth} chưa có địa chỉ thường trú.`,
     );
   }
+}
+
+/**
+ * Tên gọi tài sản cho thông báo lỗi: đủ để cán bộ tìm đúng thẻ tài sản trên màn hình mà không lộ
+ * gì nhạy cảm (loại tài sản là mã danh mục đóng, mô tả do chính cán bộ ghi).
+ */
+function assetLabel(asset: Asset, index: number): string {
+  const typeLabel = ASSET_TYPE_OPTIONS.find((option) => option.code === asset.assetType)?.label;
+  const description = asset.description.trim();
+  const detail = [typeLabel, description].filter(Boolean).join(" — ");
+  return detail ? `Tài sản ${index + 1} (${detail})` : `Tài sản ${index + 1}`;
+}
+
+function checkAssets(payload: IntakeDraft, block: Blocker): void {
+  const parcelIds = new Set(payload.parcels.map((parcel) => parcel.id));
+  const assetTypeCodes = new Set(ASSET_TYPE_OPTIONS.map((option) => option.code));
+  payload.assets.forEach((asset: Asset, index) => {
+    const nth = index + 1;
+    const prefix = `ASSET_${index}`;
+    const name = assetLabel(asset, index);
+    if (!asset.parcelId || !parcelIds.has(asset.parcelId)) {
+      block(
+        `${prefix}_PARCEL_INVALID`,
+        `${name} chưa chọn thửa đất`,
+        `${name} chưa được gắn với thửa nào. Mở bàn làm việc, chọn thửa ở ô "Thửa đất liên quan" của tài sản này rồi lưu lại.`,
+      );
+    }
+    if (!assetTypeCodes.has(asset.assetType)) {
+      block(
+        `${prefix}_TYPE_INVALID`,
+        `Tài sản ${nth} thiếu loại tài sản`,
+        `Tài sản thứ ${nth} chưa chọn loại tài sản gắn liền với đất.`,
+      );
+    }
+    for (const [field, label] of [
+      [asset.constructionArea, "diện tích xây dựng"],
+      [asset.floorArea, "diện tích sàn"],
+    ] as const) {
+      if (field?.trim()) {
+        const value = parseVietnameseDecimal(field);
+        if (value === null || value <= 0) {
+          block(
+            `${prefix}_${label === "diện tích xây dựng" ? "CONSTRUCTION" : "FLOOR"}_AREA_INVALID`,
+            `Tài sản ${nth} ${label} không hợp lệ`,
+            `${label} của tài sản thứ ${nth} phải là số lớn hơn 0.`,
+          );
+        }
+      }
+    }
+  });
+}
+
+function checkAutomaticOverrides(payload: IntakeDraft, block: Blocker): void {
+  /*
+   * Gác cổng thứ hai cho quy tắc "ô lý do không chứa CCCD". `validateWorkingPayloadForSave` đã
+   * chặn lúc lưu, nhưng bản ghi lưu TRƯỚC khi có luật này vẫn còn trong kho — và audit của lần
+   * tiếp nhận sẽ chép lại chính chuỗi đó. Chặn ở đây thì cán bộ buộc phải sửa rồi lưu lại, mà
+   * đường lưu đã sạch nên không có thế bí.
+   */
+  for (const label of overrideReasonsWithCitizenIdLike(payload)) {
+    block(
+      "OVERRIDE_REASON_CONTAINS_CITIZEN_ID",
+      `${label} chứa số định danh cá nhân`,
+      `${label} không được chứa CCCD. Sửa thành lý do nghiệp vụ ngắn rồi lưu lại bản làm việc.`,
+    );
+  }
+
+  const check = (value: string | undefined, reason: string | undefined, code: string, label: string) => {
+    if (value?.trim() && (reason?.trim().length ?? 0) < 10) {
+      block(code, label, `${label} phải có lý do ghi đè từ 10 ký tự.`);
+    }
+  };
+  check(
+    payload.wardAdministrativeCodeOverride,
+    payload.wardAdministrativeCodeOverrideReason,
+    "WARD_CODE_OVERRIDE_REASON_MISSING",
+    "Ghi đè mã ĐVHC",
+  );
+  check(
+    payload.scannedFileNamesOverride,
+    payload.scannedFileNamesOverrideReason,
+    "SCANNED_FILES_OVERRIDE_REASON_MISSING",
+    "Ghi đè tên file quét",
+  );
+  payload.parcels.forEach((parcel, index) =>
+    check(
+      parcel.cadastralMapSheetNumber,
+      parcel.cadastralMapSheetOverrideReason,
+      `PARCEL_${index}_MAP_SHEET_OVERRIDE_REASON_MISSING`,
+      `Ghi đè số hiệu tờ địa chính của thửa ${index + 1}`,
+    ),
+  );
 }
 
 function checkParcels(payload: IntakeDraft, block: Blocker): void {
