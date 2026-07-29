@@ -76,3 +76,24 @@ schema Google Sheets · luồng xử lý chính —
 - **Thay đổi phẫu thuật:** chỉ chạm phần cần thiết; không refactor lân cận; theo style hiện tại;
   dọn biến/import thừa do mình tạo.
 - **Theo mục tiêu:** biến task thành mục tiêu xác minh được — [Bước làm] → [Cách kiểm tra].
+
+## Quy trình bàn giao bắt buộc
+
+Trước khi thực hiện bất kỳ nhiệm vụ sửa code nào, phải đọc
+`AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`.
+
+Sau khi thực hiện, phải tạo hoặc cập nhật `CHATGPT_HANDOFF.md` tại thư mục
+gốc repository theo đúng cấu trúc và yêu cầu trong tài liệu trên.
+
+Không được chỉ báo cáo kết quả trong cửa sổ chat của agent. Báo cáo chính thức
+phải được ghi vào `CHATGPT_HANDOFF.md`.
+
+Không được kết thúc nhiệm vụ nếu chưa ghi:
+
+- Git status và commit;
+- Baseline trước thay đổi;
+- Danh sách file và symbol đã sửa;
+- Kết quả test, build, lint và typecheck;
+- Acceptance criteria;
+- Rủi ro và việc còn lại;
+- Diff hoặc các đoạn diff quan trọng.

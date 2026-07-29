@@ -397,3 +397,24 @@ Chỉ thực hiện sau khi MVP ổn định:
 5. Không đưa secret hay dữ liệu thật vào source, fixture, log hoặc ảnh chụp màn hình.
 6. Không xóa bảng/cột/file dữ liệu đang dùng. Mọi thay đổi schema phải có migration và cập nhật tài liệu.
 7. Với mỗi hạng mục hoàn thành, báo cáo file thay đổi, chức năng, test đã chạy, hạn chế, biến môi trường mới và thao tác quản trị cần thiết.
+
+## 10 Quy trình bàn giao bắt buộc
+
+Trước khi thực hiện bất kỳ nhiệm vụ sửa code nào, phải đọc
+`AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`.
+
+Sau khi thực hiện, phải tạo hoặc cập nhật `CHATGPT_HANDOFF.md` tại thư mục
+gốc repository theo đúng cấu trúc và yêu cầu trong tài liệu trên.
+
+Không được chỉ báo cáo kết quả trong cửa sổ chat của agent. Báo cáo chính thức
+phải được ghi vào `CHATGPT_HANDOFF.md`.
+
+Không được kết thúc nhiệm vụ nếu chưa ghi:
+
+- Git status và commit;
+- Baseline trước thay đổi;
+- Danh sách file và symbol đã sửa;
+- Kết quả test, build, lint và typecheck;
+- Acceptance criteria;
+- Rủi ro và việc còn lại;
+- Diff hoặc các đoạn diff quan trọng.
