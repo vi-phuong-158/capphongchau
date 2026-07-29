@@ -2657,3 +2657,63 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   không tự sinh `next-env.d.ts` vào commit (đã revert file này vì build tự đổi
   `.next/dev/types` → `.next/types`, không liên quan task).
 - **Chưa merge, chưa push, chưa deploy.**
+
+## [2026-07-29] Đợt 2A-2 — thêm một ô ghi chú nội bộ cho cán bộ
+
+- **Agent:** Claude Code
+- **Bối cảnh:** Người dùng chốt "ghi chú nội bộ thì không cần thiết lắm, để 1 ô thôi" và yêu cầu
+  làm sau 2A-1. Ghi chú này **không** thuộc `draft_json`/PL3, không sinh timeline (người dân không
+  bao giờ thấy), không phụ thuộc trạng thái hồ sơ hay ai đang nhận xử lý — nên tách hẳn khỏi
+  `PATCH /:submissionId` (route đó vừa đóng nhánh `STAFF_DRAFT_EDIT` ở 2A-1) thành một endpoint
+  riêng, theo đúng mẫu `PUT /working-payload` (version guard + idempotency-key, không canonical
+  projection vì không chạm dữ liệu PL3).
+- **Thay đổi:**
+  1. **Migration mới** `202607290005_submission_internal_notes.sql`: thêm cột
+     `public_submissions.internal_notes text not null default ''`.
+  2. **`repository.ts`:** thêm `internalNotes` vào `SubmissionRecord`/`SubmissionRow`, nối vào
+     `SUBMISSION_SELECT` và `mapSubmission`. Thêm hàm `commitInternalNotes` (version guard +
+     `pg_advisory_xact_lock` theo idempotency key + `request_log` kind `INTERNAL_NOTES_EDIT`) —
+     ghi audit `SUBMISSION_INTERNAL_NOTE_UPDATED` nhưng **không** lưu nội dung ghi chú vào
+     metadata audit, chỉ lưu `noteLength` (cán bộ có thể gõ SĐT/tên người dân vào ô tự do này,
+     không cần thêm một bản sao PII nữa trong audit).
+  3. **Endpoint mới** `PUT /api/submissions/:submissionId/internal-notes` — schema
+     `{ expectedVersion, internalNotes (≤ 4000 ký tự) }`, quyền `SUBMISSION_DECISION_ROLES`
+     (không yêu cầu đang claim hồ sơ, không giới hạn trạng thái — bất kỳ cán bộ có quyền quyết
+     định nào cũng ghi được, kể cả hồ sơ đã `ACCEPTED`/`REJECTED`).
+  4. **`GET /api/submissions/:submissionId`:** thêm `internalNotes` vào response.
+  5. **`submission-detail.tsx`:** thêm state đồng bộ ghi chú theo đúng idiom của
+     `useWorkingPayload` (so `submission.internalNotes` với bản đã đồng bộ ngay trong lúc render,
+     không dùng `useEffect` để tránh một lượt render thừa); thêm ô `<textarea>` + nút "Lưu ghi chú"
+     trong cột phải, phía trên Bàn làm việc PL3; gộp `notesDirty` vào cảnh báo `beforeunload` sẵn
+     có của bàn làm việc.
+  6. **`scripts/preflight-public-intake-v2-migrations.ts`:** thêm kiểm tra cột `internal_notes`
+     (bắt buộc — `tests/pr6-review-round-two.test.ts` quét mọi migration `202607280*`/`202607290*`
+     và đòi preflight phải nhắc tới từng migration, phát hiện ngay migration mới của tôi ban đầu
+     bị bỏ sót).
+- **File đã sửa:**
+  - `supabase/migrations/202607290005_submission_internal_notes.sql` (mới)
+  - `src/modules/public-intake/repository.ts`
+  - `src/app/api/submissions/[submissionId]/internal-notes/route.ts` (mới)
+  - `src/app/api/submissions/[submissionId]/route.ts`
+  - `src/components/submission-detail.tsx`
+  - `scripts/preflight-public-intake-v2-migrations.ts`
+- **Test mới:** `tests/submission-internal-notes.test.ts` — 5 ca: lưu hợp lệ gọi
+  `commitInternalNotes` đúng một lần; cho phép ghi kể cả hồ sơ `ACCEPTED` và người khác đang giữ;
+  version lệch trả 409 không gọi commit; thiếu idempotency-key trả 400; ghi chú > 4000 ký tự trả
+  400.
+- **Chưa làm (nằm ở đợt sau):** 2A-3 (chặn dân gửi lại khi cán bộ đang giữ + cho tiếp nhận hồ sơ
+  cũ `NEEDS_SUPPLEMENT`), 2B (server-prime, lazy ảnh, single-file query, lazy AI panel), 2C (cán bộ
+  tự tải ảnh bổ sung).
+- **Migration:** `202607290005_submission_internal_notes.sql` — additive thuần túy (`add column …
+  default ''`), không cần backfill, rollback là `drop column`. **Chưa chạy trên Preview/Production**
+  — phải chạy trước khi deploy code này, rồi xác nhận bằng
+  `npx tsx scripts/preflight-public-intake-v2-migrations.ts`.
+- **Kiểm tra:** baseline trước khi sửa — `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/5 warning
+  có sẵn, `npm test` 672 pass/10 skip... (baseline thực chất là kết quả cuối 2A-1: 667 pass/10
+  skip; con số 672 xuất hiện lần đầu SAU khi thêm 5 test mới của đợt này). Sau khi sửa —
+  `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/5 warning (không đổi so với baseline),
+  `npm test` 672 pass/10 skip (667 + 5 test mới, không có test nào fail/mới skip),
+  `npm run build` (Next.js 16.2.10, Turbopack) đạt và liệt kê đúng route mới
+  `/api/submissions/[submissionId]/internal-notes`. `next-env.d.ts` bị build tự đổi lại đã revert,
+  không đưa vào commit.
+- **Chưa merge, chưa push, chưa deploy.**

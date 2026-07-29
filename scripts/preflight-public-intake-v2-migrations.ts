@@ -18,6 +18,7 @@
  *   202607290002_full_pl3_editor.sql
  *   202607290003_drop_working_payload_override_columns.sql
  *   202607290004_queue_search_performance.sql
+ *   202607290005_submission_internal_notes.sql
  */
 
 import { loadEnvConfig } from "@next/env";
@@ -365,6 +366,16 @@ async function runChecks(): Promise<CheckResult[]> {
       const exists = await indexExists(index);
       check(`Index ${index} tồn tại (202607290004)`, exists, exists ? "OK" : "THIẾU INDEX");
     }
+  }
+
+  // 202607290005 — cột ghi chú nội bộ cán bộ (Đợt 2A-2).
+  {
+    const column = await columnExists("public_submissions", "internal_notes");
+    check(
+      "public_submissions.internal_notes tồn tại (202607290005)",
+      column.exists,
+      column.exists ? "OK" : "THIẾU CỘT — migration 202607290005 chưa chạy",
+    );
   }
 
   // Kiểm tra dữ liệu — hồ sơ cũ phải nhất quán, không phải chỉ schema đúng.

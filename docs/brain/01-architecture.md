@@ -290,6 +290,13 @@ src/app/submissions/page.tsx / [submissionId]
     │       land_uses → parcels → owners → certificates → assets
     │       (thứ tự code đã đúng; migration 202607250007 thêm `on delete cascade` làm lưới an toàn
     │        tầng DB — đã CHẠY THẬT và PASS trên Postgres rehearsal, xem 03-decisions.md)
+    ├── commitInternalNotes (transaction) — PUT /api/submissions/:id/internal-notes (2026-07-29, Đợt 2A-2)
+    │   ├── Không kiểm tra claimedBy/status — bất kỳ SUBMISSION_DECISION_ROLES nào cũng ghi được,
+    │   │   ở bất kỳ trạng thái nào (kể cả ACCEPTED/REJECTED) — ghi chú không phải dữ liệu PL3
+    │   ├── Chỉ update internal_notes + version + updated_at, KHÔNG chạm draft_json/canonical
+    │   │   projection, KHÔNG sinh timeline (người dân không bao giờ thấy trường này)
+    │   └── audit SUBMISSION_INTERNAL_NOTE_UPDATED chỉ ghi noteLength, không ghi nội dung ghi chú
+    │       (ô tự do — cán bộ có thể gõ SĐT/tên người dân vào đây)
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
@@ -468,6 +475,12 @@ PATCH /api/submissions/:submissionId                         (2026-07-29, Đợt
                                                         che khuất)
 PUT /api/submissions/:submissionId/working-payload   (2026-07-25, Phase 6 — sửa đầy đủ bản làm
                                                         việc: thửa đất, mục đích sử dụng)
+PUT /api/submissions/:submissionId/internal-notes     (2026-07-29, Đợt 2A-2 — ô ghi chú nội bộ tự
+                                                        do ≤ 4000 ký tự, tách khỏi PATCH chính vì
+                                                        sửa được ở BẤT KỲ trạng thái nào, không cần
+                                                        đang claim. Quyền SUBMISSION_DECISION_ROLES,
+                                                        không sinh timeline, audit chỉ ghi độ dài
+                                                        không ghi nội dung)
 POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/REJECT.
                                                         `REQUEST_SUPPLEMENT` đã bị chặn server-side
                                                         2026-07-29, Đợt 2A-1 — luồng mới không còn

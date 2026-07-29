@@ -9,6 +9,29 @@
 
 ---
 
+## [2026-07-29] Redesign màn duyệt hồ sơ — Đợt 2A (đang làm theo yêu cầu người dùng)
+
+Kế hoạch chốt: coi mỗi hồ sơ là một bản nộp hoàn chỉnh, bỏ luồng "yêu cầu bổ sung"/"gửi lại", chỉ
+giữ 3-4 nút chính (Tiếp nhận/Lưu/Hoàn thành xử lý/Từ chối). Chi tiết quyết định ở `03-decisions.md`
+cùng ngày; Code Graph ở `01-architecture.md`.
+
+- **2A-1 — ĐÃ LÀM (code, chưa merge/push/deploy):** bỏ nút/luồng "yêu cầu bổ sung"
+  (`action: REQUEST_SUPPLEMENT` bị chặn 400), đóng nhánh `STAFF_DRAFT_EDIT` của
+  `PATCH /api/submissions/:id` (chỉ còn `manualIdentityConfirmation`/`amendmentReason`), gộp UI
+  toolbar còn 4 nút chính + `<details>` "Thao tác khác" cho Release/Transfer/ForceClaim/Amend.
+- **2A-2 — ĐÃ LÀM (code, chưa merge/push/deploy):** thêm một ô ghi chú nội bộ tự do
+  (`internal_notes`, endpoint riêng `PUT /internal-notes`, không thuộc PL3/draft, không timeline).
+  **Chưa chạy migration** `202607290005_submission_internal_notes.sql` trên Preview/Production —
+  bắt buộc chạy trước khi deploy, xác nhận bằng
+  `npx tsx scripts/preflight-public-intake-v2-migrations.ts`.
+- **2A-3 — CHƯA LÀM:** chặn người dân gửi lại khi cán bộ đang giữ hồ sơ (race condition), cho
+  claim được hồ sơ cũ `NEEDS_SUPPLEMENT`/`RESUBMITTED`.
+- **2B — CHƯA LÀM:** server-priming, lazy-load ảnh trong split-screen viewer, single-file query
+  (`findActiveFile`), lazy-load AI panel.
+- **2C — CHƯA LÀM (tính năng mới, người dùng yêu cầu thêm):** cán bộ tự tải ảnh giấy tờ
+  cá nhân/GCN bổ sung khi hồ sơ nộp thiếu — cần endpoint mới vì API upload hiện tại của người dân
+  bị khóa theo session cookie + trạng thái hồ sơ, cán bộ không dùng lại được trực tiếp.
+
 ## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
 
 - `GET /api/submissions` đã chuyển lọc/tìm/phân trang sang

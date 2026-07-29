@@ -1,5 +1,30 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] Đợt 2A-2: một ô ghi chú nội bộ, tách khỏi PATCH chính
+
+- **Quyết định:** Thêm đúng một trường ghi chú nội bộ tự do (`internal_notes`, tối đa 4000 ký tự)
+  theo yêu cầu người dùng "không cần thiết lắm, để 1 ô thôi". Không gộp vào
+  `PATCH /api/submissions/:id` — route đó vừa đóng nhánh `STAFF_DRAFT_EDIT` ở 2A-1 và chỉ còn nhận
+  `manualIdentityConfirmation`/`amendmentReason` (yêu cầu hồ sơ `ACCEPTED`); ghi chú nội bộ phải sửa
+  được ở **bất kỳ trạng thái nào** kể cả trước khi claim hoặc sau khi đã `ACCEPTED`/`REJECTED`, nên
+  gộp vào sẽ tái tạo đúng bug staleness vừa đóng. Endpoint mới `PUT
+  /api/submissions/:id/internal-notes` theo mẫu `PUT /working-payload` (version guard +
+  idempotency-key, không canonical projection vì không chạm dữ liệu PL3, không sinh timeline vì
+  người dân không bao giờ thấy trường này).
+- **Quyền:** `SUBMISSION_DECISION_ROLES` (không bắt buộc đang claim hồ sơ) — ghi chú là kênh trao
+  đổi giữa các cán bộ (ví dụ "hồ sơ này từng nộp trùng do..."), khác với sửa `draft`/PL3 vốn chỉ
+  người đang giữ hồ sơ mới được sửa.
+- **Bảo mật/PII:** Audit log `SUBMISSION_INTERNAL_NOTE_UPDATED` chỉ ghi `noteLength`, không lưu lại
+  nội dung ghi chú — cán bộ có thể gõ số điện thoại/tên người dân vào ô tự do này, không cần thêm
+  một bản sao PII nữa nằm ngoài `public_submissions.internal_notes`.
+- **Migration:** `202607290005_submission_internal_notes.sql` — additive
+  (`add column ... default ''`), rollback là `drop column`. **Chưa chạy trên Preview/Production.**
+  Đã thêm bước kiểm cột này vào `scripts/preflight-public-intake-v2-migrations.ts` (bị
+  `tests/pr6-review-round-two.test.ts` bắt lỗi ngay khi thiếu — test đó quét mọi migration
+  `202607280*`/`202607290*` và đòi preflight phải nhắc tới từng migration).
+- **Chưa làm:** 2A-3 (chặn dân gửi lại khi cán bộ đang giữ hồ sơ), 2B (hiệu năng), 2C (cán bộ tự
+  tải ảnh bổ sung).
+
 ## [2026-07-29] Đợt 2A-1: bỏ luồng yêu cầu bổ sung, gộp về một đường ghi PL3
 
 - **Quyết định:** Chốt sau góp ý người dùng — coi mỗi hồ sơ là một bản nộp hoàn chỉnh; cán bộ đối

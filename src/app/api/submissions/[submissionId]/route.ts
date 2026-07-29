@@ -138,6 +138,7 @@ export async function GET(
           updatedAt: record.updatedAt,
           officialCaseId: record.officialCaseId || null,
           acceptStep: record.acceptStep || null,
+          internalNotes: record.internalNotes,
           // Màn cán bộ luôn sửa/xem lớp dữ liệu đang có hiệu lực. Khi đã nhận xử lý thì đó là
           // `working_payload`, không phải `draft_json` cũ của người dân.
           draft: effectivePayload(record),

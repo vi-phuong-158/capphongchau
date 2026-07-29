@@ -105,6 +105,8 @@ export interface SubmissionRecord {
   readonly fileSummaries: readonly PublicFileSummary[];
   /** Locator ổn định, giữ tên cũ để cookie phiên v2 tiếp tục tương thích sau migration. */
   readonly rowIndex: number;
+  /** Ghi chú nội bộ của cán bộ. Chỉ hiển thị trong màn duyệt hồ sơ, không lộ ra cổng công khai. */
+  readonly internalNotes: string;
 }
 
 export interface SubmissionSummary {
@@ -231,6 +233,7 @@ interface SubmissionRow {
   readonly access_version: number;
   readonly file_summary_json: PublicFileSummary[] | null;
   readonly legacy_row_index: string | number;
+  readonly internal_notes: string | null;
 }
 
 interface FileRow {
@@ -256,7 +259,8 @@ const SUBMISSION_SELECT = `
   created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
   citizen_payload_json, citizen_payload_version, citizen_payload_at,
   working_payload_json, working_payload_at, working_payload_by,
-  official_payload_json, official_payload_at, official_payload_by
+  official_payload_json, official_payload_at, official_payload_by,
+  internal_notes
 `;
 
 function asIso(value: Date | null | undefined): string {
@@ -336,6 +340,7 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     accessVersion: row.access_version,
     fileSummaries: decodeFileSummaries(row.file_summary_json),
     rowIndex: Number(row.legacy_row_index),
+    internalNotes: row.internal_notes ?? "",
   };
 }
 
@@ -971,6 +976,70 @@ export class PublicIntakeRepository {
           (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (
           ${input.idempotencyKey}, ${input.requestId}, 'STAFF_DRAFT_EDIT', ${input.mutationHash},
+          ${JSON.stringify({ version: next.version })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
+    });
+  }
+
+  /**
+   * Ghi chú nội bộ của cán bộ — một ô tự do, không thuộc `draft_json`/PL3, không sinh timeline
+   * (người dân không bao giờ thấy). Tách khỏi `commitStaffDraftEdit`/`commitOfficialAmendment` vì
+   * không gắn với trạng thái hồ sơ hay quyền "đang nhận xử lý": bất kỳ cán bộ nào có quyền quyết
+   * định hồ sơ cũng ghi được, ở bất kỳ trạng thái nào (kể cả đã `ACCEPTED`/`REJECTED`).
+   */
+  async commitInternalNotes(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    internalNotes: string;
+    actorEmail: string;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           internal_notes = $3, version = version + 1, updated_at = now()
+         where submission_id = $1 and version = $2
+         returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.expectedVersion, input.internalNotes],
+      );
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const next = mapSubmission(rows[0]);
+
+      // Không lưu nội dung ghi chú vào audit — đây là chỗ cán bộ có thể gõ số điện thoại, tên
+      // người dân khi diễn giải; audit chỉ cần biết AI đã sửa và độ dài, không cần bản sao PII.
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_INTERNAL_NOTE_UPDATED",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: { noteLength: input.internalNotes.length },
+      });
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'INTERNAL_NOTES_EDIT', ${input.mutationHash},
           ${JSON.stringify({ version: next.version })}::jsonb,
           now() + interval '24 hours'
         )

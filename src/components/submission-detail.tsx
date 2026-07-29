@@ -34,6 +34,7 @@ type Submission = {
   officialCaseId: string | null;
   acceptStep: string | null;
   canResetAccessSecret: boolean;
+  internalNotes: string;
   draft: IntakeDraft | null;
   files: {
     fileId: string;
@@ -164,20 +165,31 @@ export function SubmissionDetail({
     submission?.version ?? 0,
     isClaimedByMe,
   );
+  /** Ghi chú nội bộ (Đợt 2A-2) — một ô tự do, đồng bộ lại khi hồ sơ tải/tải lại (như bàn làm việc). */
+  const [notesDraft, setNotesDraft] = useState("");
+  const [syncedNotes, setSyncedNotes] = useState<string | null>(null);
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSaveError, setNotesSaveError] = useState<string | null>(null);
+  const currentNotes = submission?.internalNotes ?? null;
+  if (currentNotes !== null && currentNotes !== syncedNotes) {
+    setSyncedNotes(currentNotes);
+    setNotesDraft(currentNotes);
+  }
+  const notesDirty = submission !== null && notesDraft !== submission.internalNotes;
   useEffect(() => {
     loadSubmission(submissionId)
       .then(setSubmission)
       .catch(() => setMessage("Không thể tải hồ sơ."));
   }, [submissionId]);
-  /** Cảnh báo rời trang khi bàn làm việc còn thay đổi chưa lưu (§3.2). */
+  /** Cảnh báo rời trang khi bàn làm việc hoặc ghi chú nội bộ còn thay đổi chưa lưu (§3.2). */
   useEffect(() => {
-    if (!workingPayload.isDirty) return;
+    if (!workingPayload.isDirty && !notesDirty) return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [workingPayload.isDirty]);
+  }, [workingPayload.isDirty, notesDirty]);
   function openAmendModal() {
     if (!submission?.draft) return;
     setAmendmentReason("");
@@ -343,6 +355,35 @@ export function SubmissionDetail({
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ.");
     } finally {
       setBusy(false);
+    }
+  }
+  async function saveInternalNotes() {
+    if (!submission) return;
+    setNotesSaving(true);
+    setNotesSaveError(null);
+    try {
+      const token = await csrfToken();
+      const response = await fetch(`/api/submissions/${submission.submissionId}/internal-notes`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ expectedVersion: submission.version, internalNotes: notesDraft }),
+      });
+      const data = (await response.json()) as {
+        submission?: { version: number };
+        error?: { message: string };
+      };
+      if (!response.ok || !data.submission) {
+        throw new Error(data.error?.message ?? "Không thể lưu ghi chú.");
+      }
+      setSubmission(await loadSubmission(submission.submissionId));
+    } catch (error) {
+      setNotesSaveError(error instanceof Error ? error.message : "Không thể lưu ghi chú.");
+    } finally {
+      setNotesSaving(false);
     }
   }
   /**
@@ -667,6 +708,33 @@ export function SubmissionDetail({
               </strong>
             </div>
           </div>
+
+          {/* Ghi chú nội bộ (Đợt 2A-2) — chỉ cán bộ thấy, không thuộc hồ sơ kê khai. */}
+          <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-bold text-stone-900">Ghi chú nội bộ</h2>
+            <p className="mt-0.5 text-xs text-stone-500">
+              Chỉ cán bộ nhìn thấy, không hiển thị cho người dân.
+            </p>
+            <textarea
+              className="pc-textarea mt-2"
+              maxLength={4000}
+              onChange={(event) => setNotesDraft(event.target.value)}
+              placeholder="Ví dụ: hồ sơ này từng nộp trùng do thiếu ảnh GCN mặt sau."
+              rows={3}
+              value={notesDraft}
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                className="pc-button-quiet text-xs"
+                disabled={notesSaving || !notesDirty}
+                onClick={() => void saveInternalNotes()}
+                type="button"
+              >
+                {notesSaving ? "Đang lưu…" : "Lưu ghi chú"}
+              </button>
+              {notesSaveError && <span className="text-xs text-rose-700">{notesSaveError}</span>}
+            </div>
+          </section>
 
           {/* Working Payload Editor (Full 49 PL3 columns tabbed) */}
           {submission.status === "UNDER_REVIEW" && workingPayload.draft ? (
