@@ -69,8 +69,13 @@ supabase/migrations/
 ├── 202607250005_ai_extraction_tables.sql                   ai_extraction_jobs/results
 ├── 202607250007_land_uses_cascade_delete.sql                FK public_land_uses → on delete cascade
 ├── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
-└── 202607290002_full_pl3_editor.sql                         cột PL3 còn thiếu cho owner/parcel/
-    asset + official projection + override B/V/AX
+├── 202607290002_full_pl3_editor.sql                         cột PL3 còn thiếu cho owner/parcel/
+│   asset + official projection + override B/V/AX
+└── 202607290003_drop_working_payload_override_columns.sql   GỠ 4 cột ward_admin_code_override*/
+    scanned_file_names_override* trên public_submissions. `working_payload_json` là nguồn sự thật
+    DUY NHẤT cho ghi đè cột B và AX — 4 cột đó chỉ từng được ghi, không có đường đọc.
+    `drop column if exists` nên chạy được dù 202607290002 đã áp hay chưa; KHÔNG sửa 202607290002
+    vì file đó có thể đã chạy ở local/preview. Preflight kiểm cả hai chiều.
     (202607250001 hiện TỰ DO — file untracked từng chiếm số này đã bị xóa 2026-07-25, xem
      03-decisions.md; 202607250006 chưa cấp, dành cho Phase 12 — đổi quy ước `-1/-2` → `-01/-02`
      ĐÃ làm ở file-naming.ts nhưng CHƯA có migration đổi tên file cũ đã có trên Drive)
@@ -222,8 +227,11 @@ src/app/submissions/page.tsx / [submissionId]
     │   │   ⚠️ changedFieldPaths CẮT ở MAX_AUDIT_FIELD_PATHS=250 nhưng changedFieldCount đếm
     │   │   TRƯỚC khi cắt, kèm cờ changedFieldPathsTruncated (sửa 2026-07-29, review PR #7 —
     │   │   trước đó count lấy .length của mảng đã cắt nên luôn ≤250)
-    │   │   ⚠️ `reason` của override là free text cán bộ gõ và ĐI VÀO audit metadata — chưa có
-    │   │   bộ lọc PII, xem 03-decisions.md
+    │   │   ⚠️ `reason` của override là free text và ĐI VÀO audit metadata, nên bị quét PII
+    │   │   fail-closed ở HAI cửa (2026-07-29): validateWorkingPayloadForSave lúc lưu +
+    │   │   completionChecks lúc tiếp nhận (cửa 2 dành cho dữ liệu lưu trước khi có luật). Cả hai
+    │   │   gọi overrideReasonsWithCitizenIdLike → scanForCitizenIdLikeValues, DÙNG CHUNG một định
+    │   │   nghĩa "giống CCCD" với đường AI extraction. Thông báo lỗi KHÔNG chép lại chuỗi PII.
     │   └── WorkingPayloadEditor bao phủ B–AX: owner/org/representative/current user, parcel,
     │       tối đa 3 land-use và asset AO–AW; B/V/AX hiện nguồn + override có lý do
     │       ├── MỌI đường ghi owner đi qua migrateLegacyOrganisationOwner (types.ts): dòng tổ

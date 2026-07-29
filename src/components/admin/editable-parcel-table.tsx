@@ -264,7 +264,7 @@ export function EditableParcelTable({
               </Field>
               <Field
                 label="Lý do ghi đè cột V"
-                hint="Bắt buộc tối thiểu 10 ký tự khi nhập giá trị ghi đè."
+                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
               >
                 <input
                   disabled={readOnly || !(parcel.cadastralMapSheetNumber ?? "").trim()}

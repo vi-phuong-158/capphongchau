@@ -250,10 +250,6 @@ async function runChecks(): Promise<CheckResult[]> {
   // 202607290002 — toàn bộ cột lưu bền vững cho Bàn biên tập đầy đủ và PL3 B–AX.
   {
     const requiredColumns: ReadonlyArray<readonly [table: string, column: string]> = [
-      ["public_submissions", "ward_admin_code_override"],
-      ["public_submissions", "ward_admin_code_override_reason"],
-      ["public_submissions", "scanned_file_names_override"],
-      ["public_submissions", "scanned_file_names_override_reason"],
       ["public_owners", "organisation_name"],
       ["public_owners", "organisation_identity_number"],
       ["public_parcels", "cadastral_map_sheet_number"],
@@ -297,6 +293,28 @@ async function runChecks(): Promise<CheckResult[]> {
       "Index public_assets_parcel_idx tồn tại (202607290002)",
       assetIndex,
       assetIndex ? "OK" : "THIẾU INDEX",
+    );
+  }
+
+  // 202607290003 — `working_payload_json` là nguồn sự thật duy nhất cho ghi đè cột B và AX.
+  // Bốn cột song song phải KHÔNG còn tồn tại; còn cột nghĩa là migration chưa chạy và nguy cơ
+  // ai đó ghi lại vào đó vẫn còn.
+  {
+    const droppedColumns = [
+      "ward_admin_code_override",
+      "ward_admin_code_override_reason",
+      "scanned_file_names_override",
+      "scanned_file_names_override_reason",
+    ];
+    const stillPresent: string[] = [];
+    for (const column of droppedColumns) {
+      const { exists } = await columnExists("public_submissions", column);
+      if (exists) stillPresent.push(`public_submissions.${column}`);
+    }
+    check(
+      "Đã gỡ cột ghi đè song song trên public_submissions (202607290003)",
+      stillPresent.length === 0,
+      stillPresent.length === 0 ? "OK" : `CÒN CỘT SONG SONG: ${stillPresent.join(", ")}`,
     );
   }
 

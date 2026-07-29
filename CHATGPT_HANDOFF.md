@@ -4,498 +4,511 @@
 
 - Project: Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu (`land-ocr-180`)
 - Repository path: `D:\04. Github\capphongchau`
-- Generated at: 2026-07-29 12:25 +07:00
+- Generated at: 2026-07-29 13:35 +07:00
 - Agent: Claude Code
-- Task: Review PR #7 ("feat: hoàn thiện bàn biên tập PL3 và hợp nhất tài liệu") và vá các phát hiện được người dùng chấp thuận
+- Task: Thi hành 4 quyết định nghiệp vụ người dùng chốt cho PR #7, kiểm thử tự động + kiểm tra giao diện 4 tình huống
 - Status: `READY_FOR_REVIEW`
-- Source plan: yêu cầu trực tiếp của người dùng trong hội thoại ("review lại PR 7" → "có vá hết cho tôi" → "sửa luôn đi rồi commit"); phạm vi vá = 5 mục review + 1 mục phát sinh do chính bản vá mục 2 (xem §8 Phase 7)
-- Source acceptance criteria: từng phát hiện trong review phải có bằng chứng đã hết, cộng Definition of Done trong `AGENTS.md`
-- Source security constraints: `CLAUDE.md` §Quy tắc cứng; `docs/brain/02-coding-rules.md`; `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md` §5
+- Source plan: 4 quyết định người dùng chốt trực tiếp trong hội thoại (nguyên văn tóm tắt ở §6)
+- Source acceptance criteria: từng quyết định phải có bằng chứng đã thi hành; AC-10 của đợt trước phải hết trạng thái `NOT_TESTED`
+- Source security constraints: `CLAUDE.md` §Quy tắc cứng (đặc biệt số 6 — PII trong log); `docs/brain/02-coding-rules.md`
 
-**Lưu ý về file này:** bản `CHATGPT_HANDOFF.md` trước đó (đợt thi công của Codex cho PR #7) đã được
-lưu nguyên vẹn tại `docs/handoffs/2026-07-29_pr7-full-pl3-editor_CHATGPT_HANDOFF.md` trước khi ghi
-đè, vì PR #7 chưa merge và báo cáo đó vẫn còn giá trị nghiệm thu.
+**Quan hệ với đợt trước:** đây là đợt thi công thứ hai trên cùng nhánh. Đợt một (commit `532c369`,
+đã push) vá 6 phát hiện review và để lại 3 mục "CHƯA quyết" + AC-10 chưa xác minh. Đợt này chốt và
+thi hành cả 4, đồng thời lấp khoảng trống AC-10. Báo cáo đợt một lưu tại
+`docs/handoffs/2026-07-29_pr7-full-pl3-editor_CHATGPT_HANDOFF.md` (bản Codex) — báo cáo đợt một của
+Claude Code nằm trong lịch sử git tại `532c369`.
 
 ## 2. Git identity
 
 - Current branch: `docs/agent-handoff-protocol`
 - Remote: `origin https://github.com/vi-phuong-158/capphongchau.git`
-- Base commit before work: `05f09c35f6a278f6229bce1ecfd3683487c3fb09`
-- Head commit after work: `05f09c35f6a278f6229bce1ecfd3683487c3fb09`
-- Commit created: **KHÔNG**. Toàn bộ thay đổi đang ở working tree, chưa commit, chưa push.
-- Working tree state: dirty (11 file modified, 1 file added)
-- User changes detected before work: **không có** — `git status --short` trống hoàn toàn trước khi bắt đầu
-- User changes preserved: không áp dụng (không có thay đổi nào của người dùng để bảo toàn)
+- Base commit before work: `532c36935ff89d679c6b7b2d66413cec866e8168`
+- Head commit after work: xem §2.1 (commit tạo ở cuối đợt)
+- Working tree state trước khi bắt đầu: **sạch** (`git status --short` trống)
+- User changes detected before work: không có
+- User changes preserved: không áp dụng
 
-### Git status
+### Git status (đã stage toàn bộ trước khi commit)
 
 ```text
- M docs/brain/01-architecture.md
- M docs/brain/03-decisions.md
- M docs/brain/06-ai-working-log.md
- M eslint.config.mjs
- M src/components/admin/working-payload-editor.tsx
- M src/modules/public-intake/pl3-export.ts
- M src/modules/public-intake/repository.ts
- M src/modules/public-intake/types.ts
- M src/modules/public-intake/working-payload-audit.ts
- M tests/full-pl3-editor.test.ts
- M tests/pl3-export.test.ts
-?? docs/handoffs/2026-07-29_pr7-full-pl3-editor_CHATGPT_HANDOFF.md
-   (CHATGPT_HANDOFF.md bị ghi đè bởi chính báo cáo này)
+M  docs/brain/01-architecture.md
+M  docs/brain/03-decisions.md
+M  docs/brain/06-ai-working-log.md
+M  evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md
+M  scripts/preflight-public-intake-v2-migrations.ts
+M  src/components/admin/editable-parcel-table.tsx
+M  src/components/admin/working-payload-editor.tsx
+M  src/modules/public-intake/repository.ts
+M  src/modules/public-intake/validation.ts
+M  src/modules/submissions/completion-checks.ts
+A  supabase/migrations/202607290003_drop_working_payload_override_columns.sql
+M  tests/completion-checks.test.ts
+M  tests/full-pl3-editor.test.ts
 ```
+
+**Không có file rác nào lọt vào:** trang harness kiểm tra giao diện
+(`src/app/dev-harness/page.tsx`) và file test tạm (`tests/__scenario4.tmp.test.ts`) đã bị xóa;
+`.claude/launch.json` (gitignored) đã khôi phục nguyên trạng; `next-env.d.ts` do dev server sinh lại
+đã hoàn nguyên.
 
 ### Diff statistics
 
 ```text
- eslint.config.mjs                                  | 12 ++-
- src/components/admin/working-payload-editor.tsx    | 51 ++++++-------
- src/modules/public-intake/pl3-export.ts            | 63 +++++++++++-----
- src/modules/public-intake/repository.ts            |  8 +-
- src/modules/public-intake/types.ts                 | 39 ++++++++++
- src/modules/public-intake/working-payload-audit.ts | 13 +++-
- tests/full-pl3-editor.test.ts                      | 70 +++++++++++++++++-
- tests/pl3-export.test.ts                           | 85 ++++++++++++++++++++++
- 8 files changed, 288 insertions(+), 53 deletions(-)
-```
-
-(Chưa tính 3 file tài liệu `docs/brain/*` và file handoff lưu trữ.)
-
-### Name status
-
-```text
-M	docs/brain/01-architecture.md
-M	docs/brain/03-decisions.md
-M	docs/brain/06-ai-working-log.md
-M	eslint.config.mjs
-M	src/components/admin/working-payload-editor.tsx
-M	src/modules/public-intake/pl3-export.ts
-M	src/modules/public-intake/repository.ts
-M	src/modules/public-intake/types.ts
-M	src/modules/public-intake/working-payload-audit.ts
-M	tests/full-pl3-editor.test.ts
-M	tests/pl3-export.test.ts
+ docs/brain/01-architecture.md                      | 16 +++--
+ docs/brain/03-decisions.md                         | 46 ++++++++++---
+ docs/brain/06-ai-working-log.md                    | 34 ++++++++++
+ evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md     | 78 ++++++++++++++++++++++
+ scripts/preflight-public-intake-v2-migrations.ts   | 26 ++++++--
+ src/components/admin/editable-parcel-table.tsx     |  2 +-
+ src/components/admin/working-payload-editor.tsx    |  4 +-
+ src/modules/public-intake/repository.ts            | 16 -----
+ src/modules/public-intake/validation.ts            | 31 +++++++++
+ src/modules/submissions/completion-checks.ts       | 31 ++++++++-
+ ...90003_drop_working_payload_override_columns.sql | 17 +++++
+ tests/completion-checks.test.ts                    | 39 +++++++++++
+ tests/full-pl3-editor.test.ts                      | 46 ++++++++++++-
+ 13 files changed, 346 insertions(+), 40 deletions(-)
 ```
 
 ## 3. Executive summary
 
-**Vấn đề:** PR #7 mở rộng bàn biên tập PL3 lên đủ 49 cột B–AX. Review phát hiện 8 vấn đề; người
-dùng yêu cầu vá 5 vấn đề có thể sửa bằng code (3 vấn đề còn lại cần quyết định nghiệp vụ).
+**Vấn đề:** đợt trước để lại 3 quyết định nghiệp vụ agent cố ý không tự quyết, cộng một tiêu chí
+(AC-10 — hành vi giao diện) chưa có bằng chứng. Người dùng đã chốt cả 4 quyết định.
 
-**Kiểm chứng độc lập đã làm trước khi kết luận:** đọc trực tiếp `Tai lieu/PL3.xlsx` (sheet
-`Phong Châu`) bằng `exceljs` và đối chiếu từng nhãn ở row 3 cùng số hiệu trường ở row 4. Kết quả:
-49 nhãn trong `PL3_COLUMNS` khớp **byte-exact** với nguồn, kể cả các chi tiết trông như lỗi
-(`"Hình thức sử dụng "` thừa space ×3, `"địa chỉ thường trú (2 cấp)"` viết thường, `\n` trong nhãn
-cột H). PR #7 còn sửa đúng một lỗi lệch cột có thật ở nhóm tài sản (bản cũ đánh 41=Khu chung cư,
-42=Số căn hộ; nguồn là AP=41 Khu nhà chung cư, AQ=42 Nhà chung cư, AR=43 Số căn hộ). Phần ánh xạ
-PL3 của PR #7 được xác nhận là đúng — các mục vá dưới đây nằm ở chỗ khác.
+**Đã thực hiện:**
 
-**Đã thực hiện — 6 bản vá:**
+1. **PII** — ô lý do ghi đè bị từ chối lưu khi chứa mẫu CCCD, chặn ở hai cửa, dùng chung định nghĩa
+   "giống CCCD" với đường AI extraction. Hint trên giao diện hướng dẫn ghi lý do nghiệp vụ ngắn.
+2. **Tài sản chưa gắn thửa** — giữ "lưu được, chặn khi tiếp nhận"; thông báo nay gọi đúng tên tài sản.
+3. **Một nguồn sự thật** — gỡ hẳn 4 cột ghi đè song song khỏi `public_submissions`; migration mới
+   idempotent, không sửa migration đã chạy; preflight kiểm hai chiều.
+4. **Người đại diện tổ chức** — giữ nguyên yêu cầu, viết release note 6 mục.
 
-1. Chặn mất tên tổ chức trên bản ghi lưu trước migration `202607290002`.
-2. Chặn mất tương ứng giữa 9 cột tài sản AO–AW khi một thửa có nhiều tài sản.
-3. Sửa `changedFieldCount` trong audit vốn luôn bị chặn ở 250.
-4. Chặn tình trạng xóa thửa làm hỏng nút Lưu bằng một lỗi không giải thích được.
-5. Mở lại lint gate: ESLint đang **chết vì hết heap**, không phải fail có thông báo.
-6. (Phát sinh) Cảnh báo thuộc về một thửa bị lặp đúng bằng số đồng sở hữu — do `buildRow` chạy mỗi
-   cặp (thửa × chủ). Bản vá mục 2 thêm một cảnh báo mới vào đúng chỗ đó nên agent tự phát hiện khi
-   rà lại, người dùng chấp thuận sửa luôn.
+**Lấp khoảng trống AC-10:** dựng trang harness tạm render đúng `WorkingPayloadEditor` thật, thao tác
+bằng chuột/bàn phím qua trình duyệt. **4/4 tình huống PASS**, có số liệu trạng thái thật ở §14.
+Harness đã xóa, không nằm trong commit.
 
-**Kết quả:** test 631 → 637 pass (thêm 6 test hồi quy), typecheck đạt, build đạt, lint từ trạng
-thái crash chuyển sang 0 error.
+**Kết quả:** test 637 → 642 pass, typecheck/lint/build đạt.
 
-**Chưa hoàn thành (cố ý — cần quyết định nghiệp vụ, không phải code):** 3 mục ở §15.
-
-**Trạng thái đề xuất:** `READY_FOR_REVIEW`, chưa commit theo mặc định "không tự commit/push".
+**Trạng thái đề xuất:** `READY_FOR_REVIEW`.
 
 ## 4. Baseline before changes
 
-Đo tại commit `05f09c3`, working tree sạch, **trước** mọi thay đổi.
+Đo tại commit `532c369`, working tree sạch.
 
-| Check             | Command             | Result                 | Evidence                                                                                                                                             |
-| ----------------- | ------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit tests        | `npm test`          | PASS                   | `Test Files 67 passed \| 2 skipped (69)`; `Tests 631 passed \| 10 skipped (641)`                                                                       |
-| Integration tests | —                   | KHÔNG CÓ BỘ RIÊNG      | Nằm trong cùng bộ Vitest ở trên                                                                                                                        |
-| E2E tests         | `npm run test:e2e`  | **NOT_RUN**            | Cần preview deployment + secret; không có trong môi trường này. Không khai pass.                                                                       |
-| Build             | `npm run build`     | **NOT_RUN Ở BASELINE** | Chỉ chạy sau thay đổi (§12). Không có số liệu baseline để so sánh.                                                                                     |
-| Lint              | `npm run lint`      | **FAIL — CRASH**       | `FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory`. Không hoàn thành, không báo được lỗi nào. |
-| Typecheck         | `npm run typecheck` | PASS                   | `tsc --noEmit -p tsconfig.typecheck.json`, exit 0, không output                                                                                        |
+| Check             | Command             | Result                         | Evidence                                                                        |
+| ----------------- | ------------------- | ------------------------------ | ------------------------------------------------------------------------------- |
+| Unit tests        | `npm test`          | PASS — 637 pass / 10 skip      | `Test Files 67 passed \| 2 skipped (69)`; `Tests 637 passed \| 10 skipped (647)` |
+| Integration tests | —                   | Nằm trong bộ Vitest ở trên     | —                                                                               |
+| E2E tests         | `npm run test:e2e`  | **NOT_RUN**                    | Cần preview deployment + secret                                                  |
+| Build             | `npm run build`     | PASS                           | exit 0                                                                          |
+| Lint              | `npm run lint`      | PASS — 0 error / 5 warning     | 5 warning có sẵn ở file ngoài phạm vi                                            |
+| Typecheck         | `npm run typecheck` | PASS                           | exit 0                                                                          |
 
-**Lỗi đã tồn tại từ trước (không do thay đổi này):**
-
-- Lint crash vì OOM — chính là mục 5 được vá.
-- 5 warning `@typescript-eslint/no-unused-vars` trong `scripts/add-system-admins.ts` và
-  `tests/staging-rehearsal-scenarios.test.ts`. Hai file này **không** thuộc phạm vi vá, warning
-  được giữ nguyên có chủ ý.
+**Lỗi tồn tại từ trước:** 5 warning `no-unused-vars` ở `scripts/add-system-admins.ts` và
+`tests/staging-rehearsal-scenarios.test.ts` — không thuộc phạm vi, giữ nguyên có chủ ý.
 
 ## 5. Scope
 
 ### In scope
 
-- 5 phát hiện review được người dùng chấp thuận vá (chi tiết §8).
-- 1 phát hiện phát sinh trong lúc rà lại bản vá mục 2, người dùng chấp thuận sửa (§8 Phase 7).
-- Test hồi quy cho từng phát hiện.
-- Cập nhật `docs/brain/01-architecture.md` (Code Graph), `03-decisions.md`, `06-ai-working-log.md`
-  theo quy tắc bắt buộc trong `CLAUDE.md`.
+- 4 quyết định nghiệp vụ người dùng chốt.
+- Test hồi quy cho quyết định 1 và 2.
+- Kiểm tra giao diện 4 tình huống (§14).
+- Cập nhật `docs/brain/{01,03,06}` và release note trong `evidence/`.
 
 ### Out of scope
 
-- Không sửa mã ánh xạ PL3 (đã xác minh đúng so với `Tai lieu/PL3.xlsx`).
-- Không đụng migration `202607290002_full_pl3_editor.sql` — không thêm/xóa/đổi cột nào.
-- Không đụng `completion-checks.ts`, `official-record.ts`, `validation.ts`, route working-payload.
-- Không sửa 5 warning lint có sẵn ở file ngoài phạm vi.
-- Không commit, không push, không merge, không deploy.
+- Không sửa `202607290002_full_pl3_editor.sql` (có thể đã chạy ở local/preview).
+- Không đổi hành vi `checkOwner` với hồ sơ tổ chức (quyết định 4 là GIỮ NGUYÊN).
+- Không sửa 5 warning lint có sẵn.
+- Không chạy E2E, không áp migration lên môi trường nào.
 
 ### Deviations from approved plan
 
-- **Có một sai lệch, làm tăng chất lượng chứ không mở rộng hành vi:** hai đoạn logic vá ở mục 1 và
-  mục 4 ban đầu viết thẳng trong component React. Repo **không có hạ tầng test React** (không
-  `@testing-library/*`, không `jsdom`/`happy-dom` trong dependencies), nên logic đó sẽ không thể
-  test được. Đã tách thành hai hàm thuần `migrateLegacyOrganisationOwner()` và
-  `detachAssetsFromMissingParcels()` đặt trong `src/modules/public-intake/types.ts` cạnh các helper
-  owner/asset sẵn có, đúng theo mẫu đã dùng ở `payload-layers.ts` và `working-payload-audit.ts`.
-  Hành vi runtime không đổi; chỉ vị trí code đổi để test được.
+- **Không có sai lệch về phạm vi.** Một lựa chọn cần nêu rõ: quyết định 1 được thi hành ở **hai**
+  cửa (lưu + tiếp nhận) thay vì chỉ "từ chối lưu" như câu chữ yêu cầu. Lý do ở §8 Phase 1 — chỉ chặn
+  lúc lưu thì bản ghi đã lưu trước khi có luật vẫn đưa chuỗi PII vào audit của lần tiếp nhận. Không
+  tạo thế bí vì đường lưu đã sạch nên cán bộ luôn sửa được.
 
 ## 6. Decisions implemented
 
-| Decision                                                                     | Implementation                                                                                             | Evidence                                                                  |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Gộp nhiều tài sản trên cùng thửa phải giữ vị trí, không bỏ trùng/bỏ ô rỗng    | `assetColumn()` thay `joined()`; ô rỗng ghi `ASSET_EMPTY_PLACEHOLDER = "-"`; >1 tài sản sinh warning        | `docs/brain/03-decisions.md` mục `[2026-07-29]`; test `pl3-export.test.ts` |
-| Di trú dòng tổ chức legacy trước mọi thao tác ghi; đổi pháp nhân KHÔNG di trú | `migrateLegacyOrganisationOwner()` gọi trong `updateOwner`; `updateOwnerType` tách riêng và cố ý không gọi  | `types.ts`; test "dòng tổ chức cũ được di trú F/G…"                        |
-| Audit đếm số trường thay đổi trước khi cắt danh sách                         | `changedFieldCount` + `changedFieldPathsTruncated` trong `WorkingPayloadAuditSummary`                       | `working-payload-audit.ts`; test "changedFieldCount đếm trước khi cắt bớt…" |
-| Xóa thửa gỡ tham chiếu tài sản thay vì để payload không lưu được             | `detachAssetsFromMissingParcels()` gọi trong `updateParcels`                                                | `types.ts`; test "xóa thửa thì gỡ tham chiếu tài sản…"                     |
-| ESLint bỏ qua `**/.next/**` và `.claude/**`                                  | `eslint.config.mjs` đổi ignore                                                                             | `docs/brain/03-decisions.md`; `npm run lint` exit 0                        |
-| Ghi nhận 3 vấn đề CHƯA quyết thay vì âm thầm bỏ qua                          | Mục "CHƯA quyết" trong `03-decisions.md` + §15 báo cáo này                                                  | `docs/brain/03-decisions.md`                                              |
+| Quyết định (người dùng chốt)                                                                                              | Implementation                                                                                                                     | Evidence                                                              |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| "Ô lý do ghi đè không được chứa CCCD… bổ sung kiểm tra và từ chối lưu… hướng dẫn cán bộ chỉ ghi lý do nghiệp vụ ngắn"        | `overrideReasonsWithCitizenIdLike()` + chặn ở `validateWorkingPayloadForSave` và `checkAutomaticOverrides`; hint mới trên 3 ô lý do   | §8 Phase 1; test PII; §14 tình huống 5; `03-decisions.md`             |
+| "Tài sản chưa gắn thửa được phép lưu… nhưng phải bị chặn khi tiếp nhận, kèm thông báo rõ tài sản nào"                        | Hành vi lưu giữ nguyên; thêm `assetLabel()` để thông báo gọi tên tài sản và chỉ ra ô cần sửa                                          | §8 Phase 2; test `CC-ASSET`; §14 tình huống 3                        |
+| "Dùng working_payload làm nguồn sự thật duy nhất… không duy trì hai nguồn song song… không sửa migration đã chạy"            | Gỡ 2 khối UPDATE khỏi `repository.ts`; migration mới `202607290003` `drop column if exists`; preflight kiểm hai chiều                 | §8 Phase 3; `03-decisions.md`; nội dung migration ở §20               |
+| "Giữ yêu cầu người đại diện tổ chức phải đủ họ tên, ngày sinh, giới tính và địa chỉ… bổ sung release note"                   | Không sửa code (hành vi đã đúng); release note 6 mục ở `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7                            | §8 Phase 4; `03-decisions.md`                                        |
 
 ## 7. Changed files
 
-| File                                                 | Change type | Symbols/routes/components affected                                                                                                | Purpose                                                               | Risk                                                                 |
-| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `eslint.config.mjs`                                  | Modified    | mảng `ignores`                                                                                                                    | Ngừng quét bản build sinh tự động trong worktree agent                 | Thấp. Chỉ mở rộng phạm vi bỏ qua ngoài cây mã nguồn                   |
-| `src/modules/public-intake/types.ts`                 | Modified    | **thêm** `migrateLegacyOrganisationOwner()`, `detachAssetsFromMissingParcels()`                                                    | Hai helper thuần, test được, cho bàn biên tập gọi                      | Thấp. Chỉ thêm export, không đổi type hay hàm sẵn có                  |
-| `src/components/admin/working-payload-editor.tsx`    | Modified    | `updateOwner` (viết lại), **thêm** `updateOwnerType`/`updateParcels`, **xóa** `updateOrganisation`; ô M/F/G, `EditableParcelTable` | Chặn mất tên tổ chức và chặn payload không lưu được sau khi xóa thửa   | **Trung bình.** Đường ghi của form chủ sử dụng; cần kiểm thủ công §14 |
-| `src/modules/public-intake/pl3-export.ts`            | Modified    | **xóa** `joined()`, **thêm** `assetColumn()` + `ASSET_EMPTY_PLACEHOLDER`; `assetCells()` nhận thêm `context`; `buildRow`; `buildSubmissionRows` dedupe warnings | Giữ tương ứng giữa 9 cột AO–AW; bỏ cảnh báo lặp theo số đồng sở hữu | **Trung bình.** Đổi nội dung ô xuất PL3 khi thửa có >1 tài sản; sheet "Canh bao" ít dòng hơn |
-| `src/modules/public-intake/working-payload-audit.ts` | Modified    | `WorkingPayloadAuditSummary` (+2 field), `summarizeWorkingPayloadChanges()`, **thêm** `MAX_AUDIT_FIELD_PATHS`                      | Đếm đúng số trường thay đổi                                           | Thấp. Chỉ thêm trường vào summary                                     |
-| `src/modules/public-intake/repository.ts`            | Modified    | `commitWorkingPayload()`, `commitOfficialAmendment()` — chỉ phần `metadata` của `insertAudit`                                      | Dùng count đúng + ghi cờ truncated                                    | Thấp. Không đụng SQL, transaction hay điều kiện version               |
-| `tests/full-pl3-editor.test.ts`                      | Modified    | +3 test, +1 assertion nối dây                                                                                                     | Hồi quy mục 1, 3, 4                                                   | Không                                                                 |
-| `tests/pl3-export.test.ts`                           | Modified    | +2 test                                                                                                                           | Hồi quy mục 2                                                         | Không                                                                 |
-| `docs/brain/01-architecture.md`                      | Modified    | Code Graph: nhánh `commitWorkingPayload` và `pl3-export.ts`                                                                       | Code Graph lỗi thời nguy hiểm hơn không có                            | Không                                                                 |
-| `docs/brain/03-decisions.md`                         | Modified    | +3 mục quyết định                                                                                                                 | Ghi lý do và phần chưa chốt                                           | Không                                                                 |
-| `docs/brain/06-ai-working-log.md`                    | Modified    | +1 entry                                                                                                                          | Bắt buộc theo `CLAUDE.md`                                             | Không                                                                 |
+| File                                                              | Change type | Symbols/routes/components affected                                                        | Purpose                                                                | Risk                                                                    |
+| ----------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `src/modules/public-intake/validation.ts`                         | Modified    | **thêm** `overrideReasonsWithCitizenIdLike()`; `validateWorkingPayloadForSave()`           | Chặn PII lúc lưu                                                       | Thấp. Chỉ siết thêm, không nới bất kỳ luật nào                          |
+| `src/modules/submissions/completion-checks.ts`                    | Modified    | **thêm** `assetLabel()`; `checkAssets()`, `checkAutomaticOverrides()`                      | Chặn PII lúc tiếp nhận + thông báo tài sản rõ ràng                     | **Trung bình.** Thêm một mã chặn mới ở cửa tiếp nhận                     |
+| `src/modules/public-intake/repository.ts`                         | Modified    | `commitWorkingPayload()`, `commitOfficialAmendment()` — gỡ 2 khối `UPDATE`                 | Bỏ nguồn dữ liệu song song                                             | Thấp. Gỡ ghi vào cột không ai đọc; ít hơn 2 statement mỗi lần lưu        |
+| `supabase/migrations/202607290003_...sql`                         | **Added**   | `public_submissions` — drop 4 cột                                                          | Thi hành "một nguồn sự thật" ở tầng schema                             | **Trung bình.** DDL huỷ cột — xem phân tích an toàn dữ liệu ở §10        |
+| `scripts/preflight-public-intake-v2-migrations.ts`                | Modified    | `runChecks()` — bỏ 4 cột khỏi danh sách bắt buộc, thêm khối kiểm tra ngược                 | Preflight phải phản ánh trạng thái schema mới                          | Thấp                                                                    |
+| `src/components/admin/working-payload-editor.tsx`                 | Modified    | hint của 2 ô lý do (cột B, cột AX)                                                         | Hướng dẫn cán bộ ghi lý do ngắn, cảnh báo trước khi bị từ chối          | Không                                                                   |
+| `src/components/admin/editable-parcel-table.tsx`                  | Modified    | hint của ô lý do cột V                                                                     | Như trên                                                               | Không                                                                   |
+| `tests/full-pl3-editor.test.ts`                                   | Modified    | +3 test PII                                                                                | Hồi quy quyết định 1                                                   | Không                                                                   |
+| `tests/completion-checks.test.ts`                                 | Modified    | +2 test (`CC-ASSET`, `CC-PII`)                                                             | Hồi quy quyết định 1 và 2 ở cửa tiếp nhận                              | Không                                                                   |
+| `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md`                  | Modified    | **thêm §7** — release note 6 mục                                                           | Thi hành quyết định 4                                                  | Không                                                                   |
+| `docs/brain/01-architecture.md`                                   | Modified    | Code Graph: nhánh `commitWorkingPayload`, danh sách migration                              | Code Graph lỗi thời nguy hiểm hơn không có                             | Không                                                                   |
+| `docs/brain/03-decisions.md`                                      | Modified    | **gỡ** mục "CHƯA quyết", **thêm** 3 quyết định đã chốt                                     | Không để tài liệu còn treo câu hỏi đã có đáp án                        | Không                                                                   |
+| `docs/brain/06-ai-working-log.md`                                 | Modified    | +1 entry                                                                                   | Bắt buộc theo `CLAUDE.md`                                              | Không                                                                   |
 
 ## 8. Detailed implementation by phase
 
-### Phase 1 — Mở lại lint gate (mục 5)
+### Phase 1 — Ô lý do ghi đè không được chứa CCCD (quyết định 1)
 
-- **Mục tiêu:** `npm run lint` chạy tới cùng thay vì chết vì hết heap.
-- **File:** `eslint.config.mjs`.
-- **Đã làm:** `ignores` đổi từ `[".next/**", …]` sang `["**/.next/**", ".claude/**", …]`.
-  Nguyên nhân gốc: `.next/**` là glob neo ở gốc repo nên chỉ khớp bản build gốc; các worktree agent
-  dưới `.claude/worktrees/*/` có `.next/` riêng và bị quét.
-- **Không làm:** không sửa 5 warning có sẵn ở `scripts/add-system-admins.ts` và
-  `tests/staging-rehearsal-scenarios.test.ts` (ngoài phạm vi).
-- **Test:** `npm run lint`.
-- **Kết quả:** từ `FATAL ERROR … heap out of memory` → `✖ 5 problems (0 errors, 5 warnings)`, exit 0.
-- **Rủi ro:** không đáng kể; `.claude/` vốn đã trong `.gitignore`.
+- **Mục tiêu:** không có đường nào đưa số định danh cá nhân vào `audit_logs.metadata` qua ô lý do.
+- **File:** `src/modules/public-intake/validation.ts`, `src/modules/submissions/completion-checks.ts`,
+  `src/components/admin/{working-payload-editor,editable-parcel-table}.tsx`.
+- **Đã làm:**
+  - `overrideReasonsWithCitizenIdLike(draft)` trả về **tên các ô** vi phạm (không trả giá trị), quét
+    cả ba ô lý do: cột B, cột AX, và cột V của **từng** thửa.
+  - Tái dùng `scanForCitizenIdLikeValues` từ `src/modules/ai-extraction/pii-safety.ts` thay vì viết
+    regex mới. Đây là điểm quan trọng: hệ thống chỉ nên có **một** định nghĩa "trông giống CCCD".
+    Pattern đó là `/(?<!\d)(?:\d[ .-]?){11}\d(?!\d)/` — bắt cả `0123 4567 8901` và `012.345.678.901`.
+  - Chặn ở `validateWorkingPayloadForSave` (lúc lưu) **và** `checkAutomaticOverrides` (lúc tiếp nhận).
+  - Hint trên cả ba ô lý do đổi thành hướng dẫn cụ thể kèm ví dụ, và nói rõ hệ thống sẽ từ chối lưu.
+- **Vì sao hai cửa, dù yêu cầu chỉ nói "từ chối lưu":** bản ghi lưu **trước** khi có luật này vẫn nằm
+  trong kho, và audit của lần tiếp nhận sẽ chép lại chính chuỗi đó — chặn lúc lưu không với tới được
+  chúng. Không tạo thế bí: đường lưu đã sạch nên cán bộ luôn sửa rồi lưu lại được.
+- **Không làm:** không đặt luật này vào `draftSchema`. Đường công khai của người dân không có ô lý do
+  ghi đè, và đặt vào schema sẽ biến thông báo rõ ràng thành một lỗi cấu trúc chung.
+- **Test:** 3 test ở `full-pl3-editor.test.ts` (cả ba ô; biến thể có dấu cách; lý do hợp lệ có số
+  không bị báo nhầm) + 1 test ở `completion-checks.test.ts`.
+- **Kết quả:** pass. Đã xác minh thêm trên giao diện thật — §14 tình huống 5.
+- **Rủi ro:** fail-closed. Một chuỗi 12 số hợp lệ về nghiệp vụ sẽ bị từ chối oan; đánh đổi đã ghi ở
+  `03-decisions.md`. Đã kiểm lý do có số bình thường (`"tờ 105 lập năm 2024"`) KHÔNG bị báo nhầm.
 
-### Phase 2 — Audit đếm đúng số trường thay đổi (mục 3)
+### Phase 2 — Tài sản chưa gắn thửa (quyết định 2)
 
-- **Mục tiêu:** `changedFieldCount` phản ánh số trường thật, kể cả khi danh sách bị cắt.
-- **File:** `src/modules/public-intake/working-payload-audit.ts`, `src/modules/public-intake/repository.ts`.
-- **Đã làm:** hằng số `MAX_AUDIT_FIELD_PATHS = 250` được đặt tên và export.
-  `WorkingPayloadAuditSummary` thêm `changedFieldCount` (đếm **trước** khi `slice`) và
-  `changedFieldPathsTruncated`. Hai chỗ trong `repository.ts` chuyển từ
-  `auditSummary.changedFieldPaths.length` (mảng đã cắt → luôn ≤250) sang
-  `auditSummary.changedFieldCount`, đồng thời ghi cờ truncated vào metadata. Nhánh
-  `AI_DRAFT_APPLIED` trước đây thiếu hẳn `changedFieldCount`, nay được bổ sung cho đồng nhất.
-- **Không làm:** không đổi giá trị 250, không đổi thuật toán `collectChangedPaths`.
-- **Test:** test mới "changedFieldCount đếm trước khi cắt bớt, kèm cờ truncated".
-- **Kết quả:** pass.
-- **Rủi ro:** thấp — chỉ thêm khóa vào `audit_logs.metadata` (kiểu JSON tự do, không có schema cứng).
+- **Mục tiêu:** lưu được, chặn khi tiếp nhận, thông báo chỉ rõ tài sản nào.
+- **File:** `src/modules/submissions/completion-checks.ts`.
+- **Hiện trạng trước:** hành vi lưu/chặn **đã đúng** từ đợt trước (`draftSchema` chỉ từ chối
+  `parcelId` trỏ vào thửa không tồn tại, không từ chối chuỗi rỗng; `checkAssets` chặn lúc tiếp nhận).
+  Phần còn thiếu duy nhất là thông báo — `"Tài sản thứ N"` không giúp cán bộ tìm đúng thẻ nào.
+- **Đã làm:** `assetLabel(asset, index)` ghép số thứ tự + nhãn loại tài sản + mô tả nội bộ, cho ra
+  `"Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn)"`. Thông điệp nói rõ ô cần sửa:
+  *"chọn thửa ở ô \"Thửa đất liên quan\" của tài sản này rồi lưu lại"*.
+- **An toàn dữ liệu trong thông báo:** loại tài sản là mã danh mục **đóng** (`ASSET_TYPE_OPTIONS`),
+  mô tả là ô nội bộ do chính cán bộ ghi. Không có trường nào của người dân lọt vào thông báo lỗi.
+- **Không làm:** không đổi luật lưu, không xóa tài sản khi xóa thửa (giữ dữ liệu, để cán bộ gán lại).
+- **Test:** `CC-ASSET` — khẳng định cả chiều dương (tài sản mồ côi bị chặn, đúng nhãn) lẫn chiều âm
+  (tài sản đã gắn thửa KHÔNG bị báo).
+- **Kết quả:** pass. Đã xác minh trên giao diện — §14 tình huống 3.
 
-### Phase 3 — Giữ tương ứng 9 cột tài sản AO–AW (mục 2)
+### Phase 3 — Một nguồn sự thật cho ghi đè cột B và AX (quyết định 3)
 
-- **Mục tiêu:** khi một thửa có nhiều tài sản, người đọc PL3 phải ghép lại được giá trị nào thuộc
-  tài sản nào.
-- **File:** `src/modules/public-intake/pl3-export.ts`.
-- **Đã làm:** bỏ `joined()` (dedup `Set` + `filter(Boolean)`, áp dụng độc lập từng cột). Thêm
-  `assetColumn(assets, pick)`: 0 tài sản → `""`; 1 tài sản → giá trị trần (không có ký tự giữ chỗ);
-  ≥2 tài sản → nối `"; "` theo đúng thứ tự tài sản, ô rỗng thay bằng
-  `ASSET_EMPTY_PLACEHOLDER = "-"`. `assetCells()` nhận thêm `context` và đẩy một warning khi thửa có
-  >1 tài sản. Bộ lọc tài sản legacy thiếu `parcelId` giữ nguyên không đổi.
-- **Không làm:** không đổi mô hình dòng xuất (vẫn là thửa × chủ, không tách theo tài sản).
-- **Test:** 2 test mới trong `pl3-export.test.ts`.
-- **Kết quả:** pass.
-- **Rủi ro:** **thay đổi nội dung ô xuất PL3** với hồ sơ có >1 tài sản trên cùng thửa. Xem §9.
+- **Mục tiêu:** `working_payload_json` là nơi duy nhất giữ giá trị ghi đè; không còn cột song song.
+- **File:** `src/modules/public-intake/repository.ts`,
+  `supabase/migrations/202607290003_drop_working_payload_override_columns.sql` (mới),
+  `scripts/preflight-public-intake-v2-migrations.ts`.
+- **Đã làm:**
+  - Gỡ hai khối `update public.public_submissions set ward_admin_code_override…` trong
+    `commitWorkingPayload` và `commitOfficialAmendment`.
+  - Migration mới dùng `drop column if exists` cho cả 4 cột.
+  - Preflight: bỏ 4 cột khỏi danh sách bắt buộc của `202607290002`, thêm khối kiểm tra **ngược** —
+    4 cột đó phải KHÔNG còn tồn tại, còn cột nghĩa là migration chưa chạy.
+- **Xử lý migration theo trạng thái môi trường, không sửa migration đã chạy:** `202607290002` được
+  giữ **nguyên vẹn** vì nó có thể đã áp ở local/preview — sửa file đã chạy thì môi trường đã áp sẽ
+  không bao giờ nhận thay đổi, còn checksum thì lệch. Migration mới `drop column if exists` đúng
+  trong **cả hai** trạng thái: môi trường đã áp `202607290002` thì cột bị gỡ; môi trường chưa áp thì
+  lệnh không làm gì và cũng không lỗi.
+- **An toàn dữ liệu (đã kiểm chứng bằng đọc code, không suy đoán):** mọi giá trị từng ghi vào 4 cột
+  đều được sao chép từ `input.draft` trong **cùng** transaction ghi `working_payload_json`. Không có
+  đường nào ghi vào cột mà không ghi vào JSON. Vì vậy không có dữ liệu nào chỉ tồn tại ở 4 cột đó và
+  **không cần backfill** trước khi gỡ. Đã grep toàn `src/`: không có `SELECT` nào đọc chúng.
+- **Test:** không thêm test mới — không có logic mới nào để test; thay đổi là **gỡ bỏ**. Bộ test sẵn
+  có (round-trip save/reload, export dùng override) vẫn pass, chứng minh đường JSON tự đủ.
+- **Rủi ro:** DDL huỷ cột. Rollback ở §17.
 
-### Phase 4 — Chặn mất tên tổ chức trên bản ghi legacy (mục 1)
+### Phase 4 — Giữ yêu cầu người đại diện tổ chức + release note (quyết định 4)
 
-- **Mục tiêu:** không có thứ tự thao tác nào của cán bộ làm mất tên/mã số tổ chức.
-- **File:** `src/modules/public-intake/types.ts`, `src/components/admin/working-payload-editor.tsx`.
-- **Bối cảnh lỗi:** dòng tổ chức lưu trước `202607290002` giữ tên tổ chức trong `fullName`. Form mới
-  dùng ô H/K cho **người đại diện** và render rỗng cho dòng legacy
-  (`value={legacyOrganisation ? "" : owner.fullName}`), nhưng `onChange` lại gọi thẳng
-  `updateOwner(index, "fullName", …)`. Gõ vào H trước khi chạm F ⇒ `fullName` bị ghi đè,
-  `organisationName` vẫn rỗng ⇒ tên tổ chức mất, không cảnh báo, không khôi phục được. Đường di trú
-  cũ (`updateOrganisation`) chỉ chạy khi cán bộ tình cờ chạm F/G trước.
-- **Đã làm:** thêm `migrateLegacyOrganisationOwner(owner)` — idempotent, chỉ tác động dòng tổ chức
-  chưa có F/G, chuyển `fullName`→`organisationName` và `identityNumber`→`organisationIdentityNumber`
-  rồi giải phóng H/K. `updateOwner` gọi nó ở **mọi** trường. Xóa hẳn `updateOrganisation`; ô F/G
-  giờ dùng chung `updateOwner`. Thêm `updateOwnerType` **cố ý không di trú**: chuyển tổ chức → cá
-  nhân nghĩa là cán bộ khẳng định `fullName` vốn là tên người, phải giữ nguyên tại chỗ.
-- **Không làm:** không đổi logic hiển thị (`legacyOrganisation ? "" : …`) — chỉ đường **ghi** hỏng,
-  đường **đọc** vốn đúng.
-- **Test:** test mới bao gồm cả trường hợp idempotent và dòng cá nhân không bị đụng.
-- **Kết quả:** pass.
-- **Rủi ro:** trung bình — cần kiểm thủ công (§14), nhất là nhánh `updateOwnerType`.
+- **Mục tiêu:** giữ nguyên hành vi, làm cho nó không còn là bất ngờ với cán bộ.
+- **File:** `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md`, `docs/brain/03-decisions.md`.
+- **Đã làm:** **không sửa code** — hành vi hiện tại đã đúng yêu cầu. Viết release note §7 gồm 6 mục:
+  bảng cột bắt buộc mới cho hồ sơ tổ chức và tác động lên hồ sơ đang chờ (§7.1), cơ chế tự di trú bản
+  ghi tổ chức cũ (§7.2), luật PII (§7.3), tài sản chưa gắn thửa (§7.4), thay đổi thấy được trong file
+  PL3 xuất ra (§7.5), thứ tự áp hai migration + lệnh preflight (§7.6).
+- **Điểm cần lãnh đạo biết, đã ghi vào §7.1:** mọi hồ sơ tổ chức **đang chờ tiếp nhận** sẽ bị chặn
+  cho tới khi bổ sung thông tin người đại diện. Cần rà danh sách và báo trước cho cán bộ.
 
-### Phase 5 — Xóa thửa không làm hỏng nút Lưu (mục 4)
+### Phase 5 — Kiểm tra giao diện (lấp AC-10)
 
-- **Mục tiêu:** xóa thửa xong vẫn lưu được bản làm việc.
-- **File:** `src/modules/public-intake/types.ts`, `src/components/admin/working-payload-editor.tsx`.
-- **Bối cảnh lỗi:** `EditableParcelTable.deleteParcel` chỉ lọc mảng `parcels`; component không nhận
-  `draft` nên không dọn được `draft.assets`. Sau đó `draftSchema.superRefine` từ chối
-  `asset.parcelId` mồ côi, và vì lỗi phát sinh trong schema nên route trả về thông báo cấu trúc
-  chung không chỉ ra ô nào.
-- **Đã làm:** thêm `detachAssetsFromMissingParcels(assets, parcels)` đặt `parcelId = ""` cho tài sản
-  mồ côi. `WorkingPayloadEditor.updateParcels` gọi nó và truyền `onChange` cho `EditableParcelTable`.
-  Không đổi signature của component con — hai callback cùng ghi lên một `draft` sẽ giẫm lên nhau.
-- **Quyết định có chủ ý:** để `parcelId = ""` (lưu được) thay vì xóa luôn tài sản (mất dữ liệu).
-  `completionChecks.checkAssets` vẫn chặn lúc tiếp nhận kèm thông báo đúng chỗ
-  ("Tài sản thứ N chưa gắn với thửa"), nên không có đường nào để dữ liệu thiếu lọt vào hồ sơ chính thức.
-- **Test:** test mới xác nhận cả ba trạng thái — hợp lệ trước khi xóa, **không hợp lệ** nếu bỏ bước
-  gỡ tham chiếu, hợp lệ trở lại sau khi gỡ.
-- **Kết quả:** pass.
-- **Rủi ro:** thấp.
-
-### Phase 7 — Cảnh báo của một thửa không lặp theo số đồng sở hữu (mục 6, phát sinh)
-
-- **Mục tiêu:** sheet "Canh bao" không lặp lại cùng một câu N lần cho một thửa có N đồng sở hữu.
-- **File:** `src/modules/public-intake/pl3-export.ts`.
-- **Bối cảnh lỗi:** `buildSubmissionRows` gọi `buildRow` mỗi cặp (thửa × chủ), mà `buildRow` là nơi
-  sinh cảnh báo về **thửa** — `field19` (ghi đè/mập mờ), `landUseCells` (>3 mục đích), `labelOf`
-  (mã lạ), và cảnh báo nhiều tài sản vừa thêm ở Phase 3. Hồ sơ 3 đồng sở hữu ra 3 dòng giống hệt.
-- **Đã làm:** `buildSubmissionRows` trả `Array.from(new Set(warnings))`.
-- **Vì sao dedupe ở đây thay vì đẩy riêng cảnh báo tài sản ra ngoài vòng lặp:** dedupe dọn luôn cả
-  ba loại cảnh báo có sẵn từ PR #7 vốn đã trùng, diff nhỏ hơn, và **không mất thông tin** — các
-  chuỗi bị loại là chuỗi trùng khít nhau, đã mang sẵn ngữ cảnh `Hồ sơ {label} thửa {n}` nên hai
-  thửa khác nhau không bao giờ gộp nhầm. Ràng buộc mới phát sinh: cảnh báo phải là chuỗi tất định.
-- **Không làm:** không đổi thứ tự cảnh báo (giữ lần xuất hiện đầu tiên), không đụng nội dung câu.
-- **Test:** test mới "cảnh báo của một thửa không lặp theo số đồng sở hữu" — 3 chủ × 1 thửa = 3 dòng
-  nhưng đúng 1 cảnh báo.
-- **Kết quả:** pass. Đã xác nhận không vacuous bằng cách tạm gỡ dedupe: test fail với
-  `expected [ …(3) ] to have a length of 1 but got 3`, sau đó khôi phục.
-- **Rủi ro:** thấp. Ảnh hưởng duy nhất là nội dung sheet "Canh bao" (ít dòng hơn, không mất câu nào).
-
-### Phase 6 — Tài liệu
-
-- Cập nhật Code Graph trong `docs/brain/01-architecture.md` tại đúng hai nhánh bị ảnh hưởng
-  (`commitWorkingPayload` và `pl3-export.ts`), kèm cảnh báo ⚠️ cho bất biến mới.
-- `docs/brain/03-decisions.md`: 2 quyết định đã chốt + 1 mục **CHƯA quyết** (PII trong lý do override).
-- `docs/brain/06-ai-working-log.md`: entry theo mẫu bắt buộc.
+Xem §14 — có số liệu trạng thái thật, không phải mô tả.
 
 ## 9. Behavior before and after
 
-| Scenario                                                                        | Before                                                                   | After                                                                               | Verification                                                     |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Dòng tổ chức legacy, cán bộ gõ tên người đại diện vào ô H **trước** khi chạm ô F | Tên tổ chức bị ghi đè mất, không cảnh báo                                | Tên tổ chức tự chuyển sang ô F, ô H nhận tên người đại diện                          | Test "dòng tổ chức cũ được di trú F/G…" + kiểm thủ công §14       |
-| Dòng tổ chức legacy, cán bộ đổi pháp nhân sang "Cá nhân"                         | `fullName` giữ nguyên                                                    | `fullName` giữ nguyên (không đổi — `updateOwnerType` cố ý không di trú)              | Đọc code; kiểm thủ công §14                                      |
-| Thửa có 2 tài sản, cùng `constructionArea = "100"`, khác loại                    | AO = `"Nhà ở; Công trình xây dựng khác"` (2), AS = `"100"` (1) → lệch cột | AO = 2 phần tử, AS = `"100; 100"` (2) → mọi cột 2 phần tử                            | Test "nhiều tài sản cùng thửa: 9 cột AO–AW giữ đúng số phần tử…" |
-| Thửa có 2 tài sản, tài sản thứ 2 để trống `floorArea`                            | AT = `"180"` (1 phần tử) → không biết thuộc tài sản nào                   | AT = `"180; -"` (2 phần tử, đúng vị trí)                                             | cùng test trên                                                   |
-| Thửa có **1** tài sản                                                            | Giá trị trần                                                             | Giá trị trần — **không đổi**, không có ký tự giữ chỗ                                 | Test "một tài sản trên thửa: không chèn ký tự giữ chỗ"           |
-| Cán bộ sửa >250 trường trong một lần lưu                                         | `changedFieldCount = 250`, không cờ                                      | `changedFieldCount` = số thật, `changedFieldPathsTruncated = true`                   | Test "changedFieldCount đếm trước khi cắt bớt…"                  |
-| Cán bộ xóa một thửa đang có tài sản gắn vào                                      | Nút Lưu trả lỗi cấu trúc chung, không chỉ ra ô nào                       | Lưu được; tài sản về trạng thái chưa gắn thửa; `completionChecks` nhắc lúc tiếp nhận | Test "xóa thửa thì gỡ tham chiếu tài sản…"                       |
-| `npm run lint`                                                                   | Chết vì hết heap, không báo được lỗi nào                                 | Hoàn thành, 0 error / 5 warning có sẵn                                               | §12                                                              |
+| Scenario                                                              | Before                                                     | After                                                                                  | Verification                          |
+| --------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------- |
+| Cán bộ ghi CCCD vào ô lý do ghi đè rồi bấm Lưu                         | Lưu thành công, chuỗi CCCD vào `audit_logs.metadata`        | Từ chối lưu, báo đúng tên ô, không chép lại số                                          | §14 tình huống 5 (đo trên trình duyệt) |
+| Hồ sơ đã lưu từ trước có CCCD trong ô lý do, bấm Tiếp nhận             | Tiếp nhận được, audit chép lại chuỗi                        | Bị chặn với mã `OVERRIDE_REASON_CONTAINS_CITIZEN_ID`                                    | Test `CC-PII`                         |
+| Lý do nghiệp vụ hợp lệ có chứa số (`tờ 105 lập năm 2024`)              | Lưu được                                                    | Lưu được — **không** báo nhầm                                                           | Test + §14 tình huống 5               |
+| Tài sản chưa gắn thửa, bấm Tiếp nhận                                   | `"Tài sản thứ 2 phải được gắn với một thửa đất…"`           | `"Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất"` + chỉ ô  | Test `CC-ASSET`                       |
+| Lưu bản làm việc                                                       | 2 câu `UPDATE` thừa ghi vào cột không ai đọc                | Không còn; `working_payload_json` là nguồn duy nhất                                     | Diff `repository.ts`; test round-trip |
+| Hồ sơ tổ chức thiếu ngày sinh/giới tính người đại diện                 | (PR #7 đã chặn) — nhưng chưa ai được báo trước               | Vẫn chặn, **và** đã có release note giải thích                                          | `RELEASE_CHECKLIST.md` §7.1           |
 
 ## 10. API, data and security impact
 
-### Authentication
+### Authentication / Authorization / DataScope
 
-- Không thay đổi.
-
-### Authorization
-
-- Không thay đổi. `PUT /api/submissions/:id/working-payload` giữ nguyên điều kiện
-  `claimedBy === actor` + status `UNDER_REVIEW`; không đụng `SUBMISSION_READ_ROLES`.
-
-### DataScope
-
-- Không thay đổi. Không thêm/bớt truy vấn nào; không đổi phạm vi bản ghi mà cán bộ đọc/ghi được.
+- **Không thay đổi** ở cả ba. Không đụng `requireActiveUser`, `SUBMISSION_READ_ROLES`, điều kiện
+  `claimedBy === actor`, hay phạm vi bản ghi cán bộ đọc/ghi được.
 
 ### API contract
 
-- Endpoint: `PUT /api/submissions/:submissionId/working-payload`
-- Method: PUT
-- Request before / after: **không đổi** (`{ payload: IntakeDraft, expectedVersion, changeNote }`).
-- Response before / after: **không đổi**.
-- Error handling: **không đổi**. Lưu ý: bản vá mục 4 làm giảm tần suất lỗi
-  `VALIDATION_FAILED` do `parcelId` mồ côi, chứ không đổi định dạng lỗi.
-- Thay đổi duy nhất có thể quan sát từ ngoài: `audit_logs.metadata` có thêm khóa
-  `changedFieldPathsTruncated`, và `changedFieldCount` nay có thể >250. Không có consumer nào trong
-  repo đọc hai khóa này (đã grep) nên không phá vỡ hợp đồng nào.
+- Endpoint: `PUT /api/submissions/:submissionId/working-payload` — request/response **không đổi**.
+  Thêm một lý do khiến trả `400 VALIDATION_FAILED`: ô lý do chứa mẫu CCCD. `message` nêu tên ô, tuyệt
+  đối không chứa chuỗi PII (có test khóa).
+- Endpoint: `POST /api/submissions/:submissionId/accept` — thêm một mã trong
+  `error.details.issues[]`: `OVERRIDE_REASON_CONTAINS_CITIZEN_ID`. Nhãn `ASSET_*_PARCEL_INVALID` đổi
+  nội dung (chi tiết hơn), **mã giữ nguyên** nên client không vỡ.
 
 ### Database and migrations
 
-- **Migration added: KHÔNG CÓ.** Đợt này không thêm, sửa hay xóa migration nào.
-- Tables/columns/indexes affected: không.
-- Backfill: không.
-- Rollback: chỉ cần revert code.
-- **Production action required:** không có thêm ngoài yêu cầu đã có sẵn của PR #7 (áp
-  `202607290002_full_pl3_editor.sql` trước khi deploy code).
+- **Migration added:** `202607290003_drop_working_payload_override_columns.sql`
+- **Tables/columns affected:** `public_submissions` — drop `ward_admin_code_override`,
+  `ward_admin_code_override_reason`, `scanned_file_names_override`,
+  `scanned_file_names_override_reason`.
+- **Backfill:** **không cần.** Mọi giá trị từng ghi vào 4 cột đều được sao chép từ payload trong cùng
+  transaction; không có dữ liệu nào chỉ tồn tại ở đây. Đã grep xác nhận không có `SELECT` nào đọc.
+- **Idempotent:** `drop column if exists` — chạy đúng dù `202607290002` đã áp hay chưa.
+- **Production action required:** áp `202607290002` rồi `202607290003`, sau đó chạy
+  `npm run preflight:public-intake-v2` (script kiểm cả hai chiều).
 
 ### Validation and file handling
 
-- Trường bắt buộc: **không đổi**. Không nới, không siết `draftSchema`, `validateWorkingPayloadForSave`
-  hay `completionChecks`.
-- Quy tắc tên file / giới hạn file / MIME: không đụng.
-- Xử lý lỗi: không đổi.
+- Trường bắt buộc: **không nới** bất kỳ luật nào; chỉ **siết thêm** luật PII.
+- Quy tắc tên file / giới hạn / MIME: không đụng.
 
 ### Sensitive data
 
-- Dữ liệu nhạy cảm bị tác động: **không có dữ liệu mới nào được ghi vào log/audit.**
-- `changedFieldPathsTruncated` là boolean, `changedFieldCount` là số nguyên — không phải PII.
-- Test hồi quy sẵn có "audit chỉ chứa đường dẫn và lý do, không chứa giá trị CCCD" vẫn pass sau
-  thay đổi.
-- **Rủi ro PII còn tồn đọng, KHÔNG do đợt này gây ra và CHƯA vá:** ô lý do ghi đè là free text và đi
-  thẳng vào `audit_logs.metadata`. Xem §15.
+- **Đây là đợt làm GIẢM bề mặt PII**, không tăng. Ô lý do ghi đè trước đây là đường duy nhất đưa
+  free text của cán bộ vào `audit_logs.metadata`; nay đã có bộ lọc fail-closed ở hai cửa.
+- Thông báo lỗi ở **cả hai** cửa chỉ nêu tên ô, không chép lại giá trị. Có test khẳng định chuỗi
+  `012345678901` không xuất hiện trong lỗi trả về.
+- Nhãn tài sản trong thông báo dùng mã danh mục đóng + ô mô tả nội bộ của cán bộ — không có trường
+  nào của người dân.
 
 ## 11. Tests added or changed
 
-| Test file                       | Test case                                                                | Requirement covered                                | Result |
-| ------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------- | ------ |
-| `tests/pl3-export.test.ts`      | "nhiều tài sản cùng thửa: 9 cột AO–AW giữ đúng số phần tử và đúng thứ tự" | Mục 2 — không bỏ trùng, không bỏ ô rỗng, có warning | PASS   |
-| `tests/pl3-export.test.ts`      | "một tài sản trên thửa: không chèn ký tự giữ chỗ"                         | Mục 2 — không hồi quy trường hợp phổ biến nhất      | PASS   |
-| `tests/pl3-export.test.ts`      | "cảnh báo của một thửa không lặp theo số đồng sở hữu"                     | Mục 6                                              | PASS   |
-| `tests/full-pl3-editor.test.ts` | "changedFieldCount đếm trước khi cắt bớt, kèm cờ truncated"               | Mục 3                                              | PASS   |
-| `tests/full-pl3-editor.test.ts` | "dòng tổ chức cũ được di trú F/G trước khi sửa, không mất tên tổ chức"    | Mục 1 — gồm idempotent + dòng cá nhân không bị đụng | PASS   |
-| `tests/full-pl3-editor.test.ts` | "xóa thửa thì gỡ tham chiếu tài sản để payload vẫn lưu được"              | Mục 4 — khẳng định cả trạng thái hỏng ở giữa        | PASS   |
-| `tests/full-pl3-editor.test.ts` | (mở rộng test UI sẵn có) 2 assertion nối dây component → helper           | Mục 1 + 4 — bù cho việc không có test React         | PASS   |
+| Test file                       | Test case                                                                       | Requirement covered                       | Result |
+| ------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------- | ------ |
+| `tests/full-pl3-editor.test.ts` | "từ chối lưu khi ô lý do ghi đè chứa CCCD, ở cả ba ô lý do"                      | QĐ 1 — phủ cả 3 ô, và lỗi không chứa PII  | PASS   |
+| `tests/full-pl3-editor.test.ts` | "bắt cả CCCD viết có dấu cách/chấm/gạch, nhưng không bắt lý do nghiệp vụ bình thường" | QĐ 1 — chống né và chống báo nhầm    | PASS   |
+| `tests/full-pl3-editor.test.ts` | "completionChecks chặn tiếp nhận với dữ liệu đã lưu trước khi có luật PII"       | QĐ 1 — cửa thứ hai                        | PASS   |
+| `tests/completion-checks.test.ts` | `CC-ASSET` — tài sản chưa chọn thửa bị chặn, thông báo chỉ rõ tài sản nào      | QĐ 2                                      | PASS   |
+| `tests/completion-checks.test.ts` | `CC-PII` — lý do ghi đè chứa CCCD bị chặn tiếp nhận                            | QĐ 1 ở cửa tiếp nhận                      | PASS   |
 
-**Giới hạn đã biết của bộ test này — nêu rõ, không che:**
+**Giới hạn đã biết:**
 
-- Không có test React. Việc `WorkingPayloadEditor` **thật sự gọi** hai helper chỉ được chốt bằng
-  assertion nội dung file (`expect(editor).toContain("migrateLegacyOrganisationOwner(owners[index])")`).
-  Đây là biện pháp yếu hơn test hành vi: nó phát hiện được việc gỡ bỏ lời gọi, nhưng không phát
-  hiện được lỗi logic mới trong component. Kiểm thủ công §14 là bắt buộc.
-- 6 test mới đã được xác nhận là test hồi quy thật, không vacuous: với mã trước khi vá, hai test
-  của mục 2 sẽ fail (`joined()` cho `"100"` thay vì `"100; 100"`), và test mục 3 sẽ fail typecheck
-  vì `changedFieldCount` chưa tồn tại. Test mục 6 đã được kiểm **bằng cách chạy thật**: tạm gỡ
-  dedupe → `AssertionError: expected [ …(3) ] to have a length of 1 but got 3`, rồi khôi phục.
+- Quyết định 3 (gỡ cột) **không có test mới** — thay đổi là gỡ bỏ, không có logic mới để test. Bằng
+  chứng thay thế: bộ test round-trip save/reload và test export dùng override vẫn pass, chứng minh
+  đường JSON tự đủ mà không cần 4 cột.
+- Quyết định 4 không có test mới vì **không sửa code** — hành vi đã được test sẵn từ PR #7.
+- Vẫn **không có** hạ tầng test React trong repo. Hành vi giao diện được xác minh bằng thao tác thật
+  trên trình duyệt (§14), không phải bằng test tự động — nghĩa là nó **không** được bảo vệ khỏi hồi
+  quy trong CI. Đây là món nợ kỹ thuật còn nguyên, xem §15.
 
 ## 12. Final verification
 
-| Check             | Command                       | Result                                 | Evidence                                                                          |
-| ----------------- | ----------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| Unit tests        | `npm test`                    | **PASS** — 637 pass / 10 skip / 0 fail | `Test Files 67 passed \| 2 skipped (69)`; `Tests 637 passed \| 10 skipped (647)`   |
-| Integration tests | —                             | Nằm trong bộ Vitest ở trên             | —                                                                                 |
-| E2E tests         | `npm run test:e2e`            | **NOT_RUN**                            | Cần preview deployment + secret; không có trong môi trường này                     |
-| Build             | `npm run build`               | **PASS**                               | Next.js build hoàn tất, in đủ bảng route, exit 0                                   |
-| Lint              | `npm run lint`                | **PASS** — 0 error / 5 warning         | `✖ 5 problems (0 errors, 5 warnings)`, cả 5 là warning có sẵn ở file ngoài phạm vi |
-| Typecheck         | `npm run typecheck`           | **PASS**                               | `tsc --noEmit -p tsconfig.typecheck.json`, exit 0                                  |
-| Security check    | `npm run security-review`     | **NOT_RUN**                            | Không có script này trong `package.json`                                           |
-| Secret scan       | `git diff --check` + đọc diff | **PASS**                               | Whitespace sạch; diff không chứa key, token, connection string hay dữ liệu thật    |
+| Check             | Command                       | Result                                 | Evidence                                                                        |
+| ----------------- | ----------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| Unit tests        | `npm test`                    | **PASS** — 642 pass / 10 skip / 0 fail | `Test Files 67 passed \| 2 skipped (69)`; `Tests 642 passed \| 10 skipped (652)` |
+| Integration tests | —                             | Nằm trong bộ Vitest ở trên             | —                                                                               |
+| E2E tests         | `npm run test:e2e`            | **NOT_RUN**                            | Cần preview deployment + secret                                                  |
+| Build             | `npm run build`               | **PASS**                               | exit 0, in đủ bảng route                                                         |
+| Lint              | `npm run lint`                | **PASS** — 0 error / 5 warning         | 5 warning có sẵn ở file ngoài phạm vi                                            |
+| Typecheck         | `npm run typecheck`           | **PASS**                               | exit 0                                                                          |
+| UI verification   | trình duyệt, harness tạm      | **PASS 4/4 (+1)**                      | §14 — có số liệu trạng thái thật                                                 |
+| Security check    | `npm run security-review`     | **NOT_RUN**                            | Không có script này trong `package.json`                                         |
+| Secret scan       | `git diff --check` + đọc diff | **PASS**                               | Không có key/token/connection string; không có dữ liệu thật                      |
 
-**So với baseline:** test 631 → 637 (+6, đều là test mới của đợt này, 0 test cũ bị hỏng);
-typecheck giữ nguyên PASS; lint từ **crash** → PASS; build không có số liệu baseline để so sánh.
+**Một sự cố trong quá trình kiểm tra, đã xử lý và nêu ở đây để không giấu:** lần chạy `npm run build`
+đầu tiên sau khi xóa trang harness đã **FAIL** với
+`Cannot find module '../../../src/app/dev-harness/page.js'`. Nguyên nhân: `.next/dev/types/validator.ts`
+là file **sinh tự động** bởi dev server, còn giữ tham chiếu tới trang đã xóa. Đã xác nhận không còn
+tham chiếu `dev-harness` nào trong `src/`, `tests/`, `scripts/`, `supabase/`; xóa `.next` và build
+lại → PASS. Không phải lỗi mã nguồn, nhưng nếu không dọn thì CI có `.next` cũ sẽ đỏ.
 
 ## 13. Acceptance criteria matrix
 
-| ID    | Acceptance criterion                                                                           | Status         | Evidence                                                                      | Notes                                                              |
-| ----- | ---------------------------------------------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| AC-01 | Không thứ tự thao tác nào trên dòng tổ chức legacy làm mất tên/mã số tổ chức                    | **PASS**       | Test "dòng tổ chức cũ được di trú F/G…"; `updateOwner` gọi helper ở mọi trường | Đường ghi đã phủ; đường hiển thị không đổi                         |
-| AC-02 | Mọi cột trong 9 cột AO–AW có cùng số phần tử theo cùng thứ tự khi thửa có nhiều tài sản         | **PASS**       | Test kiểm trực tiếp bất biến `new Set(assetColumns) === Set([2])`             | Trường hợp 1 tài sản được test riêng để chắc không hồi quy          |
-| AC-03 | `changedFieldCount` bằng số trường thật kể cả khi vượt hạn mức, có cờ truncated                 | **PASS**       | Test "changedFieldCount đếm trước khi cắt bớt…"                               | Áp dụng cho cả 2 điểm gọi trong `repository.ts`                     |
-| AC-04 | Xóa thửa xong vẫn lưu được bản làm việc                                                         | **PASS**       | Test "xóa thửa thì gỡ tham chiếu tài sản…"                                    | Dữ liệu thiếu vẫn bị `completionChecks` chặn lúc tiếp nhận          |
-| AC-05 | `npm run lint` chạy tới cùng và không có error                                                  | **PASS**       | §12                                                                           | 5 warning có sẵn được giữ nguyên có chủ ý                           |
-| AC-06 | Không hồi quy: toàn bộ test/typecheck/build sẵn có vẫn đạt                                      | **PASS**       | §12                                                                           | 631 test cũ vẫn pass                                               |
-| AC-07 | Không nới lỏng validation, phân quyền hay kiểm tra bảo mật nào                                  | **PASS**       | §10; diff không chạm `validation.ts`, `completion-checks.ts`, route            | —                                                                  |
-| AC-08 | Không đụng migration                                                                            | **PASS**       | `git diff --name-status` không có file `supabase/migrations/*`                 | —                                                                  |
-| AC-09 | Tài liệu bắt buộc được cập nhật đồng bộ                                                         | **PASS**       | `docs/brain/01-architecture.md`, `03-decisions.md`, `06-ai-working-log.md`     | Theo quy tắc trong `CLAUDE.md`                                      |
-| AC-10 | Hành vi UI được xác minh trên trình duyệt thật                                                  | **NOT_TESTED** | —                                                                             | Không có hạ tầng test React; xem §14. **Người dùng phải kiểm tay** |
-| AC-11 | Cảnh báo thuộc về một thửa chỉ xuất hiện một lần bất kể số đồng sở hữu                          | **PASS**       | Test "cảnh báo của một thửa không lặp theo số đồng sở hữu"                     | Đã kiểm không vacuous bằng cách tạm gỡ dedupe (§11)                |
+| ID    | Acceptance criterion                                                                          | Status   | Evidence                                                     | Notes                                                              |
+| ----- | --------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| AC-20 | Ô lý do chứa CCCD bị từ chối lưu, ở cả ba ô                                                    | **PASS** | Test + §14 tình huống 5                                      | Bắt cả biến thể có dấu cách/chấm/gạch                              |
+| AC-21 | Lý do nghiệp vụ hợp lệ có chứa số không bị báo nhầm                                            | **PASS** | Test + §14 tình huống 5                                      | —                                                                  |
+| AC-22 | Thông báo lỗi PII không chép lại chuỗi CCCD                                                    | **PASS** | Test khẳng định `not.toContain("012345678901")`              | Áp dụng cả hai cửa                                                 |
+| AC-23 | Dữ liệu đã lưu trước luật PII bị chặn ở bước tiếp nhận                                         | **PASS** | Test `CC-PII`                                                | —                                                                  |
+| AC-24 | Tài sản chưa gắn thửa: lưu được                                                                | **PASS** | §14 tình huống 3 (`validation=null`, lưu thành công)         | —                                                                  |
+| AC-25 | Tài sản chưa gắn thửa: chặn khi tiếp nhận, thông báo gọi tên đúng tài sản                      | **PASS** | Test `CC-ASSET`                                              | Có cả khẳng định chiều âm                                          |
+| AC-26 | Không còn đường ghi nào vào 4 cột ghi đè song song                                             | **PASS** | Diff `repository.ts`; grep không còn tham chiếu               | —                                                                  |
+| AC-27 | Migration gỡ cột idempotent, không sửa migration đã chạy                                       | **PASS** | Nội dung migration ở §20; `202607290002` không nằm trong diff | —                                                                  |
+| AC-28 | Preflight kiểm cả hai chiều                                                                    | **PASS** | Diff `preflight-...ts`                                       | **Chưa chạy thật** — cần database, xem §15                         |
+| AC-29 | Yêu cầu người đại diện tổ chức giữ nguyên                                                      | **PASS** | `checkOwner` không nằm trong diff                            | —                                                                  |
+| AC-30 | Có release note cho thay đổi hành vi                                                           | **PASS** | `RELEASE_CHECKLIST.md` §7, 6 mục                             | —                                                                  |
+| AC-10 | (nợ từ đợt trước) Hành vi UI được xác minh trên trình duyệt thật                               | **PASS** | §14 — 4/4 tình huống, có số liệu trạng thái                  | Xác minh **thủ công**, chưa có test tự động bảo vệ khỏi hồi quy    |
+| AC-31 | Không có file tạm/harness lọt vào commit                                                       | **PASS** | `git status` ở §2; không còn tham chiếu `dev-harness`         | —                                                                  |
 
-## 14. Manual verification required
+## 14. UI verification — 4 tình huống (+1)
 
-Đây là phần bắt buộc — AC-10 chưa có bằng chứng.
+**Cách làm và vì sao:** `SUPABASE_DATABASE_URL` trong `.env.local` trỏ tới database **thật**, nên
+tôi **không** tạo hồ sơ giả trong đó. Thay vào đó dựng một trang harness **tạm** render đúng
+component `WorkingPayloadEditor` thật với dữ liệu dựng sẵn, kèm một khối `<pre id="probe">` in ra
+**trạng thái thật của draft** (không phải giá trị hiển thị trên ô nhập — hai thứ này khác nhau, và
+chính chỗ khác nhau đó là nơi lỗi mất tên tổ chức từng ẩn). Thao tác bằng click/gõ thật qua trình
+duyệt để đi qua đúng vòng sự kiện React. Harness đã xóa sau khi đo.
 
-**Màn hình:** `/submissions/[submissionId]` → tab bàn làm việc biên tập, với hồ sơ đang ở trạng thái
-`UNDER_REVIEW` và do chính tài khoản đang đăng nhập giữ (claim).
+Server dev chạy ở port 60777 (port 3000 đang bị process khác của người dùng chiếm — **không** tắt).
 
-**Dữ liệu mẫu cần dùng — dùng dữ liệu giả, không dùng hồ sơ dân thật:**
+### Tình huống 1 — dòng tổ chức legacy, gõ vào ô H TRƯỚC khi chạm ô F
 
-- Một hồ sơ có owner `ownerType = "TO_CHUC"` với `organisationName` và `organisationIdentityNumber`
-  **rỗng**, `fullName = "Công ty TNHH Thử Nghiệm"`, `identityNumber = "0100109106"` (mô phỏng bản
-  ghi lưu trước migration `202607290002`).
-- Một hồ sơ có ≥2 thửa và ≥2 tài sản gắn vào các thửa khác nhau.
+Đây chính là kịch bản làm mất tên tổ chức trước bản vá.
 
-**Các bước và kết quả mong đợi:**
+```
+TRƯỚC:  ownerType=TO_CHUC
+        fullName="Công ty TNHH Thử Nghiệm"     <- tên tổ chức nằm ở ô họ tên
+        organisationName=""
+        organisationIdentityNumber=""
 
-1. **Mục 1 — thứ tự thao tác nguy hiểm.** Mở hồ sơ tổ chức legacy. Gõ ngay vào ô
-   **"H — Họ tên người đại diện tổ chức"** (chưa chạm F/G).
-   → Mong đợi: ô **"F — Tên tổ chức"** lập tức hiện `Công ty TNHH Thử Nghiệm`, ô G hiện
-   `0100109106`, ô H chứa đúng ký tự vừa gõ. Lưu → refresh → cả ba ô giữ nguyên.
-   → **Đây là kịch bản trước bản vá gây mất dữ liệu.**
-2. **Mục 1 — nhánh không di trú.** Vẫn hồ sơ legacy đó (một bản ghi khác, chưa chạm gì), đổi ô
-   **"M — Pháp nhân trên GCN"** từ tổ chức sang **Cá nhân**.
-   → Mong đợi: `Công ty TNHH Thử Nghiệm` **vẫn nằm ở ô họ tên**, không nhảy sang ô tên tổ chức
-   (ô F/G lúc này cũng không còn hiển thị).
-3. **Mục 4 — xóa thửa.** Ở hồ sơ nhiều thửa, gán một tài sản vào "Thửa 2", rồi xóa Thửa 2.
-   → Mong đợi: ô "Thửa đất liên quan" của tài sản đó về `-- Chọn thửa --`; bấm **Lưu** thành công,
-   **không** hiện lỗi đỏ. Sau đó bấm Tiếp nhận → mong đợi bị chặn với thông báo
-   "Tài sản thứ N chưa gắn với thửa" (đúng chỗ, đúng lúc).
-4. **Mục 2 — xuất PL3.** Gán 2 tài sản vào cùng một thửa, đặt `Diện tích xây dựng` **giống nhau**
-   cho cả hai và để trống `Diện tích sàn` của tài sản thứ hai. Lưu, tiếp nhận, rồi
-   `POST /api/exports`.
-   → Mong đợi trong file xuất: cột AO có 2 phần tử, cột AS là `"100; 100"` (không gộp thành một),
-   cột AT là `"180; -"`. Sheet **"Canh bao"** có dòng nhắc thửa có 2 tài sản.
+thao tác: click ô "H — Họ tên người đại diện tổ chức", gõ "Trần Thị Đại Diện"
+
+SAU:    ownerType=TO_CHUC
+        fullName="Trần Thị Đại Diện"           <- tên người đại diện vừa gõ
+        identityNumber=""                       <- giải phóng cho CCCD người đại diện
+        organisationName="Công ty TNHH Thử Nghiệm"        <- ĐÃ DI TRÚ, không mất
+        organisationIdentityNumber="0100109106"           <- ĐÃ DI TRÚ
+```
+
+**PASS.**
+
+### Tình huống 2 — dòng tổ chức legacy, đổi pháp nhân sang "Cá nhân"
+
+```
+thao tác: đổi ô "M — Pháp nhân trên GCN" từ Tổ chức -> Cá nhân
+
+SAU:    ownerType=CA_NHAN
+        fullName="Công ty TNHH Thử Nghiệm"     <- GIỮ NGUYÊN TẠI CHỖ, đúng chủ ý
+        organisationName=""                     <- không bị đẩy sang ô tên tổ chức
+```
+
+**PASS** — khớp quyết định "đổi pháp nhân KHÔNG di trú".
+
+### Tình huống 3 — xóa thửa đang có tài sản gắn vào
+
+```
+TRƯỚC:  parcelCount=2, assetParcelId="parcel-2", validation=null
+
+thao tác: bấm "Xóa thửa" trên thẻ thửa số 20 (parcel-2)
+
+SAU:    parcelCount=1
+        thửa còn lại = "10"                     <- xóa đúng thửa
+        assetParcelId=""                        <- tham chiếu đã gỡ
+        ô "Thửa đất liên quan" = "-- Chọn thửa --"
+        validation=null                          <- payload hợp lệ
+
+thao tác: bấm "Lưu toàn bộ bản làm việc"
+kết quả:  errors=[]  success="Đã lưu bản làm việc. Tải lại hồ sơ sẽ dùng đúng dữ liệu vừa lưu."
+```
+
+**PASS** — lưu được, không lỗi đỏ.
+
+### Tình huống 4 — xuất PL3 với 2 tài sản cùng thửa
+
+Không đi qua giao diện (là hàm thuần phía server), nên đo trực tiếp trên `buildSubmissionRows` với
+2 tài sản **trùng** diện tích xây dựng và tài sản thứ hai **thiếu** diện tích sàn — đúng hai trường
+hợp mà bỏ trùng/bỏ ô rỗng sẽ làm lệch cột:
+
+```
+AO (loại tài sản)       = "Nhà ở; Công trình xây dựng khác"
+AS (diện tích xây dựng) = "100; 100"      <- KHÔNG gộp trùng thành một
+AT (diện tích sàn)      = "180; -"        <- giữ chỗ, vị trí 2 vẫn là của tài sản 2
+AW (cấp hạng)           = "-; -"
+Số phần tử mỗi cột AO–AW = [2,2,2,2,2,2,2,2,2]    <- bất biến quan trọng nhất
+
+Cảnh báo: "Hồ sơ PC-KK-2026-0001 thửa 1: thửa có 2 tài sản nhưng PL3 chỉ có một bộ cột AO–AW;
+           các giá trị được gộp bằng "; " theo đúng thứ tự tài sản, ô trống ghi "-"."
+```
+
+**PASS.**
+
+### Tình huống 5 (bổ sung) — luật PII mới, đo trên giao diện
+
+```
+thao tác: ô B = "07999"; ô "Lý do ghi đè cột B" = "Theo ho so cua ong A 012345678901 da nop"
+          bấm Lưu
+kết quả:  successShown=false
+          error="Lý do ghi đè cột B (mã ĐVHC): không được chứa số định danh cá nhân/CCCD.
+                 Chỉ ghi lý do nghiệp vụ ngắn, ví dụ "Theo bản đồ địa chính đã đối chiếu"."
+          -> thông báo KHÔNG chép lại số CCCD
+
+thao tác: sửa lý do thành "Theo ban do dia chinh to 105 lap nam 2024", bấm Lưu
+kết quả:  error=null
+          success="Đã lưu bản làm việc..."
+          -> lý do nghiệp vụ có số KHÔNG bị báo nhầm
+```
+
+**PASS.**
+
+### Điều KHÔNG được xác minh ở đây
+
+- Đường lưu thật qua `PUT /api/submissions/:id/working-payload` (harness gọi trực tiếp hàm
+  validation, không qua HTTP). Phân quyền, version conflict và ghi audit **chưa** được đo trên
+  trình duyệt — chúng có test đơn vị riêng nhưng chưa có kiểm tra đầu-cuối.
+- Bước tiếp nhận chính thức (`POST .../accept`) — chỉ có test đơn vị, không đo qua giao diện.
+- Hành vi với dữ liệu thật của phường.
 
 ## 15. Remaining issues and warnings
 
-| Severity   | Issue                                                                                                                                                                          | Impact                                                                                                                | Recommended action                                                                                                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **High**   | Ô lý do ghi đè là free text và đi thẳng vào `audit_logs.metadata` qua `automaticOverrideReasons`. Docstring module lại khẳng định audit không chứa PII.                          | Va chạm quy tắc cứng số 6 trong `CLAUDE.md`. Cán bộ hoàn toàn có thể gõ `"sửa theo GCN của Nguyễn Văn A, CCCD 001…"`.  | **Cần người dùng chốt:** (a) quét `CITIZEN_ID_PATTERN` và từ chối fail-closed, hay (b) chấp nhận là kênh PII có kiểm soát + sửa docstring. Đã ghi vào `03-decisions.md` mục "CHƯA quyết".  |
-| **Medium** | `checkAssets` chặn cứng tài sản thiếu `parcelId`, trong khi `pl3-export` cố ý khoan dung với tài sản legacy — hai module lệch giả định.                                          | Bản ghi cũ có tài sản (nếu tồn tại) không tiếp nhận được cho tới khi cán bộ mở bàn biên tập gán lại thửa.              | Rủi ro thực tế thấp: wizard công dân chưa từng thu tài sản nên `draft.assets` gần như luôn rỗng ở dữ liệu cũ. Cần xác nhận trên dữ liệu Preview trước khi deploy.                          |
-| **Medium** | 4 cột `ward_admin_code_override*` / `scanned_file_names_override*` trên `public_submissions` được ghi bằng một `UPDATE` riêng nhưng **không có nơi nào SELECT**.                 | Hai statement thừa mỗi lần lưu; hai nguồn sự thật (cột vs JSON payload) có thể lệch nhau về sau.                       | **Cần người dùng chốt:** gộp vào `UPDATE` chính + cho `mapSubmission` đọc ra, hay bỏ khỏi migration. Không tự quyết vì đụng migration đã có preflight.                                     |
-| **Medium** | Bỏ `return` ở nhánh tổ chức trong `checkOwner` (thuộc PR #7, không thuộc đợt vá này) khiến owner tổ chức nay phải có đủ họ tên người đại diện + ngày sinh + giới tính + địa chỉ. | Điều kiện tiếp nhận chặt hơn hẳn cho mọi hồ sơ tổ chức đang chờ duyệt. PR body của #7 không nhắc.                      | Đúng theo mô hình mới (H–L là người đại diện) nên không phải bug. Cần đưa vào release note của PR #7.                                                                                      |
-| **Low**    | FK `public_assets.parcel_id … on delete set null` cộng thứ tự xóa trong `refreshCanonicalProjection` (parcels trước assets) khiến mỗi lần refresh phải UPDATE toàn bộ hàng asset về NULL rồi mới xóa. | Lãng phí I/O, không sai kết quả.                                                                                      | Đảo thứ tự hai câu lệnh. Không làm trong đợt này để giữ diff hẹp.                                                                                                                         |
-| **Low**    | 5 warning `no-unused-vars` có sẵn ở `scripts/add-system-admins.ts`, `tests/staging-rehearsal-scenarios.test.ts`.                                                                | Không ảnh hưởng chạy.                                                                                                 | Dọn trong một PR vệ sinh riêng.                                                                                                                                                          |
-| **Low**    | AC-10 chưa có bằng chứng — không có hạ tầng test React trong repo.                                                                                                              | Hành vi UI của mục 1 và 4 chỉ được chốt bằng test hàm thuần + assertion nối dây.                                       | Chạy §14. Cân nhắc thêm `@testing-library/react` + `jsdom` trong một PR riêng.                                                                                                            |
+| Severity   | Issue                                                                                                       | Impact                                                                                          | Recommended action                                                                                             |
+| ---------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **High**   | Hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn cho tới khi bổ sung thông tin người đại diện                     | Cán bộ có thể bất ngờ ngay ngày đầu bật                                                          | Rà danh sách hồ sơ tổ chức đang chờ **trước** khi deploy; phổ biến `RELEASE_CHECKLIST.md` §7.1                  |
+| **Medium** | `preflight:public-intake-v2` đã sửa nhưng **chưa chạy thật** — cần kết nối database                          | Nếu tôi viết sai câu kiểm tra, preflight sẽ báo sai ở đúng lúc cần tin nó nhất                   | Chạy trên Supabase Preview ngay sau khi áp `202607290003`, trước khi tin kết quả                                |
+| **Medium** | Hành vi UI chỉ được xác minh **thủ công**, không có test tự động bảo vệ khỏi hồi quy                          | Một thay đổi sau này có thể phá lại lỗi mất tên tổ chức mà CI không phát hiện                    | Thêm `@testing-library/react` + `jsdom` trong một PR riêng, rồi chuyển §14 thành test                            |
+| **Medium** | Fail-closed của luật PII có thể từ chối oan chuỗi 12 số hợp lệ về nghiệp vụ                                  | Cán bộ phải viết lại câu lý do                                                                  | Đã ghi là đánh đổi có chủ ý ở `03-decisions.md`. Theo dõi phản hồi thực tế; nếu phiền, nới bằng danh sách trắng |
+| **Low**    | Migration `202607290003` là DDL huỷ cột                                                                      | Không mất dữ liệu (§10), nhưng không tự hoàn tác được                                            | Áp trên Preview trước; xem §17                                                                                 |
+| **Low**    | 5 warning `no-unused-vars` có sẵn                                                                            | Không ảnh hưởng chạy                                                                            | PR vệ sinh riêng                                                                                               |
+| **Low**    | E2E chưa chạy lần nào (nợ từ trước, không thuộc đợt này)                                                     | —                                                                                               | Theo `PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`                                                                       |
 
 ## 16. Regression and compatibility notes
 
-- **Trình duyệt / thiết bị:** không đổi. Không thêm API trình duyệt nào; chỉ đổi hàm xử lý sự kiện.
-- **Node/runtime:** không đổi. Node v24.11.0 tại máy kiểm thử.
-- **Database:** không đổi — không có migration trong đợt này.
-- **API bên ngoài:** không đụng Google Drive, Turnstile hay Supabase client.
-- **Backward compatibility — payload:** hoàn toàn tương thích. `migrateLegacyOrganisationOwner` là
-  idempotent và chỉ tác động dòng tổ chức chưa có F/G; payload đã ở dạng mới đi qua không đổi.
-  `detachAssetsFromMissingParcels` chỉ đụng tài sản có `parcelId` trỏ vào thửa không tồn tại.
-- **Backward compatibility — audit:** `audit_logs.metadata` là JSON tự do; thêm khóa không phá vỡ
-  bản ghi cũ. Bản ghi audit cũ không có `changedFieldPathsTruncated` — người đọc phải coi thiếu
-  khóa là `false`.
-- **Excel/PDF/import/export compatibility:** **có thay đổi có thể quan sát.** File PL3 xuất ra của
-  hồ sơ có >1 tài sản trên cùng thửa sẽ khác bản trước: nhiều phần tử hơn và có ký tự giữ chỗ `-`.
-  Số cột, thứ tự cột và 49 nhãn **không đổi** — `PL3_DATA_COLUMN_COUNT` vẫn được assert trong test.
-  Hồ sơ có 0 hoặc 1 tài sản trên mỗi thửa (trường hợp áp đảo) xuất ra **giống hệt** bản trước.
+- **Trình duyệt / thiết bị:** không đổi. Chỉ đổi chuỗi hint và thêm nhánh validation.
+- **Node/runtime:** không đổi. Node v24.11.0.
+- **Database:** **có đổi** — `202607290003` gỡ 4 cột. Xem §10 và §17.
+- **API bên ngoài:** không đụng Drive/Turnstile/Supabase client.
+- **Backward compatibility — payload:** hoàn toàn tương thích. Không đổi shape `IntakeDraft`; luật
+  PII chỉ đọc, không ghi.
+- **Backward compatibility — audit:** không đổi khóa nào của metadata.
+- **Backward compatibility — API:** mã lỗi `ASSET_*_PARCEL_INVALID` **giữ nguyên**, chỉ đổi nội dung
+  `label`/`message`. Client nào bám vào `code` không vỡ; client nào bám vào chuỗi `label` sẽ lệch —
+  đã kiểm: không có client nào trong repo làm vậy.
+- **Excel/PDF/export:** đợt này **không** đổi gì trong file PL3 xuất ra. (Thay đổi ở đợt trước —
+  gộp nhiều tài sản — vẫn nguyên, đã ghi ở `RELEASE_CHECKLIST.md` §7.5.)
 
 ## 17. Rollback plan
 
-- **Cách rollback code:** `git checkout -- .` (chưa commit) hoặc revert commit nếu đã tạo. Không có
-  bước nào khác.
-- **Cách rollback migration:** không áp dụng — đợt này không có migration.
-- **Dữ liệu có cần phục hồi:** không. Không có thao tác ghi dữ liệu nào được thực hiện; không chạy
-  script nào chạm database hay Drive.
-- **Điều kiện không được rollback tự động:** nếu đã deploy và cán bộ đã sửa dòng tổ chức legacy qua
-  giao diện mới, dữ liệu đã ở dạng F/G. Revert code không làm hỏng dữ liệu đó (bản cũ vẫn đọc được
-  F/G), nhưng sẽ **mở lại lỗ hổng mất tên tổ chức** cho các dòng legacy chưa được sửa.
+- **Rollback code:** revert commit. Không có bước nào khác.
+- **Rollback migration `202607290003`:** thêm lại 4 cột bằng
+  `alter table public.public_submissions add column if not exists … text not null default ''`.
+  **Dữ liệu không cần phục hồi** — 4 cột đó chưa bao giờ là nguồn sự thật; giá trị nằm nguyên trong
+  `working_payload_json`. Cột thêm lại sẽ rỗng và vô hại cho tới khi có code ghi vào (mà nay không có).
+- **Thứ tự rollback:** revert **code trước**, migration sau. Ngược lại thì code mới (không ghi cột)
+  chạy cùng schema cũ — vẫn đúng, chỉ để lại cột rỗng.
+- **Điều kiện không được rollback tự động:** nếu đã deploy và cán bộ đã sửa dòng tổ chức legacy,
+  dữ liệu đã ở dạng F/G. Revert code **không** làm hỏng dữ liệu đó, nhưng mở lại lỗ hổng mất tên tổ
+  chức cho các dòng legacy chưa sửa.
 
 ## 18. Recommended next action
 
 `READY_FOR_CHATGPT_REVIEW`
 
-Cả 6 mục trong phạm vi đã vá, có test hồi quy và có bằng chứng lệnh chạy thật. Trước khi merge cần:
-(1) chạy kiểm thủ công §14 vì AC-10 chưa có bằng chứng; (2) chốt 3 vấn đề ở §15 mà agent cố ý không
-tự quyết. Chưa commit và chưa push theo mặc định của repo.
+Cả 4 quyết định đã thi hành với bằng chứng; AC-10 nợ từ đợt trước đã hết. Trước khi merge:
+(1) áp `202607290002` rồi `202607290003` trên Supabase Preview và **chạy** `preflight` — AC-28 hiện
+mới chỉ là code chưa chạy; (2) rà danh sách hồ sơ tổ chức đang chờ tiếp nhận theo §15 High;
+(3) cập nhật phần mô tả PR (hiện vẫn là bản Codex, chưa nhắc gì tới hai đợt vá).
 
 ## 19. Commands to reproduce
 
@@ -504,78 +517,66 @@ npm ci
 npm run typecheck
 npm test
 npm run lint
-npm run build
+rm -rf .next && npm run build
 git diff --check
-npx vitest run tests/pl3-export.test.ts tests/full-pl3-editor.test.ts
+npx vitest run tests/full-pl3-editor.test.ts tests/completion-checks.test.ts
 ```
 
 ## 20. Key diff excerpts
 
-Lỗi mất tên tổ chức (mục 1) — đường ghi trước đây bỏ qua di trú:
+Luật PII — dùng chung định nghĩa "giống CCCD" với đường AI, trả về **tên ô** chứ không phải giá trị:
 
 ```diff
-+export function migrateLegacyOrganisationOwner(owner: Owner): Owner {
-+  if (!isOrganisationOwner(owner.ownerType)) return owner;
-+  if (owner.organisationName?.trim() || owner.organisationIdentityNumber?.trim()) return owner;
-+  return {
-+    ...owner,
-+    organisationName: owner.fullName,
-+    organisationIdentityNumber: owner.identityNumber,
-+    fullName: "",
-+    identityNumber: "",
-+  };
++export function overrideReasonsWithCitizenIdLike(draft: IntakeDraft): string[] {
++  const labelled: { label: string; reason: string | undefined }[] = [
++    { label: "Lý do ghi đè cột B (mã ĐVHC)", reason: draft.wardAdministrativeCodeOverrideReason },
++    { label: "Lý do ghi đè cột AX (tên file quét)", reason: draft.scannedFileNamesOverrideReason },
++    ...draft.parcels.map((parcel, index) => ({
++      label: `Lý do ghi đè cột V của thửa ${index + 1}`,
++      reason: parcel.cadastralMapSheetOverrideReason,
++    })),
++  ];
++  return labelled
++    .filter(({ reason }) => reason?.trim() && scanForCitizenIdLikeValues(reason).length > 0)
++    .map(({ label }) => label);
 +}
 ```
 
+Gỡ nguồn dữ liệu song song (lặp lại ở cả `commitWorkingPayload` và `commitOfficialAmendment`):
+
 ```diff
-   const updateOwner = <TField extends keyof Owner>(index, field, value) => {
-     const owners = [...draft.owners];
--    owners[index] = { ...owners[index], [field]: value };
-+    owners[index] = { ...migrateLegacyOrganisationOwner(owners[index]), [field]: value };
-     onChange({ ...draft, owners });
-   };
+       const next = mapSubmission(rows[0]);
+-      await transaction`
+-        update public.public_submissions set
+-          ward_admin_code_override = ${input.draft.wardAdministrativeCodeOverride ?? ""},
+-          ...
+-        where submission_id = ${input.record.submissionId}
+-      `;
 ```
 
-Lệch cột tài sản (mục 2) — bỏ dedup, giữ vị trí:
+Migration mới — toàn văn:
 
-```diff
--function joined(values: readonly string[]): string {
--  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join("; ");
--}
-+export const ASSET_EMPTY_PLACEHOLDER = "-";
-+
-+function assetColumn(assets: readonly Asset[], pick: (asset: Asset) => string): string {
-+  if (assets.length === 0) return "";
-+  if (assets.length === 1) return pick(assets[0]).trim();
-+  return assets.map((asset) => pick(asset).trim() || ASSET_EMPTY_PLACEHOLDER).join("; ");
-+}
+```sql
+alter table public.public_submissions
+  drop column if exists ward_admin_code_override,
+  drop column if exists ward_admin_code_override_reason,
+  drop column if exists scanned_file_names_override,
+  drop column if exists scanned_file_names_override_reason;
 ```
 
-Audit đếm sai (mục 3):
+Preflight kiểm chiều ngược lại:
 
 ```diff
-   return {
--    changedFieldPaths: changedFieldPaths.slice(0, 250),
-+    changedFieldPaths: changedFieldPaths.slice(0, MAX_AUDIT_FIELD_PATHS),
-+    changedFieldCount: changedFieldPaths.length,
-+    changedFieldPathsTruncated: changedFieldPaths.length > MAX_AUDIT_FIELD_PATHS,
-     automaticOverrideReasons,
-   };
-```
-
-Lint gate (mục 5):
-
-```diff
--  { ignores: [".next/**", "node_modules/**", "playwright-report/**", "test-results/**"] },
-+  {
-+    ignores: [
-+      "**/.next/**",
-+      ".claude/**",
-+      "node_modules/**",
-+      "playwright-report/**",
-+      "test-results/**",
-+    ],
-+  },
++    const stillPresent: string[] = [];
++    for (const column of droppedColumns) {
++      const { exists } = await columnExists("public_submissions", column);
++      if (exists) stillPresent.push(`public_submissions.${column}`);
++    }
++    check(
++      "Đã gỡ cột ghi đè song song trên public_submissions (202607290003)",
++      stillPresent.length === 0,
++      stillPresent.length === 0 ? "OK" : `CÒN CỘT SONG SONG: ${stillPresent.join(", ")}`,
++    );
 ```
 
 ## 21. Full unified diff
@@ -584,580 +585,403 @@ Lint gate (mục 5):
 FULL_DIFF_INCLUDED
 ```
 
-Base: `05f09c35f6a278f6229bce1ecfd3683487c3fb09` (working tree, chưa commit).
-Phạm vi: `src/`, `tests/`, `eslint.config.mjs`. Ba file `docs/brain/*` là tài liệu thuần, tóm tắt
-ở §8 Phase 6, không nhúng để giữ báo cáo đọc được.
+Base: `532c36935ff89d679c6b7b2d66413cec866e8168`.
+Phạm vi nhúng: `src/`, `tests/`, `scripts/`, `supabase/`. Bốn file tài liệu
+(`docs/brain/{01,03,06}`, `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md`) là văn bản thuần, tóm
+tắt ở §8, không nhúng để giữ báo cáo đọc được.
 
 ```diff
-diff --git a/eslint.config.mjs b/eslint.config.mjs
-index 59fb035..8103f3c 100644
---- a/eslint.config.mjs
-+++ b/eslint.config.mjs
-@@ -4,7 +4,17 @@ import nextTypeScript from "eslint-config-next/typescript";
- const eslintConfig = [
-   ...nextCoreWebVitals,
-   ...nextTypeScript,
--  { ignores: [".next/**", "node_modules/**", "playwright-report/**", "test-results/**"] },
+diff --git a/scripts/preflight-public-intake-v2-migrations.ts b/scripts/preflight-public-intake-v2-migrations.ts
+index db7a3a3..f9653d7 100644
+--- a/scripts/preflight-public-intake-v2-migrations.ts
++++ b/scripts/preflight-public-intake-v2-migrations.ts
+@@ -250,10 +250,6 @@ async function runChecks(): Promise<CheckResult[]> {
+   // 202607290002 — toàn bộ cột lưu bền vững cho Bàn biên tập đầy đủ và PL3 B–AX.
+   {
+     const requiredColumns: ReadonlyArray<readonly [table: string, column: string]> = [
+-      ["public_submissions", "ward_admin_code_override"],
+-      ["public_submissions", "ward_admin_code_override_reason"],
+-      ["public_submissions", "scanned_file_names_override"],
+-      ["public_submissions", "scanned_file_names_override_reason"],
+       ["public_owners", "organisation_name"],
+       ["public_owners", "organisation_identity_number"],
+       ["public_parcels", "cadastral_map_sheet_number"],
+@@ -300,6 +296,28 @@ async function runChecks(): Promise<CheckResult[]> {
+     );
+   }
+ 
++  // 202607290003 — `working_payload_json` là nguồn sự thật duy nhất cho ghi đè cột B và AX.
++  // Bốn cột song song phải KHÔNG còn tồn tại; còn cột nghĩa là migration chưa chạy và nguy cơ
++  // ai đó ghi lại vào đó vẫn còn.
 +  {
-+    // `.next/**` chỉ khớp bản build ở gốc repo. Các worktree agent dưới `.claude/` cũng có
-+    // `.next/` riêng; quét chúng làm ESLint ăn hết heap và chết trước khi báo được lỗi nào.
-+    ignores: [
-+      "**/.next/**",
-+      ".claude/**",
-+      "node_modules/**",
-+      "playwright-report/**",
-+      "test-results/**",
-+    ],
-+  },
- ];
- 
- export default eslintConfig;
-diff --git a/src/components/admin/working-payload-editor.tsx b/src/components/admin/working-payload-editor.tsx
-index c2dd5b0..0005432 100644
---- a/src/components/admin/working-payload-editor.tsx
-+++ b/src/components/admin/working-payload-editor.tsx
-@@ -9,9 +9,11 @@ import {
-   WARD_ADMIN_CODE,
- } from "@/modules/public-intake/reference";
- import {
-+  detachAssetsFromMissingParcels,
-   emptyAsset,
-   emptyOwner,
-   isOrganisationOwner,
-+  migrateLegacyOrganisationOwner,
-   OWNER_TYPE_LABELS,
-   OWNER_TYPES,
-   type Asset,
-@@ -110,40 +112,35 @@ export function WorkingPayloadEditor({
- }: WorkingPayloadEditorProps) {
-   const [changeNote, setChangeNote] = useState("");
- 
-+  /**
-+   * Mọi thao tác sửa trên một dòng tổ chức cũ phải di trú F/G trước — xem
-+   * `migrateLegacyOrganisationOwner`.
-+   */
-   const updateOwner = <TField extends keyof Owner>(
-     index: number,
-     field: TField,
-     value: Owner[TField],
-   ) => {
-     const owners = [...draft.owners];
--    owners[index] = { ...owners[index], [field]: value };
-+    owners[index] = { ...migrateLegacyOrganisationOwner(owners[index]), [field]: value };
-     onChange({ ...draft, owners });
-   };
- 
--  const updateOrganisation = (
--    index: number,
--    field: "organisationName" | "organisationIdentityNumber",
--    value: string,
--  ) => {
-+  /**
-+   * Đổi pháp nhân KHÔNG di trú: chuyển một dòng tổ chức cũ về cá nhân nghĩa là cán bộ khẳng định
-+   * `fullName` vốn là tên người, nên phải giữ nguyên tại chỗ thay vì đẩy sang ô tên tổ chức.
-+   */
-+  const updateOwnerType = (index: number, ownerType: Owner["ownerType"]) => {
-     const owners = [...draft.owners];
--    const current = owners[index];
--    const legacy = !current.organisationName?.trim() && !current.organisationIdentityNumber?.trim();
--    owners[index] = {
--      ...current,
--      organisationName:
--        field === "organisationName"
--          ? value
--          : current.organisationName || (legacy ? current.fullName : ""),
--      organisationIdentityNumber:
--        field === "organisationIdentityNumber"
--          ? value
--          : current.organisationIdentityNumber || (legacy ? current.identityNumber : ""),
--      fullName: legacy ? "" : current.fullName,
--      identityNumber: legacy ? "" : current.identityNumber,
--    };
-+    owners[index] = { ...owners[index], ownerType };
-     onChange({ ...draft, owners });
-   };
- 
-+  /** Xóa thửa phải gỡ tham chiếu tài sản — xem `detachAssetsFromMissingParcels`. */
-+  const updateParcels = (parcels: Parcel[]) => {
-+    onChange({ ...draft, parcels, assets: detachAssetsFromMissingParcels(draft.assets, parcels) });
-+  };
-+
-   const updateAsset = <TField extends keyof Asset>(
-     index: number,
-     field: TField,
-@@ -331,7 +328,7 @@ export function WorkingPayloadEditor({
-                       disabled={readOnly}
-                       value={owner.ownerType}
-                       onChange={(event) =>
--                        updateOwner(index, "ownerType", event.target.value as Owner["ownerType"])
-+                        updateOwnerType(index, event.target.value as Owner["ownerType"])
-                       }
-                       className={inputClass}
-                     >
-@@ -359,7 +356,7 @@ export function WorkingPayloadEditor({
-                             owner.organisationName || (legacyOrganisation ? owner.fullName : "")
-                           }
-                           onChange={(event) =>
--                            updateOrganisation(index, "organisationName", event.target.value)
-+                            updateOwner(index, "organisationName", event.target.value)
-                           }
-                           className={inputClass}
-                         />
-@@ -372,11 +369,7 @@ export function WorkingPayloadEditor({
-                             (legacyOrganisation ? owner.identityNumber : "")
-                           }
-                           onChange={(event) =>
--                            updateOrganisation(
--                              index,
--                              "organisationIdentityNumber",
--                              event.target.value,
--                            )
-+                            updateOwner(index, "organisationIdentityNumber", event.target.value)
-                           }
-                           className={inputClass}
-                         />
-@@ -505,7 +498,7 @@ export function WorkingPayloadEditor({
-       <EditableParcelTable
-         parcels={draft.parcels}
-         readOnly={readOnly}
--        onChange={(parcels: Parcel[]) => onChange({ ...draft, parcels })}
-+        onChange={updateParcels}
-       />
- 
-       <Section
-diff --git a/src/modules/public-intake/pl3-export.ts b/src/modules/public-intake/pl3-export.ts
-index de4822e..c68f59f 100644
---- a/src/modules/public-intake/pl3-export.ts
-+++ b/src/modules/public-intake/pl3-export.ts
-@@ -33,6 +33,7 @@ import type { SubmissionRecord } from "./repository";
- import {
-   isOrganisationOwner,
-   OWNER_TYPE_LABELS,
-+  type Asset,
-   type LandUse,
-   type Owner,
-   type Parcel,
-@@ -244,31 +245,52 @@ function landUseCells(parcel: Parcel, context: string, warnings: string[]): stri
-   return cells;
- }
- 
--function joined(values: readonly string[]): string {
--  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join("; ");
-+/** Ô trống của một tài sản khi thửa có nhiều tài sản — giữ chỗ để 9 cột không lệch nhau. */
-+export const ASSET_EMPTY_PLACEHOLDER = "-";
-+
-+/**
-+ * Một cột tài sản của thửa.
-+ *
-+ * PL3 chỉ có MỘT bộ 9 cột cho mỗi thửa, nên nhiều tài sản trên cùng thửa buộc phải gộp. Gộp thì
-+ * bắt buộc mọi cột phải có **cùng số phần tử theo cùng thứ tự**: bỏ trùng hay bỏ ô rỗng sẽ làm
-+ * cột này còn 1 giá trị trong khi cột kia còn 2, và người đọc PL3 không còn ghép lại được giá trị
-+ * nào thuộc tài sản nào.
-+ */
-+function assetColumn(assets: readonly Asset[], pick: (asset: Asset) => string): string {
-+  if (assets.length === 0) return "";
-+  if (assets.length === 1) return pick(assets[0]).trim();
-+  return assets.map((asset) => pick(asset).trim() || ASSET_EMPTY_PLACEHOLDER).join("; ");
- }
- 
- /** Cột AO–AW. Tài sản legacy chưa có `parcelId` được giữ cho mọi thửa để không mất dữ liệu. */
--function assetCells(record: SubmissionRecord, parcel: Parcel, warnings: string[]): string[] {
-+function assetCells(
-+  record: SubmissionRecord,
-+  parcel: Parcel,
-+  context: string,
-+  warnings: string[],
-+): string[] {
-   const assets = (record.draft?.assets ?? []).filter(
-     (asset) => !asset.parcelId || asset.parcelId === parcel.id,
-   );
-+  if (assets.length > 1) {
-+    warnings.push(
-+      `${context}: thửa có ${assets.length} tài sản nhưng PL3 chỉ có một bộ cột AO–AW; các giá trị được gộp bằng "; " theo đúng thứ tự tài sản, ô trống ghi "${ASSET_EMPTY_PLACEHOLDER}".`,
++    const droppedColumns = [
++      "ward_admin_code_override",
++      "ward_admin_code_override_reason",
++      "scanned_file_names_override",
++      "scanned_file_names_override_reason",
++    ];
++    const stillPresent: string[] = [];
++    for (const column of droppedColumns) {
++      const { exists } = await columnExists("public_submissions", column);
++      if (exists) stillPresent.push(`public_submissions.${column}`);
++    }
++    check(
++      "Đã gỡ cột ghi đè song song trên public_submissions (202607290003)",
++      stillPresent.length === 0,
++      stillPresent.length === 0 ? "OK" : `CÒN CỘT SONG SONG: ${stillPresent.join(", ")}`,
 +    );
 +  }
-   return [
--    joined(
--      assets.map((asset) =>
--        asset.assetType.trim()
--          ? labelOf(ASSET_TYPE_OPTIONS, asset.assetType, "Tài sản", warnings)
--          : "",
--      ),
-+    assetColumn(assets, (asset) =>
-+      asset.assetType.trim()
-+        ? labelOf(ASSET_TYPE_OPTIONS, asset.assetType, "Tài sản", warnings)
-+        : "",
-     ),
--    joined(assets.map((asset) => asset.mixedUseBuildingName ?? "")),
--    joined(assets.map((asset) => asset.apartmentBuildingName ?? "")),
--    joined(assets.map((asset) => asset.apartmentNumber ?? "")),
--    joined(assets.map((asset) => asset.constructionArea ?? "")),
--    joined(assets.map((asset) => asset.floorArea ?? "")),
--    joined(assets.map((asset) => asset.ownershipForm ?? "")),
--    joined(assets.map((asset) => asset.ownershipTerm ?? "")),
--    joined(assets.map((asset) => asset.grade ?? "")),
-+    assetColumn(assets, (asset) => asset.mixedUseBuildingName ?? ""),
-+    assetColumn(assets, (asset) => asset.apartmentBuildingName ?? ""),
-+    assetColumn(assets, (asset) => asset.apartmentNumber ?? ""),
-+    assetColumn(assets, (asset) => asset.constructionArea ?? ""),
-+    assetColumn(assets, (asset) => asset.floorArea ?? ""),
-+    assetColumn(assets, (asset) => asset.ownershipForm ?? ""),
-+    assetColumn(assets, (asset) => asset.ownershipTerm ?? ""),
-+    assetColumn(assets, (asset) => asset.grade ?? ""),
-   ];
- }
- 
-@@ -337,7 +359,7 @@ function buildRow(
-     parcel.addressOnCertificate.trim(), // 23 địa chỉ thửa
-     parcel.area.trim(), // 24 diện tích thửa
-     ...landUseCells(parcel, parcelContext, warnings), // 25–39
--    ...assetCells(record, parcel, warnings), // AO–AW / trường 40–48
-+    ...assetCells(record, parcel, parcelContext, warnings), // AO–AW / trường 40–48
-     record.draft?.scannedFileNamesOverride?.trim() ||
-       scannedFileNames(certificate.issueNumber, record.fileSummaries), // AX / trường 49
-   ];
-@@ -367,7 +389,10 @@ export function buildSubmissionRows(record: SubmissionRecord): Pl3BuildResult {
-       rows.push(row);
-     });
-   });
--  return { rows, warnings };
-+  // `buildRow` chạy mỗi cặp (thửa × chủ), nên cảnh báo thuộc về *thửa* — mã lạ, ghi đè trường
-+  // tự động, thừa mục đích sử dụng, nhiều tài sản — bị lặp đúng bằng số đồng sở hữu. Chuỗi trùng
-+  // khít nhau không mang thêm thông tin gì; giữ thứ tự xuất hiện đầu tiên.
-+  return { rows, warnings: Array.from(new Set(warnings)) };
- }
- 
- export interface Pl3ExportContent {
++
+   // Kiểm tra dữ liệu — hồ sơ cũ phải nhất quán, không phải chỉ schema đúng.
+   {
+     const database = getDatabase();
+diff --git a/src/components/admin/editable-parcel-table.tsx b/src/components/admin/editable-parcel-table.tsx
+index 45fba46..522deca 100644
+--- a/src/components/admin/editable-parcel-table.tsx
++++ b/src/components/admin/editable-parcel-table.tsx
+@@ -264,7 +264,7 @@ export function EditableParcelTable({
+               </Field>
+               <Field
+                 label="Lý do ghi đè cột V"
+-                hint="Bắt buộc tối thiểu 10 ký tự khi nhập giá trị ghi đè."
++                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
+               >
+                 <input
+                   disabled={readOnly || !(parcel.cadastralMapSheetNumber ?? "").trim()}
+diff --git a/src/components/admin/working-payload-editor.tsx b/src/components/admin/working-payload-editor.tsx
+index 0005432..60c6bf1 100644
+--- a/src/components/admin/working-payload-editor.tsx
++++ b/src/components/admin/working-payload-editor.tsx
+@@ -181,7 +181,7 @@ export function WorkingPayloadEditor({
+             <div className="mt-3">
+               <Field
+                 label="Lý do ghi đè cột B"
+-                hint="Bắt buộc tối thiểu 10 ký tự khi nhập giá trị ghi đè."
++                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
+               >
+                 <input
+                   disabled={readOnly || !(draft.wardAdministrativeCodeOverride ?? "").trim()}
+@@ -215,7 +215,7 @@ export function WorkingPayloadEditor({
+             <div className="mt-3">
+               <Field
+                 label="Lý do ghi đè cột AX"
+-                hint="Bắt buộc tối thiểu 10 ký tự khi nhập giá trị ghi đè."
++                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
+               >
+                 <input
+                   disabled={readOnly || !(draft.scannedFileNamesOverride ?? "").trim()}
 diff --git a/src/modules/public-intake/repository.ts b/src/modules/public-intake/repository.ts
-index f01db7d..8793c9c 100644
+index 8793c9c..8e82812 100644
 --- a/src/modules/public-intake/repository.ts
 +++ b/src/modules/public-intake/repository.ts
-@@ -1058,12 +1058,15 @@ export class PublicIntakeRepository {
-               appliedFieldPaths: input.aiApplication.appliedFieldPaths.join(","),
-               changeNote: input.changeNote || "",
-               changedFieldPaths: auditSummary.changedFieldPaths.join(","),
-+              changedFieldCount: auditSummary.changedFieldCount,
-+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
-               automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
-             }
-           : {
-               changeNote: input.changeNote || "",
-               changedFieldPaths: auditSummary.changedFieldPaths.join(","),
--              changedFieldCount: auditSummary.changedFieldPaths.length,
-+              changedFieldCount: auditSummary.changedFieldCount,
-+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
-               automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
-             },
-       });
-@@ -1207,7 +1210,8 @@ export class PublicIntakeRepository {
-           officialCaseId: next.officialCaseId,
-           amendmentReason: input.amendmentReason,
-           changedFieldPaths: auditSummary.changedFieldPaths.join(","),
--          changedFieldCount: auditSummary.changedFieldPaths.length,
-+          changedFieldCount: auditSummary.changedFieldCount,
-+          changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
-           automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
-           ownerCount: counts.ownerCount,
-           parcelCount: counts.parcelCount,
-diff --git a/src/modules/public-intake/types.ts b/src/modules/public-intake/types.ts
-index 09e7d77..3d389a5 100644
---- a/src/modules/public-intake/types.ts
-+++ b/src/modules/public-intake/types.ts
-@@ -285,6 +285,45 @@ export function emptyAsset(id: string, parcelId = ""): Asset {
-   };
+@@ -1015,14 +1015,6 @@ export class PublicIntakeRepository {
+       );
+       if (!rows[0]) throw new SubmissionVersionConflictError();
+       const next = mapSubmission(rows[0]);
+-      await transaction`
+-        update public.public_submissions set
+-          ward_admin_code_override = ${input.draft.wardAdministrativeCodeOverride ?? ""},
+-          ward_admin_code_override_reason = ${input.draft.wardAdministrativeCodeOverrideReason ?? ""},
+-          scanned_file_names_override = ${input.draft.scannedFileNamesOverride ?? ""},
+-          scanned_file_names_override_reason = ${input.draft.scannedFileNamesOverrideReason ?? ""}
+-        where submission_id = ${input.record.submissionId}
+-      `;
+ 
+       await transaction`
+         insert into public.public_submission_payload_history
+@@ -1174,14 +1166,6 @@ export class PublicIntakeRepository {
+       );
+       if (!rows[0]) throw new SubmissionVersionConflictError();
+       const next = mapSubmission(rows[0]);
+-      await transaction`
+-        update public.public_submissions set
+-          ward_admin_code_override = ${input.draft.wardAdministrativeCodeOverride ?? ""},
+-          ward_admin_code_override_reason = ${input.draft.wardAdministrativeCodeOverrideReason ?? ""},
+-          scanned_file_names_override = ${input.draft.scannedFileNamesOverride ?? ""},
+-          scanned_file_names_override_reason = ${input.draft.scannedFileNamesOverrideReason ?? ""}
+-        where submission_id = ${input.record.submissionId}
+-      `;
+ 
+       await this.refreshCanonicalProjection(
+           transaction,
+diff --git a/src/modules/public-intake/validation.ts b/src/modules/public-intake/validation.ts
+index 0679691..76a51ed 100644
+--- a/src/modules/public-intake/validation.ts
++++ b/src/modules/public-intake/validation.ts
+@@ -1,3 +1,5 @@
++import { scanForCitizenIdLikeValues } from "@/modules/ai-extraction/pii-safety";
++
+ import {
+   CERTIFICATE_ROLE_CODES,
+   CHANGE_REASON_CODES,
+@@ -256,6 +258,30 @@ export function validateDraftForSave(draft: IntakeDraft): string | null {
+   return null;
  }
  
 +/**
-+ * Dòng tổ chức lưu trước migration 202607290002 giữ tên và mã số tổ chức trong `fullName`/
-+ * `identityNumber`. Bàn biên tập đầy đủ dùng đúng hai ô đó cho **người đại diện** (cột H/K), nên
-+ * dữ liệu cũ phải được chuyển sang `organisationName`/`organisationIdentityNumber` (cột F/G)
-+ * trước lần sửa đầu tiên — bỏ bước này thì cán bộ gõ tên người đại diện vào ô H sẽ ghi đè mất tên
-+ * tổ chức, không có cảnh báo và không khôi phục được.
++ * Ô lý do ghi đè là trường tự do DUY NHẤT của bản làm việc đi thẳng vào `audit_logs.metadata`.
++ * Audit là nơi lưu lâu, đọc rộng và không được chứa định danh cá nhân (quy tắc cứng số 6), nên
++ * mọi ô lý do phải được quét trước khi lưu.
 + *
-+ * Hàm này idempotent: dòng đã có F/G, hoặc dòng cá nhân, đều trả về nguyên trạng.
++ * Dùng chung `scanForCitizenIdLikeValues` với đường AI: một định nghĩa duy nhất cho "trông giống
++ * CCCD" (12 số, cho phép dấu cách/chấm/gạch xen giữa). Fail-closed như bên AI — chuỗi 12 số có
++ * thể là dữ liệu khác, nhưng đổi lại cán bộ chỉ cần viết lại câu lý do, còn PII lọt vào audit thì
++ * không gỡ ra được.
 + */
-+export function migrateLegacyOrganisationOwner(owner: Owner): Owner {
-+  if (!isOrganisationOwner(owner.ownerType)) return owner;
-+  if (owner.organisationName?.trim() || owner.organisationIdentityNumber?.trim()) return owner;
-+  return {
-+    ...owner,
-+    organisationName: owner.fullName,
-+    organisationIdentityNumber: owner.identityNumber,
-+    fullName: "",
-+    identityNumber: "",
-+  };
++export function overrideReasonsWithCitizenIdLike(draft: IntakeDraft): string[] {
++  const labelled: { label: string; reason: string | undefined }[] = [
++    { label: "Lý do ghi đè cột B (mã ĐVHC)", reason: draft.wardAdministrativeCodeOverrideReason },
++    { label: "Lý do ghi đè cột AX (tên file quét)", reason: draft.scannedFileNamesOverrideReason },
++    ...draft.parcels.map((parcel, index) => ({
++      label: `Lý do ghi đè cột V của thửa ${index + 1}`,
++      reason: parcel.cadastralMapSheetOverrideReason,
++    })),
++  ];
++  return labelled
++    .filter(({ reason }) => reason?.trim() && scanForCitizenIdLikeValues(reason).length > 0)
++    .map(({ label }) => label);
 +}
 +
-+/**
-+ * Gỡ `parcelId` của tài sản trỏ tới thửa không còn tồn tại.
-+ *
-+ * `draftSchema` từ chối payload có `asset.parcelId` mồ côi, và lỗi đó tới cán bộ dưới dạng lỗi cấu
-+ * trúc chung không chỉ ra được ô nào — nên xóa thửa mà không gỡ tham chiếu sẽ làm nút Lưu hỏng
-+ * theo cách không giải thích được. Để rỗng thì lưu được, còn `completionChecks` vẫn chặn lúc tiếp
-+ * nhận kèm thông báo đúng chỗ.
-+ */
-+export function detachAssetsFromMissingParcels(
-+  assets: readonly Asset[],
-+  parcels: readonly Parcel[],
-+): Asset[] {
-+  const parcelIds = new Set(parcels.map((parcel) => parcel.id));
-+  return assets.map((asset) =>
-+    asset.parcelId && !parcelIds.has(asset.parcelId) ? { ...asset, parcelId: "" } : asset,
-+  );
-+}
+ /**
+  * Bàn biên tập cán bộ dùng cùng schema payload nhưng phải chặn giới hạn PL3 ngay khi lưu.
+  *
+@@ -269,6 +295,11 @@ export function validateWorkingPayloadForSave(draft: IntakeDraft): string | null
+   if (draft.parcels.some((parcel) => parcel.landUses.length > MAX_LAND_USES_PER_PARCEL)) {
+     return `Mỗi thửa chỉ ghi tối đa ${MAX_LAND_USES_PER_PARCEL} dòng mục đích sử dụng.`;
+   }
 +
- export function emptyDraft(ownerId: string, parcelId: string, landUseId: string): IntakeDraft {
-   return {
-     certificate: { issueNumber: "", issueDate: "", registryNumber: "" },
-diff --git a/src/modules/public-intake/working-payload-audit.ts b/src/modules/public-intake/working-payload-audit.ts
-index efce5a1..953d212 100644
---- a/src/modules/public-intake/working-payload-audit.ts
-+++ b/src/modules/public-intake/working-payload-audit.ts
-@@ -1,7 +1,16 @@
- import type { IntakeDraft } from "./types";
++  const piiReasons = overrideReasonsWithCitizenIdLike(draft);
++  if (piiReasons.length > 0) {
++    return `${piiReasons.join("; ")}: không được chứa số định danh cá nhân/CCCD. Chỉ ghi lý do nghiệp vụ ngắn, ví dụ "Theo bản đồ địa chính đã đối chiếu".`;
++  }
+   return null;
+ }
+ 
+diff --git a/src/modules/submissions/completion-checks.ts b/src/modules/submissions/completion-checks.ts
+index 3aeb37c..691f68f 100644
+--- a/src/modules/submissions/completion-checks.ts
++++ b/src/modules/submissions/completion-checks.ts
+@@ -17,6 +17,7 @@ import {
+   LAND_USE_AREA_TOLERANCE_M2,
+   ORGANISATION_ID_PATTERN,
+   isValidDate,
++  overrideReasonsWithCitizenIdLike,
+ } from "@/modules/public-intake/validation";
+ import {
+   isOrganisationOwner,
+@@ -256,17 +257,29 @@ function checkOwner(owner: Owner, index: number, block: Blocker): void {
+   }
+ }
  
 +/**
-+ * Audit không cần liệt kê hết đường dẫn khi cán bộ sửa cả hồ sơ, nhưng *số lượng* thì phải đúng —
-+ * đó là con số duy nhất cho biết một lần lưu chạm vào bao nhiêu trường.
++ * Tên gọi tài sản cho thông báo lỗi: đủ để cán bộ tìm đúng thẻ tài sản trên màn hình mà không lộ
++ * gì nhạy cảm (loại tài sản là mã danh mục đóng, mô tả do chính cán bộ ghi).
 + */
-+export const MAX_AUDIT_FIELD_PATHS = 250;
++function assetLabel(asset: Asset, index: number): string {
++  const typeLabel = ASSET_TYPE_OPTIONS.find((option) => option.code === asset.assetType)?.label;
++  const description = asset.description.trim();
++  const detail = [typeLabel, description].filter(Boolean).join(" — ");
++  return detail ? `Tài sản ${index + 1} (${detail})` : `Tài sản ${index + 1}`;
++}
 +
- export interface WorkingPayloadAuditSummary {
-   readonly changedFieldPaths: readonly string[];
-+  /** Tổng số trường đã đổi, đếm TRƯỚC khi cắt bớt `changedFieldPaths`. */
-+  readonly changedFieldCount: number;
-+  readonly changedFieldPathsTruncated: boolean;
-   readonly automaticOverrideReasons: readonly {
-     fieldPath: string;
-     reason: string;
-@@ -76,7 +85,9 @@ export function summarizeWorkingPayloadChanges(
+ function checkAssets(payload: IntakeDraft, block: Blocker): void {
+   const parcelIds = new Set(payload.parcels.map((parcel) => parcel.id));
+   const assetTypeCodes = new Set(ASSET_TYPE_OPTIONS.map((option) => option.code));
+   payload.assets.forEach((asset: Asset, index) => {
+     const nth = index + 1;
+     const prefix = `ASSET_${index}`;
++    const name = assetLabel(asset, index);
+     if (!asset.parcelId || !parcelIds.has(asset.parcelId)) {
+       block(
+         `${prefix}_PARCEL_INVALID`,
+-        `Tài sản ${nth} chưa gắn với thửa`,
+-        `Tài sản thứ ${nth} phải được gắn với một thửa đất đang có trong hồ sơ.`,
++        `${name} chưa chọn thửa đất`,
++        `${name} chưa được gắn với thửa nào. Mở bàn làm việc, chọn thửa ở ô "Thửa đất liên quan" của tài sản này rồi lưu lại.`,
+       );
+     }
+     if (!assetTypeCodes.has(asset.assetType)) {
+@@ -295,6 +308,20 @@ function checkAssets(payload: IntakeDraft, block: Blocker): void {
+ }
+ 
+ function checkAutomaticOverrides(payload: IntakeDraft, block: Blocker): void {
++  /*
++   * Gác cổng thứ hai cho quy tắc "ô lý do không chứa CCCD". `validateWorkingPayloadForSave` đã
++   * chặn lúc lưu, nhưng bản ghi lưu TRƯỚC khi có luật này vẫn còn trong kho — và audit của lần
++   * tiếp nhận sẽ chép lại chính chuỗi đó. Chặn ở đây thì cán bộ buộc phải sửa rồi lưu lại, mà
++   * đường lưu đã sạch nên không có thế bí.
++   */
++  for (const label of overrideReasonsWithCitizenIdLike(payload)) {
++    block(
++      "OVERRIDE_REASON_CONTAINS_CITIZEN_ID",
++      `${label} chứa số định danh cá nhân`,
++      `${label} không được chứa CCCD. Sửa thành lý do nghiệp vụ ngắn rồi lưu lại bản làm việc.`,
++    );
++  }
++
+   const check = (value: string | undefined, reason: string | undefined, code: string, label: string) => {
+     if (value?.trim() && (reason?.trim().length ?? 0) < 10) {
+       block(code, label, `${label} phải có lý do ghi đè từ 10 ký tự.`);
+diff --git a/supabase/migrations/202607290003_drop_working_payload_override_columns.sql b/supabase/migrations/202607290003_drop_working_payload_override_columns.sql
+new file mode 100644
+index 0000000..b8c4bfe
+--- /dev/null
++++ b/supabase/migrations/202607290003_drop_working_payload_override_columns.sql
+@@ -0,0 +1,17 @@
++-- `working_payload_json` là nguồn sự thật DUY NHẤT cho mã ĐVHC ghi đè (cột B) và tên file quét
++-- ghi đè (cột AX). Bốn cột dưới đây do 202607290002 thêm vào chỉ từng được GHI, không có đường đọc
++-- nào — giữ lại là duy trì hai nguồn dữ liệu song song có thể lệch nhau.
++--
++-- KHÔNG sửa 202607290002: file đó có thể đã chạy ở môi trường local/preview. Migration này
++-- idempotent (`drop column if exists`) nên đúng trong cả hai trạng thái: môi trường đã áp
++-- 202607290002 thì cột bị gỡ, môi trường chưa áp thì lệnh không làm gì.
++--
++-- An toàn dữ liệu: mọi giá trị từng ghi vào bốn cột này đều được sao chép nguyên vẹn từ
++-- `working_payload_json`/`draft_json` trong cùng transaction, nên không có dữ liệu nào chỉ tồn tại
++-- ở đây. Không cần backfill trước khi gỡ.
++
++alter table public.public_submissions
++  drop column if exists ward_admin_code_override,
++  drop column if exists ward_admin_code_override_reason,
++  drop column if exists scanned_file_names_override,
++  drop column if exists scanned_file_names_override_reason;
+diff --git a/tests/completion-checks.test.ts b/tests/completion-checks.test.ts
+index 0788ba1..73cc1b7 100644
+--- a/tests/completion-checks.test.ts
++++ b/tests/completion-checks.test.ts
+@@ -5,6 +5,7 @@ import {
+ } from "@/modules/submissions/completion-checks";
+ import type { SubmissionRecord } from "@/modules/public-intake/repository";
+ import {
++  emptyAsset,
+   emptyLandUse,
+   emptyOwner,
+   emptyParcel,
+@@ -172,4 +173,42 @@ describe("Completion checks validation rules", () => {
+     const checks = completionChecks(rec, draft);
+     expect(checks.some((c) => c.code === "PARCEL_0_LAND_USES_EXCEEDED")).toBe(true);
    });
- 
-   return {
--    changedFieldPaths: changedFieldPaths.slice(0, 250),
-+    changedFieldPaths: changedFieldPaths.slice(0, MAX_AUDIT_FIELD_PATHS),
-+    changedFieldCount: changedFieldPaths.length,
-+    changedFieldPathsTruncated: changedFieldPaths.length > MAX_AUDIT_FIELD_PATHS,
-     automaticOverrideReasons,
-   };
- }
++
++  it("CC-ASSET: tài sản chưa chọn thửa bị chặn, thông báo chỉ rõ tài sản nào", () => {
++    const rec = makeRecord();
++    const draft = makeDraft({
++      assets: [
++        { ...emptyAsset("a1", "p1"), assetType: "NHA_O" },
++        // Tài sản mồ côi sau khi cán bộ xóa thửa — lưu được, nhưng không tiếp nhận được.
++        { ...emptyAsset("a2", ""), assetType: "CONG_TRINH", description: "Nhà kho sau vườn" },
++      ],
++    });
++
++    const detail = blockingCompletionIssueDetails(completionChecks(rec, draft)).find(
++      (issue) => issue.code === "ASSET_1_PARCEL_INVALID",
++    );
++    expect(detail).toBeDefined();
++    // Phải gọi tên đúng tài sản thứ 2, không phải một câu chung chung.
++    expect(detail?.label).toBe("Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất");
++    expect(detail?.message).toContain("Thửa đất liên quan");
++    // Tài sản đã gắn thửa không bị báo.
++    expect(
++      completionChecks(rec, draft).some((check) => check.code === "ASSET_0_PARCEL_INVALID"),
++    ).toBe(false);
++  });
++
++  it("CC-PII: lý do ghi đè chứa CCCD bị chặn tiếp nhận", () => {
++    const rec = makeRecord();
++    const draft = makeDraft({
++      wardAdministrativeCodeOverride: "07999",
++      wardAdministrativeCodeOverrideReason: "Theo hồ sơ của ông A 012345678901 đã nộp",
++    });
++
++    const detail = blockingCompletionIssueDetails(completionChecks(rec, draft)).find(
++      (issue) => issue.code === "OVERRIDE_REASON_CONTAINS_CITIZEN_ID",
++    );
++    expect(detail).toBeDefined();
++    // Thông báo trả ra màn hình cán bộ không được chép lại chính số CCCD.
++    expect(JSON.stringify(detail)).not.toContain("012345678901");
++  });
+ });
 diff --git a/tests/full-pl3-editor.test.ts b/tests/full-pl3-editor.test.ts
-index e56fb73..125c369 100644
+index 125c369..4704788 100644
 --- a/tests/full-pl3-editor.test.ts
 +++ b/tests/full-pl3-editor.test.ts
-@@ -4,11 +4,17 @@ import path from "node:path";
+@@ -3,7 +3,11 @@ import path from "node:path";
+ 
  import { describe, expect, it } from "vitest";
  
- import { draftSchema, validateWorkingPayloadForSave } from "@/modules/public-intake/validation";
--import { summarizeWorkingPayloadChanges } from "@/modules/public-intake/working-payload-audit";
- import {
-+  MAX_AUDIT_FIELD_PATHS,
-+  summarizeWorkingPayloadChanges,
-+} from "@/modules/public-intake/working-payload-audit";
+-import { draftSchema, validateWorkingPayloadForSave } from "@/modules/public-intake/validation";
 +import {
-+  detachAssetsFromMissingParcels,
-   emptyAsset,
-   emptyDraft,
-   emptyOwner,
-+  emptyParcel,
-+  migrateLegacyOrganisationOwner,
-   type IntakeDraft,
- } from "@/modules/public-intake/types";
- 
-@@ -85,6 +91,64 @@ describe("full PL3 working payload", () => {
-     expect(summary.automaticOverrideReasons).toHaveLength(3);
++  draftSchema,
++  overrideReasonsWithCitizenIdLike,
++  validateWorkingPayloadForSave,
++} from "@/modules/public-intake/validation";
+ import {
+   MAX_AUDIT_FIELD_PATHS,
+   summarizeWorkingPayloadChanges,
+@@ -149,6 +153,46 @@ describe("full PL3 working payload", () => {
+     expect(reconciled.assets[1].parcelId).toBe("");
    });
  
-+  it("changedFieldCount đếm trước khi cắt bớt, kèm cờ truncated", () => {
-+    const previous = fullDraft();
-+    const next = structuredClone(previous);
-+    // Nhiều trường hơn hạn mức audit để buộc nhánh cắt bớt chạy.
-+    next.parcels = Array.from({ length: MAX_AUDIT_FIELD_PATHS + 20 }, (_, index) => ({
-+      ...emptyParcel(`parcel-extra-${index}`, `land-use-extra-${index}`),
-+      parcelNumber: String(index),
-+    }));
-+
-+    const summary = summarizeWorkingPayloadChanges(previous, next);
-+    expect(summary.changedFieldPaths).toHaveLength(MAX_AUDIT_FIELD_PATHS);
-+    expect(summary.changedFieldCount).toBeGreaterThan(MAX_AUDIT_FIELD_PATHS);
-+    expect(summary.changedFieldPathsTruncated).toBe(true);
++  it("từ chối lưu khi ô lý do ghi đè chứa CCCD, ở cả ba ô lý do", () => {
++    for (const mutate of [
++      (draft: IntakeDraft) => {
++        draft.wardAdministrativeCodeOverrideReason = "Đối chiếu hồ sơ CCCD 012345678901 đã nộp";
++      },
++      (draft: IntakeDraft) => {
++        draft.scannedFileNamesOverrideReason = "Theo giấy tờ của 012345678901 tại kho";
++      },
++      (draft: IntakeDraft) => {
++        draft.parcels[0].cadastralMapSheetOverrideReason = "Chủ hộ 012345678901 xác nhận tại chỗ";
++      },
++    ]) {
++      const draft = fullDraft();
++      mutate(draft);
++      const error = validateWorkingPayloadForSave(draft);
++      expect(error).toContain("không được chứa số định danh cá nhân");
++      // Thông báo không được chép lại chính chuỗi PII vào lỗi trả cho client.
++      expect(error).not.toContain("012345678901");
++    }
 +  });
 +
-+  it("dòng tổ chức cũ được di trú F/G trước khi sửa, không mất tên tổ chức", () => {
-+    // Bản ghi lưu trước migration 202607290002: tên tổ chức nằm trong fullName.
-+    const legacy = {
-+      ...emptyOwner("owner-legacy"),
-+      ownerType: "TO_CHUC" as const,
-+      fullName: "Công ty Phong Châu",
-+      identityNumber: "0100109106",
-+    };
++  it("bắt cả CCCD viết có dấu cách/chấm/gạch, nhưng không bắt lý do nghiệp vụ bình thường", () => {
++    const spaced = fullDraft();
++    spaced.wardAdministrativeCodeOverrideReason = "Theo hồ sơ 0123 4567 8901 đã lưu";
++    expect(validateWorkingPayloadForSave(spaced)).toContain("không được chứa");
 +
-+    const migrated = migrateLegacyOrganisationOwner(legacy);
-+    expect(migrated.organisationName).toBe("Công ty Phong Châu");
-+    expect(migrated.organisationIdentityNumber).toBe("0100109106");
-+    // Ô H/K được giải phóng cho người đại diện, tên tổ chức không bị ghi đè.
-+    expect(migrated.fullName).toBe("");
-+    expect(migrated.identityNumber).toBe("");
-+
-+    // Idempotent: chạy lại trên dòng đã di trú không làm mất F/G.
-+    expect(migrateLegacyOrganisationOwner(migrated)).toEqual(migrated);
-+    // Dòng cá nhân không bị đụng tới.
-+    const person = { ...emptyOwner("owner-person"), fullName: "Trần Thị B" };
-+    expect(migrateLegacyOrganisationOwner(person)).toEqual(person);
++    // Lý do hợp lệ có số (số tờ, số thửa, năm) không được báo nhầm.
++    const clean = fullDraft();
++    clean.wardAdministrativeCodeOverrideReason = "Theo bản đồ địa chính tờ 105 lập năm 2024";
++    expect(validateWorkingPayloadForSave(clean)).toBeNull();
 +  });
 +
-+  it("xóa thửa thì gỡ tham chiếu tài sản để payload vẫn lưu được", () => {
++  it("completionChecks chặn tiếp nhận với dữ liệu đã lưu trước khi có luật PII", () => {
 +    const draft = fullDraft();
-+    draft.assets.push({ ...emptyAsset("asset-2", "parcel-2"), assetType: "CONG_TRINH" });
-+    draft.parcels.push(emptyParcel("parcel-2", "land-use-2"));
-+    expect(draftSchema.safeParse(draft).success).toBe(true);
-+
-+    const remaining = draft.parcels.filter((parcel) => parcel.id !== "parcel-2");
-+    const orphaned = { ...draft, parcels: remaining };
-+    expect(draftSchema.safeParse(orphaned).success).toBe(false);
-+
-+    const reconciled = {
-+      ...draft,
-+      parcels: remaining,
-+      assets: detachAssetsFromMissingParcels(draft.assets, remaining),
-+    };
-+    expect(draftSchema.safeParse(reconciled).success).toBe(true);
-+    expect(reconciled.assets[0].parcelId).toBe("parcel-1");
-+    expect(reconciled.assets[1].parcelId).toBe("");
++    draft.scannedFileNamesOverrideReason = "Bàn giao cho ông A 012345678901 ký nhận";
++    expect(overrideReasonsWithCitizenIdLike(draft)).toEqual([
++      "Lý do ghi đè cột AX (tên file quét)",
++    ]);
 +  });
 +
    it("migration bổ sung đầy đủ cột normalized cho owner/parcel/asset và payload chính thức", () => {
      const migration = fs.readFileSync(
        path.join(process.cwd(), "supabase/migrations/202607290002_full_pl3_editor.sql"),
-@@ -126,6 +190,10 @@ describe("full PL3 working payload", () => {
-       "+ Thêm tài sản",
-       "AO — Loại tài sản gắn liền với đất",
-       "AW — Cấp hạng",
-+      // Hai đường dẫn ghi phải đi qua helper thuần, nếu không dòng tổ chức cũ mất tên tổ chức và
-+      // xóa thửa làm hỏng nút Lưu. Không có hạ tầng test React nên chốt bằng nối dây.
-+      "migrateLegacyOrganisationOwner(owners[index])",
-+      "detachAssetsFromMissingParcels(draft.assets, parcels)",
-     ]) {
-       expect(editor).toContain(text);
-     }
-diff --git a/tests/pl3-export.test.ts b/tests/pl3-export.test.ts
-index 5c5fd43..dad31ee 100644
---- a/tests/pl3-export.test.ts
-+++ b/tests/pl3-export.test.ts
-@@ -1,6 +1,7 @@
- import { describe, expect, it } from "vitest";
- 
- import {
-+  ASSET_EMPTY_PLACEHOLDER,
-   buildPl3Content,
-   buildSubmissionRows,
-   formatExportDate,
-@@ -610,6 +611,90 @@ describe("buildSubmissionRows — nổ dòng và ánh xạ nhãn", () => {
-     expect(built.warnings.some((w) => w.includes("đối chiếu"))).toBe(true);
-   });
- 
-+  it("nhiều tài sản cùng thửa: 9 cột AO–AW giữ đúng số phần tử và đúng thứ tự", () => {
-+    const target = parcel({ id: "par_multi" });
-+    // Hai tài sản trùng diện tích xây dựng và trùng ô rỗng — đúng các trường hợp mà bỏ trùng hoặc
-+    // bỏ ô rỗng sẽ làm cột này còn 1 giá trị trong khi cột kia còn 2.
-+    const first = {
-+      ...emptyAsset("asset_a", target.id),
-+      assetType: "NHA_O",
-+      constructionArea: "100",
-+      floorArea: "180",
-+      grade: "Cấp II",
-+    };
-+    const second = {
-+      ...emptyAsset("asset_b", target.id),
-+      assetType: "CONG_TRINH",
-+      constructionArea: "100",
-+      floorArea: "",
-+      grade: "",
-+    };
-+
-+    const built = buildSubmissionRows(
-+      record("ACCEPTED", draft({ parcels: [target], assets: [first, second] })),
-+    );
-+    const [row] = built.rows;
-+
-+    expect(row[COL.assetType]).toBe("Nhà ở; Công trình xây dựng khác");
-+    // Trùng giá trị KHÔNG bị gộp lại thành một phần tử.
-+    expect(row[COL.constructionArea]).toBe("100; 100");
-+    // Ô rỗng giữ chỗ nên vị trí thứ 2 vẫn là của asset_b.
-+    expect(row[COL.floorArea]).toBe(`180; ${ASSET_EMPTY_PLACEHOLDER}`);
-+    expect(row[COL.grade]).toBe(`Cấp II; ${ASSET_EMPTY_PLACEHOLDER}`);
-+
-+    // Bất biến thật sự cần giữ: mọi cột tài sản có cùng số phần tử để ghép lại được.
-+    const assetColumns = [
-+      COL.assetType,
-+      COL.mixedUseBuilding,
-+      COL.apartmentBuilding,
-+      COL.apartmentNumber,
-+      COL.constructionArea,
-+      COL.floorArea,
-+      COL.ownershipForm,
-+      COL.ownershipTerm,
-+      COL.grade,
-+    ].map((index) => row[index].split("; ").length);
-+    expect(new Set(assetColumns)).toEqual(new Set([2]));
-+
-+    expect(built.warnings.some((warning) => warning.includes("2 tài sản"))).toBe(true);
-+  });
-+
-+  it("cảnh báo của một thửa không lặp theo số đồng sở hữu", () => {
-+    const target = parcel({ id: "par_shared" });
-+    const assets = [
-+      { ...emptyAsset("asset_x", target.id), assetType: "NHA_O" },
-+      { ...emptyAsset("asset_y", target.id), assetType: "CONG_TRINH" },
-+    ];
-+    const owners = [
-+      owner({ id: "own_a", fullName: "Nguyễn Văn A" }),
-+      owner({ id: "own_b", fullName: "Trần Thị B" }),
-+      owner({ id: "own_c", fullName: "Lê Văn C" }),
-+    ];
-+
-+    const built = buildSubmissionRows(
-+      record("ACCEPTED", draft({ owners, parcels: [target], assets })),
-+    );
-+    // 3 chủ × 1 thửa = 3 dòng, nhưng cảnh báo về thửa chỉ được nói một lần.
-+    expect(built.rows).toHaveLength(3);
-+    expect(built.warnings.filter((warning) => warning.includes("2 tài sản"))).toHaveLength(1);
-+    expect(new Set(built.warnings).size).toBe(built.warnings.length);
-+  });
-+
-+  it("một tài sản trên thửa: không chèn ký tự giữ chỗ", () => {
-+    const target = parcel({ id: "par_single" });
-+    const [row] = buildSubmissionRows(
-+      record(
-+        "ACCEPTED",
-+        draft({
-+          parcels: [target],
-+          assets: [{ ...emptyAsset("asset_only", target.id), assetType: "NHA_O" }],
-+        }),
-+      ),
-+    ).rows;
-+    expect(row[COL.assetType]).toBe("Nhà ở");
-+    expect(row[COL.floorArea]).toBe("");
-+  });
-+
-   it("thiếu thửa hoặc chủ sử dụng: không sinh dòng, có cảnh báo", () => {
-     expect(buildSubmissionRows(record("ACCEPTED", draft({ parcels: [] }))).rows).toHaveLength(0);
-     expect(buildSubmissionRows(record("ACCEPTED", null)).warnings.length).toBeGreaterThan(0);
 ```
 
 ## 22. Agent declaration
 
 Agent xác nhận:
 
-- Đã đọc `CLAUDE.md`, `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`, `docs/brain/01-architecture.md` và
-  các phần liên quan của `docs/brain/` trước khi sửa code.
-- Không tự mở rộng phạm vi ngoài 6 mục người dùng chấp thuận (5 mục review + 1 mục phát sinh được người dùng đồng ý sửa). Sai lệch duy nhất — tách hai hàm
-  thuần để test được — đã nêu tại §5.
-- Không có thay đổi nào của người dùng để ghi đè (`git status` trống ở baseline). Bản
-  `CHATGPT_HANDOFF.md` cũ đã được lưu sang `docs/handoffs/` trước khi ghi đè.
-- Không đưa secret, dữ liệu cá nhân hay dữ liệu nghiệp vụ thật vào báo cáo.
-- Không commit, không merge, không push, không deploy.
-- Kết quả test/build/lint/typecheck tại §4 và §12 được ghi đúng theo lệnh thực tế đã chạy trong
-  phiên này, kèm output thật.
-- Các nội dung chưa xác minh được đánh dấu rõ: E2E `NOT_RUN`, security-review `NOT_RUN` (không có
-  script), AC-10 `NOT_TESTED`, và giới hạn của assertion nối dây nêu tại §11.
+- Đã đọc `CLAUDE.md`, `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md` và các phần liên quan của
+  `docs/brain/` trước khi sửa code.
+- Không tự mở rộng phạm vi ngoài 4 quyết định người dùng chốt. Một lựa chọn vượt quá câu chữ yêu cầu
+  (chặn PII ở hai cửa thay vì một) đã nêu rõ và giải thích tại §5 và §8 Phase 1.
+- Không có thay đổi nào của người dùng để ghi đè (`git status` trống ở baseline).
+- **Không chạm database thật.** Không tạo, sửa, xóa bản ghi nào; không áp migration lên môi trường nào.
+- Trang harness kiểm tra giao diện và file test tạm đã bị xóa; `.claude/launch.json` đã khôi phục;
+  đã kiểm `git status` để chắc không có file rác trong commit.
+- Không đưa secret, dữ liệu cá nhân hay dữ liệu nghiệp vụ thật vào báo cáo. Chuỗi `012345678901` xuất
+  hiện trong báo cáo là **số dựng để test**, không phải CCCD của ai.
+- Không tự merge, không tự deploy.
+- Kết quả test/build/lint/typecheck tại §4 và §12 ghi đúng theo lệnh thực tế đã chạy, gồm cả lần
+  build FAIL và cách xử lý.
+- Các nội dung chưa xác minh được đánh dấu rõ: E2E `NOT_RUN`, security-review `NOT_RUN`, AC-28
+  (preflight) chưa chạy thật, và giới hạn của kiểm tra giao diện nêu ở cuối §14.

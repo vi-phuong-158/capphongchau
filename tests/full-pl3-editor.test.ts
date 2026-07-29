@@ -3,7 +3,11 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { draftSchema, validateWorkingPayloadForSave } from "@/modules/public-intake/validation";
+import {
+  draftSchema,
+  overrideReasonsWithCitizenIdLike,
+  validateWorkingPayloadForSave,
+} from "@/modules/public-intake/validation";
 import {
   MAX_AUDIT_FIELD_PATHS,
   summarizeWorkingPayloadChanges,
@@ -147,6 +151,46 @@ describe("full PL3 working payload", () => {
     expect(draftSchema.safeParse(reconciled).success).toBe(true);
     expect(reconciled.assets[0].parcelId).toBe("parcel-1");
     expect(reconciled.assets[1].parcelId).toBe("");
+  });
+
+  it("từ chối lưu khi ô lý do ghi đè chứa CCCD, ở cả ba ô lý do", () => {
+    for (const mutate of [
+      (draft: IntakeDraft) => {
+        draft.wardAdministrativeCodeOverrideReason = "Đối chiếu hồ sơ CCCD 012345678901 đã nộp";
+      },
+      (draft: IntakeDraft) => {
+        draft.scannedFileNamesOverrideReason = "Theo giấy tờ của 012345678901 tại kho";
+      },
+      (draft: IntakeDraft) => {
+        draft.parcels[0].cadastralMapSheetOverrideReason = "Chủ hộ 012345678901 xác nhận tại chỗ";
+      },
+    ]) {
+      const draft = fullDraft();
+      mutate(draft);
+      const error = validateWorkingPayloadForSave(draft);
+      expect(error).toContain("không được chứa số định danh cá nhân");
+      // Thông báo không được chép lại chính chuỗi PII vào lỗi trả cho client.
+      expect(error).not.toContain("012345678901");
+    }
+  });
+
+  it("bắt cả CCCD viết có dấu cách/chấm/gạch, nhưng không bắt lý do nghiệp vụ bình thường", () => {
+    const spaced = fullDraft();
+    spaced.wardAdministrativeCodeOverrideReason = "Theo hồ sơ 0123 4567 8901 đã lưu";
+    expect(validateWorkingPayloadForSave(spaced)).toContain("không được chứa");
+
+    // Lý do hợp lệ có số (số tờ, số thửa, năm) không được báo nhầm.
+    const clean = fullDraft();
+    clean.wardAdministrativeCodeOverrideReason = "Theo bản đồ địa chính tờ 105 lập năm 2024";
+    expect(validateWorkingPayloadForSave(clean)).toBeNull();
+  });
+
+  it("completionChecks chặn tiếp nhận với dữ liệu đã lưu trước khi có luật PII", () => {
+    const draft = fullDraft();
+    draft.scannedFileNamesOverrideReason = "Bàn giao cho ông A 012345678901 ký nhận";
+    expect(overrideReasonsWithCitizenIdLike(draft)).toEqual([
+      "Lý do ghi đè cột AX (tên file quét)",
+    ]);
   });
 
   it("migration bổ sung đầy đủ cột normalized cho owner/parcel/asset và payload chính thức", () => {

@@ -181,7 +181,7 @@ export function WorkingPayloadEditor({
             <div className="mt-3">
               <Field
                 label="Lý do ghi đè cột B"
-                hint="Bắt buộc tối thiểu 10 ký tự khi nhập giá trị ghi đè."
+                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
               >
                 <input
                   disabled={readOnly || !(draft.wardAdministrativeCodeOverride ?? "").trim()}
@@ -215,7 +215,7 @@ export function WorkingPayloadEditor({
             <div className="mt-3">
               <Field
                 label="Lý do ghi đè cột AX"
-                hint="Bắt buộc tối thiểu 10 ký tự khi nhập giá trị ghi đè."
+                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
               >
                 <input
                   disabled={readOnly || !(draft.scannedFileNamesOverride ?? "").trim()}

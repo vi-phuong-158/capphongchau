@@ -1,3 +1,5 @@
+import { scanForCitizenIdLikeValues } from "@/modules/ai-extraction/pii-safety";
+
 import {
   CERTIFICATE_ROLE_CODES,
   CHANGE_REASON_CODES,
@@ -257,6 +259,30 @@ export function validateDraftForSave(draft: IntakeDraft): string | null {
 }
 
 /**
+ * Ô lý do ghi đè là trường tự do DUY NHẤT của bản làm việc đi thẳng vào `audit_logs.metadata`.
+ * Audit là nơi lưu lâu, đọc rộng và không được chứa định danh cá nhân (quy tắc cứng số 6), nên
+ * mọi ô lý do phải được quét trước khi lưu.
+ *
+ * Dùng chung `scanForCitizenIdLikeValues` với đường AI: một định nghĩa duy nhất cho "trông giống
+ * CCCD" (12 số, cho phép dấu cách/chấm/gạch xen giữa). Fail-closed như bên AI — chuỗi 12 số có
+ * thể là dữ liệu khác, nhưng đổi lại cán bộ chỉ cần viết lại câu lý do, còn PII lọt vào audit thì
+ * không gỡ ra được.
+ */
+export function overrideReasonsWithCitizenIdLike(draft: IntakeDraft): string[] {
+  const labelled: { label: string; reason: string | undefined }[] = [
+    { label: "Lý do ghi đè cột B (mã ĐVHC)", reason: draft.wardAdministrativeCodeOverrideReason },
+    { label: "Lý do ghi đè cột AX (tên file quét)", reason: draft.scannedFileNamesOverrideReason },
+    ...draft.parcels.map((parcel, index) => ({
+      label: `Lý do ghi đè cột V của thửa ${index + 1}`,
+      reason: parcel.cadastralMapSheetOverrideReason,
+    })),
+  ];
+  return labelled
+    .filter(({ reason }) => reason?.trim() && scanForCitizenIdLikeValues(reason).length > 0)
+    .map(({ label }) => label);
+}
+
+/**
  * Bàn biên tập cán bộ dùng cùng schema payload nhưng phải chặn giới hạn PL3 ngay khi lưu.
  *
  * Giữ quy tắc này ngoài `draftSchema`: các luồng gửi hồ sơ công khai cần trả mã lỗi/ngữ cảnh
@@ -268,6 +294,11 @@ export function validateWorkingPayloadForSave(draft: IntakeDraft): string | null
 
   if (draft.parcels.some((parcel) => parcel.landUses.length > MAX_LAND_USES_PER_PARCEL)) {
     return `Mỗi thửa chỉ ghi tối đa ${MAX_LAND_USES_PER_PARCEL} dòng mục đích sử dụng.`;
+  }
+
+  const piiReasons = overrideReasonsWithCitizenIdLike(draft);
+  if (piiReasons.length > 0) {
+    return `${piiReasons.join("; ")}: không được chứa số định danh cá nhân/CCCD. Chỉ ghi lý do nghiệp vụ ngắn, ví dụ "Theo bản đồ địa chính đã đối chiếu".`;
   }
   return null;
 }

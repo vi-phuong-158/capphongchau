@@ -1015,14 +1015,6 @@ export class PublicIntakeRepository {
       );
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
-      await transaction`
-        update public.public_submissions set
-          ward_admin_code_override = ${input.draft.wardAdministrativeCodeOverride ?? ""},
-          ward_admin_code_override_reason = ${input.draft.wardAdministrativeCodeOverrideReason ?? ""},
-          scanned_file_names_override = ${input.draft.scannedFileNamesOverride ?? ""},
-          scanned_file_names_override_reason = ${input.draft.scannedFileNamesOverrideReason ?? ""}
-        where submission_id = ${input.record.submissionId}
-      `;
 
       await transaction`
         insert into public.public_submission_payload_history
@@ -1174,14 +1166,6 @@ export class PublicIntakeRepository {
       );
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
-      await transaction`
-        update public.public_submissions set
-          ward_admin_code_override = ${input.draft.wardAdministrativeCodeOverride ?? ""},
-          ward_admin_code_override_reason = ${input.draft.wardAdministrativeCodeOverrideReason ?? ""},
-          scanned_file_names_override = ${input.draft.scannedFileNamesOverride ?? ""},
-          scanned_file_names_override_reason = ${input.draft.scannedFileNamesOverrideReason ?? ""}
-        where submission_id = ${input.record.submissionId}
-      `;
 
       await this.refreshCanonicalProjection(
           transaction,

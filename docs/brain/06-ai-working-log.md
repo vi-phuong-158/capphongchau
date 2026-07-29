@@ -2431,3 +2431,37 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** `npm test` 637 pass/10 skip (baseline 631, +6 test hồi quy mới);
   `npm run typecheck` đạt; `npm run build` đạt; `npm run lint` **0 error**/5 warning có sẵn
   (baseline: OOM crash); `git diff --check` đạt.
+
+## [2026-07-29] Chốt 4 quyết định nghiệp vụ còn treo của PR #7
+
+- **Agent:** Claude Code
+- **Nguồn:** người dùng chốt trực tiếp 4 quyết định vốn được ghi là "CHƯA quyết" ở lần trước.
+- **Thay đổi:**
+  1. **PII trong ô lý do ghi đè** — thêm `overrideReasonsWithCitizenIdLike()` (`validation.ts`)
+     dùng lại `scanForCitizenIdLikeValues` của đường AI, để chỉ có MỘT định nghĩa "giống CCCD".
+     Chặn ở hai cửa: `validateWorkingPayloadForSave` lúc lưu và `checkAutomaticOverrides` lúc tiếp
+     nhận (cửa 2 dành cho bản ghi lưu trước khi có luật — audit lần tiếp nhận sẽ chép lại chuỗi đó).
+     Thông báo lỗi nêu tên ô, KHÔNG chép lại số CCCD. Hint trên 3 ô lý do hướng dẫn ghi lý do ngắn.
+  2. **Tài sản chưa gắn thửa** — hành vi "lưu được, chặn khi tiếp nhận" vốn đã đúng; bổ sung
+     `assetLabel()` để thông báo gọi tên đúng tài sản ("Tài sản 2 (Công trình xây dựng khác — Nhà
+     kho sau vườn) chưa chọn thửa đất") và chỉ ra ô cần sửa, thay cho "Tài sản thứ N" chung chung.
+  3. **Một nguồn sự thật** — gỡ hai khối `update public.public_submissions set ward_admin_code_
+     override…` khỏi `repository.ts`; thêm migration `202607290003` `drop column if exists` cho 4
+     cột. KHÔNG sửa `202607290002` (có thể đã chạy ở local/preview). Preflight bỏ 4 cột khỏi danh
+     sách bắt buộc và thêm kiểm tra ngược: 4 cột đó phải KHÔNG còn tồn tại.
+  4. **Người đại diện tổ chức** — giữ nguyên hành vi, không sửa code; viết release note
+     `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7 (6 mục, gồm cả thay đổi file PL3 xuất ra
+     và thứ tự áp migration).
+- **File đã sửa:** `src/modules/public-intake/{validation,repository}.ts`,
+  `src/modules/submissions/completion-checks.ts`,
+  `src/components/admin/{working-payload-editor,editable-parcel-table}.tsx`,
+  `scripts/preflight-public-intake-v2-migrations.ts`,
+  `supabase/migrations/202607290003_drop_working_payload_override_columns.sql` (mới),
+  `tests/{full-pl3-editor,completion-checks}.test.ts`,
+  `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md`, `docs/brain/{01,03,06}`.
+- **Kiểm tra tự động:** `npm test` 642 pass/10 skip; `npm run typecheck` đạt; `npm run build` đạt;
+  `npm run lint` 0 error/5 warning có sẵn; `git diff --check` đạt.
+- **Kiểm tra giao diện (lấp khoảng trống AC-10):** dựng trang harness TẠM render đúng
+  `WorkingPayloadEditor` thật, thao tác bằng chuột/bàn phím qua trình duyệt, KHÔNG chạm database
+  (`SUPABASE_DATABASE_URL` trỏ dữ liệu thật — không tạo hồ sơ giả trong đó). Harness đã xóa sau khi
+  đo, không nằm trong commit. Kết quả: 4/4 tình huống PASS, chi tiết ở `CHATGPT_HANDOFF.md` §14.

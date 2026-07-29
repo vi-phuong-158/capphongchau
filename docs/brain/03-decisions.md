@@ -1586,13 +1586,39 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
   Lint gate coi như không tồn tại trong suốt thời gian đó.
 - **Đánh đổi:** Không có. `.claude/` đã nằm trong `.gitignore`, không phải mã nguồn của dự án.
 
-## [2026-07-29] CHƯA quyết: lý do ghi đè là free text và đi vào audit metadata
+## [2026-07-29] Ô lý do ghi đè KHÔNG được chứa CCCD — fail-closed ở cả hai cửa
 
-- **Hiện trạng:** `summarizeWorkingPayloadChanges()` đóng gói `reason` do cán bộ tự gõ vào
-  `automaticOverrideReasons` rồi `JSON.stringify` vào `audit_logs.metadata`. Docstring của module
-  khẳng định audit không chứa PII vì chỉ ghi đường dẫn trường — điều đó đúng với `changedFieldPaths`
-  nhưng **không đúng với ô lý do**, vốn có thể chứa họ tên hoặc CCCD.
-- **Va chạm:** Quy tắc cứng số 6 trong `CLAUDE.md` (không ghi PII vào log).
-- **Cần chốt một trong hai:** (a) quét `reason` bằng `CITIZEN_ID_PATTERN` và từ chối fail-closed như
-  đường AI extraction đang làm; hoặc (b) chấp nhận đây là kênh PII có kiểm soát, ghi rõ ở đây và sửa
-  docstring cho khỏi sai. Không được để nguyên trạng thái "tài liệu nói một đằng, code làm một nẻo".
+- **Quyết định:** ba ô lý do ghi đè (cột B, cột V mỗi thửa, cột AX) bị từ chối lưu nếu chứa chuỗi
+  giống số định danh cá nhân. Dùng chung `scanForCitizenIdLikeValues` với đường AI extraction —
+  **một** định nghĩa duy nhất cho "trông giống CCCD" (12 số, cho phép dấu cách/chấm/gạch xen giữa).
+- **Vì sao hai cửa:** `validateWorkingPayloadForSave` chặn lúc lưu; `completionChecks` chặn lúc tiếp
+  nhận. Cửa thứ hai không thừa — bản ghi lưu TRƯỚC khi có luật này vẫn nằm trong kho, và audit của
+  lần tiếp nhận sẽ chép lại chính chuỗi đó. Không có thế bí: đường lưu đã sạch nên cán bộ sửa được.
+- **Đánh đổi:** fail-closed như bên AI. Một chuỗi 12 số hợp lệ về nghiệp vụ (nếu có) sẽ bị từ chối
+  oan; đổi lại cán bộ chỉ cần viết lại câu lý do, còn PII lọt vào `audit_logs` thì không gỡ ra được.
+  Đã kiểm: lý do có số bình thường (số tờ, số thửa, năm) KHÔNG bị báo nhầm.
+- **Thông báo lỗi không chép lại chuỗi PII** — chỉ nêu tên ô. Có test khóa điều này.
+
+## [2026-07-29] `working_payload_json` là nguồn sự thật DUY NHẤT cho ghi đè cột B và AX
+
+- **Quyết định:** gỡ bốn cột `ward_admin_code_override*` / `scanned_file_names_override*` trên
+  `public_submissions`. `repository.ts` không ghi chúng nữa.
+- **Lý do:** bốn cột đó chỉ từng được GHI, không có đường đọc nào — `pl3-export` luôn lấy giá trị từ
+  payload JSON. Giữ lại là duy trì hai nguồn có thể lệch nhau, và bất kỳ ai sau này đọc nhầm cột sẽ
+  thấy dữ liệu cũ.
+- **Cách xử lý migration:** KHÔNG sửa `202607290002` vì file đó có thể đã chạy ở local/preview. Thêm
+  `202607290003_drop_working_payload_override_columns.sql` dùng `drop column if exists` — idempotent,
+  đúng trong cả hai trạng thái môi trường. Preflight kiểm **cả hai chiều**: cột PL3 phải có, cột ghi
+  đè song song phải không còn.
+- **An toàn dữ liệu:** mọi giá trị từng ghi vào bốn cột đều được sao chép từ payload trong cùng
+  transaction, nên không có dữ liệu nào chỉ tồn tại ở đó. Không cần backfill trước khi gỡ.
+
+## [2026-07-29] GIỮ yêu cầu người đại diện tổ chức đủ họ tên, ngày sinh, giới tính, địa chỉ
+
+- **Quyết định:** giữ nguyên hành vi PR #7 (bỏ `return` sớm ở nhánh tổ chức trong `checkOwner`).
+  Dòng tổ chức phải có đủ F/G (tổ chức) **và** H/I/J/L (người đại diện) trước khi tiếp nhận.
+- **Lý do:** PL3 có các cột đó và mô hình mới tách đúng tổ chức khỏi người đại diện. Nới ra là mở
+  đường cho hồ sơ tổ chức thiếu người đại diện đi vào dữ liệu chính thức.
+- **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
+  thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
+  `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.

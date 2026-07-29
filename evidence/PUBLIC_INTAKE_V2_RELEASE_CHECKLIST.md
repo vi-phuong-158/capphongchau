@@ -80,3 +80,81 @@ với `ASSISTED_INTAKE_ROLES`. Cờ client không bao giờ là hàng rào bảo
   một cửa).
 - 5 phát hiện MEDIUM ở `PUBLIC_INTAKE_V2_DIFF_REVIEW.md`, đáng chú ý nhất là M-01 (phản hồi 308
   tiêu một lượt thử lại) — cần dữ liệu Phase 5 rồi mới chỉnh có căn cứ.
+
+---
+
+## 7. Release note — Bàn biên tập PL3 đầy đủ (PR #7, 2026-07-29)
+
+### 7.1. THAY ĐỔI HÀNH VI — điều kiện tiếp nhận hồ sơ TỔ CHỨC chặt hơn
+
+**Phải phổ biến cho cán bộ trước khi bật.** Trước đây `checkOwner` thoát sớm ở nhánh tổ chức, nên
+một dòng chủ sử dụng là tổ chức chỉ cần mã số thuế và địa chỉ trụ sở là qua được cửa tiếp nhận.
+
+Từ PR #7, mô hình dữ liệu tách đúng theo PL3: cột **F/G là tổ chức**, cột **H–L là người đại diện
+theo pháp luật**. Vì vậy một dòng tổ chức nay **bắt buộc** phải có đủ:
+
+| Cột | Trường | Ghi chú |
+|---|---|---|
+| F | Tên tổ chức | Mới — trước đây nằm chung ô họ tên |
+| G | Số định danh tổ chức | Mã số thuế 10 số (hoặc kèm 3 số đơn vị trực thuộc) |
+| H | Họ tên người đại diện | **Mới bắt buộc** |
+| I | Ngày sinh người đại diện | **Mới bắt buộc** |
+| J | Giới tính người đại diện | **Mới bắt buộc** |
+| L | Địa chỉ thường trú | Trước là địa chỉ trụ sở, nay là của người đại diện |
+
+**Tác động:** mọi hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn cho tới khi cán bộ bổ sung thông tin
+người đại diện. Đây là **chủ ý**, không phải lỗi — PL3 đòi các cột này.
+
+**Việc cần làm trước khi bật:** rà danh sách hồ sơ tổ chức đang ở trạng thái chờ, báo trước cho cán
+bộ để chuẩn bị thông tin người đại diện.
+
+### 7.2. Bản ghi tổ chức cũ tự di trú khi sửa
+
+Dòng tổ chức lưu **trước** migration `202607290002` giữ tên tổ chức ở ô họ tên. Khi cán bộ mở bàn
+làm việc và sửa bất kỳ trường nào của dòng đó, hệ thống tự chuyển tên/mã số tổ chức sang cột F/G và
+giải phóng ô H/K cho người đại diện. Cán bộ **không cần thao tác gì thêm**, chỉ cần điền tiếp.
+
+Ngoại lệ có chủ ý: đổi cột M từ tổ chức sang cá nhân thì **không** di trú — hệ thống hiểu cán bộ
+đang khẳng định ô họ tên vốn là tên người thật.
+
+### 7.3. Ô lý do ghi đè không được chứa CCCD
+
+Ba ô lý do ghi đè (cột B, cột V của từng thửa, cột AX) đi thẳng vào nhật ký audit, nên hệ thống
+**từ chối lưu** nếu phát hiện chuỗi 12 số giống số định danh cá nhân (kể cả khi viết cách nhau bằng
+dấu cách, chấm hoặc gạch). Cán bộ chỉ ghi lý do nghiệp vụ ngắn, ví dụ
+*"Theo bản đồ địa chính đã đối chiếu"*.
+
+Hồ sơ đã lưu trước khi có luật này cũng bị chặn ở bước tiếp nhận, kèm thông báo chỉ rõ ô nào.
+
+### 7.4. Tài sản chưa gắn thửa: lưu được, không tiếp nhận được
+
+Xóa một thửa đang có tài sản gắn vào thì tài sản tự về trạng thái chưa chọn thửa và **vẫn lưu được**
+bản làm việc. Bước **tiếp nhận chính thức** sẽ chặn, kèm thông báo gọi đúng tên tài sản, ví dụ
+*"Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất"*.
+
+### 7.5. File PL3 xuất ra thay đổi khi một thửa có nhiều tài sản
+
+PL3 chỉ có **một** bộ 9 cột AO–AW cho mỗi thửa. Thửa có nhiều tài sản được gộp bằng `"; "` theo
+đúng thứ tự tài sản ở cả 9 cột; ô trống ghi ký tự giữ chỗ `-` để các cột không lệch nhau.
+
+```
+AO = Nhà ở; Công trình xây dựng khác
+AS = 100; 100          <- KHÔNG gộp trùng thành một giá trị
+AT = 180; -            <- tài sản thứ hai không có diện tích sàn
+```
+
+Sheet **"Canh bao"** có một dòng nhắc mỗi thửa như vậy. Hồ sơ có 0 hoặc 1 tài sản trên mỗi thửa
+(trường hợp áp đảo) xuất ra **giống hệt** trước đây.
+
+### 7.6. Migration phải áp theo thứ tự
+
+| Migration | Nội dung | Bắt buộc |
+|---|---|---|
+| `202607290002_full_pl3_editor.sql` | Thêm cột PL3 cho owner/parcel/asset + projection chính thức | Áp trước khi deploy code |
+| `202607290003_drop_working_payload_override_columns.sql` | Gỡ 4 cột ghi đè song song trên `public_submissions` | Áp cùng đợt; idempotent, chạy được dù `202607290002` đã áp hay chưa |
+
+Sau khi áp, chạy `npm run preflight:public-intake-v2` — script kiểm cả hai chiều: cột PL3 phải
+**có**, và 4 cột ghi đè song song phải **không còn**.
+
+`working_payload_json` là nguồn sự thật **duy nhất** cho mã ĐVHC ghi đè và tên file quét ghi đè.
+Không khôi phục lại 4 cột đó dưới bất kỳ hình thức nào.

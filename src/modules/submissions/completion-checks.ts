@@ -17,6 +17,7 @@ import {
   LAND_USE_AREA_TOLERANCE_M2,
   ORGANISATION_ID_PATTERN,
   isValidDate,
+  overrideReasonsWithCitizenIdLike,
 } from "@/modules/public-intake/validation";
 import {
   isOrganisationOwner,
@@ -256,17 +257,29 @@ function checkOwner(owner: Owner, index: number, block: Blocker): void {
   }
 }
 
+/**
+ * Tên gọi tài sản cho thông báo lỗi: đủ để cán bộ tìm đúng thẻ tài sản trên màn hình mà không lộ
+ * gì nhạy cảm (loại tài sản là mã danh mục đóng, mô tả do chính cán bộ ghi).
+ */
+function assetLabel(asset: Asset, index: number): string {
+  const typeLabel = ASSET_TYPE_OPTIONS.find((option) => option.code === asset.assetType)?.label;
+  const description = asset.description.trim();
+  const detail = [typeLabel, description].filter(Boolean).join(" — ");
+  return detail ? `Tài sản ${index + 1} (${detail})` : `Tài sản ${index + 1}`;
+}
+
 function checkAssets(payload: IntakeDraft, block: Blocker): void {
   const parcelIds = new Set(payload.parcels.map((parcel) => parcel.id));
   const assetTypeCodes = new Set(ASSET_TYPE_OPTIONS.map((option) => option.code));
   payload.assets.forEach((asset: Asset, index) => {
     const nth = index + 1;
     const prefix = `ASSET_${index}`;
+    const name = assetLabel(asset, index);
     if (!asset.parcelId || !parcelIds.has(asset.parcelId)) {
       block(
         `${prefix}_PARCEL_INVALID`,
-        `Tài sản ${nth} chưa gắn với thửa`,
-        `Tài sản thứ ${nth} phải được gắn với một thửa đất đang có trong hồ sơ.`,
+        `${name} chưa chọn thửa đất`,
+        `${name} chưa được gắn với thửa nào. Mở bàn làm việc, chọn thửa ở ô "Thửa đất liên quan" của tài sản này rồi lưu lại.`,
       );
     }
     if (!assetTypeCodes.has(asset.assetType)) {
@@ -295,6 +308,20 @@ function checkAssets(payload: IntakeDraft, block: Blocker): void {
 }
 
 function checkAutomaticOverrides(payload: IntakeDraft, block: Blocker): void {
+  /*
+   * Gác cổng thứ hai cho quy tắc "ô lý do không chứa CCCD". `validateWorkingPayloadForSave` đã
+   * chặn lúc lưu, nhưng bản ghi lưu TRƯỚC khi có luật này vẫn còn trong kho — và audit của lần
+   * tiếp nhận sẽ chép lại chính chuỗi đó. Chặn ở đây thì cán bộ buộc phải sửa rồi lưu lại, mà
+   * đường lưu đã sạch nên không có thế bí.
+   */
+  for (const label of overrideReasonsWithCitizenIdLike(payload)) {
+    block(
+      "OVERRIDE_REASON_CONTAINS_CITIZEN_ID",
+      `${label} chứa số định danh cá nhân`,
+      `${label} không được chứa CCCD. Sửa thành lý do nghiệp vụ ngắn rồi lưu lại bản làm việc.`,
+    );
+  }
+
   const check = (value: string | undefined, reason: string | undefined, code: string, label: string) => {
     if (value?.trim() && (reason?.trim().length ?? 0) < 10) {
       block(code, label, `${label} phải có lý do ghi đè từ 10 ký tự.`);
