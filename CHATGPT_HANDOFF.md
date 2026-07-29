@@ -46,6 +46,55 @@
 
 Rollback: set Preview `SUPABASE_POOL_MAX=1` and redeploy; revert the region config only if Vercel rejects it or benchmark evidence requires it. No migration or data rollback exists. Do not increase Production pool or call Phase 4 PASS without the documented Preview evidence.
 
+## PR #9 follow-up — staff performance benchmark correctness and rehearsal guard (2026-07-29)
+
+### Scope, baseline and commits
+
+- Repository/worktree: `D:\04. Github\capphongchau-acceptance-visibility`; branch: `codex/phase5-acceptance-batching` (PR #9). No merge or Vercel/Supabase mutation was performed.
+- Baseline before change: clean worktree at `6bfd91bf609bfdf433a6e1268f5ae106ea528bc2`; focused regression suite: 5 files, 13 tests PASS.
+- Code and documentation commit: `bff34b9` — `fix(perf): harden staff benchmark`. This handoff update is committed separately after the report is recorded.
+- In scope: repair the local benchmark runner and its pure contracts/tests; update required source-of-truth documentation. Out of scope: runtime API/auth/role/schema/migration changes, data seed/reset, deployment and Production.
+
+### Fixed findings and changed symbols
+
+| Finding | Fix | Files / symbols |
+| --- | --- | --- |
+| Queue search measured an ignored `query` parameter | Request builder now uses the route contract `q`, with encoding regression coverage. | `buildStaffBenchmarkRequests` in `src/modules/performance/staff-preview-benchmark.ts` |
+| Detail benchmark missed the real SSR page | Split `detail_page` (`/submissions/:id`) from `detail_api` (`/api/submissions/:id`) diagnostic timing; preview remains separate. | `StaffBenchmarkRoute`, `buildStaffBenchmarkRequests`, runner |
+| “Preview-only” could target Production and understated audit writes | Guard requires HTTPS root Vercel Preview origin, exact expected host and `REHEARSAL_ONLY`, rejecting the production alias, credentials, port, path, query and hash before cookie read/send. Docs state that successful detail page/API/preview reads retain append-only audit. | `validateStaffBenchmarkTarget`, runner comments, AGENTS/brain/evidence |
+
+Relevant diff behavior:
+
+```diff
+- /api/submissions?query=<synthetic>
++ /api/submissions?q=<synthetic>
+- detail: /api/submissions/:submissionId
++ detail_page: /submissions/:submissionId
++ detail_api:  /api/submissions/:submissionId
++ validate target before PERF_BENCHMARK_COOKIE is read
+```
+
+### Verification and acceptance
+
+| Check | Result |
+| --- | --- |
+| Focused baseline before change | PASS — 5 files, 13 tests |
+| Focused final suite | PASS — 5 files, 15 tests |
+| Full test suite | PASS — 78 files, 680 tests; 2 files / 11 tests skipped |
+| `npm.cmd run typecheck` | PASS |
+| `npm.cmd run lint -- --quiet` | PASS |
+| `npm.cmd run build -- --webpack` | PASS — 23/23 static pages |
+| `git diff --check` | PASS before commit |
+| Authenticated Preview rehearsal benchmark | NOT_TESTED — no approved rehearsal staff cookie/IDs were supplied; no request was made |
+
+Acceptance met in code: filtered queue routes reach the intended `q` contract; actual SSR detail and API diagnostic metrics are distinguishable; target validation fails closed before cookie access; the product audit contract is preserved and documented. No new environment variable is read by runtime code: the `PERF_BENCHMARK_*` values are one-shot local runner inputs only.
+
+### Risks and required next action
+
+- Do not run against Production. Set a synthetic/rehearsal Preview root origin, matching `PERF_BENCHMARK_EXPECTED_HOST` and literal `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`.
+- A complete 10 warm-up + 40 measured run can add up to 150 audit rows across successful SSR detail, API detail and preview requests. Prepare the authorized rehearsal audit cleanup/reset before the run.
+- Phase 4 is still BLOCKED until an authenticated rehearsal run produces P50/P95, error rate, Server-Timing and connection-quota evidence for pool 1/2/3. No Production conclusion may be inferred.
+
 ## Phase 2 performance report — detail server-prime/lazy preview (2026-07-29)
 
 ### Report metadata
