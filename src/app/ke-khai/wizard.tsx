@@ -28,7 +28,7 @@ import {
 } from "@/modules/public-intake/reference";
 import {
   PUBLIC_WIZARD_STEPS,
-  STEP_CONTACT_AND_IDENTITY,
+  STEP_CERTIFICATE_UPLOAD,
   optionalSummary,
   ownerNeedsIdentityPhotos,
   submitChecklist,
@@ -88,6 +88,7 @@ import {
   MAX_PURPOSE_FREE_TEXT_LENGTH,
   normalizeLandPurposeFreeText,
 } from "@/modules/public-intake/validation";
+import { isValidCertificateLookupInput } from "@/modules/public-intake/certificate-normalization";
 
 /**
  * Public Intake V2 — bốn bước thay cho bảy.
@@ -131,6 +132,17 @@ type ExistingLookupResult = {
     issueNumberMasked: string;
     issueDate: string;
   }>;
+};
+type CertificateDuplicateResult = {
+  found: boolean;
+  status: "IN_PROCESSING" | "OFFICIALLY_RECEIVED" | null;
+  guidance: string;
+};
+type CertificateDuplicateState = {
+  issueNumber: string;
+  issueDate: string;
+  checking: boolean;
+  result: CertificateDuplicateResult | null;
 };
 
 const SAVE_STATUS_LABELS: Record<SaveStatus, string> = {
@@ -531,8 +543,13 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const [draft, setDraft] = useState<IntakeDraft>(() => emptyDraft(newId(), newId(), newId()));
   const [errors, setErrors] = useState<Errors>({});
 
-  const [certificateCount, setCertificateCount] = useState("");
-  const [hasCertificate, setHasCertificate] = useState("");
+  // Không còn ô chọn trên màn hình: cổng công khai hiện chỉ phục vụ đúng trường hợp đã có một Giấy
+  // chứng nhận, nên hai giá trị này cố định thay vì để trống chờ người dân chọn. Không phải state
+  // vì không còn gì làm chúng đổi giá trị nữa. Vẫn giữ tên và giữ nguyên
+  // `WizardValidationInput`/`validatePublicWizardStep` coi đây là hai điều kiện độc lập, để không
+  // phải sửa hợp đồng dùng chung với máy chủ chỉ vì bỏ hai ô nhập.
+  const certificateCount = "MOT";
+  const hasCertificate = "CO";
 
   const [receipt, setReceipt] = useState<{ code: string; secret: string } | null>(null);
 
@@ -550,6 +567,9 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const [recentReceipts, setRecentReceipts] = useState<string[]>([]);
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
   const [existingResults, setExistingResults] = useState<Record<string, ExistingLookupResult>>({});
+  const [certificateDuplicate, setCertificateDuplicate] = useState<CertificateDuplicateState | null>(
+    null,
+  );
 
   const [csrfToken, setCsrfToken] = useState("");
   /** Version PostgreSQL gần nhất đã nhận từ GET/PATCH, gửi lại để phát hiện thiết bị sửa song song. */
@@ -601,8 +621,6 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
       return () => window.removeEventListener("beforeunload", handleBeforeUnload);
     }
   }, [saveStatus]);
-
-  const outOfScope = hasCertificate === "KHONG" || certificateCount === "NHIEU";
 
   // Hai hành động phải qua Turnstile: tạo bản kê khai và gửi chính thức. Các bước ở giữa chỉ lưu
   // nháp trong phiên đã có, không cần bắt người dân giải lại.
@@ -912,6 +930,57 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     },
     [csrfToken, draft, certificatePhotos, serverVersion, adoptServerDraft],
   );
+
+  /**
+   * Sau khi người dân nhập đủ số phát hành + ngày cấp, kiểm trùng nền trong chính phiên kê khai.
+   * Không tự lưu nháp hoặc chặn form: kết quả chỉ cảnh báo để tránh nộp trùng, còn người dân vẫn
+   * quyết định tiếp tục khi GCN cũ đã bị từ chối/hủy (máy chủ không coi hai trạng thái đó là active).
+   */
+  useEffect(() => {
+    const issueNumber = draft.certificate.issueNumber;
+    const issueDate = draft.certificate.issueDate;
+    if (!csrfToken || !receipt || !isValidCertificateLookupInput(issueNumber, issueDate)) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCertificateDuplicate({ issueNumber, issueDate, checking: true, result: null });
+      void fetchApi("/api/public/submissions/current/certificate-duplicate-check", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-public-csrf-token": csrfToken,
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ issueNumber, issueDate }),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(await readErrorMessage(response, "Chưa kiểm tra được số GCN."));
+          }
+          return (await response.json()) as CertificateDuplicateResult;
+        })
+        .then((result) => {
+          if (!cancelled) setCertificateDuplicate({ issueNumber, issueDate, checking: false, result });
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setCertificateDuplicate({ issueNumber, issueDate, checking: false, result: null });
+            setServerError(error instanceof Error ? error.message : "Chưa kiểm tra được số GCN.");
+          }
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [csrfToken, draft.certificate.issueDate, draft.certificate.issueNumber, receipt]);
+
+  const currentCertificateDuplicate =
+    certificateDuplicate?.issueNumber === draft.certificate.issueNumber &&
+    certificateDuplicate.issueDate === draft.certificate.issueDate
+      ? certificateDuplicate
+      : null;
 
   /**
    * Lưu nháp **một lần** cho mỗi lô thay đổi.
@@ -1808,7 +1877,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     setUploadNote("");
     setReceiptCopied(false);
     setSubmitted(false);
-    setStep(STEP_CONTACT_AND_IDENTITY);
+    setStep(STEP_CERTIFICATE_UPLOAD);
     submitIdempotencyKey.current = null;
     draftDirtyRef.current = false;
 
@@ -1952,128 +2021,71 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
       ) : null}
 
       <section className="pc-card pc-step-panel space-y-5">
-        {step === 0 ? (
+        {step === 0 && !receipt ? (
           <>
-            {!receipt ? (
-              <>
-                <Field
-                  label="Thửa đất của bạn đã có Giấy chứng nhận (sổ đỏ/sổ hồng) chưa?"
-                  required
-                  error={errors.hasCertificate}
-                >
-                  <Select
-                    value={hasCertificate}
-                    onChange={setHasCertificate}
-                    invalid={Boolean(errors.hasCertificate)}
-                    placeholder="— Chọn —"
-                    options={[
-                      { code: "CO", label: "Đã có Giấy chứng nhận" },
-                      { code: "KHONG", label: "Chưa có Giấy chứng nhận" },
-                    ]}
-                  />
-                </Field>
+            <Field
+              label="Số điện thoại liên hệ"
+              required
+              error={errors.phone}
+              hint="Cán bộ sẽ gọi vào số này nếu hồ sơ cần bổ sung. Hệ thống không gửi tin nhắn tự động."
+            >
+              <input
+                className="pc-input"
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                value={draft.phone}
+                aria-invalid={errors.phone ? "true" : undefined}
+                onChange={(event) =>
+                  update((next) => {
+                    next.phone = event.target.value.replace(/\D/g, "").slice(0, 10);
+                  })
+                }
+              />
+            </Field>
 
-                <Field
-                  label="Lần kê khai này gồm mấy Giấy chứng nhận?"
-                  required
-                  error={errors.certificateCount}
-                  hint="Mỗi lần kê khai chỉ dùng cho một Giấy chứng nhận."
-                >
-                  <Select
-                    value={certificateCount}
-                    onChange={setCertificateCount}
-                    invalid={Boolean(errors.certificateCount)}
-                    placeholder="— Chọn —"
-                    options={[
-                      { code: "MOT", label: "Một Giấy chứng nhận" },
-                      { code: "NHIEU", label: "Từ hai Giấy chứng nhận trở lên" },
-                    ]}
-                  />
-                </Field>
-
-                {outOfScope ? (
-                  <div
-                    className="pc-card"
-                    style={{
-                      background: "var(--warning-surface)",
-                      borderColor: "var(--warning-border)",
-                    }}
-                  >
-                    <p className="font-semibold">Trường hợp của bạn cần làm trực tiếp</p>
-                    <p className="mt-2">
-                      Cổng kê khai trực tuyến hiện chỉ phục vụ trường hợp đã có một Giấy chứng nhận.
-                      Đề nghị mang giấy tờ đến Bộ phận một cửa UBND phường Phong Châu để được hướng
-                      dẫn.
-                    </p>
-                  </div>
-                ) : null}
-
-                <Field
-                  label="Số điện thoại liên hệ"
-                  required
-                  error={errors.phone}
-                  hint="Cán bộ sẽ gọi vào số này nếu hồ sơ cần bổ sung. Hệ thống không gửi tin nhắn tự động."
-                >
-                  <input
-                    className="pc-input"
-                    type="tel"
-                    inputMode="numeric"
-                    autoComplete="tel"
-                    value={draft.phone}
-                    aria-invalid={errors.phone ? "true" : undefined}
-                    onChange={(event) =>
-                      update((next) => {
-                        next.phone = event.target.value.replace(/\D/g, "").slice(0, 10);
-                      })
-                    }
-                  />
-                </Field>
-
-                <div>
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      id="consentAccepted"
-                      name="consentAccepted"
-                      aria-invalid={errors.consent ? "true" : undefined}
-                      className="mt-1.5 h-5 w-5"
-                      checked={draft.consentAccepted}
-                      onChange={(event) =>
-                        update((next) => {
-                          next.consentAccepted = event.target.checked;
-                        })
-                      }
-                    />
-                    <label htmlFor="consentAccepted">
-                      Tôi đồng ý cung cấp thông tin và ảnh giấy tờ để phục vụ kê khai, đăng ký đất
-                      đai trong đợt cao điểm 180 ngày.
-                    </label>
-                  </div>
-                  {errors.consent ? (
-                    <p className="pc-field-error" aria-live="polite">
-                      {errors.consent}
-                    </p>
-                  ) : null}
-                  <p className="pc-field-hint">
-                    Nội dung thông báo bảo vệ dữ liệu cá nhân và thời hạn lưu trữ sẽ được bổ sung
-                    nguyên văn trước khi vận hành thật.
-                  </p>
-                </div>
-              </>
-            ) : (
-              <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
-                <p className="font-semibold">Tải ảnh CCCD cho từng người</p>
-                <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
-                  Bản kê khai đã được tạo. Hãy thêm chủ sử dụng và tải đủ hai mặt CCCD; QR trên ảnh
-                  được đọc ngay trên thiết bị để gợi ý tự điền, không dùng OCR.
-                </p>
+            <div>
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="consentAccepted"
+                  name="consentAccepted"
+                  aria-invalid={errors.consent ? "true" : undefined}
+                  className="mt-1.5 h-5 w-5"
+                  checked={draft.consentAccepted}
+                  onChange={(event) =>
+                    update((next) => {
+                      next.consentAccepted = event.target.checked;
+                    })
+                  }
+                />
+                <label htmlFor="consentAccepted">
+                  Tôi đồng ý cung cấp thông tin và ảnh giấy tờ để phục vụ kê khai, đăng ký đất đai
+                  trong đợt cao điểm 180 ngày.
+                </label>
               </div>
-            )}
+              {errors.consent ? (
+                <p className="pc-field-error" aria-live="polite">
+                  {errors.consent}
+                </p>
+              ) : null}
+              <p className="pc-field-hint">
+                Nội dung thông báo bảo vệ dữ liệu cá nhân và thời hạn lưu trữ sẽ được bổ sung nguyên
+                văn trước khi vận hành thật.
+              </p>
+            </div>
           </>
         ) : null}
 
-        {step === 0 && receipt ? (
+        {step === 1 ? (
           <>
+            <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
+              <p className="font-semibold">Tải ảnh CCCD cho từng người</p>
+              <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+                Bản kê khai đã được tạo. Hãy thêm chủ sử dụng và tải đủ hai mặt CCCD; QR trên ảnh
+                được đọc ngay trên thiết bị để gợi ý tự điền, không dùng OCR.
+              </p>
+            </div>
             {draft.owners.map((owner, index) => (
               <div key={owner.id} className="pc-card">
                 <RepeatableHeading
@@ -2702,7 +2714,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           </>
         ) : null}
 
-        {step === 1 ? (
+        {step === 0 && receipt ? (
           <>
             <div className="pc-card" style={{ borderColor: "var(--accent)" }}>
               <p className="font-semibold">Chụp rõ toàn bộ Giấy chứng nhận</p>
@@ -3025,6 +3037,27 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
                     Gõ thẳng ngày, tháng, năm bằng bàn phím số — không phải lùi từng tháng trên
                     lịch.
                   </p>
+                  {currentCertificateDuplicate?.checking ? (
+                    <p className="pc-field-hint mt-2" aria-live="polite">
+                      Đang kiểm tra số GCN đã được kê khai…
+                    </p>
+                  ) : currentCertificateDuplicate?.result?.found ? (
+                    <div
+                      className="mt-2 rounded-lg border p-3 text-sm"
+                      style={{
+                        background: "var(--warning-surface)",
+                        borderColor: "var(--warning-border)",
+                      }}
+                      role="status"
+                    >
+                      <p className="font-semibold">
+                        {currentCertificateDuplicate.result.status === "OFFICIALLY_RECEIVED"
+                          ? "GCN này đã được tiếp nhận chính thức."
+                          : "GCN này đang có hồ sơ xử lý."}
+                      </p>
+                      <p className="mt-1">{currentCertificateDuplicate.result.guidance}</p>
+                    </div>
+                  ) : null}
                 </Field>
                 <Field label="Số vào sổ GCN" error={errors.registryNumber}>
                   <input
@@ -3275,7 +3308,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
               </ul>
             </div>
 
-            <ReviewBlock title="Chủ sử dụng và CCCD" onEdit={() => setStep(0)}>
+            <ReviewBlock title="Chủ sử dụng và CCCD" onEdit={() => setStep(1)}>
               <ul className="space-y-3 text-sm">
                 {draft.owners.map((owner, ownerIndex) => (
                   <li
@@ -3324,7 +3357,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
               </ul>
             </ReviewBlock>
 
-            <ReviewBlock title="Ảnh Giấy chứng nhận" onEdit={() => setStep(1)}>
+            <ReviewBlock title="Ảnh Giấy chứng nhận" onEdit={() => setStep(0)}>
               {certificatePhotos.length > 0 ? (
                 <>
                   <p className="text-sm">Đã tải {certificatePhotos.length} ảnh.</p>
@@ -3413,7 +3446,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         </div>
       ) : null}
 
-      {challengeAction && !outOfScope ? (
+      {challengeAction ? (
         <div>
           <TurnstileWidget
             key={`${challengeAction}-${challengeNonce}`}
@@ -3442,7 +3475,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
             onClick={() => {
               void goNext();
             }}
-            disabled={outOfScope || busy || (challengeAction !== null && !challengeToken)}
+            disabled={busy || (challengeAction !== null && !challengeToken)}
           >
             {busy ? "Đang xử lý…" : "Tiếp tục"}
           </button>

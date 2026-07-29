@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { turnstileHostname, verifyTurnstileToken } from "@/modules/public-intake/turnstile";
+import {
+  resetTurnstileRejectionReport,
+  turnstileHostnames,
+  verifyTurnstileToken,
+} from "@/modules/public-intake/turnstile";
 
 const BASE = {
   action: "create" as const,
   secretKey: "turnstile-secret",
-  expectedHostname: "kekhai.example.vn",
+  expectedHostnames: ["kekhai.example.vn"] as readonly string[],
 };
 
 function siteverifyResponse(body: unknown, status = 200): Response {
@@ -20,6 +24,7 @@ describe("xác minh Turnstile", () => {
 
   beforeEach(() => {
     fetchMock.mockReset();
+    resetTurnstileRejectionReport();
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -29,7 +34,7 @@ describe("xác minh Turnstile", () => {
 
   it("chấp nhận token hợp lệ đúng hành động và đúng hostname", async () => {
     fetchMock.mockResolvedValue(
-      siteverifyResponse({ success: true, action: "create", hostname: BASE.expectedHostname }),
+      siteverifyResponse({ success: true, action: "create", hostname: BASE.expectedHostnames[0] }),
     );
 
     await expect(verifyTurnstileToken({ ...BASE, token: "valid-token" })).resolves.toEqual({
@@ -52,7 +57,7 @@ describe("xác minh Turnstile", () => {
 
   it("từ chối token của hành động khác", async () => {
     fetchMock.mockResolvedValue(
-      siteverifyResponse({ success: true, action: "submit", hostname: BASE.expectedHostname }),
+      siteverifyResponse({ success: true, action: "submit", hostname: BASE.expectedHostnames[0] }),
     );
 
     await expect(verifyTurnstileToken({ ...BASE, token: "token" })).resolves.toEqual({
@@ -126,7 +131,7 @@ describe("xác minh Turnstile", () => {
 
   it("không đưa token vào thân request dưới dạng có thể log nhầm sang nơi khác", async () => {
     fetchMock.mockResolvedValue(
-      siteverifyResponse({ success: true, action: "create", hostname: BASE.expectedHostname }),
+      siteverifyResponse({ success: true, action: "create", hostname: BASE.expectedHostnames[0] }),
     );
 
     await verifyTurnstileToken({ ...BASE, token: "secret-token" });
@@ -170,8 +175,86 @@ describe("xác minh Turnstile", () => {
     });
   });
 
+  it("chấp nhận token giải trên alias Vercel khác của cùng bản triển khai", async () => {
+    // Nguyên nhân thật của lỗi "Chưa xác minh được thao tác này" trên production 2026-07-29:
+    // người dân mở alias production, còn APP_BASE_URL trỏ tới một tên miền khác của cùng project.
+    // Ghim một hostname là chặn 100% lượt kê khai, không phải chặn thỉnh thoảng.
+    fetchMock.mockResolvedValue(
+      siteverifyResponse({ success: true, action: "create", hostname: "capphongchau.vercel.app" }),
+    );
+
+    await expect(
+      verifyTurnstileToken({
+        ...BASE,
+        expectedHostnames: ["kekhai.example.vn", "capphongchau.vercel.app"],
+        token: "token",
+      }),
+    ).resolves.toEqual({ ok: true, duplicate: false });
+  });
+
+  it("vẫn từ chối hostname không nằm trong danh sách dù danh sách có nhiều mục", async () => {
+    fetchMock.mockResolvedValue(
+      siteverifyResponse({ success: true, action: "create", hostname: "ke-khai-gia-mao.example" }),
+    );
+
+    await expect(
+      verifyTurnstileToken({
+        ...BASE,
+        expectedHostnames: ["kekhai.example.vn", "capphongchau.vercel.app"],
+        token: "token",
+      }),
+    ).resolves.toEqual({ ok: false, duplicate: false });
+  });
+
+  it("ghi log lý do từ chối để phân biệt được lỗi cấu hình với bot bị chặn", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchMock.mockResolvedValue(
+      siteverifyResponse({ success: false, "error-codes": ["invalid-input-secret"] }),
+    );
+
+    await verifyTurnstileToken({ ...BASE, token: "secret-token" });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("invalid-input-secret");
+    // Token là bí mật dùng một lần của phiên người dân: ai đọc được log sẽ giải thay họ.
+    expect(line).not.toContain("secret-token");
+    warn.mockRestore();
+  });
+
+  it("không lặp lại cùng một lý do để một đợt bot không làm ngập log", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // Phải tạo Response mới mỗi lần: thân của một Response chỉ đọc được một lần, dùng lại thì
+    // lần thứ hai ném lỗi và ta đo nhầm sang nhánh "siteverify không gọi được".
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        siteverifyResponse({ success: false, "error-codes": ["invalid-input-response"] }),
+      ),
+    );
+
+    await verifyTurnstileToken({ ...BASE, token: "a" });
+    await verifyTurnstileToken({ ...BASE, token: "b" });
+    await verifyTurnstileToken({ ...BASE, token: "c" });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
   it("lấy hostname mong đợi từ APP_BASE_URL", () => {
-    expect(turnstileHostname("https://kekhai.example.vn")).toBe("kekhai.example.vn");
-    expect(turnstileHostname("http://localhost:3000")).toBe("localhost");
+    expect(turnstileHostnames("https://kekhai.example.vn")).toEqual(["kekhai.example.vn"]);
+    expect(turnstileHostnames("http://localhost:3000")).toEqual(["localhost"]);
+  });
+
+  it("thêm các tên miền Vercel tiêm từ máy chủ, và không trùng lặp", () => {
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "capphongchau.vercel.app");
+    vi.stubEnv("VERCEL_BRANCH_URL", "capphongchau-git-main.vercel.app");
+    vi.stubEnv("VERCEL_URL", "capphongchau.vercel.app");
+
+    expect(turnstileHostnames("https://capphongchau.vercel.app")).toEqual([
+      "capphongchau.vercel.app",
+      "capphongchau-git-main.vercel.app",
+    ]);
+
+    vi.unstubAllEnvs();
   });
 });

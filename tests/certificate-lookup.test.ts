@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   findExistingCertificates: vi.fn(),
   hasPendingIdentityMatch: vi.fn(),
+  lookupCertificateByIssue: vi.fn(),
   appendAudit: vi.fn(),
   verifyTurnstileToken: vi.fn(),
 }));
@@ -27,15 +28,18 @@ vi.mock("@/modules/public-intake/turnstile", async (importOriginal) => ({
   verifyTurnstileToken: mocks.verifyTurnstileToken,
 }));
 
-vi.mock("@/modules/public-intake/repository", () => ({
+vi.mock("@/modules/public-intake/repository", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/public-intake/repository")>()),
   getPublicIntakeRepository: () => ({
     findExistingCertificates: mocks.findExistingCertificates,
     hasPendingIdentityMatch: mocks.hasPendingIdentityMatch,
+    lookupCertificateByIssue: mocks.lookupCertificateByIssue,
     appendAudit: mocks.appendAudit,
   }),
 }));
 
 import { POST } from "@/app/api/public/certificate-lookup/route";
+import { CertificateLookupRateLimitError } from "@/modules/public-intake/repository";
 
 const IDENTITY_NUMBER = "030099001234";
 
@@ -51,15 +55,21 @@ describe("POST /api/public/certificate-lookup", () => {
   beforeEach(() => {
     mocks.findExistingCertificates.mockReset();
     mocks.hasPendingIdentityMatch.mockReset();
+    mocks.lookupCertificateByIssue.mockReset();
     mocks.appendAudit.mockReset();
     mocks.verifyTurnstileToken.mockReset();
     mocks.verifyTurnstileToken.mockResolvedValue({ ok: true, duplicate: false });
     mocks.findExistingCertificates.mockResolvedValue([]);
     mocks.hasPendingIdentityMatch.mockResolvedValue(false);
+    mocks.lookupCertificateByIssue.mockResolvedValue({
+      found: false,
+      status: null,
+      guidance: "Chưa tìm thấy hồ sơ theo thông tin đã nhập.",
+    });
     mocks.appendAudit.mockResolvedValue(undefined);
   });
 
-  it("trả về che số GCN khi tìm thấy khớp, không lộ số đầy đủ", async () => {
+  it("giữ tra cứu QR nhưng chỉ trả DTO tối thiểu, không lộ số GCN", async () => {
     mocks.findExistingCertificates.mockResolvedValue([
       {
         existingRecordId: "r1",
@@ -73,30 +83,29 @@ describe("POST /api/public/certificate-lookup", () => {
       createRequest({ identityNumber: IDENTITY_NUMBER, fullName: "Nguyễn Văn A" }),
     );
     const body = (await response.json()) as {
-      matched: boolean;
-      pendingWarning: boolean;
-      certificates: Array<{ issueNumberMasked: string; issueDate: string }>;
+      found: boolean;
+      status: string | null;
+      guidance: string;
     };
 
     expect(response.status).toBe(200);
-    expect(body.matched).toBe(true);
-    expect(body.certificates).toHaveLength(1);
-    expect(body.certificates[0].issueNumberMasked).not.toBe("CH01234567");
-    expect(body.certificates[0].issueNumberMasked.endsWith("4567")).toBe(true);
+    expect(body.found).toBe(true);
+    expect(body.status).toBe("OFFICIALLY_RECEIVED");
+    expect(JSON.stringify(body)).not.toContain("CH01234567");
     expect(mocks.appendAudit).toHaveBeenCalledOnce();
     const auditCall = mocks.appendAudit.mock.calls[0][0] as Record<string, unknown>;
     expect(JSON.stringify(auditCall)).not.toContain(IDENTITY_NUMBER);
   });
 
-  it("trả về chưa khớp khi không có GCN nào", async () => {
+  it("trả về chưa khớp khi QR không có GCN nào", async () => {
     const response = await POST(
       createRequest({ identityNumber: IDENTITY_NUMBER, fullName: "Nguyễn Văn A" }),
     );
-    const body = (await response.json()) as { matched: boolean; certificates: unknown[] };
+    const body = (await response.json()) as { found: boolean; status: string | null };
 
     expect(response.status).toBe(200);
-    expect(body.matched).toBe(false);
-    expect(body.certificates).toHaveLength(0);
+    expect(body.found).toBe(false);
+    expect(body.status).toBeNull();
   });
 
   it("từ chối trước khi chạm Google khi Turnstile không đạt", async () => {
@@ -126,8 +135,65 @@ describe("POST /api/public/certificate-lookup", () => {
     const response = await POST(
       createRequest({ identityNumber: IDENTITY_NUMBER, fullName: "Nguyễn Văn A" }),
     );
-    const body = (await response.json()) as { pendingWarning: boolean };
+    const body = (await response.json()) as { found: boolean; status: string | null };
 
-    expect(body.pendingWarning).toBe(true);
+    expect(body.found).toBe(true);
+    expect(body.status).toBe("IN_PROCESSING");
+  });
+
+  it("tra GCN chuẩn hóa khoảng trắng, dấu gạch và chữ hoa/thường; chỉ trả trạng thái tối thiểu", async () => {
+    mocks.lookupCertificateByIssue.mockResolvedValue({
+      found: true,
+      status: "IN_PROCESSING",
+      guidance: "Đang xử lý.",
+    });
+
+    const response = await POST(
+      createRequest({
+        method: "CERTIFICATE_NUMBER",
+        issueNumber: " ch- 012 345 ",
+        issueDate: "2020-01-31",
+      }),
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(mocks.lookupCertificateByIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ normalizedIssueNumber: "CH012345", issueDate: "2020-01-31" }),
+    );
+    expect(body).toMatchObject({ found: true, status: "IN_PROCESSING", guidance: "Đang xử lý." });
+    expect(JSON.stringify(body)).not.toContain("CH012345");
+  });
+
+  it("từ chối số GCN hoặc ngày cấp sai định dạng trước khi tra cứu", async () => {
+    const badNumber = await POST(
+      createRequest({ method: "CERTIFICATE_NUMBER", issueNumber: "CH/123", issueDate: "2020-01-01" }),
+    );
+    const badDate = await POST(
+      createRequest({ method: "CERTIFICATE_NUMBER", issueNumber: "CH-123", issueDate: "2020-02-30" }),
+    );
+
+    expect(badNumber.status).toBe(400);
+    expect(badDate.status).toBe(400);
+    expect(mocks.lookupCertificateByIssue).not.toHaveBeenCalled();
+  });
+
+  it("từ chối phương thức lạ thay vì âm thầm hạ xuống luồng QR", async () => {
+    const response = await POST(createRequest({ method: "OTHER" }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.lookupCertificateByIssue).not.toHaveBeenCalled();
+  });
+
+  it("chặn dò liên tục khi repository báo vượt giới hạn", async () => {
+    mocks.lookupCertificateByIssue.mockRejectedValue(new CertificateLookupRateLimitError());
+
+    const response = await POST(
+      createRequest({ method: "CERTIFICATE_NUMBER", issueNumber: "CH-123", issueDate: "2020-01-01" }),
+    );
+    const body = (await response.json()) as { error?: { code?: string } };
+
+    expect(response.status).toBe(429);
+    expect(body.error?.code).toBe("RATE_LIMITED");
   });
 });

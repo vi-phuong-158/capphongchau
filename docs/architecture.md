@@ -63,6 +63,18 @@ Các nhóm bảng chính trong `supabase/migrations/202607230001_supabase_schema
 
 `legacy_row_index` trên `public_submissions` giữ locator ổn định cho cookie phiên v2 trong giai đoạn chuyển đổi; nó không còn mang nghĩa “số dòng Sheet” trong runtime mới.
 
+### Tra cứu công khai theo GCN
+
+`POST /api/public/certificate-lookup` hỗ trợ QR CCCD và số phát hành + ngày cấp GCN. Số phát hành
+được chuẩn hóa ở request layer (bỏ khoảng trắng/dấu gạch, chữ hoa) rồi repository đọc ba nguồn:
+`public_certificates` của submission active, `certificates` chính thức và bản cuối `VERIFIED` trong
+`existing_certificates`. Không thêm schema: các trường `issue_number`/`issue_date` hiện hữu là đủ.
+
+Route chỉ trả `found`, trạng thái công khai `IN_PROCESSING` hoặc `OFFICIALLY_RECEIVED`, cùng hướng
+dẫn cố định. Audit/rate-limit trong cùng transaction dùng HMAC nguồn gọi và fingerprint HMAC của
+cặp số/ngày; không ghi số GCN hay dữ liệu cá nhân thô. Tra cứu từ wizard đi qua route session+CSRF
+riêng, loại trừ chính bản nháp và không coi `REJECTED`/`EXPIRED` là hồ sơ active.
+
 ## Tính đúng đắn giao dịch
 
 - Mọi API write có `idempotency-key` và `request_id`.

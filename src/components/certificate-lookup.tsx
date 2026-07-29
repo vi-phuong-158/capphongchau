@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { TurnstileWidget } from "@/components/turnstile-widget";
+import { VietnameseDateInput } from "@/components/vietnamese-date-input";
 import {
   prepareCitizenIdImage,
   readCitizenIdQr,
@@ -10,17 +11,23 @@ import {
 import { IMAGE_FILE_ACCEPT } from "@/modules/public-intake/image-format";
 
 interface LookupResult {
-  matched: boolean;
-  pendingWarning: boolean;
-  certificates: Array<{ issueNumberMasked: string; issueDate: string }>;
+  found: boolean;
+  status: "IN_PROCESSING" | "OFFICIALLY_RECEIVED" | null;
+  guidance: string;
 }
 
+type LookupMethod = "QR" | "CERTIFICATE";
 type ScanState =
   | { step: "idle" }
   | { step: "decoding" }
   | { step: "decoded"; identityNumber: string; fullName: string }
   | { step: "checking"; identityNumber: string; fullName: string }
-  | { step: "done"; fullName: string; result: LookupResult };
+  | { step: "done"; result: LookupResult };
+
+const STATUS_LABELS: Record<NonNullable<LookupResult["status"]>, string> = {
+  IN_PROCESSING: "Đang xử lý",
+  OFFICIALLY_RECEIVED: "Đã tiếp nhận chính thức",
+};
 
 async function readErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
@@ -32,14 +39,16 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
 }
 
 /**
- * Tra cứu nhanh "đã nộp Giấy chứng nhận chưa" ngay ở trang chủ, không cần bắt đầu kê khai.
- *
- * Ảnh CCCD không rời trình duyệt: `readCitizenIdQr` giải mã QR bằng canvas cục bộ, chỉ số định
- * danh + họ tên (không phải ảnh) được gửi lên để đối chiếu, và server không lưu lại — chỉ ghi audit
- * kèm số lượng khớp. Số GCN trả về bị che theo quyết định 03-decisions.md 2026-07-23.
+ * Tra cứu công khai theo một trong hai bằng chứng người dân đang có: QR CCCD hoặc số phát hành +
+ * ngày cấp GCN. Cả hai nhánh dùng cùng Turnstile và chỉ render DTO tối thiểu do máy chủ trả về.
  */
 export function CertificateLookup() {
+  const [method, setMethod] = useState<LookupMethod>("QR");
   const [scan, setScan] = useState<ScanState>({ step: "idle" });
+  const [issueNumber, setIssueNumber] = useState("");
+  const [issueDate, setIssueDate] = useState("");
+  const [certificateResult, setCertificateResult] = useState<LookupResult | null>(null);
+  const [certificateChecking, setCertificateChecking] = useState(false);
   const [error, setError] = useState("");
   const [challenge, setChallenge] = useState("");
   const [challengeKey, setChallengeKey] = useState(0);
@@ -47,13 +56,34 @@ export function CertificateLookup() {
 
   const onToken = useCallback((token: string) => setChallenge(token), []);
 
-  const reset = useCallback(() => {
-    setScan({ step: "idle" });
-    setError("");
+  const resetChallenge = useCallback(() => {
     setChallenge("");
     setChallengeKey((value) => value + 1);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
+
+  const resetQr = useCallback(() => {
+    setScan({ step: "idle" });
+    setError("");
+    resetChallenge();
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [resetChallenge]);
+
+  const resetCertificate = useCallback(() => {
+    setCertificateResult(null);
+    setError("");
+    resetChallenge();
+  }, [resetChallenge]);
+
+  const changeMethod = useCallback(
+    (nextMethod: LookupMethod) => {
+      setMethod(nextMethod);
+      setError("");
+      setScan({ step: "idle" });
+      setCertificateResult(null);
+      resetChallenge();
+    },
+    [resetChallenge],
+  );
 
   const handleFile = useCallback(async (file: File | null) => {
     if (!file) return;
@@ -80,7 +110,7 @@ export function CertificateLookup() {
     }
   }, []);
 
-  const check = useCallback(async () => {
+  const checkQr = useCallback(async () => {
     if (scan.step !== "decoded" || !challenge) return;
     const { identityNumber, fullName } = scan;
     setScan({ step: "checking", identityNumber, fullName });
@@ -89,22 +119,61 @@ export function CertificateLookup() {
       const response = await fetch("/api/public/certificate-lookup", {
         method: "POST",
         headers: { "content-type": "application/json", "x-turnstile-token": challenge },
-        body: JSON.stringify({ identityNumber, fullName }),
+        body: JSON.stringify({ method: "CITIZEN_ID_QR", identityNumber, fullName }),
       });
       if (!response.ok) {
         setError(await readErrorMessage(response, "Chưa kiểm tra được. Vui lòng thử lại."));
         setScan({ step: "decoded", identityNumber, fullName });
-        setChallenge("");
-        setChallengeKey((value) => value + 1);
+        resetChallenge();
         return;
       }
-      const result = (await response.json()) as LookupResult;
-      setScan({ step: "done", fullName, result });
+      setScan({ step: "done", result: (await response.json()) as LookupResult });
     } catch {
       setError("Không thể kết nối máy chủ. Vui lòng thử lại.");
       setScan({ step: "decoded", identityNumber, fullName });
     }
-  }, [scan, challenge]);
+  }, [challenge, resetChallenge, scan]);
+
+  const checkCertificate = useCallback(async () => {
+    if (!challenge || !issueNumber.trim() || !issueDate) return;
+    setCertificateChecking(true);
+    setCertificateResult(null);
+    setError("");
+    try {
+      const response = await fetch("/api/public/certificate-lookup", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-turnstile-token": challenge },
+        body: JSON.stringify({ method: "CERTIFICATE_NUMBER", issueNumber, issueDate }),
+      });
+      if (!response.ok) {
+        setError(await readErrorMessage(response, "Chưa kiểm tra được. Vui lòng thử lại."));
+        resetChallenge();
+        return;
+      }
+      setCertificateResult((await response.json()) as LookupResult);
+    } catch {
+      setError("Không thể kết nối máy chủ. Vui lòng thử lại.");
+    } finally {
+      setCertificateChecking(false);
+    }
+  }, [challenge, issueDate, issueNumber, resetChallenge]);
+
+  const result = method === "QR" && scan.step === "done" ? scan.result : certificateResult;
+  const renderResult = result ? (
+    <div
+      className="rounded-lg border p-3 text-sm"
+      style={{
+        background: result.found ? "var(--warning-surface)" : "var(--surface-muted)",
+        borderColor: result.found ? "var(--warning-border)" : "var(--border)",
+      }}
+      aria-live="polite"
+    >
+      <p className="font-semibold">
+        {result.found && result.status ? STATUS_LABELS[result.status] : "Chưa có hồ sơ trùng"}
+      </p>
+      <p className="mt-1">{result.guidance}</p>
+    </div>
+  ) : null;
 
   return (
     <section
@@ -112,139 +181,131 @@ export function CertificateLookup() {
       style={{ borderTop: "4px solid var(--gold-500)", background: "var(--surface)" }}
     >
       <div className="space-y-2 text-center">
-        <h2 className="text-xl sm:text-2xl font-bold">Kiểm tra đã nộp Giấy chứng nhận chưa?</h2>
+        <h2 className="text-xl sm:text-2xl font-bold">Kiểm tra tình trạng Giấy chứng nhận</h2>
         <p className="text-sm sm:text-base max-w-lg mx-auto" style={{ color: "var(--muted)" }}>
-          Quét mã QR trên căn cước (chụp ảnh hoặc chọn ảnh có sẵn) để xem đã có hồ sơ nào nộp cho
-          CCCD này chưa. Ảnh không được tải lên hay lưu lại — hệ thống chỉ đọc mã QR ngay trên thiết
-          bị của bạn.
+          Chọn cách tra cứu phù hợp. Kết quả chỉ cho biết có hồ sơ hay không, trạng thái xử lý và
+          hướng dẫn tiếp theo; không hiển thị thông tin cá nhân hoặc ảnh giấy tờ.
         </p>
       </div>
 
-      {scan.step === "idle" || scan.step === "decoding" ? (
-        <div className="space-y-3">
-          <label
-            className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
-              scan.step === "decoding" ? "opacity-50 pointer-events-none" : "hover:bg-black/5"
-            }`}
-            style={{ borderColor: "var(--border-strong)" }}
-          >
-            <input
-              ref={fileInputRef}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              type="file"
-              accept={IMAGE_FILE_ACCEPT}
-              disabled={scan.step === "decoding"}
-              onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
-            />
-            <div className="flex flex-col items-center text-center space-y-3 pointer-events-none">
-              <div
-                className="p-4 rounded-full shadow-sm"
-                style={{ background: "var(--gold-100)", color: "var(--gold-800)" }}
-              >
-                <svg
-                  className="w-8 h-8"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <p className="font-bold text-lg">Chạm để chụp ảnh / Chọn tệp</p>
-                <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-                  Đưa mã QR trên CCCD vào khung hình
-                </p>
-              </div>
-            </div>
-          </label>
-          {scan.step === "decoding" ? (
-            <p
-              className="text-sm text-center font-medium animate-pulse"
-              style={{ color: "var(--accent)" }}
+      <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Phương thức tra cứu">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={method === "QR"}
+          className={method === "QR" ? "pc-button" : "pc-button-quiet"}
+          onClick={() => changeMethod("QR")}
+        >
+          Quét QR CCCD
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={method === "CERTIFICATE"}
+          className={method === "CERTIFICATE" ? "pc-button" : "pc-button-quiet"}
+          onClick={() => changeMethod("CERTIFICATE")}
+        >
+          Bằng số GCN
+        </button>
+      </div>
+
+      {method === "QR" ? (
+        <div className="space-y-3" role="tabpanel">
+          <p className="text-sm" style={{ color: "var(--muted)" }}>
+            Ảnh CCCD không được tải lên hay lưu lại — mã QR chỉ được đọc trên thiết bị của bạn.
+          </p>
+          {scan.step === "idle" || scan.step === "decoding" ? (
+            <label
+              className={`relative flex flex-col items-center justify-center p-8 sm:p-10 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+                scan.step === "decoding" ? "opacity-50 pointer-events-none" : "hover:bg-black/5"
+              }`}
+              style={{ borderColor: "var(--border-strong)" }}
             >
-              Đang đọc mã QR trên thiết bị…
-            </p>
+              <input
+                ref={fileInputRef}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                type="file"
+                accept={IMAGE_FILE_ACCEPT}
+                disabled={scan.step === "decoding"}
+                onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
+              />
+              <span className="text-center font-semibold">Chạm để chụp ảnh / Chọn ảnh CCCD có mã QR</span>
+            </label>
+          ) : null}
+          {scan.step === "decoding" ? <p className="text-sm">Đang đọc mã QR trên thiết bị…</p> : null}
+          {scan.step === "decoded" || scan.step === "checking" ? (
+            <>
+              <p className="text-sm">Đã đọc mã QR. Hoàn thành xác minh rồi nhấn kiểm tra.</p>
+              <TurnstileWidget key={challengeKey} action="lookup" onToken={onToken} />
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  className="pc-button"
+                  disabled={scan.step === "checking" || !challenge}
+                  onClick={() => void checkQr()}
+                >
+                  {scan.step === "checking" ? "Đang kiểm tra…" : "Kiểm tra"}
+                </button>
+                <button type="button" className="pc-button-quiet" onClick={resetQr}>
+                  Quét ảnh khác
+                </button>
+              </div>
+            </>
+          ) : null}
+          {renderResult}
+          {scan.step === "done" ? (
+            <button type="button" className="pc-button-quiet" onClick={resetQr}>
+              Kiểm tra CCCD khác
+            </button>
           ) : null}
         </div>
-      ) : null}
-
-      {scan.step === "decoded" || scan.step === "checking" ? (
-        <div className="space-y-3">
-          <p className="text-sm">
-            Đã đọc mã QR của <strong>{scan.fullName}</strong>. Nhấn kiểm tra để tra cứu.
-          </p>
+      ) : (
+        <div className="space-y-4" role="tabpanel">
+          <label className="block">
+            <span className="pc-field-label">Số phát hành GCN</span>
+            <input
+              className="pc-input font-mono uppercase"
+              value={issueNumber}
+              autoComplete="off"
+              onChange={(event) => {
+                setIssueNumber(event.target.value);
+                setCertificateResult(null);
+              }}
+              placeholder="Ví dụ: CH 012-345"
+            />
+            <span className="pc-field-hint">Khoảng trắng, dấu gạch và chữ hoa/thường được tự chuẩn hóa khi đối chiếu.</span>
+          </label>
+          <div>
+            <span className="pc-field-label">Ngày cấp GCN</span>
+            <VietnameseDateInput
+              value={issueDate}
+              onChange={(value) => {
+                setIssueDate(value);
+                setCertificateResult(null);
+              }}
+              bounds={{ minYear: 1987 }}
+              groupLabel="Ngày cấp Giấy chứng nhận để tra cứu"
+            />
+          </div>
           <TurnstileWidget key={challengeKey} action="lookup" onToken={onToken} />
           <div className="flex gap-3">
             <button
               type="button"
               className="pc-button"
-              disabled={scan.step === "checking" || !challenge}
-              onClick={() => void check()}
+              disabled={certificateChecking || !challenge || !issueNumber.trim() || !issueDate}
+              onClick={() => void checkCertificate()}
             >
-              {scan.step === "checking" ? "Đang kiểm tra…" : "Kiểm tra"}
+              {certificateChecking ? "Đang kiểm tra…" : "Tra cứu bằng số GCN"}
             </button>
-            <button
-              type="button"
-              className="pc-button-quiet"
-              disabled={scan.step === "checking"}
-              onClick={reset}
-            >
-              Quét ảnh khác
-            </button>
+            {certificateResult ? (
+              <button type="button" className="pc-button-quiet" onClick={resetCertificate}>
+                Tra cứu lại
+              </button>
+            ) : null}
           </div>
+          {renderResult}
         </div>
-      ) : null}
-
-      {scan.step === "done" ? (
-        <div className="space-y-3">
-          {scan.result.matched ? (
-            <div
-              className="rounded-lg border p-3 text-sm"
-              style={{ background: "var(--warning-surface)", borderColor: "var(--warning-border)" }}
-            >
-              <p className="font-semibold">
-                Đã tìm thấy {scan.result.certificates.length} Giấy chứng nhận từng nộp cho{" "}
-                {scan.fullName}:
-              </p>
-              <ul className="mt-2 list-disc pl-5">
-                {scan.result.certificates.map((cert, index) => (
-                  <li key={`${cert.issueNumberMasked}-${index}`}>
-                    Số GCN: <span className="font-mono">{cert.issueNumberMasked}</span> — cấp ngày{" "}
-                    {cert.issueDate || "chưa rõ"}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
-                Số hiển thị đã được che một phần. Đối chiếu 4 số cuối với Giấy chứng nhận đang cầm;
-                nếu khớp thì có thể không cần nộp lại — hãy hỏi cán bộ tiếp nhận để chắc chắn.
-              </p>
-            </div>
-          ) : (
-            <p className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm">
-              Chưa tìm thấy hồ sơ Giấy chứng nhận nào đã nộp cho CCCD này.
-            </p>
-          )}
-          {scan.result.pendingWarning ? (
-            <p className="text-sm text-amber-800">
-              Lưu ý: đang có một hồ sơ khác chờ xử lý cho cùng CCCD này.
-            </p>
-          ) : null}
-          <button type="button" className="pc-button-quiet" onClick={reset}>
-            Kiểm tra CCCD khác
-          </button>
-        </div>
-      ) : null}
+      )}
 
       {error ? <p className="pc-field-error">{error}</p> : null}
     </section>

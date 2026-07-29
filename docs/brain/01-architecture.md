@@ -25,6 +25,18 @@ PublicIntakeRepository
 
 202607290001_public_upload_attempts_rls.sql
 └── ENABLE/FORCE RLS + REVOKE anon/authenticated; không public policy
+
+POST /api/public/certificate-lookup
+├── Turnstile `lookup` + edge guard
+├── QR CCCD giữ decode client-side; số GCN nhận `issueNumber` + `issueDate`
+├── certificate-normalization.ts: bỏ space/hyphen, uppercase; date hợp lệ
+└── PublicIntakeRepository.lookupCertificateByIssue
+    ├── advisory lock theo HMAC nguồn → 8 lượt/10 phút, audit cùng transaction
+    ├── `public_certificates` active → IN_PROCESSING
+    └── `certificates` + latest VERIFIED `existing_certificates` → OFFICIALLY_RECEIVED
+
+POST /api/public/submissions/current/certificate-duplicate-check
+└── public session + CSRF + idempotency → cùng repository, loại trừ submission đang kê khai
 ```
 
 ## Stack hiện tại
@@ -113,8 +125,10 @@ src/app/api/users/route.ts
 └── SupabaseUserRepository.mutate
     └── transaction: users + audit_logs + request_log
 
-src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không còn 7
-│   STEPS = Người kê khai và CCCD | Ảnh GCN | Thông tin thửa đất | Kiểm tra và gửi
+src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không còn 7
+│   STEPS = Ảnh GCN | Người kê khai và CCCD | Thông tin thửa đất | Kiểm tra và gửi
+│   Bước 1 có hai pha: trước CREATE chỉ hiện phone + consent; server kiểm consent trước
+│   Turnstile/Drive/database, CREATE thành công mới hiện upload GCN trong chính bước đó.
 │   Nhận prop `assisted?: { officerName }` — /ke-khai-ho dùng lại NGUYÊN component này,
 │   không có bản wizard song song nào.
 ├── src/modules/public-intake/public-wizard-validation.ts (thuần, test được ở Node)

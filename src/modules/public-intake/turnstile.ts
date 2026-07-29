@@ -27,6 +27,39 @@ const CLOUDFLARE_TESTING_SECRETS: ReadonlySet<string> = new Set([
 
 export const TURNSTILE_HEADER = "x-turnstile-token";
 
+/**
+ * Lý do từ chối đã in log, để một đợt bot không đẩy hàng nghìn dòng giống hệt nhau.
+ *
+ * Mỗi lý do chỉ in một lần trong vòng đời tiến trình: đủ để người vận hành biết cấu hình sai ở đâu,
+ * không đủ để làm nhiễu log.
+ */
+const reportedRejections = new Set<string>();
+
+/**
+ * Ghi lý do Turnstile từ chối.
+ *
+ * Không có hàm này thì mọi nguyên nhân — secret sai cặp với site key, hostname lệch, token giả,
+ * siteverify timeout — đều hiện ra ngoài y hệt nhau: một dòng "Chưa xác minh được thao tác này".
+ * Người vận hành không có cách nào phân biệt, nên một lỗi cấu hình 30 giây có thể treo cả cổng
+ * công khai.
+ *
+ * Chỉ ghi dữ liệu cấu hình: mã lỗi của Cloudflare, hostname và action mong đợi/nhận được. Hostname
+ * là thông tin công khai. Token TUYỆT ĐỐI không được ghi — nó là bí mật dùng một lần của phiên
+ * người dân, và ai đọc được log sẽ giải được thử thách thay họ.
+ */
+function reportRejection(reason: string, detail: string): void {
+  if (reportedRejections.has(reason)) {
+    return;
+  }
+  reportedRejections.add(reason);
+  console.warn(`[turnstile] reject reason=${reason} ${detail}`);
+}
+
+/** Chỉ dùng cho test: xoá bộ nhớ "đã in" để các case không ảnh hưởng lẫn nhau. */
+export function resetTurnstileRejectionReport(): void {
+  reportedRejections.clear();
+}
+
 export type TurnstileAction = "create" | "recover" | "submit" | "lookup";
 
 export interface TurnstileResult {
@@ -52,11 +85,19 @@ export async function verifyTurnstileToken(input: {
   token: string | null | undefined;
   action: TurnstileAction;
   secretKey: string;
-  /** Hostname mong đợi, lấy từ `APP_BASE_URL` — chặn token giải trên site khác đem sang dùng. */
-  expectedHostname: string;
+  /**
+   * Các hostname được chấp nhận — chặn token giải trên site khác đem sang dùng.
+   *
+   * Là danh sách chứ không phải một giá trị: cùng một bản triển khai Vercel phục vụ nhiều tên miền
+   * (alias production, URL preview theo nhánh, URL riêng của từng deployment). Ghim vào đúng một
+   * `APP_BASE_URL` nghĩa là mọi tên miền còn lại đều bị từ chối 100%, kể cả khi người dân đang mở
+   * đúng trang thật. Xem `turnstileHostnames`.
+   */
+  expectedHostnames: readonly string[];
 }): Promise<TurnstileResult> {
   const token = typeof input.token === "string" ? input.token.trim() : "";
   if (!token || token.length > 2048) {
+    reportRejection("missing-token", `action=${input.action}`);
     return REJECTED;
   }
 
@@ -70,24 +111,38 @@ export async function verifyTurnstileToken(input: {
       cache: "no-store",
     });
     if (!response.ok) {
+      reportRejection("siteverify-http", `status=${response.status}`);
       return REJECTED;
     }
     payload = (await response.json()) as SiteverifyResponse;
   } catch {
+    reportRejection("siteverify-unreachable", `timeout_ms=${VERIFY_TIMEOUT_MS}`);
     return REJECTED;
   }
 
   if (payload.success !== true) {
+    const errorCodes = payload["error-codes"] ?? [];
+    // `invalid-input-secret` nghĩa là TURNSTILE_SECRET_KEY sai hoặc không cùng cặp với site key
+    // đang nhúng ở client — lỗi cấu hình chặn toàn bộ người dân, không phải bot bị chặn.
+    reportRejection("siteverify-failed", `error_codes=${errorCodes.join(",") || "none"}`);
     return {
       ok: false,
-      duplicate: (payload["error-codes"] ?? []).includes("timeout-or-duplicate"),
+      duplicate: errorCodes.includes("timeout-or-duplicate"),
     };
   }
 
   // `success` chưa đủ: token phải được sinh cho đúng hành động và đúng site này. Khóa sandbox
   // không cung cấp hai trường đó nên chỉ kiểm với khóa thật.
   if (!CLOUDFLARE_TESTING_SECRETS.has(input.secretKey)) {
-    if (payload.action !== input.action || payload.hostname !== input.expectedHostname) {
+    if (payload.action !== input.action) {
+      reportRejection("action-mismatch", `expected=${input.action} got=${payload.action ?? "none"}`);
+      return REJECTED;
+    }
+    if (!input.expectedHostnames.includes(payload.hostname ?? "")) {
+      reportRejection(
+        "hostname-mismatch",
+        `expected=${input.expectedHostnames.join("|")} got=${payload.hostname ?? "none"}`,
+      );
       return REJECTED;
     }
   }
@@ -95,6 +150,29 @@ export async function verifyTurnstileToken(input: {
   return { ok: true, duplicate: false };
 }
 
-export function turnstileHostname(appBaseUrl: string): string {
-  return new URL(appBaseUrl).hostname;
+/**
+ * Các hostname mà một token được phép mang.
+ *
+ * `APP_BASE_URL` là một giá trị duy nhất dùng chung cho cả Production lẫn Preview trên Vercel,
+ * nhưng một project Vercel phục vụ nhiều tên miền cùng lúc: alias production
+ * (`<project>.vercel.app`), URL theo nhánh, và URL riêng của từng deployment. Người dân mở alias
+ * production trong khi `APP_BASE_URL` trỏ tới một alias khác là đủ để Turnstile từ chối mọi lượt
+ * kê khai — thất bại toàn phần, không phải thỉnh thoảng.
+ *
+ * Các biến `VERCEL_*` do chính Vercel tiêm vào lúc chạy, client không tác động được, nên thêm chúng
+ * không nới lỏng hàng rào: token vẫn phải được giải trên chính bản triển khai này, không phải trên
+ * site của kẻ tấn công.
+ */
+export function turnstileHostnames(appBaseUrl: string): readonly string[] {
+  const hostnames = new Set<string>([new URL(appBaseUrl).hostname]);
+  for (const vercelHost of [
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_URL,
+  ]) {
+    if (vercelHost) {
+      hostnames.add(vercelHost);
+    }
+  }
+  return [...hostnames];
 }

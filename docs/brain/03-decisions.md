@@ -7,6 +7,24 @@
 > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
 > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
 
+## [2026-07-29] Tra cứu bằng số phát hành Giấy chứng nhận, không lộ dữ liệu hồ sơ
+
+- **Quyết định:** Màn hình tra cứu công khai cho chọn QR CCCD hoặc `Số phát hành GCN` + `Ngày cấp
+  GCN`. Khi tra số, chuẩn hóa bỏ mọi khoảng trắng/dấu gạch và viết hoa trước so sánh; repository
+  tìm `public_certificates` của hồ sơ active, `certificates` chính thức và bản cuối `VERIFIED` của
+  `existing_certificates`. Kết quả chỉ có `found`, `IN_PROCESSING`/`OFFICIALLY_RECEIVED` và hướng
+  dẫn cố định — không trả số GCN, ID, họ tên, CCCD, điện thoại, địa chỉ hoặc ảnh. QR CCCD vẫn decode
+  trên thiết bị, nhưng response cũng chuyển về DTO tối thiểu này.
+- **Chống dò:** Turnstile vẫn bắt buộc cho route không phiên. Repository lấy advisory lock theo HMAC
+  nguồn gọi, đếm tối đa 8 audit thành công trong 10 phút và ghi audit cùng transaction. Audit chỉ
+  giữ HMAC nguồn/fingerprint của cặp số-ngày; không giữ số GCN thô. Wizard dùng route session+CSRF
+  riêng để kiểm trùng nền khi nhập đủ hai trường; nó loại trừ bản nháp hiện tại và chỉ cảnh báo, không
+  chặn. `REJECTED`/`EXPIRED` không được coi là active.
+- **Không migration:** `public_certificates.issue_number/issue_date`, `certificates.issue_number/
+  issue_date` và `existing_certificates.issue_number/issue_date` đã đáp ứng; không thêm bảng/cột.
+- **Đánh đổi:** Rate-limit bền vững cần một aggregate query vào `audit_logs` thay vì cache tiến trình;
+  lưu lượng pilot nhỏ nên chấp nhận, không tạo thêm nơi lưu dữ liệu.
+
 ## [2026-07-29] Review PR #6 vòng hai — ba quyết định về an toàn dữ liệu
 
 **1. Câu hỏi trước khi xóa tệp Drive là "có AI đang trỏ vào nó không", không phải "hồ sơ đang gọi

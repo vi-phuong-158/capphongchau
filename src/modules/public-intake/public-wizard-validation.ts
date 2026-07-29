@@ -18,16 +18,23 @@
 import type { IntakeDraft } from "./types";
 import { validateCitizenSubmitDraft, type CitizenSubmitIssue } from "./validation";
 
-/** Bốn bước của wizard V2. */
+/**
+ * Bốn bước của wizard V2.
+ *
+ * "Ảnh Giấy chứng nhận" đứng trước "Người kê khai và CCCD": bản kê khai chỉ tạo được (và chỉ từ đó
+ * mới có thư mục Drive để tải ảnh) khi đã có số điện thoại + đồng ý xử lý dữ liệu — hai trường đó
+ * giờ nằm ở đầu bước này. Đặt chúng ở bước cuối cùng là không thể, vì lúc đó hồ sơ đã phải tồn tại
+ * từ lâu để các bước giữa tải được ảnh.
+ */
 export const PUBLIC_WIZARD_STEPS = [
-  "Người kê khai và CCCD",
   "Ảnh Giấy chứng nhận",
+  "Người kê khai và CCCD",
   "Thông tin thửa đất",
   "Kiểm tra và gửi",
 ] as const;
 
-export const STEP_CONTACT_AND_IDENTITY = 0;
-export const STEP_CERTIFICATE_UPLOAD = 1;
+export const STEP_CERTIFICATE_UPLOAD = 0;
+export const STEP_CONTACT_AND_IDENTITY = 1;
 export const STEP_PARCEL_QUICK = 2;
 export const STEP_REVIEW_SUBMIT = 3;
 
@@ -57,7 +64,7 @@ export interface WizardValidationInput {
  * `parcels.*` gộp cả thửa đất lẫn loại đất vì V2 nhập cả hai trong một bước.
  */
 function stepOfFieldPath(fieldPath: string): number {
-  if (fieldPath === "phone" || fieldPath === "consentAccepted") return STEP_CONTACT_AND_IDENTITY;
+  if (fieldPath === "phone" || fieldPath === "consentAccepted") return STEP_CERTIFICATE_UPLOAD;
   if (fieldPath.startsWith("owners")) return STEP_CONTACT_AND_IDENTITY;
   if (fieldPath.startsWith("certificate.")) return STEP_CERTIFICATE_UPLOAD;
   if (fieldPath.startsWith("parcels")) return STEP_PARCEL_QUICK;
@@ -134,8 +141,10 @@ const UPLOAD_FAILED_MESSAGE = "Có ảnh tải lỗi. Thử lại hoặc xóa �
 export function validatePublicWizardStep(input: WizardValidationInput): WizardErrors {
   const errors: WizardErrors = {};
 
-  // Giai đoạn sàng lọc trước khi tạo bản kê khai — không liên quan tới `draft`.
-  if (input.step === STEP_CONTACT_AND_IDENTITY && !input.hasReceipt) {
+  // Giai đoạn sàng lọc trước khi tạo bản kê khai — không liên quan tới `draft`. Hai câu hỏi này
+  // không còn ô nhập trên màn hình (hệ thống tự gán "CO"/"MOT"), nên trong thực tế không bao giờ
+  // rỗng; điều kiện vẫn giữ để không âm thầm cho qua nếu sau này có chỗ quên gán mặc định.
+  if (input.step === STEP_CERTIFICATE_UPLOAD && !input.hasReceipt) {
     if (!input.hasCertificate) errors.hasCertificate = "Chọn một phương án.";
     if (!input.certificateCount) errors.certificateCount = "Chọn một phương án.";
   }
@@ -145,11 +154,17 @@ export function validatePublicWizardStep(input: WizardValidationInput): WizardEr
     errors[key || "draft"] = issue.message;
   }
 
-  if (input.step === STEP_CONTACT_AND_IDENTITY && input.hasReceipt) {
+  if (input.step === STEP_CONTACT_AND_IDENTITY) {
     Object.assign(errors, identityPhotoErrors(input));
   }
 
-  if (input.step === STEP_CERTIFICATE_UPLOAD && input.uploadedCertificateCount < 1) {
+  // Chưa có bản kê khai thì chưa có nơi để tải ảnh GCN — không được báo "thiếu ảnh" trong lúc màn
+  // hình vẫn đang hỏi điện thoại/đồng ý để tạo hồ sơ.
+  if (
+    input.step === STEP_CERTIFICATE_UPLOAD &&
+    input.hasReceipt &&
+    input.uploadedCertificateCount < 1
+  ) {
     errors.certificatePhotos = "Chưa có ảnh Giấy chứng nhận. Cần ít nhất một ảnh.";
   }
 
@@ -169,7 +184,7 @@ export function validatePublicWizardStep(input: WizardValidationInput): WizardEr
 function relevantIssues(input: WizardValidationInput): CitizenSubmitIssue[] {
   // Trước khi có bản kê khai, chỉ số điện thoại và đồng ý là có ô nhập trên màn hình.
   const issues = validateCitizenSubmitDraft(input.draft);
-  if (input.step === STEP_CONTACT_AND_IDENTITY && !input.hasReceipt) {
+  if (input.step === STEP_CERTIFICATE_UPLOAD && !input.hasReceipt) {
     return issues.filter(
       (item) => item.fieldPath === "phone" || item.fieldPath === "consentAccepted",
     );

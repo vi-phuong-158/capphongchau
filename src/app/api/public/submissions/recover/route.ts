@@ -17,7 +17,7 @@ import {
 } from "@/modules/public-intake/session";
 import {
   TURNSTILE_HEADER,
-  turnstileHostname,
+  turnstileHostnames,
   verifyTurnstileToken,
 } from "@/modules/public-intake/turnstile";
 import {
@@ -49,7 +49,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     token: request.headers.get(TURNSTILE_HEADER),
     action: "recover",
     secretKey: environment.TURNSTILE_SECRET_KEY,
-    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
+    expectedHostnames: turnstileHostnames(environment.APP_BASE_URL),
   });
   if (!turnstile.ok) {
     return publicError("ACCESS_DENIED", "Không xác minh được thao tác truy cập.", requestId);

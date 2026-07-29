@@ -16,7 +16,7 @@ import {
 } from "@/modules/public-intake/route-context";
 import {
   TURNSTILE_HEADER,
-  turnstileHostname,
+  turnstileHostnames,
   verifyTurnstileToken,
 } from "@/modules/public-intake/turnstile";
 import type { IntakeDraft } from "@/modules/public-intake/types";
@@ -108,7 +108,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     token: request.headers.get(TURNSTILE_HEADER),
     action: "submit",
     secretKey: environment.TURNSTILE_SECRET_KEY,
-    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
+    expectedHostnames: turnstileHostnames(environment.APP_BASE_URL),
   });
   if (!turnstile.ok) {
     return publicError(

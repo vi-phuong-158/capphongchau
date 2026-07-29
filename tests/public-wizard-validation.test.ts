@@ -3,6 +3,11 @@
  *
  * Trọng tâm là **những gì không còn chặn**: đó chính là các góp ý của cán bộ đi thu hồ sơ (quá
  * nhiều trường phải nhập, hộ dân bỏ dở). Mỗi test "không block vì..." tương ứng một rào cản đã gỡ.
+ *
+ * Thứ tự bước (2026-07-29): "Ảnh Giấy chứng nhận" đứng TRƯỚC "Người kê khai và CCCD" — số điện
+ * thoại và ô đồng ý chuyển sang đầu bước 1, vì server chỉ tạo được bản kê khai (và chỉ từ đó mới
+ * có thư mục Drive để tải ảnh) khi có cả hai. Xem `public-wizard-validation.ts` mục comment ở
+ * `PUBLIC_WIZARD_STEPS`.
  */
 import { describe, expect, it } from "vitest";
 
@@ -53,8 +58,8 @@ function input(overrides: Partial<WizardValidationInput> = {}): WizardValidation
 describe("Wizard V2 có đúng 4 bước", () => {
   it("danh sách bước", () => {
     expect(PUBLIC_WIZARD_STEPS).toEqual([
-      "Người kê khai và CCCD",
       "Ảnh Giấy chứng nhận",
+      "Người kê khai và CCCD",
       "Thông tin thửa đất",
       "Kiểm tra và gửi",
     ]);
@@ -66,36 +71,78 @@ describe("Wizard V2 có đúng 4 bước", () => {
   });
 });
 
-describe("Bước 1 — người kê khai và CCCD", () => {
-  it("đủ phone + đồng ý + tên + hai mặt CCCD thì đi tiếp được", () => {
-    expect(validatePublicWizardStep(input())).toEqual({});
+describe("Bước 1 — ảnh Giấy chứng nhận", () => {
+  const step = STEP_CERTIFICATE_UPLOAD;
+
+  it("đủ phone + đồng ý + 1 ảnh thì đi tiếp được, dù bỏ trống toàn bộ thông tin GCN", () => {
+    const draft = draftWithOwner();
+    draft.certificate = { issueNumber: "", issueDate: "", registryNumber: "" };
+    expect(validatePublicWizardStep(input({ step, draft }))).toEqual({});
   });
 
-  it("giai đoạn sàng lọc: thiếu hai câu hỏi đầu thì chặn", () => {
+  it("giai đoạn trước khi tạo hồ sơ: hai câu hỏi sàng lọc luôn đã có giá trị mặc định", () => {
+    // Không còn ô nhập cho hasCertificate/certificateCount trên màn hình — hệ thống tự gán
+    // "CO"/"MOT". Test này khóa đúng điều đó: rỗng vẫn là trường hợp không xảy ra trong thực tế,
+    // nhưng nếu ai đó quên gán mặc định thì phải chặn, không được âm thầm cho qua.
     const errors = validatePublicWizardStep(
-      input({ hasReceipt: false, hasCertificate: "", certificateCount: "" }),
+      input({ step, hasReceipt: false, hasCertificate: "", certificateCount: "" }),
     );
     expect(errors.hasCertificate).toBeTruthy();
     expect(errors.certificateCount).toBeTruthy();
   });
 
-  it("giai đoạn sàng lọc không đòi tên chủ (chưa có màn hình nhập)", () => {
+  it("giai đoạn trước khi tạo hồ sơ không đòi tên chủ (chưa có màn hình nhập)", () => {
     const draft = draftWithOwner();
     draft.owners[0].fullName = "";
-    const errors = validatePublicWizardStep(input({ hasReceipt: false, draft }));
+    const errors = validatePublicWizardStep(input({ step, hasReceipt: false, draft }));
     expect(errors["owner-0-name"]).toBeUndefined();
+  });
+
+  it("giai đoạn trước khi tạo hồ sơ không đòi ảnh Giấy chứng nhận — chưa có hồ sơ thì chưa có nơi tải ảnh", () => {
+    const errors = validatePublicWizardStep(
+      input({ step, hasReceipt: false, uploadedCertificateCount: 0 }),
+    );
+    expect(errors.certificatePhotos).toBeUndefined();
   });
 
   it("thiếu số điện thoại thì chặn đúng ô", () => {
     const draft = draftWithOwner();
     draft.phone = "12";
-    expect(validatePublicWizardStep(input({ hasReceipt: false, draft })).phone).toBeTruthy();
+    expect(
+      validatePublicWizardStep(input({ step, hasReceipt: false, draft })).phone,
+    ).toBeTruthy();
   });
 
   it("chưa đồng ý thì chặn", () => {
     const draft = draftWithOwner();
     draft.consentAccepted = false;
-    expect(validatePublicWizardStep(input({ hasReceipt: false, draft })).consent).toBeTruthy();
+    expect(
+      validatePublicWizardStep(input({ step, hasReceipt: false, draft })).consent,
+    ).toBeTruthy();
+  });
+
+  it("đã tạo hồ sơ rồi thì chưa có ảnh GCN nào là chặn", () => {
+    const errors = validatePublicWizardStep(input({ step, uploadedCertificateCount: 0 }));
+    expect(errors.certificatePhotos).toBe("Chưa có ảnh Giấy chứng nhận. Cần ít nhất một ảnh.");
+  });
+
+  it("ngày cấp nhập sai thì chặn đúng ô", () => {
+    const draft = draftWithOwner();
+    draft.certificate.issueDate = "2016-02-31";
+    expect(validatePublicWizardStep(input({ step, draft })).issueDate).toBeTruthy();
+  });
+
+  it("lỗi của bước khác không rò sang bước này", () => {
+    const draft = draftWithOwner();
+    draft.owners[0].fullName = "";
+    draft.parcels[0].area = "không phải số";
+    expect(validatePublicWizardStep(input({ step, draft }))).toEqual({});
+  });
+});
+
+describe("Bước 2 — người kê khai và CCCD", () => {
+  it("đủ tên và hai mặt CCCD thì đi tiếp được", () => {
+    expect(validatePublicWizardStep(input())).toEqual({});
   });
 
   it("thiếu tên chủ sử dụng thì chặn đúng owner", () => {
@@ -158,34 +205,6 @@ describe("Bước 1 — người kê khai và CCCD", () => {
 
   it("còn ảnh đang tải thì chặn đi tiếp", () => {
     expect(validatePublicWizardStep(input({ hasPendingUpload: true })).uploadPending).toBeTruthy();
-  });
-});
-
-describe("Bước 2 — ảnh Giấy chứng nhận", () => {
-  const step = STEP_CERTIFICATE_UPLOAD;
-
-  it("có ít nhất một ảnh thì đi tiếp được, dù bỏ trống toàn bộ thông tin GCN", () => {
-    const draft = draftWithOwner();
-    draft.certificate = { issueNumber: "", issueDate: "", registryNumber: "" };
-    expect(validatePublicWizardStep(input({ step, draft }))).toEqual({});
-  });
-
-  it("chưa có ảnh GCN nào thì chặn", () => {
-    const errors = validatePublicWizardStep(input({ step, uploadedCertificateCount: 0 }));
-    expect(errors.certificatePhotos).toBe("Chưa có ảnh Giấy chứng nhận. Cần ít nhất một ảnh.");
-  });
-
-  it("ngày cấp nhập sai thì chặn đúng ô", () => {
-    const draft = draftWithOwner();
-    draft.certificate.issueDate = "2016-02-31";
-    expect(validatePublicWizardStep(input({ step, draft })).issueDate).toBeTruthy();
-  });
-
-  it("lỗi của bước khác không rò sang bước này", () => {
-    const draft = draftWithOwner();
-    draft.owners[0].fullName = "";
-    draft.parcels[0].area = "không phải số";
-    expect(validatePublicWizardStep(input({ step, draft }))).toEqual({});
   });
 });
 
@@ -258,6 +277,15 @@ describe("Bước 4 — kiểm tra và gửi", () => {
     expect(
       validatePublicWizardStep(input({ step, hasFailedUpload: true })).uploadFailed,
     ).toBeTruthy();
+  });
+
+  it("không còn ô đồng ý ở bước này — chưa đồng ý từ bước 1 thì đã không tạo được hồ sơ để đi tới đây", () => {
+    // consentAccepted vẫn được validateCitizenSubmitDraft kiểm ở STEP_REVIEW_SUBMIT (gom lỗi mọi
+    // bước), nhưng trên thực tế không thể false ở đây: server chặn cứng consent trước khi tạo hồ
+    // sơ (create-request.ts), và không có ô nhập nào ở bước 4 để đổi lại giá trị này về false.
+    const draft = draftWithOwner();
+    draft.consentAccepted = false;
+    expect(validatePublicWizardStep(input({ step, draft })).consent).toBeTruthy();
   });
 });
 

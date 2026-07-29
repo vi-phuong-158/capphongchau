@@ -1,5 +1,32 @@
 # 06 — AI Working Log
 
+## [2026-07-29] Đồng bộ E2E và tài liệu sau khi đổi thứ tự Public Intake wizard
+
+- **Agent:** Codex
+- **Thay đổi:** Hoàn tất các kịch bản E2E theo thứ tự `Ảnh GCN → Người kê khai và CCCD`; thêm
+  kiểm tra E2E rằng checkbox đồng ý xuất hiện và được gửi trong payload CREATE trước khi giao diện
+  mở ô upload GCN. Đồng bộ Code Graph và kế hoạch V2, đồng thời sửa mô tả luồng cán bộ hỗ trợ.
+- **Bảo mật/kiến trúc:** Không đổi route, schema hay contract. Consent vẫn được client gửi ở
+  `POST /api/public/submissions`; server vẫn là nơi kiểm consent trước Turnstile, Drive và database.
+- **Kiểm tra:** focused Vitest 86/86 pass; `npx playwright test --list` nhận 15 scenario;
+  changed-file ESLint, typecheck, `git diff --check`, full Vitest 619 pass/10 skip và production
+  build đều pass. Rehearsal Playwright thật chưa chạy vì chưa có credential Supabase/Drive/Turnstile
+  và tài khoản E2E. Chạy localhost qua server dev hiện có: 1 pass (`/ke-khai-ho` chưa đăng nhập),
+  14 skip do thiếu hạ tầng; smoke trang chủ fail vì assertion cũ đòi heading/nội dung không còn có
+  trong UI hiện hành, không thuộc thay đổi wizard.
+
+## [2026-07-29] Đồng bộ smoke E2E trang chủ với giao diện hiện hành
+
+- **Agent:** Codex
+- **Thay đổi:** Cập nhật smoke test trang chủ theo heading `CSDL Đất đai`, mô tả chiến dịch và link
+  bắt đầu kê khai đang render thực tế; loại assertion cho heading dài/nội dung online-only đã không
+  còn thuộc UI.
+- **Lý do:** Lần chạy localhost phát hiện đây là expectation test cũ, không phải lỗi render hoặc
+  lỗi nghiệp vụ của trang chủ.
+- **Kiểm tra:** localhost Playwright đạt 2 pass, 14 skip (các kịch bản public intake vẫn cần
+  Supabase/Drive/Turnstile và tài khoản E2E); focused Vitest 86/86, typecheck và `git diff --check`
+  đều pass.
+
 > Các entry bên dưới là nhật ký theo thời điểm. Khi có mô tả cũ nói runtime còn là Google Sheets,
 > trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
 > read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
@@ -2304,3 +2331,24 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `saveDraft`.
 - **Kết quả HEAD mới:** focused 19/19; typecheck đạt; lint 0 error/5 warning có sẵn; unit 558
   pass/10 skipped; build đạt. Không push, merge, deploy, migration hoặc cleanup dữ liệu.
+## [2026-07-29] Bổ sung tra cứu GCN theo số phát hành và ngày cấp
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm chọn phương thức QR CCCD / số GCN ở `CertificateLookup`; route công khai dùng
+  Turnstile, chuẩn hóa số GCN và chỉ trả DTO tối thiểu. Repository tra nguồn đang xử lý và chính
+  thức, giới hạn 8 lượt/10 phút qua advisory lock + audit HMAC. Wizard tự kiểm trùng sau khi người
+  dùng nhập đủ số phát hành/ngày cấp, không chặn trạng thái bị từ chối/hết hạn.
+- **Bảo mật:** Không migration; audit không có GCN nguyên văn, PII hoặc IP thô. Response không có
+  danh sách GCN, định danh hồ sơ hay dữ liệu cá nhân.
+- **Kiểm tra:** `npm.cmd run typecheck` đạt; test tập trung 31/31 đạt; `npm.cmd test` đạt 619 pass,
+  10 skip; `npm.cmd run build` đạt; eslint các file tác động đạt. Full lint đã vượt giới hạn 60
+  giây của shell, cần chạy lại trước khi commit/deploy.
+
+## [2026-07-29] Hotfix validation số phát hành GCN có chữ Đ
+
+- **Agent:** Codex
+- **Nguyên nhân:** Validation chỉ cho `[A-Z0-9]`, nên số phát hành thực tế `AĐ 266864` bị từ chối
+  trước khi gọi tra cứu; `W 654042` không có ký tự tiếng Việt nên vẫn qua.
+- **Sửa:** Dùng Unicode letter class `\p{L}` sau chuẩn hóa; vẫn chặn dấu câu/ký tự đặc biệt. Thêm
+  regression test cho `ađ 266864` → `AĐ266864` và ngày `2006-02-20`.
+- **Kiểm tra:** focused 14/14 pass, typecheck pass, localhost trả HTTP 200.

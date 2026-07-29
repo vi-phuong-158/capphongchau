@@ -8,6 +8,14 @@ import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository"
 import { getDatabase } from "@/modules/supabase/database";
 
 import type { IntakeDraft } from "./types";
+import {
+  certificateLookupAuditMetadata,
+  certificateLookupResult,
+  isCertificateLookupRateLimited,
+  type CertificateLookupResult,
+  type CertificateLookupStatus,
+  CERTIFICATE_LOOKUP_RATE_WINDOW_SECONDS,
+} from "./certificate-lookup";
 import type { FileNormalizationMetadata, UploadAttemptMetric } from "./upload-metrics";
 import {
   type PublicFileSummary,
@@ -131,6 +139,13 @@ export interface ExistingCertificateMatch {
   readonly issueNumber: string;
   readonly issueDate: string;
   readonly registryNumber: string;
+}
+
+export class CertificateLookupRateLimitError extends Error {
+  constructor() {
+    super("Đã đạt giới hạn tra cứu. Vui lòng thử lại sau ít phút.");
+    this.name = "CertificateLookupRateLimitError";
+  }
 }
 
 export interface StoredSubmissionMutation {
@@ -614,6 +629,89 @@ export class PublicIntakeRepository {
       issueDate: row.issue_date,
       registryNumber: row.registry_number,
     }));
+  }
+
+  /**
+   * Đối chiếu số GCN trong cùng transaction với audit/rate limit. Chỉ trả status allowlist; không
+   * đưa identifier của certificate, submission, case hay bất kỳ PII nào ra khỏi repository.
+   */
+  async lookupCertificateByIssue(input: {
+    normalizedIssueNumber: string;
+    issueDate: string;
+    excludeSubmissionId?: string;
+    rateLimitKey: string;
+    lookupFingerprint: string;
+    source: "PUBLIC" | "SUBMISSION";
+    requestId: string;
+  }): Promise<CertificateLookupResult> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      // Cùng một nguồn phải nối đuôi trong transaction: SELECT-then-INSERT không khóa sẽ để nhiều
+      // request song song cùng vượt qua ngưỡng trước khi audit được ghi.
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${`CERTIFICATE_LOOKUP:${input.rateLimitKey}`}, 0))`;
+      const attempts = await transaction<{ attempt_count: string | number }[]>`
+        select count(*) as attempt_count
+        from public.audit_logs
+        where action = 'PUBLIC_CERTIFICATE_LOOKUP'
+          and metadata ->> 'rateLimitKey' = ${input.rateLimitKey}
+          and occurred_at >= now() - (${CERTIFICATE_LOOKUP_RATE_WINDOW_SECONDS} * interval '1 second')
+      `;
+      if (isCertificateLookupRateLimited(Number(attempts[0]?.attempt_count ?? 0))) {
+        throw new CertificateLookupRateLimitError();
+      }
+
+      const processing = await transaction<{ found: boolean }[]>`
+        select exists (
+          select 1
+          from public.public_certificates certificate
+          join public.public_submissions submission
+            on submission.submission_id = certificate.submission_id
+          where upper(regexp_replace(certificate.issue_number, '[[:space:]-]+', '', 'g')) = ${input.normalizedIssueNumber}
+            and certificate.issue_date = ${input.issueDate}
+            and submission.submission_id <> ${input.excludeSubmissionId ?? ""}
+            and submission.status in ('DRAFT','SUBMITTED','UNDER_REVIEW','NEEDS_SUPPLEMENT','RESUBMITTED','ACCEPTING')
+        ) as found
+      `;
+      const officiallyReceived = await transaction<{ found: boolean }[]>`
+        select exists (
+          select 1
+          from public.certificates certificate
+          where upper(regexp_replace(certificate.issue_number, '[[:space:]-]+', '', 'g')) = ${input.normalizedIssueNumber}
+            and certificate.issue_date = ${input.issueDate}
+          union all
+          select 1
+          from (
+            select distinct on (existing_record_id)
+              existing_record_id, issue_number, issue_date, status
+            from public.existing_certificates
+            order by existing_record_id, row_version desc
+          ) existing_certificate
+          where existing_certificate.status = 'VERIFIED'
+            and upper(regexp_replace(existing_certificate.issue_number, '[[:space:]-]+', '', 'g')) = ${input.normalizedIssueNumber}
+            and existing_certificate.issue_date = ${input.issueDate}
+        ) as found
+      `;
+      const status: CertificateLookupStatus | null = officiallyReceived[0]?.found
+        ? "OFFICIALLY_RECEIVED"
+        : processing[0]?.found
+          ? "IN_PROCESSING"
+          : null;
+      const result = certificateLookupResult(status);
+
+      await this.insertAudit(transaction, {
+        actorEmail: "PUBLIC",
+        action: "PUBLIC_CERTIFICATE_LOOKUP",
+        entityId: "CERTIFICATE_LOOKUP",
+        requestId: input.requestId,
+        metadata: certificateLookupAuditMetadata({
+          source: input.source,
+          rateLimitKey: input.rateLimitKey,
+          lookupFingerprint: input.lookupFingerprint,
+          result,
+        }),
+      });
+      return result;
+    });
   }
 
   async findStoredMutation(

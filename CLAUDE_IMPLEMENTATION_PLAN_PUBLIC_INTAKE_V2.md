@@ -308,11 +308,27 @@ Không được dùng điều kiện tối thiểu của người dân làm đi�
 
 ## 2.2. Wizard mới gồm 4 bước
 
-### Bước 1 — Người kê khai và CCCD
+### Bước 1 — Ảnh Giấy chứng nhận
+
+Trước khi tạo bản kê khai, chỉ hiển thị:
+
+- số điện thoại;
+- ô đồng ý xử lý dữ liệu.
+
+Máy chủ phải kiểm ô đồng ý trước Turnstile, tạo bản kê khai và tạo nơi nhận ảnh trên Drive. Chỉ sau
+khi tạo thành công, trong chính bước này hiển thị:
+
+- upload từ 1 đến 10 ảnh Giấy chứng nhận;
+- khối tùy chọn sau upload gồm số phát hành GCN, ngày cấp và số vào sổ.
+
+Ghi chú:
+
+> Không tìm thấy thông tin có thể để trống. Cán bộ sẽ đối chiếu trên ảnh Giấy chứng nhận.
+
+### Bước 2 — Người kê khai và CCCD
 
 Hiển thị:
 
-- số điện thoại;
 - tên chủ sử dụng;
 - loại chủ sử dụng;
 - ảnh CCCD mặt trước;
@@ -323,21 +339,6 @@ Hiển thị:
 Thông điệp:
 
 > Chụp rõ toàn bộ giấy tờ, không che góc, không lóa sáng.
-
-### Bước 2 — Ảnh Giấy chứng nhận
-
-Đặt upload ở đầu bước.
-
-Sau upload mới hiển thị khối tùy chọn:
-
-- số phát hành GCN;
-- ngày cấp;
-- số vào sổ.
-
-Ghi chú:
-
-> Không tìm thấy thông tin có thể để trống. Cán bộ sẽ đối chiếu trên ảnh Giấy chứng nhận.
-
 ### Bước 3 — Thông tin thửa đất nếu biết
 
 Hiển thị ngắn gọn:

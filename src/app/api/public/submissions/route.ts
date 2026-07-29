@@ -26,7 +26,7 @@ import {
 } from "@/modules/public-intake/session";
 import {
   TURNSTILE_HEADER,
-  turnstileHostname,
+  turnstileHostnames,
   verifyTurnstileToken,
 } from "@/modules/public-intake/turnstile";
 
@@ -97,7 +97,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     token: request.headers.get(TURNSTILE_HEADER),
     action: "create",
     secretKey: environment.TURNSTILE_SECRET_KEY,
-    expectedHostname: turnstileHostname(environment.APP_BASE_URL),
+    expectedHostnames: turnstileHostnames(environment.APP_BASE_URL),
   });
   if (!turnstile.ok && !turnstile.duplicate) {
     return publicError(

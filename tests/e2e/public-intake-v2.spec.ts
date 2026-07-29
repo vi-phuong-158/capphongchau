@@ -65,28 +65,52 @@ async function uploadAndAwaitComplete(page: Page, input: ReturnType<Page["locato
 }
 
 /**
- * Điền bước 1 tới mức tối thiểu — hai phát hiện qua chạy E2E thật lần đầu, không thấy được bằng
- * đọc mã nguồn hay unit test:
- *
- * 1. Trang mở ra CHỈ có hai ô chọn ("Đã có GCN chưa?", "Mấy GCN?") + số điện thoại + đồng ý. Ô "Họ
- *    và tên" và toàn bộ form chủ sử dụng chỉ xuất hiện SAU khi bấm "Tiếp tục" lần đầu — đó là lúc
- *    hồ sơ thật được tạo (POST /api/public/submissions) và máy chủ sinh ID chủ sử dụng đầu tiên.
- * 2. Bước 1 tên là "Người kê khai và CCCD" theo đúng nghĩa đen: ảnh CCCD mặt trước/sau là bắt buộc
- *    để rời khỏi bước 1 (`identityPhotoErrors` trong `public-wizard-validation.ts`), không phải
- *    tùy chọn tới tận màn hình gửi cuối cùng như đã hiểu nhầm lúc đọc mã nguồn.
+ * Ô chọn ảnh Giấy chứng nhận (bước 1) — `Field` (wizard.tsx) không gắn `htmlFor` vào đúng phần tử
+ * `<input type="file">` lồng bên trong, nên `getByLabel` không khớp; dòng chữ hiển thị
+ * "Chạm để chụp ảnh / Chọn NHIỀU tệp" (số nhiều) đủ riêng biệt để dùng trực tiếp — đây là ô duy
+ * nhất mang chữ đó, khác với hai ô CCCD ở bước 2 dùng chung một dòng chữ số ít.
  */
-async function fillMinimalStepOne(page: Page): Promise<void> {
-  await page.getByLabel(/đã có Giấy chứng nhận.*chưa/i).selectOption("CO");
-  await page.getByLabel(/gồm mấy Giấy chứng nhận/i).selectOption("MOT");
+function certificatePhotoInput(page: Page) {
+  return page.getByLabel(/Chạm để chụp ảnh.*Chọn nhiều tệp/i);
+}
+
+/**
+ * Điền phần đầu bước 1 (Ảnh Giấy chứng nhận) và tạo hồ sơ thật — phát hiện qua chạy E2E thật lần
+ * đầu, không thấy được bằng đọc mã nguồn hay unit test:
+ *
+ * Trang mở ra CHỈ có số điện thoại + đồng ý. Ô tải ảnh Giấy chứng nhận chỉ xuất hiện SAU khi bấm
+ * "Tiếp tục" lần đầu — đó là lúc hồ sơ thật được tạo (POST /api/public/submissions) và máy chủ
+ * dựng thư mục Drive để nhận ảnh. Hai câu hỏi sàng lọc cũ ("Đã có GCN chưa?", "Mấy GCN?") không
+ * còn ô nhập trên màn hình — hệ thống tự gán mặc định "Đã có Giấy chứng nhận" / "Một Giấy chứng
+ * nhận" (2026-07-29, gộp phone vào bước ảnh GCN + đưa CCCD/chủ sử dụng thành bước riêng).
+ *
+ * Tách riêng khỏi `fillMinimalStepOne`: E2E-02 cần dừng lại ĐÚNG lúc này, trước khi có ảnh GCN
+ * nào, để kiểm tra thông báo "Chưa có ảnh Giấy chứng nhận".
+ */
+async function createMinimalSubmission(page: Page): Promise<void> {
   await page.getByLabel(/Số điện thoại/i).fill(PHONE);
   await page.getByRole("checkbox", { name: /đồng ý/i }).check();
   await page.getByRole("button", { name: /Tiếp tục/i }).click();
-  // Hồ sơ vừa được tạo thật; form chủ sử dụng nay mới xuất hiện trên cùng bước 1.
+  // Hồ sơ vừa được tạo thật; ô tải ảnh GCN nay mới xuất hiện trên cùng bước 1.
+  await expect(certificatePhotoInput(page)).toBeVisible();
+}
+
+/** Tạo hồ sơ rồi tải luôn một ảnh GCN tối thiểu — đủ để rời khỏi bước 1. */
+async function fillMinimalStepOne(page: Page): Promise<void> {
+  await createMinimalSubmission(page);
+  await uploadAndAwaitComplete(page, certificatePhotoInput(page), "tests/fixtures/gcn.png");
+  // Khi hàng đợi hoàn tất, nhãn tạm "Trang GCN 1" bị gỡ và thẻ ảnh chính thức dùng "Ảnh 1/1".
+  await expect(page.getByText("Ảnh 1/1")).toBeVisible();
+}
+
+/**
+ * Điền bước 2 (Người kê khai và CCCD) tới mức tối thiểu — ảnh CCCD mặt trước/sau là bắt buộc để
+ * rời khỏi bước này (`identityPhotoErrors` trong `public-wizard-validation.ts`), không phải tùy
+ * chọn tới tận màn hình gửi cuối cùng.
+ */
+async function fillMinimalStepTwo(page: Page): Promise<void> {
   await page.getByLabel(/Họ và tên/i).first().fill("Nguyễn Văn Test");
-  // `Field` (wizard.tsx) không gắn `htmlFor` vào đúng phần tử <input type="file"> lồng bên trong —
-  // đây là lỗ a11y có sẵn trong UI (`getByLabel("CCCD mặt trước")` không khớp gì), không phải do
-  // thay đổi ở vòng này. Cả hai ô CCCD dùng chung một dòng chữ hiển thị ("Chạm để chụp ảnh / Chọn
-  // tệp"), nên phải chọn theo VỊ TRÍ: mặt trước luôn render trước mặt sau (mảng
+  // Cùng lỗ a11y như ô ảnh GCN: chọn theo VỊ TRÍ, mặt trước luôn render trước mặt sau (mảng
   // `["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK"]` trong wizard.tsx).
   const cccdFileInputs = page.locator('input[type="file"]');
   await uploadAndAwaitComplete(page, cccdFileInputs.nth(0), "tests/fixtures/cccd-truoc.png");
@@ -103,22 +127,12 @@ async function fillMinimalStepOne(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: /Tiếp tục/i })).toBeEnabled();
 }
 
-/**
- * Ô chọn ảnh Giấy chứng nhận (bước 2) — cùng lỗ a11y như CCCD, nhưng dòng chữ hiển thị khác biệt
- * đủ để dùng trực tiếp: "Chạm để chụp ảnh / Chọn NHIỀU tệp" (số nhiều, chỉ riêng ô này có chữ đó).
- */
-function certificatePhotoInput(page: Page) {
-  return page.getByLabel(/Chạm để chụp ảnh.*Chọn nhiều tệp/i);
-}
-
-/** Từ bước 1 tới màn hình "KÊ KHAI THÀNH CÔNG" bằng đúng một ảnh GCN tối thiểu. */
+/** Từ bước 1 tới màn hình "KÊ KHAI THÀNH CÔNG" bằng đúng một ảnh GCN và một chủ sử dụng tối thiểu. */
 async function submitMinimalRecord(page: Page, path = "/ke-khai"): Promise<void> {
   await page.goto(path);
   await fillMinimalStepOne(page);
   await page.getByRole("button", { name: /Tiếp tục/i }).click();
-  await uploadAndAwaitComplete(page, certificatePhotoInput(page), "tests/fixtures/gcn.png");
-  // Khi hàng đợi hoàn tất, nhãn tạm "Trang GCN 1" bị gỡ và thẻ ảnh chính thức dùng "Ảnh 1/1".
-  await expect(page.getByText("Ảnh 1/1")).toBeVisible();
+  await fillMinimalStepTwo(page);
   await page.getByRole("button", { name: /Tiếp tục/i }).click();
   await page.getByRole("button", { name: /Tiếp tục/i }).click();
   await page.getByRole("button", { name: /Gửi bản kê khai/i }).click();
@@ -133,11 +147,40 @@ test.describe("E2E-01 — Người dân kê khai tối thiểu", () => {
     await expect(page.getByText(/Bước 1\/4/)).toBeVisible();
   });
 
-  test("không ô nào ngoài bốn ô bắt buộc chặn được bước 1", async ({ page }) => {
+  test("đồng ý xử lý dữ liệu có trước khi tạo hồ sơ, rồi mới mở tải ảnh GCN", async ({ page }) => {
+    const serverEvents: string[] = [];
+    const createBodies: Array<{ consent?: { accepted?: unknown } }> = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() !== "POST") return;
+      if (pathname === "/api/public/submissions") {
+        serverEvents.push("create");
+        createBodies.push(request.postDataJSON() as { consent?: { accepted?: unknown } });
+      }
+      if (pathname.includes("/uploads/")) serverEvents.push("upload");
+    });
+
+    await page.goto("/ke-khai");
+    const consent = page.getByRole("checkbox", { name: /đồng ý/i });
+    await expect(consent).toBeVisible();
+    await expect(consent).not.toBeChecked();
+    // Chưa có receipt/folder Drive nên giao diện chưa cho chọn ảnh để upload.
+    await expect(certificatePhotoInput(page)).toHaveCount(0);
+
+    await createMinimalSubmission(page);
+
+    expect(createBodies).toHaveLength(1);
+    expect(createBodies[0]?.consent?.accepted).toBe(true);
+    expect(serverEvents).toEqual(["create"]);
+    await expect(certificatePhotoInput(page)).toBeVisible();
+  });
+
+  test("không ô nào ngoài ba ô bắt buộc chặn được bước 1", async ({ page }) => {
     await page.goto("/ke-khai");
     await fillMinimalStepOne(page);
     await page.getByRole("button", { name: /Tiếp tục/i }).click();
-    // Bước 2 là ảnh Giấy chứng nhận — góp ý "up ảnh GCN gần phần kê khai GCN".
+    // Bước 2 là người kê khai và CCCD — góp ý "up ảnh GCN gần phần kê khai GCN" đưa ảnh GCN lên
+    // trước, ngay bước 1.
     await expect(page.getByText(/Bước 2\/4/)).toBeVisible();
   });
 
@@ -159,8 +202,8 @@ test.describe("E2E-02 — Thiếu ảnh phải báo rõ thiếu gì", () => {
    */
   test("nêu đích danh ảnh còn thiếu, không phải một câu chung chung", async ({ page }) => {
     await page.goto("/ke-khai");
-    await fillMinimalStepOne(page);
-    await page.getByRole("button", { name: /Tiếp tục/i }).click();
+    // Tạo hồ sơ xong nhưng KHÔNG tải ảnh GCN nào, rồi bấm Tiếp tục ngay trên chính bước 1.
+    await createMinimalSubmission(page);
     await page.getByRole("button", { name: /Tiếp tục/i }).click();
 
     await expect(page.getByText(/Chưa có ảnh Giấy chứng nhận/i)).toBeVisible();
@@ -172,8 +215,7 @@ test.describe("E2E-03 — Nhiều ảnh Giấy chứng nhận", () => {
 
   test("một ảnh hỏng không kéo theo ảnh khác — cả ba nhãn trang đều hiện", async ({ page }) => {
     await page.goto("/ke-khai");
-    await fillMinimalStepOne(page);
-    await page.getByRole("button", { name: /Tiếp tục/i }).click();
+    await createMinimalSubmission(page);
     await certificatePhotoInput(page)
       .setInputFiles([
         "tests/fixtures/gcn-1.png",
@@ -211,8 +253,7 @@ test.describe("E2E-04 — Mạng lỗi giữa chừng", () => {
     });
 
     await page.goto("/ke-khai");
-    await fillMinimalStepOne(page);
-    await page.getByRole("button", { name: /Tiếp tục/i }).click();
+    await createMinimalSubmission(page);
     // Lần PUT đầu bị abort; uploadWithResume (MAX_UPLOAD_ATTEMPTS = 3) tự hỏi lại tiến độ và thử
     // lại — không cần người dân bấm "Thử lại". `uploadAndAwaitComplete` đợi ĐÚNG response
     // `/uploads/complete` cuối cùng, nên chỉ pass khi ảnh thật sự lên được sau khi thử lại.
@@ -251,7 +292,7 @@ test.describe("E2E-06a — /ke-khai-ho chặn người chưa đăng nhập", () 
 test.describe("E2E-06b — Chế độ cán bộ hỗ trợ kê khai", () => {
   test.skip(!HAS_OFFICER, "Cần tài khoản cán bộ có quyền lập hồ sơ hộ dân.");
 
-  test("login → create → upload CCCD → upload GCN → submit → success", async ({
+  test("login → create → upload GCN → upload CCCD → submit → success", async ({
     page,
     context,
     baseURL,
@@ -311,9 +352,9 @@ test.describe("E2E-08 — Kê khai hồ sơ tiếp theo", () => {
     await expect(page.getByText(/Bước 1\/4/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "KÊ KHAI THÀNH CÔNG" })).toHaveCount(0);
 
-    // Ô nhập trống hoàn toàn — không còn PII của hộ trước.
+    // Ô nhập trống hoàn toàn — không còn PII của hộ trước. "Họ và tên" nay ở bước 2 (Người kê
+    // khai và CCCD), không còn trên màn hình bước 1 nữa nên không kiểm ở đây.
     await expect(page.getByLabel(/Số điện thoại/i)).toHaveValue("");
-    await expect(page.getByLabel(/Họ và tên/i).first()).toHaveValue("");
 
     // Nộp trọn vẹn hồ sơ thứ hai để chứng minh đường tạo hồ sơ vẫn hoạt động sau khi bấm nút.
     await submitMinimalRecord(page);
@@ -388,15 +429,16 @@ test.describe("E2E-10 — Phát lại idempotent không tạo hồ sơ thứ hai
     });
 
     await page.goto("/ke-khai");
-    await fillMinimalStepOne(page);
-    await page.getByRole("button", { name: /Tiếp tục/i }).click();
 
-    // Wizard phải tự vượt qua lần lỗi đầu và tới được bước 2 — không đứng lại ở thông báo lỗi.
-    await expect(page.getByText(/Bước 2\/4/)).toBeVisible({ timeout: 20_000 });
+    // Wizard phải tự vượt qua lần lỗi đầu và tới được màn tải ảnh GCN (vẫn trên bước 1) — không
+    // đứng lại ở thông báo lỗi.
+    await createMinimalSubmission(page);
     expect(createCalls).toBeGreaterThanOrEqual(2);
 
     await uploadAndAwaitComplete(page, certificatePhotoInput(page), "tests/fixtures/gcn.png");
     await expect(page.getByText("Ảnh 1/1")).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: /Tiếp tục/i }).click();
+    await fillMinimalStepTwo(page);
     await page.getByRole("button", { name: /Tiếp tục/i }).click();
     await page.getByRole("button", { name: /Tiếp tục/i }).click();
     await page.getByRole("button", { name: /Gửi bản kê khai/i }).click();

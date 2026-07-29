@@ -242,8 +242,10 @@ GET /api/health/google
 GET /api/health/database
 GET /api/security/csrf
 POST /api/public/submissions
+POST /api/public/certificate-lookup
 POST /api/public/submissions/recover
 GET/PATCH /api/public/submissions/current
+POST /api/public/submissions/current/certificate-duplicate-check
 GET/DELETE /api/public/submissions/current/files/:fileId
 POST /api/public/submissions/current/existing-records/check
 POST /api/public/submissions/current/existing-records/link
@@ -291,6 +293,15 @@ Route bị khóa bằng cờ `OFFICIAL_ACCEPTANCE_ENABLED` (`src/modules/submiss
 mặc định `false`) — độc lập với `REFERENCE_IS_PLACEHOLDER` (cờ đó chỉ nói nhãn danh mục xuất PL3
 đã chốt, không phải đã đủ điều kiện ghi dữ liệu thật). Chỉ đảo `true` sau khi hoàn thành gác cổng
 ở `docs/brain/04-current-tasks.md`.
+
+`POST /api/public/certificate-lookup` nhận một trong hai phương thức: QR CCCD hiện có hoặc số
+phát hành GCN + ngày cấp. Với GCN, chuẩn hóa bỏ khoảng trắng/dấu gạch và không phân biệt hoa/thường;
+đối chiếu cả `public_certificates` đang active, `certificates` chính thức và bản cuối `VERIFIED` của
+`existing_certificates`. Chỉ trả `found`, trạng thái allowlist `IN_PROCESSING`/`OFFICIALLY_RECEIVED`
+và hướng dẫn; tuyệt đối không trả PII, ID nội bộ, số GCN hay ảnh. Tra cứu công khai cần Turnstile,
+giới hạn tối đa 8 lượt/10 phút theo HMAC nguồn gọi; audit chỉ ghi HMAC nguồn/fingerprint tra cứu.
+`POST /api/public/submissions/current/certificate-duplicate-check` dùng session + CSRF để cảnh báo
+trùng tự động trong wizard, loại trừ chính submission và không coi `REJECTED`/`EXPIRED` là hiệu lực.
 
 ## 6. Bảo mật và vận hành
 
