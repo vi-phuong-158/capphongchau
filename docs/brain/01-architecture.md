@@ -365,8 +365,11 @@ src/app/api/submissions/[submissionId]/accept/route.ts
     │   (ngoài transaction nghiệp vụ; mỗi cache miss mở transaction RIÊNG, giữ
     │   pg_advisory_xact_lock theo parent/name bao quanh thao tác Drive, nên nhiều lambda không
     │   thể tạo trùng thư mục)
-    ├── FILES_MOVED: drive.files.update từng file (đổi parent + đổi tên `requestBody.name`),
-    │   checkpoint moved_files (NGOÀI tx) — tên sinh bởi buildOriginalFileNames
+    ├── FILES_MOVED: `acceptance-file-move.ts` chia file chưa checkpoint theo thứ tự thành nhóm
+    │   tối đa 2; mỗi nhóm chạy `drive.files.get` + `drive.files.update` song song, rồi checkpoint
+    │   các file thành công đúng một lần bằng transaction ngắn + advisory lock. Lỗi một file vẫn
+    │   checkpoint peer thành công trước khi trả retryable; retry cùng key bỏ qua `moved_files`.
+    │   Tên sinh bởi buildOriginalFileNames
     │   (src/modules/public-intake/file-naming.ts, đệm 0 `-01/-02` từ 2026-07-25), issueNumber
     │   rỗng → bỏ qua đổi tên
     ├── RECORDS_WRITTEN (tx): cases + files, syncOfficialRecord ghi certificates/owners/

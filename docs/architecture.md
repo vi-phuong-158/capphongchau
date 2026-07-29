@@ -147,6 +147,10 @@ Google Sign-In chỉ cấp session. Mỗi request bảo vệ đọc lại `users
 3. Browser PUT trực tiếp lên Drive và hiển thị tiến độ/retry.
 4. API complete xác minh folder cha, MIME, dung lượng và checksum.
 5. Metadata file được ghi vào Supabase; Drive ID/link không được trả trong lỗi hoặc log kỹ thuật.
+6. Saga tiếp nhận chính thức (`FILES_MOVED`) giữ thứ tự file nhưng chỉ xử lý tối đa hai file Drive
+   song song. Sau từng nhóm, các file thành công được checkpoint cùng một transaction ngắn +
+   advisory lock; nếu peer lỗi, retry cùng idempotency key bỏ qua file đã checkpoint. Không có
+   migration, biến môi trường hay background/work-unit resume cho cơ chế này.
 
 Google My Drive tiếp tục dùng cây `00_CONFIG`, `01_INBOX`, `02_CASES`, `03_EXPORTS`, `99_BACKUP`. Scope vẫn là `drive.file`; không dùng service account hoặc link công khai.
 

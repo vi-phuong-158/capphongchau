@@ -330,6 +330,12 @@ Khi `completionChecks` còn lỗi `BLOCKING`, route trả HTTP 400 kèm `error.d
 `code`, `label`, `message` an toàn để cán bộ biết chính xác mục cần hoàn thiện; không đưa PII,
 Drive ID/link, token hoặc metadata tệp vào chi tiết lỗi.
 
+Ở checkpoint `FILES_MOVED`, saga tiếp nhận chỉ được chạy Drive theo nhóm cố định tối đa **2** file,
+giữ thứ tự `activeFiles`; mỗi nhóm `files.get`/`files.update` song song rồi ghi chung một checkpoint
+`moved_files` trong transaction ngắn + advisory lock. Nếu một file lỗi, file thành công cùng nhóm
+phải được checkpoint trước khi trả lỗi retryable để retry cùng idempotency key bỏ qua chúng. Không
+thêm work-unit/background resume hay biến concurrency nếu chưa có quyết định Phase 5B riêng.
+
 `POST /api/public/certificate-lookup` nhận một trong hai phương thức: QR CCCD hiện có hoặc số
 phát hành GCN + ngày cấp. Với GCN, chuẩn hóa bỏ khoảng trắng/dấu gạch và không phân biệt hoa/thường;
 đối chiếu cả `public_certificates` đang active, `certificates` chính thức và bản cuối `VERIFIED` của

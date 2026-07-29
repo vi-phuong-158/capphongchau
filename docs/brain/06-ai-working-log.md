@@ -2589,6 +2589,19 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
 - **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
 - **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.
+
+## [2026-07-29] Phase 5A — tối ưu tiếp nhận chính thức theo nhóm 2 file
+
+- **Agent:** Codex.
+- **Thay đổi:** thêm `acceptance-file-move.ts`; saga chia file chưa checkpoint thành nhóm tối đa 2,
+  chạy Drive song song rồi checkpoint `moved_files` một lần bằng transaction ngắn + advisory lock.
+  Lỗi nhóm vẫn checkpoint peer thành công trước `AcceptanceRetryableError`; retry cùng key bỏ qua
+  peer đó. API accept không đổi.
+- **UI/Test:** hiển thị “Đang chuyển ảnh và ghi dữ liệu hồ sơ. Vui lòng không đóng trang.”; unit
+  kiểm chunk/order/trần 2/nhóm lỗi/10 file = 5 nhóm. Rehearsal integration đo peak Drive và 10 file,
+  chỉ chạy khi có `ACCEPTANCE_SAGA_TEST_DATABASE_URL` riêng.
+- **Giới hạn:** không migration, env, deploy/merge Production hay Phase 5B; chưa có benchmark Preview
+  10 file vì chưa deploy Preview.
 ## [2026-07-29] Phase 4 — pool Supabase và region Preview
 
 - **Agent:** Codex.

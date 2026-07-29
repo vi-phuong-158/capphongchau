@@ -1687,6 +1687,19 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
   thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
   `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.
+
+## [2026-07-29] Phase 5A — Chuyển Drive theo nhóm hai file, checkpoint một lần mỗi nhóm
+
+- **Quyết định:** ở bước `FILES_MOVED`, giữ nguyên thứ tự `activeFiles` và giới hạn cứng mỗi nhóm
+  ở hai file. Trong một nhóm, `files.get` và (khi cần) `files.update` chạy song song; sau khi cả
+  nhóm settled, file thành công được ghi vào `moved_files` trong **một** transaction ngắn có advisory
+  lock. Một file lỗi không làm mất checkpoint peer thành công; saga trả retryable và retry cùng key
+  bỏ qua file đã checkpoint.
+- **Lý do:** giảm checkpoint từ 10 xuống 5 cho 10 ảnh mà không thay API, `ACCEPTING`, deterministic
+  ID hay transaction ghi dữ liệu chính thức.
+- **Giới hạn:** concurrency luôn 2, không migration, worker/background task hay resume đa phiên.
+  Phase 5B/work-unit chỉ được lập riêng nếu benchmark sau 5A không đạt mục tiêu; key ở tab không là
+  cam kết resume phiên mới.
 ## [2026-07-29] Phase 2 dùng SSR initial detail, lazy preview và lazy AI
 
 - **Quyết định:** Trang chi tiết cán bộ tự kiểm quyền rồi gọi `loadStaffSubmissionDetail` ở Server Component; `SubmissionDetail` nhận `initialSubmission` và không fetch detail khi mount. GET detail giữ nguyên contract để refresh sau mutation/direct access.

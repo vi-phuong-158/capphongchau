@@ -883,3 +883,67 @@ evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md.
   mồ côi thuộc nhiều hồ sơ; không xóa tự động vì cần đối chiếu thủ công.
 - Để chạy lại cần cung cấp `x-vercel-protection-bypass` hợp lệ/bật quyền Preview cho runner, sau đó
   chạy lại cùng lệnh. Chưa commit, push, merge hoặc deploy.
+
+## Phase 5A handoff — tiếp nhận chính thức theo nhóm 2 file (2026-07-29)
+
+### Trạng thái
+
+`READY_FOR_REVIEW` — đã implement và kiểm chứng local. Không migration, không deploy/merge
+Production, không triển khai Phase 5B/work-unit. Benchmark Preview end-to-end 10 file còn
+`NOT_TESTED` vì nhánh chưa được deploy Preview và runner không có session/API Preview được phép.
+
+### Baseline trước thay đổi
+
+- Worktree/branch: `D:\04. Github\capphongchau-acceptance-visibility`,
+  `codex/phase5-acceptance-batching`, base `c4049c2`.
+- Full Vitest baseline: 675 pass, 10 skip. Typecheck và lint đạt.
+- Không có migration hoặc biến môi trường mới; không sửa hay đọc trực tiếp `.env.local` Production.
+
+### Thay đổi và symbol
+
+- `src/modules/submissions/acceptance-file-move.ts` —
+  `OFFICIAL_ACCEPTANCE_FILE_MOVE_CONCURRENCY = 2`, `chunkOfficialAcceptanceFiles`,
+  `settleOfficialAcceptanceMoveChunk`.
+- `src/modules/submissions/acceptance-saga.ts` — `runOfficialAcceptance` xử lý `FILES_MOVED` theo
+  nhóm hai file, chạy Drive song song trong nhóm và checkpoint `moved_files` một lần/nhóm qua
+  transaction ngắn + advisory lock. Kết quả thành công cùng nhóm lỗi được checkpoint trước lỗi
+  retryable; retry cùng idempotency key bỏ qua chúng.
+- `src/components/submission-detail.tsx` — trạng thái bận có ngữ cảnh: “Đang chuyển ảnh và ghi dữ
+  liệu hồ sơ. Vui lòng không đóng trang.” API accept/body/response không đổi.
+- `tests/acceptance-file-move.test.ts` — order, nhóm 2, concurrency peak 2, peer-success và
+  10 file = 5 nhóm. `tests/staging-rehearsal-acceptance-saga.integration.test.ts` — fake Drive đo
+  concurrency, fixture 10 file, kiểm không trùng bản ghi chính thức; suite chỉ chạy với
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL` rehearsal riêng.
+- Đồng bộ: `AGENTS.md`, `docs/architecture.md`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/06-ai-working-log.md`.
+
+### Kết quả kiểm tra
+
+| Check | Result |
+|---|---|
+| `npm.cmd run typecheck` | PASS |
+| `npm.cmd run lint -- --quiet` | PASS |
+| `npm.cmd test` | PASS — 678 pass, 11 skip (689 total) |
+| `npm.cmd run build -- --webpack` | PASS — 23/23 static pages |
+| `git diff --check` | PASS |
+| Rehearsal Postgres thật | NOT_TESTED — thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` riêng |
+| Preview synthetic 10-file P50/P95/error rate | NOT_TESTED — không deploy Preview trong task này |
+
+### Nghiệm thu và rủi ro còn lại
+
+- Đạt ở cấp local: giới hạn Drive cố định 2; file/naming vẫn theo `activeFiles`; parent được kiểm
+  trước update; checkpoint, `ACCEPTING`, deterministic IDs, guard và transaction ghi dữ liệu chính
+  thức giữ nguyên. Không thay API/schema/auth/role/phone masking.
+- Cần trước khi kết luận hiệu năng: chạy rehearsal integration bằng Postgres tách biệt, sau đó
+  deploy Preview theo phê duyệt và benchmark authenticated synthetic 10 file để ghi P50/P95, error
+  rate và Server-Timing.
+- Phase 5B không tự mở: nếu P95 vẫn vượt mục tiêu phải thiết kế continue server-side đa phiên; key
+  hiện chỉ sống trong tab không an toàn để hứa resume sau khi đóng/mở lại.
+
+### Git status và diff quan trọng
+
+- Commit ở đầu handoff: `c4049c2`; commit Phase 5A đã được tạo với message
+  `perf(acceptance): batch Drive moves in pairs` (xem `git log -1 --oneline`).
+- Thay đổi chỉ thuộc Phase 5A và tài liệu/handoff nêu trên. Diff lõi: vòng lặp tuần tự `for` +
+  checkpoint `database.unsafe` mỗi file được thay bằng `Promise.allSettled` trên chunk 2 và một
+  `database.begin` checkpoint mỗi chunk thành công.

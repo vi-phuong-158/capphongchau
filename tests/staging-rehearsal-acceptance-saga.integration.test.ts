@@ -47,6 +47,8 @@ const drive = vi.hoisted(() => {
   const nodes = new Map<string, Node>();
   let seq = 0;
   const callsByFile = new Map<string, number>();
+  let activeUpdates = 0;
+  let peakConcurrentUpdates = 0;
 
   const state = {
     /** Ném lỗi mạng giả khi `drive.files.update` được gọi cho đúng fileId này. */
@@ -55,6 +57,8 @@ const drive = vi.hoisted(() => {
       nodes.clear();
       seq = 0;
       callsByFile.clear();
+      activeUpdates = 0;
+      peakConcurrentUpdates = 0;
       state.failOnFileId = null;
     },
     seedFile(id: string, parentId: string) {
@@ -65,6 +69,9 @@ const drive = vi.hoisted(() => {
     },
     updateCallsFor(id: string): number {
       return callsByFile.get(id) ?? 0;
+    },
+    peakConcurrentUpdates(): number {
+      return peakConcurrentUpdates;
     },
   };
 
@@ -114,15 +121,22 @@ const drive = vi.hoisted(() => {
       removeParents?: string;
     }) => {
       callsByFile.set(fileId, (callsByFile.get(fileId) ?? 0) + 1);
-      if (state.failOnFileId === fileId) {
-        throw new Error("fake drive: mô phỏng mất mạng giữa chừng khi di chuyển file");
+      activeUpdates += 1;
+      peakConcurrentUpdates = Math.max(peakConcurrentUpdates, activeUpdates);
+      try {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (state.failOnFileId === fileId) {
+          throw new Error("fake drive: mô phỏng mất mạng giữa chừng khi di chuyển file");
+        }
+        const node = nodes.get(fileId);
+        if (!node) throw new Error(`fake drive: không tìm thấy file ${fileId}`);
+        const removeSet = new Set((removeParents ?? "").split(",").filter(Boolean));
+        node.parents = node.parents.filter((parentId) => !removeSet.has(parentId));
+        if (addParents) node.parents.push(addParents);
+        return { data: { id: node.id, parents: [...node.parents] } };
+      } finally {
+        activeUpdates -= 1;
       }
-      const node = nodes.get(fileId);
-      if (!node) throw new Error(`fake drive: không tìm thấy file ${fileId}`);
-      const removeSet = new Set((removeParents ?? "").split(",").filter(Boolean));
-      node.parents = node.parents.filter((parentId) => !removeSet.has(parentId));
-      if (addParents) node.parents.push(addParents);
-      return { data: { id: node.id, parents: [...node.parents] } };
     },
     delete: async () => ({ data: {} }),
   };
@@ -279,8 +293,9 @@ describe.skipIf(!hasTestDb)(
       await truncateAppTables(bootstrapSql);
     });
 
-    /** Mỗi hồ sơ có 3 file (2 CCCD + 1 GCN) sẵn sàng để saga di chuyển. */
-    async function seedSubmission(draftOverrides: Record<string, unknown> = {}) {
+    /** Mỗi hồ sơ có 2 CCCD, 1+ GCN sẵn sàng để saga di chuyển. */
+    async function seedSubmission(draftOverrides: Record<string, unknown> = {}, fileCount = 3) {
+      if (fileCount < 3) throw new Error("Fixture tiếp nhận cần tối thiểu 2 CCCD và 1 GCN.");
       const submissionId = `sub-${randomUUID()}`;
       const receiptCode = `PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
       const draft = {
@@ -347,7 +362,12 @@ describe.skipIf(!hasTestDb)(
         )
       `;
 
-      const fileSpecs = [
+      const fileSpecs: Array<{
+        fileId: string;
+        driveFileId: string;
+        documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
+        ownerId: string;
+      }> = [
         {
           fileId: `file-${randomUUID()}`,
           driveFileId: `drive-front-${randomUUID()}`,
@@ -366,7 +386,15 @@ describe.skipIf(!hasTestDb)(
           documentType: "CERTIFICATE",
           ownerId: "",
         },
-      ] as const;
+      ];
+      for (let index = 3; index < fileCount; index += 1) {
+        fileSpecs.push({
+          fileId: `file-${randomUUID()}`,
+          driveFileId: `drive-cert-${randomUUID()}`,
+          documentType: "CERTIFICATE",
+          ownerId: "",
+        });
+      }
 
       for (const file of fileSpecs) {
         await bootstrapSql`
@@ -450,6 +478,39 @@ describe.skipIf(!hasTestDb)(
         expect(filesRows).toHaveLength(3);
         const reservationRows = await bootstrapSql`select * from public.id_reservations`;
         expect(reservationRows).toHaveLength(1);
+      },
+      30_000,
+    );
+
+    it(
+      "Phase 5A: mười file hoàn tất theo năm nhóm, Drive peak không vượt 2 và dữ liệu chính thức không trùng",
+      async () => {
+        const { record, fileSpecs } = await seedSubmission({}, 10);
+        const result = await runOfficialAcceptance({
+          ...baseInput(record),
+          idempotencyKey: `key-${randomUUID()}`,
+          mutationHash: "phase-5a-ten-files",
+        });
+        expect(result.status).toBe("ACCEPTED");
+        expect(drive.state.peakConcurrentUpdates()).toBe(2);
+        expect(drive.state.peakConcurrentUpdates()).toBeLessThanOrEqual(2);
+
+        const [saga] = await bootstrapSql<
+          { moved_files: Record<string, string> | string; step: string }[]
+        >`select moved_files, step from public.public_acceptance_sagas where submission_id = ${record.submissionId}`;
+        const movedFiles =
+          typeof saga.moved_files === "string"
+            ? (JSON.parse(saga.moved_files) as Record<string, string>)
+            : saga.moved_files;
+        // Five durable checkpoint transactions are exercised by five chunks; the helper unit test
+        // asserts exact grouping because schema deliberately stores only the final map, not history.
+        expect(Object.keys(movedFiles)).toHaveLength(10);
+        expect(saga.step).toBe("COMPLETED");
+        const officialFiles = await bootstrapSql`
+          select file_id from public.files where case_id = ${result.officialCaseId}
+        `;
+        expect(officialFiles).toHaveLength(10);
+        for (const file of fileSpecs) expect(drive.state.updateCallsFor(file.driveFileId)).toBe(1);
       },
       30_000,
     );

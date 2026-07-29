@@ -357,7 +357,7 @@ export function SubmissionDetail({
       return;
     if (!acceptKeyRef.current) acceptKeyRef.current = crypto.randomUUID();
     setBusy(true);
-    setMessage(null);
+    setMessage("Đang chuyển ảnh và ghi dữ liệu hồ sơ. Vui lòng không đóng trang.");
     setAcceptanceIssues([]);
     try {
       const token = await csrfToken();
