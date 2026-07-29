@@ -1,5 +1,40 @@
 # CHATGPT HANDOFF REPORT
 
+## Rehearsal execution after PR #10 lease-token fix (2026-07-29)
+
+### Outcome: BLOCKED — do not enable the Phase 3 flag
+
+- Local branch was fast-forwarded to `bb0ffd8` (`fix(public-intake): keep Drive folder lease token lossless`).
+- Migration `202607290005_lazy_drive_folder_creation.sql` was applied transactionally to the approved
+  isolated rehearsal project `ddiaaweuqfvutogjckwc`. Read-back confirmed all four folder columns,
+  the state CHECK constraint and the lease index. No Production database or `.env.local` credentials
+  were used.
+- Local regression checks passed: `npm.cmd run typecheck`; `npm.cmd test` = 79 files / 689 tests
+  passed, 2 files / 13 tests skipped.
+- Real PostgreSQL rehearsal command ran against that isolated database. The suite intentionally
+  truncates its synthetic rehearsal tables before each case; it does **not** call real Google Drive
+  (the harness supplies a fake Drive/stub storage).
+- Result: 10/12 integration cases passed; both new Phase 3 lease cases failed. Therefore Phase 3 is
+  not PASS and `LAZY_DRIVE_FOLDER_CREATION_ENABLED` must remain false.
+
+### Root cause proved on rehearsal Postgres
+
+`drive_folder_lease_until::text` returns microseconds correctly, for example
+`2026-07-29 16:15:36.185035+00`. But a bound parameter written as
+`${leaseToken}::timestamptz` is coerced by the driver to millisecond precision before PostgreSQL
+compares it: the diagnostic read-back became `...16:15:36.185+00`, a 35 microsecond mismatch.
+Consequently `markSubmissionFolderReady()` updates zero rows and the concurrent path has no winner.
+
+The minimal corrective patch is to force the parameter to stay text until PostgreSQL parses it:
+
+```sql
+drive_folder_lease_until = (${leaseToken}::text)::timestamptz
+```
+
+in both `markSubmissionFolderReady` and `markSubmissionFolderFailed`, followed by the same rehearsal
+suite. Do not claim actual-Drive E2E: the dedicated rehearsal env contains only the Postgres URL, and
+using the OAuth settings from `.env.local` would violate the non-Production boundary.
+
 ## Sửa review PR #10 — lease token Phase 3 (2026-07-29, Claude Code)
 
 ### 1. Trạng thái, git và commit
@@ -322,4 +357,3 @@ Phase 3 mới `READY_FOR_REVIEW`, chưa được gọi là Preview PASS.
 + folderId = await ensureSubmissionFolderReady(record)
 + response.headers.set("Retry-After", ...)
 ```
-
