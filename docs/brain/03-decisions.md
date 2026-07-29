@@ -10,6 +10,37 @@
 > Các tên `PLAN2`, `PLAN_NL` và kế hoạch Claude/Gemini xuất hiện trong các entry cũ chỉ là nguồn
 > lịch sử; bản đã lưu nằm trong `docs/archive/`. Không dùng các entry đó để đảo ngược quyết định mới.
 
+## [2026-07-29] Xác nhận định danh thủ công phải ghi đúng working payload
+
+- **Quyết định:** Giữ nguyên `completionChecks`: chỉ `QR_CONFIRMED` hoặc `MANUAL_COMPLETE` mới qua
+  cổng định danh. Khi cán bộ đang giữ hồ sơ `UNDER_REVIEW` đã trực tiếp đối chiếu CCCD/bản giấy tờ,
+  họ dùng checkbox rõ ràng trên màn chi tiết. `PATCH /api/submissions/:id` chỉ nhận owner ID; server
+  kiểm đủ CCCD 12 số, ngày sinh, giới tính và địa chỉ rồi tự đặt `MANUAL_COMPLETE`, nguồn `MANUAL` và
+  thời điểm server.
+- **Lý do:** `PENDING_CONFIRMATION` là trạng thái chưa có hành động xác nhận, không phải báo CCCD sai.
+  Sửa riêng `draft_json` không giải quyết được hồ sơ đã claim vì tiếp nhận đọc `working_payload`.
+  Luồng mới dùng `commitWorkingPayload` trong một transaction để cập nhật lớp có hiệu lực, projection,
+  idempotency/request log và audit cùng nhau.
+- **Bảo mật/đánh đổi:** Không có tự xác nhận, không cho kèm chỉnh sửa dữ liệu trong cùng request, chỉ
+  cán bộ đang giữ hồ sơ gọi được và audit chỉ lưu loại thao tác/số chủ, không lưu CCCD. Đây là xác nhận
+  thao tác của cán bộ, không phải kết luận pháp lý; các thiếu sót GCN/thửa đất vẫn chặn tiếp nhận.
+
+## [2026-07-29] Bật chuẩn hóa ảnh trên Vercel Preview và Production
+
+- **Quyết định:** Theo yêu cầu trực tiếp “bật lên đi” của chủ dự án sau khi đã được cảnh báo về
+  thay đổi byte nguồn, đặt `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` cho cả Preview và
+  Production rồi redeploy từ đúng deployment gần nhất của từng môi trường.
+- **Hành vi:** CCCD được giới hạn cạnh dài 2400 px, GCN 3000 px, JPEG quality 0.88; ảnh dưới 4 MiB
+  và trong giới hạn cạnh giữ nguyên. HEIC vẫn chuyển JPEG như trước. Drive lưu **bản tiếp nhận vận
+  hành** sau chuẩn hóa; không cam kết byte trùng tệp camera. Metadata nguồn/đích vẫn đi qua schema
+  số đo đóng, không có tên tệp hay PII tự do.
+- **Bằng chứng vận hành:** Preview deployment `dpl_CRfKZHxA8vVPi9wDJNx6fn6krP5w` và Production
+  `dpl_DMPPmXNzwswVJ7WRNTiseyRoqCmV` đều `Ready`; alias production
+  `https://capphongchau.vercel.app` trả 200, health Google và database đều trả 200.
+- **Giới hạn:** Bộ benchmark chất lượng ảnh thật vẫn chưa được điền; không tuyên bố đã đạt mục tiêu
+  giảm 35% thời gian/50% dung lượng. Cần kiểm thủ công chữ nhỏ, hướng ảnh và QR trên thiết bị thật.
+  Rollback bằng cách đặt cờ `false` và redeploy; không có migration.
+
 ## [2026-07-29] Bàn làm việc biên tập đầy đủ là nguồn hoàn thiện 49 cột B–AX của PL3
 
 - **Quyết định:** `WorkingPayloadEditor` phải cho cán bộ xem/thêm/sửa/xóa toàn bộ dữ liệu nhập tay

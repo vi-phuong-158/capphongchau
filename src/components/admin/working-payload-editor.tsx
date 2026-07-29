@@ -111,6 +111,7 @@ export function WorkingPayloadEditor({
   saveSuccess,
 }: WorkingPayloadEditorProps) {
   const [changeNote, setChangeNote] = useState("");
+  const [activeTab, setActiveTab] = useState<"all" | "gcn" | "owners" | "parcels" | "assets">("all");
 
   /**
    * Mọi thao tác sửa trên một dòng tổ chức cũ phải di trú F/G trước — xem
@@ -158,6 +159,67 @@ export function WorkingPayloadEditor({
 
   return (
     <div className="space-y-6">
+      {/* Sub-header Tab Bar */}
+      <div className="flex flex-wrap gap-1.5 border-b border-stone-200 pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveTab("all")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "all"
+              ? "bg-emerald-800 text-white shadow-sm"
+              : "bg-stone-100 text-stone-700 hover:bg-stone-200"
+          }`}
+        >
+          📋 Tất cả
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("gcn")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "gcn"
+              ? "bg-emerald-800 text-white shadow-sm"
+              : "bg-stone-100 text-stone-700 hover:bg-stone-200"
+          }`}
+        >
+          📄 Giấy chứng nhận (C–E, B, AX)
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("owners")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "owners"
+              ? "bg-emerald-800 text-white shadow-sm"
+              : "bg-stone-100 text-stone-700 hover:bg-stone-200"
+          }`}
+        >
+          👤 Chủ sử dụng ({draft.owners.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("parcels")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "parcels"
+              ? "bg-emerald-800 text-white shadow-sm"
+              : "bg-stone-100 text-stone-700 hover:bg-stone-200"
+          }`}
+        >
+          🗺️ Thửa đất PL3 ({draft.parcels.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("assets")}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "assets"
+              ? "bg-emerald-800 text-white shadow-sm"
+              : "bg-stone-100 text-stone-700 hover:bg-stone-200"
+          }`}
+        >
+          🏠 Tài sản ({draft.assets.length})
+        </button>
+      </div>
+
+      {(activeTab === "all" || activeTab === "gcn") && (
+        <>
       <Section
         title="Đối chiếu PL3 và các trường tự động"
         description="Bàn làm việc bao phủ đúng 49 cột dữ liệu B–AX. Trường tự động luôn hiển thị nguồn; nếu ghi đè phải nhập lý do."
@@ -277,11 +339,14 @@ export function WorkingPayloadEditor({
           </Field>
         </div>
       </Section>
+        </>
+      )}
 
-      <Section
-        title={`Chủ sử dụng, tổ chức và người đại diện — cột F–N (${draft.owners.length})`}
-        description="Tổ chức (F/G) và người đại diện (H–L) là hai nhóm riêng, không còn dùng chung một ô dữ liệu."
-      >
+      {(activeTab === "all" || activeTab === "owners") && (
+        <Section
+          title={`Chủ sử dụng, tổ chức và người đại diện — cột F–N (${draft.owners.length})`}
+          description="Tổ chức (F/G) và người đại diện (H–L) là hai nhóm riêng, không còn dùng chung một ô dữ liệu."
+        >
         {!readOnly ? (
           <button
             type="button"
@@ -494,162 +559,166 @@ export function WorkingPayloadEditor({
           })}
         </div>
       </Section>
+      )}
 
-      <EditableParcelTable
-        parcels={draft.parcels}
-        readOnly={readOnly}
-        onChange={updateParcels}
-      />
+      {(activeTab === "all" || activeTab === "parcels") && (
+        <EditableParcelTable
+          parcels={draft.parcels}
+          readOnly={readOnly}
+          onChange={updateParcels}
+        />
+      )}
 
-      <Section
-        title={`Tài sản gắn liền với đất — cột AO–AW (${draft.assets.length})`}
-        description="Mỗi tài sản được gắn với một thửa; nếu có nhiều tài sản cùng thửa, PL3 giữ tất cả giá trị bằng dấu chấm phẩy theo từng cột."
-      >
-        {!readOnly ? (
-          <button
-            type="button"
-            onClick={() =>
-              onChange({
-                ...draft,
-                assets: [...draft.assets, emptyAsset(newId("asset"), draft.parcels[0]?.id ?? "")],
-              })
-            }
-            className="mb-4 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"
-          >
-            + Thêm tài sản
-          </button>
-        ) : null}
-        <div className="space-y-4">
-          {draft.assets.map((asset, index) => (
-            <article
-              key={asset.id}
-              className="rounded border border-gray-200 p-4 dark:border-gray-700"
+      {(activeTab === "all" || activeTab === "assets") && (
+        <Section
+          title={`Tài sản gắn liền với đất — cột AO–AW (${draft.assets.length})`}
+          description="Mỗi tài sản được gắn với một thửa; nếu có nhiều tài sản cùng thửa, PL3 giữ tất cả giá trị bằng dấu chấm phẩy theo từng cột."
+        >
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...draft,
+                  assets: [...draft.assets, emptyAsset(newId("asset"), draft.parcels[0]?.id ?? "")],
+                })
+              }
+              className="mb-4 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"
             >
-              <div className="mb-3 flex items-center justify-between">
-                <strong className="text-xs">Tài sản {index + 1}</strong>
-                {!readOnly ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onChange({
-                        ...draft,
-                        assets: draft.assets.filter((_, current) => current !== index),
-                      })
-                    }
-                    className="text-xs text-red-700"
-                  >
-                    Xóa
-                  </button>
-                ) : null}
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                <Field label="Thửa đất liên quan">
-                  <select
-                    disabled={readOnly}
-                    value={asset.parcelId ?? ""}
-                    onChange={(event) => updateAsset(index, "parcelId", event.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">-- Chọn thửa --</option>
-                    {draft.parcels.map((parcel, parcelIndex) => (
-                      <option key={parcel.id} value={parcel.id}>
-                        Thửa {parcelIndex + 1} — {parcel.parcelNumber || "chưa có số"}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="AO — Loại tài sản gắn liền với đất">
-                  <Options
-                    disabled={readOnly}
-                    value={asset.assetType}
-                    options={ASSET_TYPE_OPTIONS}
-                    onChange={(value) => updateAsset(index, "assetType", value)}
-                  />
-                </Field>
-                <Field label="AP — Khu nhà chung cư, nhà hỗn hợp">
-                  <input
-                    disabled={readOnly}
-                    value={asset.mixedUseBuildingName ?? ""}
-                    onChange={(event) =>
-                      updateAsset(index, "mixedUseBuildingName", event.target.value)
-                    }
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AQ — Nhà chung cư">
-                  <input
-                    disabled={readOnly}
-                    value={asset.apartmentBuildingName ?? ""}
-                    onChange={(event) =>
-                      updateAsset(index, "apartmentBuildingName", event.target.value)
-                    }
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AR — Số căn hộ">
-                  <input
-                    disabled={readOnly}
-                    value={asset.apartmentNumber ?? ""}
-                    onChange={(event) => updateAsset(index, "apartmentNumber", event.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AS — Diện tích xây dựng">
-                  <input
-                    disabled={readOnly}
-                    value={asset.constructionArea ?? ""}
-                    onChange={(event) => updateAsset(index, "constructionArea", event.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AT — Diện tích sàn">
-                  <input
-                    disabled={readOnly}
-                    value={asset.floorArea ?? ""}
-                    onChange={(event) => updateAsset(index, "floorArea", event.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AU — Hình thức sở hữu">
-                  <input
-                    disabled={readOnly}
-                    value={asset.ownershipForm ?? ""}
-                    onChange={(event) => updateAsset(index, "ownershipForm", event.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AV — Thời hạn sở hữu">
-                  <input
-                    disabled={readOnly}
-                    value={asset.ownershipTerm ?? ""}
-                    onChange={(event) => updateAsset(index, "ownershipTerm", event.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="AW — Cấp hạng">
-                  <input
-                    disabled={readOnly}
-                    value={asset.grade ?? ""}
-                    onChange={(event) => updateAsset(index, "grade", event.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <div className="md:col-span-2 xl:col-span-3">
-                  <Field label="Mô tả/ghi chú tài sản (nội bộ)">
-                    <textarea
+              + Thêm tài sản
+            </button>
+          ) : null}
+          <div className="space-y-4">
+            {draft.assets.map((asset, index) => (
+              <article
+                key={asset.id}
+                className="rounded border border-gray-200 p-4 dark:border-gray-700"
+              >
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <strong className="text-xs">Tài sản {index + 1}</strong>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...draft,
+                          assets: draft.assets.filter((_, current) => current !== index),
+                        })
+                      }
+                      className="text-xs text-red-700"
+                    >
+                      Xóa
+                    </button>
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <Field label="Thửa đất gắn liền">
+                    <select
                       disabled={readOnly}
-                      value={asset.description}
-                      onChange={(event) => updateAsset(index, "description", event.target.value)}
+                      value={asset.parcelId}
+                      onChange={(event) => updateAsset(index, "parcelId", event.target.value)}
                       className={inputClass}
-                      rows={2}
+                    >
+                      {draft.parcels.map((parcel, parcelIdx) => (
+                        <option key={parcel.id} value={parcel.id}>
+                          Thửa {parcel.parcelNumber || parcelIdx + 1} (Tờ {parcel.mapSheetNumber || "-"})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="AO — Loại tài sản gắn liền với đất">
+                    <Options
+                      disabled={readOnly}
+                      value={asset.assetType}
+                      options={ASSET_TYPE_OPTIONS}
+                      onChange={(value) => updateAsset(index, "assetType", value)}
                     />
                   </Field>
+                  <Field label="AP — Khu nhà chung cư, nhà hỗn hợp">
+                    <input
+                      disabled={readOnly}
+                      value={asset.mixedUseBuildingName ?? ""}
+                      onChange={(event) =>
+                        updateAsset(index, "mixedUseBuildingName", event.target.value)
+                      }
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AQ — Tên nhà chung cư">
+                    <input
+                      disabled={readOnly}
+                      value={asset.apartmentBuildingName ?? ""}
+                      onChange={(event) =>
+                        updateAsset(index, "apartmentBuildingName", event.target.value)
+                      }
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AR — Số căn hộ">
+                    <input
+                      disabled={readOnly}
+                      value={asset.apartmentNumber ?? ""}
+                      onChange={(event) => updateAsset(index, "apartmentNumber", event.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AS — Diện tích xây dựng">
+                    <input
+                      disabled={readOnly}
+                      value={asset.constructionArea ?? ""}
+                      onChange={(event) => updateAsset(index, "constructionArea", event.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AT — Diện tích sàn">
+                    <input
+                      disabled={readOnly}
+                      value={asset.floorArea ?? ""}
+                      onChange={(event) => updateAsset(index, "floorArea", event.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AU — Hình thức sở hữu">
+                    <input
+                      disabled={readOnly}
+                      value={asset.ownershipForm ?? ""}
+                      onChange={(event) => updateAsset(index, "ownershipForm", event.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AV — Thời hạn sở hữu">
+                    <input
+                      disabled={readOnly}
+                      value={asset.ownershipTerm ?? ""}
+                      onChange={(event) => updateAsset(index, "ownershipTerm", event.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="AW — Cấp hạng">
+                    <input
+                      disabled={readOnly}
+                      value={asset.grade ?? ""}
+                      onChange={(event) => updateAsset(index, "grade", event.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <div className="md:col-span-2 xl:col-span-3">
+                    <Field label="Mô tả/ghi chú tài sản (nội bộ)">
+                      <textarea
+                        disabled={readOnly}
+                        value={asset.description}
+                        onChange={(event) => updateAsset(index, "description", event.target.value)}
+                        className={inputClass}
+                        rows={2}
+                      />
+                    </Field>
+                  </div>
                 </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      </Section>
+              </article>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {!readOnly ? (
         <section className="sticky bottom-3 rounded-lg border border-blue-200 bg-white p-4 shadow-lg dark:border-blue-900 dark:bg-gray-900">

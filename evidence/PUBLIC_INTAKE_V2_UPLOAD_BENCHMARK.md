@@ -1,6 +1,6 @@
 # PUBLIC INTAKE V2 — UPLOAD BENCHMARK
 
-## Trạng thái: CHƯA CÓ SỐ ĐO THẬT
+## Trạng thái: ĐÃ BẬT THEO QUYẾT ĐỊNH CHỦ DỰ ÁN, CHƯA CÓ SỐ ĐO TRƯỚC/SAU
 
 Kế hoạch §0.2 mục 12: *"Không tuyên bố tăng tốc nếu chưa có số đo trước/sau."*
 
@@ -12,11 +12,15 @@ Phiên thi công này **không đo được** thời gian tải thật, vì cầ
 
 Không có thứ nào trong ba thứ đó ở môi trường phát triển này.
 
-**Do đó:**
+**Trạng thái vận hành 2026-07-29:**
 
-- `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED` mặc định **`false`**.
+- Source vẫn mặc định `false`, nhưng biến Vercel Preview và Production đã được đặt `true` theo yêu
+  cầu trực tiếp của chủ dự án sau khi được cảnh báo về việc không giữ nguyên byte camera.
+- Preview deployment `dpl_CRfKZHxA8vVPi9wDJNx6fn6krP5w` và Production deployment
+  `dpl_DMPPmXNzwswVJ7WRNTiseyRoqCmV` đều đã `Ready`.
 - Mốc §18.2 (giảm ≥ 35% thời gian tải, ≥ 50% dung lượng) **chưa được nghiệm thu**.
-- Không có tuyên bố hiệu năng nào trong commit hay tài liệu của lần thi công này.
+- Không được suy từ trạng thái “đã bật” thành tuyên bố “đã tăng tốc”; vẫn phải hoàn tất toàn bộ
+  bảng kiểm dưới đây và rollback ngay nếu Q1–Q4 trượt.
 
 ---
 

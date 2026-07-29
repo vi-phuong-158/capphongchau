@@ -23,7 +23,8 @@ import {
   ORGANISATION_ID_PATTERN,
 } from "@/modules/public-intake/validation";
 import { identityHmac, newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
-import { payloadLayerOf } from "@/modules/public-intake/payload-layers";
+import { effectivePayload, payloadLayerOf } from "@/modules/public-intake/payload-layers";
+import { manualIdentityConfirmationIssue } from "@/modules/submissions/manual-identity-confirmation";
 import {
   isOwnerIdentityQrConfirmed,
   mayAmendOfficialRecord,
@@ -81,6 +82,12 @@ const patchSchema = z.object({
     })
     .optional(),
   owners: z.array(ownerPatchSchema).max(10).optional(),
+  /** Xác nhận có đối chiếu CCCD; server tự gắn trạng thái và thời điểm, không tin client. */
+  manualIdentityConfirmation: z
+    .object({
+      ownerIds: z.array(z.string().trim().min(1)).min(1).max(10),
+    })
+    .optional(),
   /**
    * Bắt buộc khi hồ sơ đã tiếp nhận chính thức. Đây là dấu vết đối soát duy nhất giải thích vì sao
    * dữ liệu chính thức đổi sau khi đã chốt — nên đòi câu có nghĩa, không nhận "sửa" hay "abc".
@@ -131,7 +138,9 @@ export async function GET(
           updatedAt: record.updatedAt,
           officialCaseId: record.officialCaseId || null,
           acceptStep: record.acceptStep || null,
-          draft: record.draft,
+          // Màn cán bộ luôn sửa/xem lớp dữ liệu đang có hiệu lực. Khi đã nhận xử lý thì đó là
+          // `working_payload`, không phải `draft_json` cũ của người dân.
+          draft: effectivePayload(record),
           payloadLayer: payloadLayerOf(record),
           citizenPayload: record.citizenPayload || null,
           workingPayload: record.workingPayload || null,
@@ -191,7 +200,11 @@ export async function PATCH(
     // Chế độ suy ra từ chính yêu cầu (có `amendmentReason` hay không) để không phải đọc hồ sơ trước
     // khi kiểm phát lại. Nếu chế độ suy ra không khớp trạng thái thật của hồ sơ thì yêu cầu bị từ
     // chối bên dưới, trước mọi thao tác ghi.
-    const scopeKind = body.data.amendmentReason ? "OFFICIAL_AMENDMENT" : "STAFF_DRAFT_EDIT";
+    const scopeKind = body.data.manualIdentityConfirmation
+      ? "MANUAL_IDENTITY_CONFIRMATION"
+      : body.data.amendmentReason
+        ? "OFFICIAL_AMENDMENT"
+        : "STAFF_DRAFT_EDIT";
     const scopedIdempotencyKey = `${scopeKind}:${submissionId}:${idempotencyKey}`;
     const mutationHash = createHash("sha256")
       .update(
@@ -201,6 +214,8 @@ export async function PATCH(
           version: body.data.version,
           certificate: body.data.certificate ?? null,
           owners: body.data.owners ?? [],
+          manualIdentityConfirmationOwnerIds:
+            [...(body.data.manualIdentityConfirmation?.ownerIds ?? [])].sort(),
           // Phải nằm trong hash: phát lại cùng khóa nhưng khác lý do là hai thao tác khác nhau.
           amendmentReason: body.data.amendmentReason ?? null,
         }),
@@ -279,6 +294,86 @@ export async function PATCH(
         "Chỉ hồ sơ đã tiếp nhận chính thức mới cần lý do điều chỉnh.",
         requestId,
         400,
+      );
+    }
+
+    if (body.data.manualIdentityConfirmation) {
+      if (isAmendment || !mayStaffEdit(record, user.email)) {
+        return fail(
+          "ACCESS_DENIED",
+          "Chỉ cán bộ đang nhận xử lý hồ sơ mới được xác nhận định danh thủ công.",
+          requestId,
+          403,
+        );
+      }
+      if (body.data.certificate || body.data.owners || body.data.amendmentReason) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Xác nhận định danh phải thực hiện riêng, không kèm chỉnh sửa thông tin khác.",
+          requestId,
+          400,
+        );
+      }
+
+      const ownerIds = body.data.manualIdentityConfirmation.ownerIds;
+      if (new Set(ownerIds).size !== ownerIds.length) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Danh sách chủ sử dụng cần xác nhận có mục trùng lặp.",
+          requestId,
+          400,
+        );
+      }
+      const payload = effectivePayload(record);
+      if (!payload) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Hồ sơ chưa có dữ liệu kê khai để xác nhận định danh.",
+          requestId,
+          400,
+        );
+      }
+
+      const workingDraft: IntakeDraft = structuredClone(payload);
+      const confirmedAt = new Date().toISOString();
+      for (const ownerId of ownerIds) {
+        const owner = workingDraft.owners.find((candidate) => candidate.id === ownerId);
+        if (!owner) {
+          return fail(
+            "VALIDATION_FAILED",
+            "Không tìm thấy chủ sử dụng cần xác nhận định danh.",
+            requestId,
+            400,
+          );
+        }
+        const issue = manualIdentityConfirmationIssue(owner);
+        if (issue) return fail("VALIDATION_FAILED", issue.message, requestId, 400);
+
+        owner.identitySource = "MANUAL";
+        owner.identityStatus = "MANUAL_COMPLETE";
+        owner.identityConfirmedAt = confirmedAt;
+      }
+
+      const pendingIdentityHmacs = citizenIdsForLookup(workingDraft).map((identityNumber) =>
+        identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
+      );
+      const updated = await repository.commitWorkingPayload({
+        record,
+        expectedVersion: body.data.version,
+        draft: workingDraft,
+        actorEmail: user.email,
+        changeNote: "Cán bộ xác nhận đã đối chiếu CCCD.",
+        manualIdentityConfirmationOwnerCount: ownerIds.length,
+        requestLogKind: "MANUAL_IDENTITY_CONFIRMATION",
+        requestId,
+        idempotencyKey: scopedIdempotencyKey,
+        mutationHash,
+        pendingIdentityHmacs,
+      });
+
+      return NextResponse.json(
+        { submission: { version: updated.version }, requestId },
+        { headers: { "cache-control": "no-store" } },
       );
     }
 

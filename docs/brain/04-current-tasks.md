@@ -51,7 +51,7 @@ production.**
 | 0 | Baseline + test characterization khóa lỗ hổng `completionChecks` | `1cc7d93` |
 | 1 | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức) | `e938bab` |
 | 2 | Wizard 7 bước → 4 bước | `fe3e2e3` |
-| 3 | Chuẩn hóa ảnh trên thiết bị (cờ, mặc định TẮT) | `814eee7` |
+| 3 | Chuẩn hóa ảnh trên thiết bị (source default TẮT; Vercel Preview/Production đã BẬT 2026-07-29) | `814eee7` |
 | 4 | Tiến độ tải thật qua XHR + hàng đợi 2 luồng | `bdbf180` |
 | 6 | Màn hình thành công + kê khai hồ sơ tiếp theo | `ee30ee8` |
 | 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
@@ -80,9 +80,10 @@ render và E2E chưa chạy lần nào.
 3. **Bật `OFFICER_ASSISTED_INTAKE_ENABLED=true`** trên preview trước khi chạy các kịch bản
    E2E-06b/E2E-06c — kill switch server-side mặc định TẮT (2026-07-28, vòng rà soát lần hai).
 4. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` (đã có bảng so
-   sánh nguồn↔sau chuẩn hóa theo từng ảnh) trước khi đặt
-   `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`. Chưa có số đo nào; **không được** tuyên
-   bố tăng tốc.
+   sánh nguồn↔sau chuẩn hóa theo từng ảnh). Chủ dự án đã yêu cầu bật
+   `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` trên Preview/Production ngày 2026-07-29
+   trước khi hoàn tất benchmark. Chưa có số đo trước/sau; **không được** tuyên bố đạt mục tiêu tăng
+   tốc cho tới khi bảng được điền. Nếu chữ nhỏ, hướng ảnh hoặc QR trượt, rollback cờ ngay.
 5. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
    resume và tiến độ không tụt.
 6. **Xác nhận danh sách vai trò `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,

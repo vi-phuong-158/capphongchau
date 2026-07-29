@@ -59,6 +59,13 @@ trong `REQUEST_LOG` để retry cùng key trả lại đúng phản hồi.
 `202607290002_full_pl3_editor.sql` bổ sung tổ chức/người đại diện, số tờ/thửa địa chính, liên kết
 tài sản→thửa và các cột AO–AW; dữ liệu cũ vẫn nằm nguyên trong JSON và được đọc tương thích.
 
+Với chủ cá nhân còn `PENDING_CONFIRMATION` hoặc `QR_OVERRIDE_PENDING_REVIEW`, cán bộ đang giữ hồ sơ
+phải tích xác nhận đã đối chiếu CCCD/bản giấy tờ. `PATCH /api/submissions/:submissionId` nhận danh
+sách owner ID, server kiểm đủ trường định danh, tự đóng dấu `MANUAL_COMPLETE`/thời điểm và dùng cùng
+transaction `commitWorkingPayload`; audit chỉ ghi loại thao tác và số dòng, không chứa CCCD. Đây là
+xác nhận thao tác của cán bộ, không phải kết luận pháp lý và không làm các điều kiện tiếp nhận khác
+tự đạt.
+
 Ba trường tự động có quy tắc rõ: B lấy mã Phường Phong Châu, V suy từ ĐVHC cũ + số tờ trên GCN,
 AX lấy tên file đã xác minh/đổi tên trên Drive. Cán bộ có thể ghi đè nhưng phải nhập lý do tối thiểu
 10 ký tự; audit chỉ ghi đường dẫn trường và lý do, không ghi giá trị CCCD/tên/địa chỉ trước-sau.
@@ -108,7 +115,10 @@ Google Sign-In chỉ cấp session. Mỗi request bảo vệ đọc lại `users
 
 ## File và upload
 
-1. Browser kiểm tra JPEG/PNG/WebP/HEIC/HEIF, tối đa 30 MB; HEIC/HEIF chuyển JPEG client-side khi cần.
+1. Browser kiểm tra JPEG/PNG/WebP/HEIC/HEIF, tối đa 30 MB; HEIC/HEIF chuyển JPEG client-side khi
+   cần. Trên Preview và Production, `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` từ
+   2026-07-29: CCCD tối đa 2400 px, GCN tối đa 3000 px, JPEG quality 0.88. Drive lưu bản tiếp nhận
+   vận hành đã chuẩn hóa; metadata nguồn/đích được lưu nhưng byte camera không được tải lên.
 2. API tạo resumable upload session trong Google Drive.
 3. Browser PUT trực tiếp lên Drive và hiển thị tiến độ/retry.
 4. API complete xác minh folder cha, MIME, dung lượng và checksum.

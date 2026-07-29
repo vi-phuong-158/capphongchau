@@ -144,9 +144,11 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │       ⚠️ TRƯỚC V2 `validate()` trong wizard chép lại luật bằng regex riêng — hai bản lệch nhau.
 │       Sửa luật nghiệp vụ thì sửa validation.ts, KHÔNG sửa lại ở wizard.
 ├── src/modules/public-intake/image-normalization.client.ts (cờ
-│   NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED, mặc định FALSE)
+│   NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED; source default FALSE, Vercel Preview +
+│   Production TRUE từ 2026-07-29 theo quyết định trực tiếp của chủ dự án)
 │   └── normalizeIntakeImage → CCCD 2400px / GCN 3000px, JPEG q0.88, không phóng to,
-│       imageOrientation:"from-image" (thiếu là ảnh dọc bị xoay ngang), mọi lỗi → trả tệp nguồn
+│       imageOrientation:"from-image" (thiếu là ảnh dọc bị xoay ngang), mọi lỗi → trả tệp nguồn;
+│       khi có chuẩn hóa, Drive giữ bản tiếp nhận vận hành chứ không giữ byte camera
 ├── src/modules/public-intake/upload-queue.ts (thuần)
 │   └── runWithConcurrency — GCN tối đa 2 luồng, 1 khi saveData/2g; một ảnh hỏng KHÔNG
 │       hủy ảnh khác (trước V2 vòng lặp `break` làm mất cả các ảnh chưa thử)
@@ -224,6 +226,9 @@ src/app/submissions/page.tsx / [submissionId]
     │   │   cán bộ sửa trực tiếp draft_json" — không phải lỗi, staff edit cố ý hiển thị cho dân)
     │   ├── refreshCanonicalProjection nếu status khác DRAFT
     │   ├── audit chỉ ghi changedFieldPaths + lý do override, không ghi giá trị PII trước/sau
+    │   ├── PATCH manualIdentityConfirmation cũng đi qua transaction này: chỉ cán bộ đang giữ hồ sơ
+    │   │   `UNDER_REVIEW`, server tự đặt `MANUAL_COMPLETE`/thời điểm sau khi kiểm trường CCCD;
+    │   │   audit action `SUBMISSION_IDENTITY_MANUALLY_CONFIRMED` chỉ lưu số dòng
     │   │   ⚠️ changedFieldPaths CẮT ở MAX_AUDIT_FIELD_PATHS=250 nhưng changedFieldCount đếm
     │   │   TRƯỚC khi cắt, kèm cờ changedFieldPathsTruncated (sửa 2026-07-29, review PR #7 —
     │   │   trước đó count lấy .length của mảng đã cắt nên luôn ≤250)
@@ -422,7 +427,8 @@ POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — 
                                                         best-effort, luôn 204)
 GET /api/submissions
 GET /api/submissions/:submissionId
-PATCH /api/submissions/:submissionId
+PATCH /api/submissions/:submissionId                         (sửa hẹp; `manualIdentityConfirmation`
+                                                        xác nhận CCCD thủ công vào working payload)
 PUT /api/submissions/:submissionId/working-payload   (2026-07-25, Phase 6 — sửa đầy đủ bản làm
                                                         việc: thửa đất, mục đích sử dụng)
 POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/

@@ -4,6 +4,34 @@
 > hoạch cũ trong các entry giữ nguyên theo thời điểm phát sinh; xem `PLAN.md` và `docs/README.md`
 > để biết nguồn sự thật hiện tại.
 
+## [2026-07-29] Cải tiến UI/UX Giao diện Duyệt & Biên tập hồ sơ Cán bộ (land-ocr-180)
+
+- **Agent:** Antigravity (Gemini 3.6 Flash)
+- **Thay đổi:**
+  - Loại bỏ hoàn toàn khối form "Soạn yêu cầu bổ sung có cấu trúc" cũ khỏi `src/components/submission-detail.tsx` theo chỉ đạo người dùng; nâng cấp các nút hành động *Yêu cầu bổ sung* và *Từ chối* với giao diện xác nhận trực quan.
+  - Tạo linh kiện `DocumentViewer` (`src/components/admin/document-viewer.tsx`) tương tác: Phóng to (Zoom 100-300%), Xoay ảnh (90°/180°/270°), Xoay/Đặt lại, Xem toàn màn hình (Lightbox) và Chuyển tab giữa ảnh CCCD mặt trước/sau và GCN.
+  - Chuyển giao diện `SubmissionDetail` sang **bố cục Split-Screen song song 2 cột**: Cột trái ghim `DocumentViewer` đối chiếu ảnh, Cột phải chứa Bàn làm việc biên tập dữ liệu.
+  - Phân Tab Bàn làm việc 49 cột PL3 trong `WorkingPayloadEditor` (`src/components/admin/working-payload-editor.tsx`): Tất cả, Giấy chứng nhận, Chủ sử dụng, Thửa đất PL3, Tài sản.
+  - Nâng cấp `SubmissionsQueue` (`src/components/submissions-queue.tsx`) thêm các thẻ đếm chỉ số KPI và badge phân màu trạng thái.
+- **Không đổi:** Toàn bộ logic xử lý backend, các Route Handlers, Database schemas, Saga tiếp nhận và Audit logs giữ nguyên 100%.
+- **Kiểm tra:** `npx vitest run` (646 pass / 10 skipped); `npx tsc --noEmit` pass (0 errors).
+
+## [2026-07-29] Mở đường xác nhận định danh thủ công cho cán bộ đang xử lý
+
+- **Agent:** Codex
+- **Thay đổi:** Thêm `manual-identity-confirmation.ts` làm gác cổng thuần kiểm CCCD, ngày sinh,
+  giới tính, địa chỉ và các trạng thái không đủ điều kiện. `PATCH /api/submissions/:id` nhận
+  `manualIdentityConfirmation.ownerIds` riêng biệt, chỉ cho cán bộ đang giữ hồ sơ `UNDER_REVIEW`;
+  server tự đặt `MANUAL_COMPLETE`/`MANUAL`/timestamp trên payload hiệu lực rồi gọi
+  `commitWorkingPayload`. Repository ghi request log kind riêng và audit action
+  `SUBMISSION_IDENTITY_MANUALLY_CONFIRMED` không chứa PII. Màn chi tiết có checkbox cam kết đối
+  chiếu CCCD và nút xác nhận riêng; GET staff trả payload hiệu lực để UI không hiển thị draft cũ.
+- **Không đổi:** `completionChecks` vẫn chặn mọi trạng thái khác `QR_CONFIRMED`/`MANUAL_COMPLETE`;
+  xác nhận này không bỏ qua điều kiện GCN, thửa đất hay tệp ảnh.
+- **Kiểm tra:** `vitest` focused 11/11 pass; full Vitest 646 pass/10 skip; `npm run typecheck` và
+  production build đều pass. ESLint cho file chạm có 0 error; còn 5 warning có sẵn ở
+  `submission-detail.tsx`.
+
 ## [2026-07-29] Đồng bộ E2E và tài liệu sau khi đổi thứ tự Public Intake wizard
 
 - **Agent:** Codex
@@ -2494,3 +2522,20 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** `npm test` 642 pass/10 skip; `npm run typecheck` đạt (sau khi sửa một lỗi ép kiểu
   trong `probe-preview-state.ts` do chính đợt này tạo ra); `npm run build` đạt; `npm run lint`
   0 error/5 warning có sẵn; `git diff --check` đạt.
+
+## [2026-07-29] Bật chuẩn hóa ảnh trên Vercel Preview và Production
+
+- **Agent:** Codex.
+- **Yêu cầu:** Chủ dự án yêu cầu “bật lên đi” sau khi đã được thông báo đây là thay đổi cấu hình
+  nhanh nhất và ảnh lưu trên Drive sẽ là bản đã chuẩn hóa, không còn nguyên byte camera.
+- **Thao tác:** Thêm `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true` cho Vercel Preview và
+  Production; redeploy từ đúng deployment gần nhất của từng môi trường, không deploy mã nguồn từ
+  nhánh tài liệu hiện tại. Preview `dpl_CRfKZHxA8vVPi9wDJNx6fn6krP5w` và Production
+  `dpl_DMPPmXNzwswVJ7WRNTiseyRoqCmV` đều `Ready`; alias production giữ nguyên.
+- **Kiểm tra:** baseline upload-focused 64/64 pass; typecheck và production build pass. Sau deploy,
+  `/ke-khai`, `/api/health/google`, `/api/health/database` trên alias production đều HTTP 200; Vercel
+  env list xác nhận cờ có ở cả Preview và Production.
+- **Giới hạn/rủi ro:** Chưa chạy benchmark ảnh giả trên Android/iPhone và 4G; chưa chứng minh mục
+  tiêu giảm 35% thời gian/50% dung lượng, chất lượng chữ nhỏ hoặc tỷ lệ QR. Tài liệu nguồn sự thật
+  được đồng bộ để ghi rõ ngoại lệ “bản tiếp nhận vận hành”. Rollback: đặt cờ `false` và redeploy,
+  không có migration.

@@ -971,6 +971,13 @@ export class PublicIntakeRepository {
       appliedFieldPaths: readonly string[];
     };
     /**
+     * Cán bộ đã đối chiếu CCCD và xác nhận thủ công một hay nhiều chủ sử dụng. Chỉ lưu số lượng
+     * để audit không chứa mã định danh hoặc dữ liệu người dân.
+     */
+    manualIdentityConfirmationOwnerCount?: number;
+    /** Loại request log riêng để phát lại thao tác xác nhận không lẫn với lần lưu bàn làm việc. */
+    requestLogKind?: "WORKING_PAYLOAD_EDIT" | "MANUAL_IDENTITY_CONFIRMATION";
+    /**
      * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
      *
      * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
@@ -1040,7 +1047,11 @@ export class PublicIntakeRepository {
       );
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
-        action: input.aiApplication ? "AI_DRAFT_APPLIED" : "SUBMISSION_WORKING_PAYLOAD_EDITED",
+        action: input.aiApplication
+          ? "AI_DRAFT_APPLIED"
+          : input.manualIdentityConfirmationOwnerCount
+            ? "SUBMISSION_IDENTITY_MANUALLY_CONFIRMED"
+            : "SUBMISSION_WORKING_PAYLOAD_EDITED",
         entityId: input.record.submissionId,
         requestId: input.requestId,
         metadata: input.aiApplication
@@ -1060,6 +1071,13 @@ export class PublicIntakeRepository {
               changedFieldCount: auditSummary.changedFieldCount,
               changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
               automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
+              ...(input.manualIdentityConfirmationOwnerCount
+                ? {
+                    manualIdentityConfirmation: true,
+                    manualIdentityConfirmationOwnerCount:
+                      input.manualIdentityConfirmationOwnerCount,
+                  }
+                : {}),
             },
       });
 
@@ -1078,7 +1096,7 @@ export class PublicIntakeRepository {
         insert into public.request_log
           (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (
-          ${input.idempotencyKey}, ${input.requestId}, 'WORKING_PAYLOAD_EDIT', ${input.mutationHash},
+          ${input.idempotencyKey}, ${input.requestId}, ${input.requestLogKind ?? "WORKING_PAYLOAD_EDIT"}, ${input.mutationHash},
           ${JSON.stringify({
             version: next.version,
             updatedAt: next.updatedAt,

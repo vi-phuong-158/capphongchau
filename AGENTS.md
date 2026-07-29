@@ -112,7 +112,11 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
 
 - My Drive và file phải ở chế độ `Restricted`; không tạo link công khai.
 - Không chia sẻ thư mục gốc cho cán bộ. Mọi truy cập đi qua ứng dụng và quyền trong `USERS`.
-- Giữ nguyên file gốc. Tạo preview JPEG tối đa 2.5 MB để giao diện xem qua Vercel; ảnh gốc không đi qua body của Vercel Function.
+- Mặc định giữ nguyên file nguồn. Ngoại lệ đã được chủ dự án chốt ngày 2026-07-29: khi
+  `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`, cổng kê khai lưu **bản tiếp nhận vận hành**
+  đã chuẩn hóa trên thiết bị (CCCD tối đa 2400 px, GCN tối đa 3000 px, JPEG quality 0.88), không
+  cam kết byte trùng tệp camera; metadata nguồn/đích phải được giữ để đo và audit kỹ thuật. Ảnh
+  không đi qua body của Vercel Function.
 - Browser kiểm tra JPEG, PNG, WebP, HEIC/HEIF; giới hạn 30 MB/file. HEIC/HEIF được chuyển sang JPEG tại thiết bị khi cần.
 - Backend tạo resumable upload session; browser upload trực tiếp Drive và hiển thị tiến độ/retry.
 - Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
@@ -369,6 +373,11 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
   hiện có, không xác nhận hồ sơ và mọi lần nạp/ghi đè phải audit.
 - Địa chỉ thường trú sửa bình thường. Sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý
   do, lưu audit và chuyển `QR_OVERRIDE_PENDING_REVIEW`; QR đã tách không bị xóa.
+- Khi hồ sơ đang `UNDER_REVIEW`, chỉ cán bộ đang giữ hồ sơ mới được xác nhận định danh thủ công sau
+  khi đối chiếu CCCD/bản giấy tờ. `PATCH /api/submissions/:submissionId` nhận
+  `manualIdentityConfirmation.ownerIds`; server tự đặt `MANUAL_COMPLETE`, `identitySource = MANUAL`
+  và `identityConfirmedAt`, ghi audit không có PII, request log idempotent và cập nhật
+  `working_payload_json` (không được chỉ sửa `draft_json`). Không nới `completionChecks`.
 
 ## 7. Kiểm thử và Definition of Done
 
