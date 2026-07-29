@@ -1,5 +1,10 @@
 # Kiến trúc hệ thống
 
+> Cập nhật Phase 4 (2026-07-29): Vercel Function được cấu hình `regions: ["sin1"]`; kết nối
+> Supavisor vẫn `prepare: false`, SSL và singleton, còn `max` lấy từ biến server-only
+> `SUPABASE_POOL_MAX` (1–3, mặc định 1) tại lúc runtime instance tạo client. Đổi pool phải qua
+> deployment Preview riêng và benchmark A/B; biến `VERCEL_REGION` không phải bằng chứng vị trí runtime.
+
 > Bổ sung PR #8 (2026-07-29): trong `UNDER_REVIEW`, mọi sửa PL3 đi qua
 > `WorkingPayloadEditor`/`PUT /working-payload`. Server so sánh payload ứng viên với payload hiệu lực:
 > sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý do và thành
@@ -142,6 +147,10 @@ Google Sign-In chỉ cấp session. Mỗi request bảo vệ đọc lại `users
 3. Browser PUT trực tiếp lên Drive và hiển thị tiến độ/retry.
 4. API complete xác minh folder cha, MIME, dung lượng và checksum.
 5. Metadata file được ghi vào Supabase; Drive ID/link không được trả trong lỗi hoặc log kỹ thuật.
+6. Saga tiếp nhận chính thức (`FILES_MOVED`) giữ thứ tự file nhưng chỉ xử lý tối đa hai file Drive
+   song song. Sau từng nhóm, các file thành công được checkpoint cùng một transaction ngắn +
+   advisory lock; nếu peer lỗi, retry cùng idempotency key bỏ qua file đã checkpoint. Không có
+   migration, biến môi trường hay background/work-unit resume cho cơ chế này.
 
 Google My Drive tiếp tục dùng cây `00_CONFIG`, `01_INBOX`, `02_CASES`, `03_EXPORTS`, `99_BACKUP`. Scope vẫn là `drive.file`; không dùng service account hoặc link công khai.
 
@@ -178,3 +187,6 @@ Không chạy ETL khi production còn ghi. Không xóa spreadsheet sau cutover; 
 ## Hướng nâng cấp
 
 Shared Drive/kho lưu trữ cơ quan vẫn là nâng cấp riêng. Khi chuyển file, giữ nguyên `file_id`/`case_id`, cập nhật `drive_file_id`, kiểm checksum và audit theo lô. OCR CCCD, đối soát dân cư và tích hợp CSDL đất đai chỉ triển khai khi có cơ sở pháp lý và kênh kỹ thuật chính thức.
+# Cập nhật Phase 2 — chi tiết cán bộ và xem ảnh theo yêu cầu
+
+`/submissions/:submissionId` kiểm quyền và server-prime DTO chi tiết trước khi render client. Initial render không gọi lại `GET /api/submissions/:submissionId`; endpoint này vẫn giữ cho refresh sau thao tác ghi. `DocumentViewer` không đặt `src` ảnh trước hành động “Xem ảnh”; preview route xác minh đúng một file `UPLOADED` thuộc submission bằng repository trước khi gọi Drive. AI draft chỉ tải khi cán bộ mở phần đối chiếu. Detail/preview response thành công có `Server-Timing` không chứa PII.

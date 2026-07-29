@@ -1,5 +1,52 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-29 — Phase 4 pool Supabase/region
+
+```text
+vercel.json
+└── regions: [sin1] → Vercel Function Preview/Production theo cấu hình deployment
+
+src/modules/common/env.ts
+└── SUPABASE_POOL_MAX: 1 | 2 | 3 (default 1), server-only
+    └── loadSupabaseEnvironment
+        └── src/modules/supabase/database.ts
+            └── supabaseDatabaseOptions → postgres(..., { prepare: false, max, SSL, timeouts })
+
+scripts/benchmark-staff-preview.ts
+├── validateStaffBenchmarkTarget → HTTPS root origin + exact expected host + REHEARSAL_ONLY
+│   └── chỉ *.vercel.app Preview rehearsal, chặn Production alias/credential/path/query/hash trước cookie
+├── buildStaffBenchmarkRequests → queue `q`; SSR `detail_page` + API `detail_api` diagnostic + preview
+│   └── detail/page/preview thành công vẫn append audit theo contract, không có bypass
+└── safe Server-Timing + region label → P50/P95/error-rate report không PII
+```
+
+Pool chỉ đổi khi runtime instance mới được tạo. Kết quả benchmark không được dùng để suy diễn
+Production; quota Supabase và Vercel deployment metadata là nguồn xác minh vận hành.
+
+## Cập nhật Code Graph 2026-07-29 — Phase 2 mở chi tiết/lazy preview
+
+```text
+src/app/submissions/[submissionId]/page.tsx
+└── requireActiveUser(SUBMISSION_READ_ROLES)
+    └── loadStaffSubmissionDetail → initialSubmission → SubmissionDetail
+        ├── record + active files, audit mở chi tiết một lần khi SSR navigation
+        └── không fetch GET /api/submissions/:id khi client mount
+
+GET /api/submissions/:id
+└── requireActiveUser → loadStaffSubmissionDetail → DTO tương thích + Server-Timing
+
+DocumentViewer
+├── chưa đặt img.src khi mở hồ sơ
+├── cán bộ bấm “Xem ảnh” → đúng một preview URL cho file đang chọn
+└── GET /api/submissions/:id/files/:fileId
+    ├── requireActiveUser(SUBMISSION_READ_ROLES)
+    ├── PublicIntakeRepository.findActiveFile(submissionId, fileId)
+    ├── Drive readPreview(file.driveFileId)
+    └── audit preview + Server-Timing, không trả Drive ID/link
+
+AiDraftPanel chỉ mount/fetch sau khi cán bộ mở “Đối chiếu AI”.
+```
+
 > Cập nhật PR #8 (2026-07-29): `PUT /api/submissions/:id/working-payload` so sánh payload hiệu lực
 > trước khi commit. Sửa bốn trường định danh sau `QR_CONFIRMED` bắt buộc lý do và server chuyển sang
 > `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` xóa dấu xác nhận và về
@@ -321,8 +368,11 @@ src/app/api/submissions/[submissionId]/accept/route.ts
     │   (ngoài transaction nghiệp vụ; mỗi cache miss mở transaction RIÊNG, giữ
     │   pg_advisory_xact_lock theo parent/name bao quanh thao tác Drive, nên nhiều lambda không
     │   thể tạo trùng thư mục)
-    ├── FILES_MOVED: drive.files.update từng file (đổi parent + đổi tên `requestBody.name`),
-    │   checkpoint moved_files (NGOÀI tx) — tên sinh bởi buildOriginalFileNames
+    ├── FILES_MOVED: `acceptance-file-move.ts` chia file chưa checkpoint theo thứ tự thành nhóm
+    │   tối đa 2; mỗi nhóm chạy `drive.files.get` + `drive.files.update` song song, rồi checkpoint
+    │   các file thành công đúng một lần bằng transaction ngắn + advisory lock. Lỗi một file vẫn
+    │   checkpoint peer thành công trước khi trả retryable; retry cùng key bỏ qua `moved_files`.
+    │   Tên sinh bởi buildOriginalFileNames
     │   (src/modules/public-intake/file-naming.ts, đệm 0 `-01/-02` từ 2026-07-25), issueNumber
     │   rỗng → bỏ qua đổi tên
     ├── RECORDS_WRITTEN (tx): cases + files, syncOfficialRecord ghi certificates/owners/

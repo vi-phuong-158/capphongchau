@@ -1,5 +1,151 @@
 # CHATGPT HANDOFF REPORT
 
+## Phase 4 performance report — Supavisor pool and Vercel region (2026-07-29)
+
+### Report metadata and scope
+
+- Repository: `D:\\04. Github\\capphongchau-acceptance-visibility`
+- Branch/base: `codex/phase4-pool-region` from `d6cb796`.
+- Commit created: `perf(infra): configure preview pool experiments` (final commit ID is reported with delivery).
+- Status: `READY_FOR_DEPLOY_REVIEW`; Preview benchmark has not run and Phase 4 is not PASS.
+- Source plan: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md` §6 Phase 4 and the approved Phase 4 plan.
+- In scope: server-only pool allowlist, Vercel region configuration, PII-safe Preview benchmark runner, tests and documentation.
+- Out of scope: migrations, data writes/seeding, authorization/API business changes, `.env.local` Production, Vercel environment changes, deployment, merge and Production.
+
+### Baseline, implementation and verification
+
+| Check | Before | Final |
+| --- | --- | --- |
+| `npm.cmd test` | 669 pass, 10 skip | 675 pass, 10 skip |
+| `npm.cmd run typecheck` | pass | pass |
+| `npm.cmd run lint -- --quiet` | pass | pass |
+| `npm.cmd run build -- --webpack` | previously pass | pass |
+| Preview benchmark | no authenticated session | not run; runner fail-safe requires explicit environment |
+
+- `SUPABASE_POOL_MAX` is parsed only on the server, accepts integers 1–3 and defaults to 1. `supabaseDatabaseOptions` preserves `prepare: false`, SSL and existing timeouts while passing that validated max to `postgres`.
+- `vercel.json` now declares `regions: ["sin1"]`. Runtime confirmation remains a deployment-time check of Vercel metadata/`x-vercel-id`; the declarative `VERCEL_REGION` variable is not treated as proof.
+- `scripts/benchmark-staff-preview.ts` requires an explicitly supplied HTTPS Preview URL, session cookie and synthetic route inputs. It does not load `.env.local`, write data, print supplied values, raw headers, response bodies, URLs, queries or IDs. Output is restricted to route labels, status counts, duration P50/P95, allowlisted Server-Timing durations and a region label.
+- Fail-safe command without any benchmark environment exited as expected with only `Thiếu cấu hình PERF_BENCHMARK_BASE_URL.`; it made no request.
+
+### Files and acceptance
+
+| Area | Files/symbols | Result |
+| --- | --- | --- |
+| Pool configuration | `env.ts`, `database.ts`, `.env.example`; `SUPABASE_POOL_MAX`, `supabaseDatabaseOptions` | PASS locally |
+| Region | `vercel.json` | PASS static contract; requires Preview deployment verification |
+| Measurement | `staff-preview-benchmark.ts`, `benchmark-staff-preview.ts` | PASS unit/fail-safe; real A/B blocked |
+| Documentation | AGENTS, architecture, brain, baseline | Updated |
+
+| Criterion | Status | Evidence / remaining action |
+| --- | --- | --- |
+| Pool bounded to 1–3/default 1 | PASS | environment and database-option tests |
+| Existing Supavisor safeguards preserved | PASS | option test + typecheck/build |
+| Region configured as `sin1` | PASS in source | deploy Preview then inspect runtime metadata |
+| A/B 1/2/3 with P50/P95, quota and zero errors | BLOCKED | needs Ready Preview, synthetic data and dedicated staff session |
+| No Production action | PASS | no Vercel/Supabase mutation performed |
+
+Rollback: set Preview `SUPABASE_POOL_MAX=1` and redeploy; revert the region config only if Vercel rejects it or benchmark evidence requires it. No migration or data rollback exists. Do not increase Production pool or call Phase 4 PASS without the documented Preview evidence.
+
+## PR #9 follow-up — staff performance benchmark correctness and rehearsal guard (2026-07-29)
+
+### Scope, baseline and commits
+
+- Repository/worktree: `D:\04. Github\capphongchau-acceptance-visibility`; branch: `codex/phase5-acceptance-batching` (PR #9). No merge or Vercel/Supabase mutation was performed.
+- Baseline before change: clean worktree at `6bfd91bf609bfdf433a6e1268f5ae106ea528bc2`; focused regression suite: 5 files, 13 tests PASS.
+- Code and documentation commit: `bff34b9` — `fix(perf): harden staff benchmark`. This handoff update is committed separately after the report is recorded.
+- In scope: repair the local benchmark runner and its pure contracts/tests; update required source-of-truth documentation. Out of scope: runtime API/auth/role/schema/migration changes, data seed/reset, deployment and Production.
+
+### Fixed findings and changed symbols
+
+| Finding | Fix | Files / symbols |
+| --- | --- | --- |
+| Queue search measured an ignored `query` parameter | Request builder now uses the route contract `q`, with encoding regression coverage. | `buildStaffBenchmarkRequests` in `src/modules/performance/staff-preview-benchmark.ts` |
+| Detail benchmark missed the real SSR page | Split `detail_page` (`/submissions/:id`) from `detail_api` (`/api/submissions/:id`) diagnostic timing; preview remains separate. | `StaffBenchmarkRoute`, `buildStaffBenchmarkRequests`, runner |
+| “Preview-only” could target Production and understated audit writes | Guard requires HTTPS root Vercel Preview origin, exact expected host and `REHEARSAL_ONLY`, rejecting the production alias, credentials, port, path, query and hash before cookie read/send. Docs state that successful detail page/API/preview reads retain append-only audit. | `validateStaffBenchmarkTarget`, runner comments, AGENTS/brain/evidence |
+
+Relevant diff behavior:
+
+```diff
+- /api/submissions?query=<synthetic>
++ /api/submissions?q=<synthetic>
+- detail: /api/submissions/:submissionId
++ detail_page: /submissions/:submissionId
++ detail_api:  /api/submissions/:submissionId
++ validate target before PERF_BENCHMARK_COOKIE is read
+```
+
+### Verification and acceptance
+
+| Check | Result |
+| --- | --- |
+| Focused baseline before change | PASS — 5 files, 13 tests |
+| Focused final suite | PASS — 5 files, 15 tests |
+| Full test suite | PASS — 78 files, 680 tests; 2 files / 11 tests skipped |
+| `npm.cmd run typecheck` | PASS |
+| `npm.cmd run lint -- --quiet` | PASS |
+| `npm.cmd run build -- --webpack` | PASS — 23/23 static pages |
+| `git diff --check` | PASS before commit |
+| Authenticated Preview rehearsal benchmark | NOT_TESTED — no approved rehearsal staff cookie/IDs were supplied; no request was made |
+
+Acceptance met in code: filtered queue routes reach the intended `q` contract; actual SSR detail and API diagnostic metrics are distinguishable; target validation fails closed before cookie access; the product audit contract is preserved and documented. No new environment variable is read by runtime code: the `PERF_BENCHMARK_*` values are one-shot local runner inputs only.
+
+### Risks and required next action
+
+- Do not run against Production. Set a synthetic/rehearsal Preview root origin, matching `PERF_BENCHMARK_EXPECTED_HOST` and literal `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`.
+- A complete 10 warm-up + 40 measured run can add up to 150 audit rows across successful SSR detail, API detail and preview requests. Prepare the authorized rehearsal audit cleanup/reset before the run.
+- Phase 4 is still BLOCKED until an authenticated rehearsal run produces P50/P95, error rate, Server-Timing and connection-quota evidence for pool 1/2/3. No Production conclusion may be inferred.
+
+## Phase 2 performance report — detail server-prime/lazy preview (2026-07-29)
+
+### Report metadata
+
+- Project: Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu (`land-ocr-180`)
+- Repository: `D:\04. Github\capphongchau-acceptance-visibility`
+- Branch/base: `codex/phase2-detail-lazy-preview` from `c17254c`
+- Phase 2 commit: `perf(submissions): server-prime detail previews` (the final commit ID is recorded in the delivery message).
+- Git state after commit: clean before remote push; only the Phase 2 files listed in this report are included.
+- Status: `BLOCKED_PREVIEW_BUILD`; authenticated Preview E2E remains blocked.
+- Source: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md` §6 Phase 2.
+
+### Implemented scope
+
+- Server page calls shared `loadStaffSubmissionDetail` after `requireActiveUser` and passes `initialSubmission`; client no longer fetches detail when mounting.
+- Detail GET retains its contract for deliberate refresh, detail/preview successful responses expose safe duration-only `Server-Timing` values.
+- `DocumentViewer` has no image `src` until “Xem ảnh”; AI panel mounts only after “Mở đối chiếu AI”.
+- Repository `findActiveFile(submissionId, fileId)` scopes preview to a single `UPLOADED` file; the preview route no longer reads the whole submission/file list before Drive.
+- No migration, data change, Production release, or Phase 3 work. A CLI-created Production deployment (`dpl_GcJUg5DUcwrsWJ8LnxriMT9qQ6Xr`) was removed while still `Initializing` (0 ms build), before it became Ready.
+
+### Security/data impact
+
+- Authentication/roles remain `requireActiveUser(SUBMISSION_READ_ROLES)`.
+- DTOs continue to omit Drive IDs/links; a missing, inactive, or cross-submission file returns generic 404 before Drive access.
+- Detail audit remains one event per SSR/API entrypoint; preview audit occurs only after successful Drive preview read. Timing headers contain no PII, query, Drive ID/link, or token.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| Baseline `npm.cmd test` | 664 pass, 10 skip; exit 0 |
+| Final `npm.cmd test` | 669 pass, 10 skip; exit 0 |
+| `npm.cmd run typecheck` | pass |
+| `npm.cmd run lint -- --quiet` | pass |
+| `npm.cmd run build -- --webpack` | pass |
+| Default Turbopack build | blocked by pre-existing worktree `node_modules` symlink restriction; webpack validates the same source. |
+| Vercel deployment state | Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` was still Building after 13 minutes at last check; the unintended initializing Production deployment was removed before Ready. |
+
+New tests cover shared detail loading/audit, missing-record no-audit, initial SSR/no mount fetch, deferred AI/image source, scoped active-file query and timing contract.
+
+### Acceptance and next action
+
+| Criterion | Status | Evidence/next action |
+| --- | --- | --- |
+| No initial client detail fetch | PASS | server-prime + structural test |
+| No preview before explicit click | PASS | `previewFileId` gate + test |
+| One active file scoped before Drive | PASS | repository/route test |
+| Preview deployment and authenticated E2E P50/P95 | BLOCKED | Wait for the existing Preview build to become Ready, then use an approved Preview test session. |
+
+Rollback is code-only: revert this Phase 2 commit. No database rollback/backfill is required. Do not mark Phase 2 PASS until Preview E2E verifies role, phone masking, cross-submission 404, image/AI laziness, `Server-Timing`, and P95 metadata ≤ 1.5 s (or documents the cause).
+
 ## Phase 1 performance report — SQL queue pagination/search (2026-07-29)
 
 ### 1. Report metadata
@@ -786,3 +932,67 @@ evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md.
   mồ côi thuộc nhiều hồ sơ; không xóa tự động vì cần đối chiếu thủ công.
 - Để chạy lại cần cung cấp `x-vercel-protection-bypass` hợp lệ/bật quyền Preview cho runner, sau đó
   chạy lại cùng lệnh. Chưa commit, push, merge hoặc deploy.
+
+## Phase 5A handoff — tiếp nhận chính thức theo nhóm 2 file (2026-07-29)
+
+### Trạng thái
+
+`READY_FOR_REVIEW` — đã implement và kiểm chứng local. Không migration, không deploy/merge
+Production, không triển khai Phase 5B/work-unit. Benchmark Preview end-to-end 10 file còn
+`NOT_TESTED` vì nhánh chưa được deploy Preview và runner không có session/API Preview được phép.
+
+### Baseline trước thay đổi
+
+- Worktree/branch: `D:\04. Github\capphongchau-acceptance-visibility`,
+  `codex/phase5-acceptance-batching`, base `c4049c2`.
+- Full Vitest baseline: 675 pass, 10 skip. Typecheck và lint đạt.
+- Không có migration hoặc biến môi trường mới; không sửa hay đọc trực tiếp `.env.local` Production.
+
+### Thay đổi và symbol
+
+- `src/modules/submissions/acceptance-file-move.ts` —
+  `OFFICIAL_ACCEPTANCE_FILE_MOVE_CONCURRENCY = 2`, `chunkOfficialAcceptanceFiles`,
+  `settleOfficialAcceptanceMoveChunk`.
+- `src/modules/submissions/acceptance-saga.ts` — `runOfficialAcceptance` xử lý `FILES_MOVED` theo
+  nhóm hai file, chạy Drive song song trong nhóm và checkpoint `moved_files` một lần/nhóm qua
+  transaction ngắn + advisory lock. Kết quả thành công cùng nhóm lỗi được checkpoint trước lỗi
+  retryable; retry cùng idempotency key bỏ qua chúng.
+- `src/components/submission-detail.tsx` — trạng thái bận có ngữ cảnh: “Đang chuyển ảnh và ghi dữ
+  liệu hồ sơ. Vui lòng không đóng trang.” API accept/body/response không đổi.
+- `tests/acceptance-file-move.test.ts` — order, nhóm 2, concurrency peak 2, peer-success và
+  10 file = 5 nhóm. `tests/staging-rehearsal-acceptance-saga.integration.test.ts` — fake Drive đo
+  concurrency, fixture 10 file, kiểm không trùng bản ghi chính thức; suite chỉ chạy với
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL` rehearsal riêng.
+- Đồng bộ: `AGENTS.md`, `docs/architecture.md`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/06-ai-working-log.md`.
+
+### Kết quả kiểm tra
+
+| Check | Result |
+|---|---|
+| `npm.cmd run typecheck` | PASS |
+| `npm.cmd run lint -- --quiet` | PASS |
+| `npm.cmd test` | PASS — 678 pass, 11 skip (689 total) |
+| `npm.cmd run build -- --webpack` | PASS — 23/23 static pages |
+| `git diff --check` | PASS |
+| Rehearsal Postgres thật | NOT_TESTED — thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` riêng |
+| Preview synthetic 10-file P50/P95/error rate | NOT_TESTED — không deploy Preview trong task này |
+
+### Nghiệm thu và rủi ro còn lại
+
+- Đạt ở cấp local: giới hạn Drive cố định 2; file/naming vẫn theo `activeFiles`; parent được kiểm
+  trước update; checkpoint, `ACCEPTING`, deterministic IDs, guard và transaction ghi dữ liệu chính
+  thức giữ nguyên. Không thay API/schema/auth/role/phone masking.
+- Cần trước khi kết luận hiệu năng: chạy rehearsal integration bằng Postgres tách biệt, sau đó
+  deploy Preview theo phê duyệt và benchmark authenticated synthetic 10 file để ghi P50/P95, error
+  rate và Server-Timing.
+- Phase 5B không tự mở: nếu P95 vẫn vượt mục tiêu phải thiết kế continue server-side đa phiên; key
+  hiện chỉ sống trong tab không an toàn để hứa resume sau khi đóng/mở lại.
+
+### Git status và diff quan trọng
+
+- Commit ở đầu handoff: `c4049c2`; commit Phase 5A đã được tạo với message
+  `perf(acceptance): batch Drive moves in pairs` (xem `git log -1 --oneline`).
+- Thay đổi chỉ thuộc Phase 5A và tài liệu/handoff nêu trên. Diff lõi: vòng lặp tuần tự `for` +
+  checkpoint `database.unsafe` mỗi file được thay bằng `Promise.allSettled` trên chunk 2 và một
+  `database.begin` checkpoint mỗi chunk thành công.

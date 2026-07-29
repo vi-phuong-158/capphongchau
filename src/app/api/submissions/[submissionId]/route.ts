@@ -23,8 +23,9 @@ import {
   ORGANISATION_ID_PATTERN,
 } from "@/modules/public-intake/validation";
 import { identityHmac, newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
-import { effectivePayload, payloadLayerOf } from "@/modules/public-intake/payload-layers";
+import { effectivePayload } from "@/modules/public-intake/payload-layers";
 import { manualIdentityConfirmationIssue } from "@/modules/submissions/manual-identity-confirmation";
+import { loadStaffSubmissionDetail } from "@/modules/submissions/detail";
 import {
   isOwnerIdentityQrConfirmed,
   mayAmendOfficialRecord,
@@ -100,11 +101,21 @@ export async function GET(
   context: { params: Promise<{ submissionId: string }> },
 ): Promise<NextResponse> {
   const requestId = randomUUID();
+  const totalStartedAt = performance.now();
   try {
     const user = await requireActiveUser(SUBMISSION_READ_ROLES);
     const { submissionId } = await context.params;
-    const record = await getPublicIntakeRepository().findById(submissionId);
-    if (!record) {
+    const databaseStartedAt = performance.now();
+    const submission = await loadStaffSubmissionDetail({
+      submissionId,
+      actorEmail: user.email,
+      canResetAccessSecret:
+        user.roles.includes(UserRole.SYSTEM_ADMIN) || user.roles.includes(UserRole.WARD_ADMIN),
+      auditDetailView: true,
+      requestId,
+    });
+    const databaseMs = performance.now() - databaseStartedAt;
+    if (!submission) {
       return NextResponse.json(
         createApiErrorPayload({
           code: "NOT_FOUND",
@@ -114,48 +125,17 @@ export async function GET(
         { status: 404 },
       );
     }
-    await getPublicIntakeRepository().appendAudit({
-      actorEmail: user.email,
-      action: "SUBMISSION_SENSITIVE_DETAIL_VIEWED",
-      entityId: record.submissionId,
-      requestId,
-    });
-    const files = await getPublicIntakeRepository().listFiles(record.submissionId);
     return NextResponse.json(
       {
-        submission: {
-          submissionId: record.submissionId,
-          receiptCode: record.receiptCode,
-          status: record.status,
-          phone: record.phone,
-          version: record.version,
-          claimedBy: record.claimedBy || null,
-          claimedByDisplayName: record.claimedByDisplayName || null,
-          intakeChannel: record.intakeChannel,
-          assistedByDisplayName: record.assistedByDisplayName || null,
-          claimedAt: record.claimedAt || null,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-          officialCaseId: record.officialCaseId || null,
-          acceptStep: record.acceptStep || null,
-          // Màn cán bộ luôn sửa/xem lớp dữ liệu đang có hiệu lực. Khi đã nhận xử lý thì đó là
-          // `working_payload`, không phải `draft_json` cũ của người dân.
-          draft: effectivePayload(record),
-          payloadLayer: payloadLayerOf(record),
-          citizenPayload: record.citizenPayload || null,
-          workingPayload: record.workingPayload || null,
-          officialPayload: record.officialPayload || null,
-          files: files.map((file) => ({
-            fileId: file.fileId,
-            documentType: file.documentType,
-            ownerId: file.ownerId,
-          })),
-          canResetAccessSecret:
-            user.roles.includes(UserRole.SYSTEM_ADMIN) || user.roles.includes(UserRole.WARD_ADMIN),
-        },
+        submission,
         requestId,
       },
-      { headers: { "cache-control": "no-store" } },
+      {
+        headers: {
+          "cache-control": "no-store",
+          "server-timing": `detail_db;dur=${databaseMs.toFixed(1)}, detail_total;dur=${(performance.now() - totalStartedAt).toFixed(1)}`,
+        },
+      },
     );
   } catch (error) {
     const code = error instanceof AuthorizationError ? error.kind : "INTERNAL_ERROR";

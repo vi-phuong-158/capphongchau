@@ -1,5 +1,22 @@
 # Performance baseline — Phase 1 queue pagination/search
 
+## Phase 4 — pool Supabase và region (2026-07-29)
+
+- Branch: `codex/phase4-pool-region`; base: `d6cb796`.
+- Baseline code: Supavisor dùng `prepare: false`, SSL, `idle_timeout=20`, `connect_timeout=10` và hard-code `max: 1`; `vercel.json` chưa khai báo `regions`.
+- Thay đổi code: `SUPABASE_POOL_MAX` chỉ nhận 1–3, default 1; `vercel.json` khóa `sin1`. Không migration, không thay dữ liệu hoặc quyền API.
+- Benchmark Preview: **BLOCKED** cho đến khi deployment Ready và có session cán bộ Preview riêng cùng dữ liệu synthetic. Runner bắt buộc warm-up 10, đo 40 lượt/route với 4 worker; report chỉ có P50/P95, error rate, HTTP status, Server-Timing allowlist và region label. Target phải là HTTPS root Vercel Preview có exact `PERF_BENCHMARK_EXPECTED_HOST` và `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`; alias Production bị chặn trước cookie. Tập route gồm queue `q`, `detail_page` SSR, `detail_api` diagnostic và preview. Không có audit bypass: ba route nhạy cảm thành công có thể thêm tối đa 150 audit rows/lượt đầy đủ, chỉ chạy/dọn trên rehearsal synthetic.
+- Tiêu chí chọn pool: chỉ chọn 2/3 nếu P95 cải thiện ≥10% so với 1, error rate 0, không timeout/deadlock/too-many-connections và peak connection <70% quota Supabase. Nếu không đạt, giữ 1. Không suy diễn hay rollout Production từ kết quả này.
+
+## Phase 2 — mở chi tiết và preview theo yêu cầu (2026-07-29)
+
+- Branch: `codex/phase2-detail-lazy-preview`; base: `c17254c`.
+- Không migration, không thay đổi dữ liệu. Initial detail chuyển sang Server Component; client không còn GET detail khi mount. Ảnh và AI chỉ tạo request sau thao tác mở rõ ràng.
+- `Server-Timing` mới: detail `detail_db`, `detail_total`; preview `preview_db`, `preview_drive`, `preview_total`. Header không chứa PII, query, Drive ID/link hay token.
+- Local verification: typecheck/lint pass; unit test 75 files pass, 2 skip; 669 pass, 10 skip; webpack production build pass.
+- Benchmark authenticated/P50/P95 Preview: **BLOCKED**. Không có credential/session cán bộ Preview. Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` đang build; không suy diễn số đo từ Preview cũ hay Production. Một deployment Production do CLI tạo nhầm đã được xóa khi còn `Initializing` (0 ms build), trước `Ready`; không có release Production.
+- Acceptance chưa PASS cho đến khi Preview deployment từ branch này chạy và E2E có session cán bộ xác minh: SSR không có GET detail client, không preview trước click, scope file 404, role/phone masking và P95 metadata ≤ 1,5 giây hoặc có phân tích nguyên nhân.
+
 - Ngày ghi: 2026-07-29
 - Branch: `codex/perf-queue-sql-pagination`
 - Base commit: `2fca1f363c8c6212692ca048c61e3929750493e8`

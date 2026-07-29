@@ -2589,3 +2589,41 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
 - **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
 - **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.
+
+## [2026-07-29] Phase 5A — tối ưu tiếp nhận chính thức theo nhóm 2 file
+
+- **Agent:** Codex.
+- **Thay đổi:** thêm `acceptance-file-move.ts`; saga chia file chưa checkpoint thành nhóm tối đa 2,
+  chạy Drive song song rồi checkpoint `moved_files` một lần bằng transaction ngắn + advisory lock.
+  Lỗi nhóm vẫn checkpoint peer thành công trước `AcceptanceRetryableError`; retry cùng key bỏ qua
+  peer đó. API accept không đổi.
+- **UI/Test:** hiển thị “Đang chuyển ảnh và ghi dữ liệu hồ sơ. Vui lòng không đóng trang.”; unit
+  kiểm chunk/order/trần 2/nhóm lỗi/10 file = 5 nhóm. Rehearsal integration đo peak Drive và 10 file,
+  chỉ chạy khi có `ACCEPTANCE_SAGA_TEST_DATABASE_URL` riêng.
+- **Giới hạn:** không migration, env, deploy/merge Production hay Phase 5B; chưa có benchmark Preview
+  10 file vì chưa deploy Preview.
+## [2026-07-29] Phase 4 — pool Supabase và region Preview
+
+- **Agent:** Codex.
+- **Thay đổi:** Thay hard-code pool `max: 1` bằng `SUPABASE_POOL_MAX` server-only, allowlist 1–3/default 1; giữ `prepare: false`, SSL, timeout và singleton client. `vercel.json` đặt `regions: ["sin1"]`.
+- **Đo lường:** Thêm `scripts/benchmark-staff-preview.ts` và module tổng hợp P50/P95/error-rate. Script chỉ nhận session/ID/query qua environment phiên chạy, không đọc `.env.local` và không in chúng; chỉ xuất route label, status, duration, timing allowlist và region label.
+- **Kiểm tra local:** typecheck, lint và focused tests được chạy trước khi benchmark thật. Không migration, không seed dữ liệu, không thay Vercel environment hoặc deploy Production.
+- **Còn lại:** Cần Preview Ready, session cán bộ benchmark riêng, dữ liệu synthetic và dashboard quota để A/B pool 1/2/3. Chưa kết luận Phase 4 PASS.
+
+## [2026-07-29] Phase 2 — server-prime chi tiết, lazy preview và lazy AI
+
+- **Agent:** Codex.
+- **Deploy safety:** Push nhánh `codex/phase2-detail-lazy-preview`; Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` đang build. Một deployment Production do CLI tạo nhầm (`dpl_GcJUg5DUcwrsWJ8LnxriMT9qQ6Xr`) đã bị xóa khi còn `Initializing` (0 ms build), trước `Ready`; không có release Production.
+- **Thay đổi:** `page.tsx` kiểm quyền và nạp `initialSubmission` từ service server dùng chung; `SubmissionDetail` khởi tạo state từ prop, không fetch detail lúc mount. GET detail được giữ để refresh có chủ đích và thêm `Server-Timing` an toàn.
+- **Preview ảnh:** `DocumentViewer` chỉ đặt ảnh sau nút “Xem ảnh”. Preview route dùng `findActiveFile(submissionId, fileId)` để xác minh đúng file `UPLOADED` thuộc hồ sơ trước Drive; không còn đọc toàn hồ sơ/danh sách file; audit chỉ sau đọc Drive thành công.
+- **AI:** `AiDraftPanel` chỉ mount sau hành động mở phần “Đối chiếu AI”.
+- **Kiểm tra local:** typecheck, lint, 679 test pass/10 skip và webpack production build pass. Next/Turbopack build mặc định tại worktree bị lỗi symlink `node_modules` có sẵn; webpack không bị ảnh hưởng.
+- **Preview/E2E:** Chưa có P50/P95 authenticated vì không có session cán bộ Preview. Hai lần deploy local bằng Vercel CLI đều timeout không phát sinh deployment mới; không deploy Production.
+
+## [2026-07-29] Sửa review PR #9 — benchmark hiệu năng rehearsal đúng tuyến và đúng đích
+
+- **Agent:** Codex.
+- **Thay đổi:** `buildStaffBenchmarkRequests` dùng `q` (không còn `query`) cho ba tìm kiếm queue; tách `detail_page` (`/submissions/:id`, SSR thực tế) khỏi `detail_api` diagnostic; preview giữ riêng. `validateStaffBenchmarkTarget` yêu cầu HTTPS root origin, exact expected host, Vercel Preview và xác nhận `REHEARSAL_ONLY`; chặn Production alias, credential, port, path, query và hash trước khi đọc cookie.
+- **Audit/scope:** Không thêm audit bypass. Detail page, API detail và preview thành công vẫn append audit theo contract; một lượt đầy đủ 10 warm-up + 40 đo có thể thêm tối đa 150 audit rows. Chỉ chạy dữ liệu synthetic/rehearsal và dọn/reset audit sau đo.
+- **Tài liệu:** đồng bộ AGENTS, Code Graph, decision/task/baseline hiệu năng để không mô tả sai là “không ghi database”. Không đổi runtime API, role, schema hay migration.
+- **Kiểm tra ban đầu:** baseline 5 file/13 test PASS; focused runner test sau sửa 6/6 PASS. Chưa chạy authenticated Preview vì không có cookie/session rehearsal được cấp; không deploy/merge Production.

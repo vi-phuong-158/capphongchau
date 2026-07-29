@@ -2,6 +2,17 @@
 
 ## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
 
+## Bổ sung Phase 4 hiệu năng pool/region (2026-07-29)
+
+- `SUPABASE_POOL_MAX` là cấu hình server-only của Supavisor theo từng Vercel runtime instance, chỉ nhận `1`–`3` và mặc định `1`. Không tăng Production dựa trên cảm nhận; phải benchmark A/B Preview cùng tải, kiểm connection quota/timeout và giữ giá trị `1` nếu không cải thiện P95 có ý nghĩa.
+- `vercel.json` khóa Function ở `sin1`; `VERCEL_REGION` chỉ là giá trị khai báo, không thay cho xác minh deployment settings và `x-vercel-id`. Công cụ benchmark không được in cookie, URL/query, ID hồ sơ/tệp, response body, header thô hoặc PII. Runner hiệu năng cán bộ chỉ được chạy với Vercel Preview rehearsal/synthetic đã kiểm tra exact host và xác nhận `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`; không có audit-bypass: page detail, API detail và preview thành công vẫn append audit, nên phải dự trù dọn/reset audit rehearsal sau khi đo.
+
+## Bổ sung Phase 2 hiệu năng chi tiết hồ sơ (2026-07-29)
+
+- Chi tiết cán bộ phải được server-prime sau `requireActiveUser`; client không được tự gọi lại GET detail ở lần mount đầu. GET detail vẫn giữ cho refresh có chủ đích.
+- Ảnh chỉ được đặt `src` sau thao tác xem rõ ràng. Preview route phải dùng lookup đúng một file active thuộc submission; không đọc toàn hồ sơ/danh sách file, không trả Drive ID/link, và chỉ audit sau khi đọc preview thành công.
+- AI draft không được fetch lúc mở hồ sơ; chỉ mount khi cán bộ mở phần đối chiếu. Server-Timing chỉ được chứa duration an toàn, không chứa PII hoặc định danh Drive.
+
 - Trong `UNDER_REVIEW`, `WorkingPayloadEditor` là nơi duy nhất sửa PL3; nút hành động chỉ mở tab
   Chủ sử dụng. `PUT /working-payload` phải so sánh payload hiệu lực ở server: sửa họ tên/CCCD/ngày
   sinh/giới tính sau `QR_CONFIRMED` cần lý do và server chuyển sang `QR_OVERRIDE_PENDING_REVIEW`;
@@ -318,6 +329,12 @@ mặc định `false`) — độc lập với `REFERENCE_IS_PLACEHOLDER` (cờ �
 Khi `completionChecks` còn lỗi `BLOCKING`, route trả HTTP 400 kèm `error.details.issues[]` chỉ gồm
 `code`, `label`, `message` an toàn để cán bộ biết chính xác mục cần hoàn thiện; không đưa PII,
 Drive ID/link, token hoặc metadata tệp vào chi tiết lỗi.
+
+Ở checkpoint `FILES_MOVED`, saga tiếp nhận chỉ được chạy Drive theo nhóm cố định tối đa **2** file,
+giữ thứ tự `activeFiles`; mỗi nhóm `files.get`/`files.update` song song rồi ghi chung một checkpoint
+`moved_files` trong transaction ngắn + advisory lock. Nếu một file lỗi, file thành công cùng nhóm
+phải được checkpoint trước khi trả lỗi retryable để retry cùng idempotency key bỏ qua chúng. Không
+thêm work-unit/background resume hay biến concurrency nếu chưa có quyết định Phase 5B riêng.
 
 `POST /api/public/certificate-lookup` nhận một trong hai phương thức: QR CCCD hiện có hoặc số
 phát hành GCN + ngày cấp. Với GCN, chuẩn hóa bỏ khoảng trắng/dấu gạch và không phân biệt hoa/thường;

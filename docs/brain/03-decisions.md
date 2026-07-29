@@ -1,5 +1,12 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] Phase 4: pool Supavisor nhỏ, A/B Preview và region cấu hình rõ ràng
+
+- **Quyết định:** bỏ hard-code `max: 1` bằng `SUPABASE_POOL_MAX` server-only, allowlist 1–3 và default 1. Mỗi deployment/instance tạo singleton client một lần nên pool không được đổi động trong process.
+- **Lý do:** tăng pool theo từng lambda có thể nhân số kết nối toàn hệ thống. Chỉ chọn 2 hoặc 3 khi cùng workload Preview cho P95 tốt hơn ít nhất 10%, không lỗi/timeout/deadlock và peak connection dưới 70% quota Supabase; ngoài ra giữ 1.
+- **Runner rehearsal:** benchmark không có route bỏ audit vì sẽ làm sai contract đọc nhạy cảm. Mỗi request SSR detail, API detail hoặc preview thành công vẫn append audit; runner bắt buộc HTTPS Vercel Preview rehearsal/synthetic, exact expected host và literal `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY` trước khi đọc/gửi cookie. Một lượt đầy đủ (10 warm-up + 40 đo) có thể thêm tối đa 150 audit rows từ ba route này; chuẩn bị reset/dọn dữ liệu rehearsal sau đo, không chạy Production.
+- **Region/đo lường:** đặt `regions: ["sin1"]` trong `vercel.json`; xác minh qua deployment settings và nhãn region của `x-vercel-id`, không tin riêng biến môi trường. Benchmark chỉ tổng hợp duration/status/metric allowlist, không log session, URL/query, ID hoặc PII.
+
 ## [2026-07-29] PR #8: server là nguồn chuyển trạng thái định danh
 
 - **Quyết định:** Tab Chủ sử dụng của `WorkingPayloadEditor` là luồng xác nhận trong
@@ -1681,3 +1688,23 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
   thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
   `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.
+
+## [2026-07-29] Phase 5A — Chuyển Drive theo nhóm hai file, checkpoint một lần mỗi nhóm
+
+- **Quyết định:** ở bước `FILES_MOVED`, giữ nguyên thứ tự `activeFiles` và giới hạn cứng mỗi nhóm
+  ở hai file. Trong một nhóm, `files.get` và (khi cần) `files.update` chạy song song; sau khi cả
+  nhóm settled, file thành công được ghi vào `moved_files` trong **một** transaction ngắn có advisory
+  lock. Một file lỗi không làm mất checkpoint peer thành công; saga trả retryable và retry cùng key
+  bỏ qua file đã checkpoint.
+- **Lý do:** giảm checkpoint từ 10 xuống 5 cho 10 ảnh mà không thay API, `ACCEPTING`, deterministic
+  ID hay transaction ghi dữ liệu chính thức.
+- **Giới hạn:** concurrency luôn 2, không migration, worker/background task hay resume đa phiên.
+  Phase 5B/work-unit chỉ được lập riêng nếu benchmark sau 5A không đạt mục tiêu; key ở tab không là
+  cam kết resume phiên mới.
+## [2026-07-29] Phase 2 dùng SSR initial detail, lazy preview và lazy AI
+
+- **Quyết định:** Trang chi tiết cán bộ tự kiểm quyền rồi gọi `loadStaffSubmissionDetail` ở Server Component; `SubmissionDetail` nhận `initialSubmission` và không fetch detail khi mount. GET detail giữ nguyên contract để refresh sau mutation/direct access.
+- **Ảnh:** `DocumentViewer` không đặt `img.src` cho đến khi cán bộ bấm “Xem ảnh”; mỗi preview lookup dùng `findActiveFile(submissionId, fileId)` thay vì đọc toàn hồ sơ/danh sách file. File sai scope hoặc không còn `UPLOADED` trả 404 an toàn.
+- **AI:** Chỉ mount `AiDraftPanel` khi mở phần “Đối chiếu AI”, nên không tạo request AI trong initial load.
+- **Đo lường:** Response thành công phát `Server-Timing` chỉ gồm duration `detail_*` hoặc `preview_*`; không chứa PII, Drive ID/link, query hay token.
+- **Đánh đổi:** Không có nút “Xem tất cả” trong Phase 2; cán bộ mở từng ảnh để tránh tải/audit hàng loạt. Không có migration, rollback là revert code.
