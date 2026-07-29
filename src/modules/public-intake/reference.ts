@@ -15,6 +15,9 @@ export interface ReferenceOption {
   readonly label: string;
 }
 
+/** Cột B / trường 1 của PL3 — mã ĐVHC Phường Phong Châu. */
+export const WARD_ADMIN_CODE = "07954";
+
 /** Mục A, Phụ lục II Thông tư 08/2024/TT-BTNMT (các mã thường dùng). */
 export const LAND_PURPOSE_OPTIONS: readonly ReferenceOption[] = [
   { code: "LUC", label: "Đất chuyên trồng lúa" },

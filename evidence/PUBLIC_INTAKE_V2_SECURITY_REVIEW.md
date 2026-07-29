@@ -1,6 +1,6 @@
 # PUBLIC INTAKE V2 — SECURITY REVIEW
 
-Checklist §22 của `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md`, đối chiếu với mã nguồn thực tế
+Checklist §22 của `docs/archive/plans/CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2-2026-07-28.md`, đối chiếu với mã nguồn thực tế
 tại commit cuối của nhánh `claude/land-declaration-process-feedback-126f2e`.
 
 | # | Mục | Trạng thái | Bằng chứng |

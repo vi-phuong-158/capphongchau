@@ -17,6 +17,7 @@ import {
   CERTIFICATE_LOOKUP_RATE_WINDOW_SECONDS,
 } from "./certificate-lookup";
 import type { FileNormalizationMetadata, UploadAttemptMetric } from "./upload-metrics";
+import { summarizeWorkingPayloadChanges } from "./working-payload-audit";
 import {
   type PublicFileSummary,
   type PublicStatus,
@@ -1033,6 +1034,10 @@ export class PublicIntakeRepository {
         );
       }
 
+      const auditSummary = summarizeWorkingPayloadChanges(
+        input.record.workingPayload ?? input.record.citizenPayload ?? input.record.draft,
+        input.draft,
+      );
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
         action: input.aiApplication ? "AI_DRAFT_APPLIED" : "SUBMISSION_WORKING_PAYLOAD_EDITED",
@@ -1044,8 +1049,18 @@ export class PublicIntakeRepository {
               aiJobId: input.aiApplication.jobId,
               appliedFieldPaths: input.aiApplication.appliedFieldPaths.join(","),
               changeNote: input.changeNote || "",
+              changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+              changedFieldCount: auditSummary.changedFieldCount,
+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
+              automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
             }
-          : { changeNote: input.changeNote || "" },
+          : {
+              changeNote: input.changeNote || "",
+              changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+              changedFieldCount: auditSummary.changedFieldCount,
+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
+              automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
+            },
       });
 
       if (input.aiApplication && input.aiApplication.appliedFieldPaths.length > 0) {
@@ -1164,6 +1179,10 @@ export class PublicIntakeRepository {
         submissionId: input.record.submissionId,
         draft: input.draft,
       });
+      const auditSummary = summarizeWorkingPayloadChanges(
+        input.record.officialPayload ?? input.record.workingPayload ?? input.record.draft,
+        input.draft,
+      );
 
       await this.insertAudit(transaction, {
         actorEmail: input.actorEmail,
@@ -1174,6 +1193,10 @@ export class PublicIntakeRepository {
           ...input.auditMetadata,
           officialCaseId: next.officialCaseId,
           amendmentReason: input.amendmentReason,
+          changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+          changedFieldCount: auditSummary.changedFieldCount,
+          changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
+          automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
           ownerCount: counts.ownerCount,
           parcelCount: counts.parcelCount,
           assetCount: counts.assetCount,
@@ -2037,6 +2060,7 @@ export class PublicIntakeRepository {
       await transaction`
         insert into public.public_owners (
           owner_id, submission_id, owner_type, full_name, identity_number, role_on_certificate,
+          organisation_name, organisation_identity_number,
           date_of_birth, gender, residence_address, identity_source, qr_payload_hash,
           qr_decoder_version, qr_parser_version, identity_status, identity_confirmed_at,
           identity_override_reason,
@@ -2044,7 +2068,9 @@ export class PublicIntakeRepository {
           current_user_address, change_reason
         ) values (
           ${owner.id}, ${submissionId}, ${owner.ownerType}, ${owner.fullName},
-          ${owner.identityNumber}, ${owner.roleOnCertificate}, ${owner.dateOfBirth},
+          ${owner.identityNumber}, ${owner.roleOnCertificate},
+          ${owner.organisationName ?? ""}, ${owner.organisationIdentityNumber ?? ""},
+          ${owner.dateOfBirth},
           ${owner.gender}, ${owner.residenceAddress}, ${owner.identitySource},
           ${owner.qrPayloadHash}, ${owner.qrDecoderVersion}, ${owner.qrParserVersion},
           ${owner.identityStatus}, ${owner.identityConfirmedAt}, ${owner.identityOverrideReason ?? ""},
@@ -2058,11 +2084,16 @@ export class PublicIntakeRepository {
       await transaction`
         insert into public.public_parcels (
           parcel_id, submission_id, parcel_id_code, map_sheet_number, parcel_number,
-          address_on_certificate, address_two_level, area, old_ward
+          address_on_certificate, address_two_level, area, old_ward,
+          cadastral_map_sheet_number, cadastral_map_sheet_override_reason,
+          cadastral_parcel_number
         ) values (
           ${parcel.id}, ${submissionId}, ${parcel.parcelIdCode},
           ${parcel.mapSheetNumber}, ${parcel.parcelNumber}, ${parcel.addressOnCertificate},
-          ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard}
+          ${parcel.addressTwoLevel}, ${parcel.area}, ${parcel.oldWard},
+          ${parcel.cadastralMapSheetNumber ?? ""},
+          ${parcel.cadastralMapSheetOverrideReason ?? ""},
+          ${parcel.cadastralParcelNumber ?? ""}
         )
       `;
       for (const landUse of parcel.landUses || []) {
@@ -2080,8 +2111,17 @@ export class PublicIntakeRepository {
     }
     for (const asset of draft.assets || []) {
       await transaction`
-        insert into public.public_assets (asset_id, submission_id, asset_type, description)
-        values (${asset.id}, ${submissionId}, ${asset.assetType}, ${asset.description})
+        insert into public.public_assets (
+          asset_id, submission_id, parcel_id, asset_type, description,
+          mixed_use_building_name, apartment_building_name, apartment_number,
+          construction_area, floor_area, ownership_form, ownership_term, grade
+        ) values (
+          ${asset.id}, ${submissionId}, ${asset.parcelId ?? null}, ${asset.assetType},
+          ${asset.description}, ${asset.mixedUseBuildingName ?? ""},
+          ${asset.apartmentBuildingName ?? ""}, ${asset.apartmentNumber ?? ""},
+          ${asset.constructionArea ?? ""}, ${asset.floorArea ?? ""},
+          ${asset.ownershipForm ?? ""}, ${asset.ownershipTerm ?? ""}, ${asset.grade ?? ""}
+        )
       `;
     }
     for (const hmac of pendingIdentityHmacs ?? []) {

@@ -12,7 +12,11 @@ import {
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
 import type { IntakeDraft } from "@/modules/public-intake/types";
-import { citizenIdsForLookup, draftSchema } from "@/modules/public-intake/validation";
+import {
+  citizenIdsForLookup,
+  draftSchema,
+  validateWorkingPayloadForSave,
+} from "@/modules/public-intake/validation";
 import { identityHmac } from "@/modules/public-intake/workflow";
 import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
@@ -66,6 +70,12 @@ export async function PUT(
         requestId,
         400,
       );
+    }
+
+    const workingDraft = body.data.payload as unknown as IntakeDraft;
+    const workingPayloadError = validateWorkingPayloadForSave(workingDraft);
+    if (workingPayloadError) {
+      return fail("VALIDATION_FAILED", workingPayloadError, requestId, 400);
     }
 
     const { submissionId } = await context.params;
@@ -126,7 +136,6 @@ export async function PUT(
       );
     }
 
-    const workingDraft = body.data.payload as unknown as IntakeDraft;
     const updated = await repository.commitWorkingPayload({
       record,
       expectedVersion: body.data.expectedVersion,

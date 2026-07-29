@@ -68,7 +68,14 @@ supabase/migrations/
 ├── 202607250004_submission_claim_guard.sql                 claim_note/claim_released_at + index
 ├── 202607250005_ai_extraction_tables.sql                   ai_extraction_jobs/results
 ├── 202607250007_land_uses_cascade_delete.sql                FK public_land_uses → on delete cascade
-└── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+├── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+├── 202607290002_full_pl3_editor.sql                         cột PL3 còn thiếu cho owner/parcel/
+│   asset + official projection + override B/V/AX
+└── 202607290003_drop_working_payload_override_columns.sql   GỠ 4 cột ward_admin_code_override*/
+    scanned_file_names_override* trên public_submissions. `working_payload_json` là nguồn sự thật
+    DUY NHẤT cho ghi đè cột B và AX — 4 cột đó chỉ từng được ghi, không có đường đọc.
+    `drop column if exists` nên chạy được dù 202607290002 đã áp hay chưa; KHÔNG sửa 202607290002
+    vì file đó có thể đã chạy ở local/preview. Preflight kiểm cả hai chiều.
     (202607250001 hiện TỰ DO — file untracked từng chiếm số này đã bị xóa 2026-07-25, xem
      03-decisions.md; 202607250006 chưa cấp, dành cho Phase 12 — đổi quy ước `-1/-2` → `-01/-02`
      ĐÃ làm ở file-naming.ts nhưng CHƯA có migration đổi tên file cũ đã có trên Drive)
@@ -215,7 +222,24 @@ src/app/submissions/page.tsx / [submissionId]
     │   ├── Chỉ cán bộ đang giữ (claimedBy === actor) + status UNDER_REVIEW mới gọi được
     │   ├── Ghi working_payload_json VÀ draft_json cùng lúc (khớp quyết định 2026-07-24 "Cho phép
     │   │   cán bộ sửa trực tiếp draft_json" — không phải lỗi, staff edit cố ý hiển thị cho dân)
-    │   └── refreshCanonicalProjection nếu status khác DRAFT
+    │   ├── refreshCanonicalProjection nếu status khác DRAFT
+    │   ├── audit chỉ ghi changedFieldPaths + lý do override, không ghi giá trị PII trước/sau
+    │   │   ⚠️ changedFieldPaths CẮT ở MAX_AUDIT_FIELD_PATHS=250 nhưng changedFieldCount đếm
+    │   │   TRƯỚC khi cắt, kèm cờ changedFieldPathsTruncated (sửa 2026-07-29, review PR #7 —
+    │   │   trước đó count lấy .length của mảng đã cắt nên luôn ≤250)
+    │   │   ⚠️ `reason` của override là free text và ĐI VÀO audit metadata, nên bị quét PII
+    │   │   fail-closed ở HAI cửa (2026-07-29): validateWorkingPayloadForSave lúc lưu +
+    │   │   completionChecks lúc tiếp nhận (cửa 2 dành cho dữ liệu lưu trước khi có luật). Cả hai
+    │   │   gọi overrideReasonsWithCitizenIdLike → scanForCitizenIdLikeValues, DÙNG CHUNG một định
+    │   │   nghĩa "giống CCCD" với đường AI extraction. Thông báo lỗi KHÔNG chép lại chuỗi PII.
+    │   └── WorkingPayloadEditor bao phủ B–AX: owner/org/representative/current user, parcel,
+    │       tối đa 3 land-use và asset AO–AW; B/V/AX hiện nguồn + override có lý do
+    │       ├── MỌI đường ghi owner đi qua migrateLegacyOrganisationOwner (types.ts): dòng tổ
+    │       │   chức lưu trước 202607290002 giữ tên tổ chức trong `fullName`, mà form mới dùng ô
+    │       │   đó cho NGƯỜI ĐẠI DIỆN. Không di trú trước thì gõ vào H là mất tên tổ chức.
+    │       │   Đổi ownerType KHÔNG di trú (tổ chức → cá nhân = fullName vốn là tên người).
+    │       └── xóa thửa gọi detachAssetsFromMissingParcels: draftSchema từ chối asset.parcelId
+    │           mồ côi và chỉ trả lỗi cấu trúc chung, cán bộ không biết ô nào sai
     ├── commitOfficialAmendment (transaction) — PATCH sửa hồ sơ ĐÃ tiếp nhận (Q2, 2026-07-25)
     │   ├── mayAmendOfficialRecord — ACCEPTED + có official_case_id + (người giữ | admin)
     │   ├── bắt buộc amendmentReason >= 10 ký tự → audit OFFICIAL_RECORD_AMENDED
@@ -276,6 +300,16 @@ src/app/api/submissions/[submissionId]/accept/route.ts
 
 src/modules/public-intake/pl3-export.ts (thuần, không I/O)
 ├── buildPl3Content / createPl3Accumulator → tách sheet PL3 (ACCEPTED) / Ton dong (đang xử lý)
+├── PL3_COLUMNS khóa nguyên văn 49 nhãn B–AX của `Tai lieu/PL3.xlsx`
+├── cột W lấy `cadastralParcelNumber`; AO–AW lấy tài sản gắn theo thửa, không để rỗng cố định
+│   ⚠️ PL3 chỉ có MỘT bộ 9 cột AO–AW cho mỗi thửa. Nhiều tài sản cùng thửa → assetColumn() gộp
+│   bằng "; " GIỮ NGUYÊN số phần tử và thứ tự ở cả 9 cột, ô rỗng ghi ASSET_EMPTY_PLACEHOLDER "-".
+│   KHÔNG được bỏ trùng hay bỏ ô rỗng (bug đã sửa 2026-07-29, review PR #7): làm vậy thì cột AS
+│   còn 1 giá trị trong khi AO có 2, người đọc không ghép lại được giá trị nào thuộc tài sản nào.
+├── buildSubmissionRows dedupe `warnings` trước khi trả: buildRow chạy mỗi cặp (thửa × chủ) nên
+│   cảnh báo thuộc về THỬA bị lặp đúng bằng số đồng sở hữu. Thêm cảnh báo mới vào buildRow thì
+│   không cần lo trùng, nhưng cảnh báo phải là chuỗi tất định (đừng nhét timestamp/random vào).
+├── B/V/AX dùng nguồn tự động trừ khi working payload có override + lý do hợp lệ
 ├── scannedFileNames (trường 49) → buildOriginalFileNames cùng file-naming.ts,
 │   dùng chung quy ước với bước FILES_MOVED để tên không lệch nhau
 └── POST /api/exports (route.ts) — ĐÃ SỬA (Phase 2, 2026-07-25): dùng

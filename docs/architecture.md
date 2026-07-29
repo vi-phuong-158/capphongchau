@@ -52,6 +52,18 @@ trong `REQUEST_LOG` để retry cùng key trả lại đúng phản hồi.
 
 ## Mô hình dữ liệu
 
+### Bàn làm việc PL3 đầy đủ
+
+`PUT /api/submissions/:submissionId/working-payload` lưu nguyên tử bản làm việc đủ cột B–AX vào
+`working_payload_json` và `draft_json`, đồng thời làm mới các bảng chuẩn hóa. Migration
+`202607290002_full_pl3_editor.sql` bổ sung tổ chức/người đại diện, số tờ/thửa địa chính, liên kết
+tài sản→thửa và các cột AO–AW; dữ liệu cũ vẫn nằm nguyên trong JSON và được đọc tương thích.
+
+Ba trường tự động có quy tắc rõ: B lấy mã Phường Phong Châu, V suy từ ĐVHC cũ + số tờ trên GCN,
+AX lấy tên file đã xác minh/đổi tên trên Drive. Cán bộ có thể ghi đè nhưng phải nhập lý do tối thiểu
+10 ký tự; audit chỉ ghi đường dẫn trường và lý do, không ghi giá trị CCCD/tên/địa chỉ trước-sau.
+PL3 export dùng đúng 49 cột B–AX và không tự đổi nhãn cột của `Tai lieu/PL3.xlsx`.
+
 Các nhóm bảng chính trong `supabase/migrations/202607230001_supabase_schema.sql`:
 
 - Truy cập/vận hành: `users`, `audit_logs`, `request_log`, `reference_data`, `id_reservations`, `search_index`.

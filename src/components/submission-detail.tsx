@@ -809,7 +809,7 @@ export function SubmissionDetail({
           <h2 className="text-xl font-bold">Bản làm việc (biên tập đầy đủ)</h2>
           <p className="mt-1 text-sm text-stone-600">
             {isClaimedByMe
-              ? "Sửa đầy đủ giấy chứng nhận, chủ sử dụng và thửa đất. Thay đổi chỉ áp dụng cho bản làm việc của hồ sơ này."
+              ? "Sửa đầy đủ 49 cột PL3: GCN, chủ/tổ chức/người đại diện, người sử dụng hiện tại, thửa đất, tối đa 3 mục đích và tài sản. Thay đổi chỉ áp dụng cho bản làm việc của hồ sơ này."
               : "Chỉ cán bộ đang nhận xử lý hồ sơ này mới sửa được — bạn đang xem ở chế độ chỉ đọc."}
           </p>
           <div className="mt-4">

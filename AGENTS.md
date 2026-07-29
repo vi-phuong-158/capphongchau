@@ -146,7 +146,10 @@ Tạo các bảng sau (tên vật lý dùng `snake_case` trong migration SQL):
   `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`,
   `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS` và
   `PUBLIC_LOOKUP_INDEX` (256 bucket HMAC).
-- Tạo sẵn `PARCELS`, `ASSETS`, `OCR_FIELDS` để tương thích nâng cấp nhưng không đưa vào quy trình hiện tại.
+- `PARCELS`, `LAND_USES` và `ASSETS` đang hoạt động trong Bàn làm việc biên tập đầy đủ và PL3
+  export. Payload phải giữ riêng tổ chức/người đại diện, cột địa chính thủ công, tối đa ba mục đích
+  mỗi thửa, nhóm tài sản AO–AW và lý do ghi đè các trường tự động B/V/AX. `OCR_FIELDS` vẫn chỉ giữ
+  chỗ cho nâng cấp.
 
 Không xóa bảng/cột hoặc dữ liệu đã dùng. Nếu thay đổi schema phải có migration, cập nhật tài liệu và bảo toàn dữ liệu cũ.
 

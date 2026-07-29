@@ -34,7 +34,8 @@ Mã nội bộ dự án: `land-ocr-180`.
 
 `Tai lieu/PL3.xlsx` — **49 trường**, mỗi dòng là một (GCN × thửa × người), giá trị ghi bằng chữ
 chứ không phải mã. Đây là đích thay cho bộ 15 trường của Phụ lục 8 (đổi ngày 2026-07-22). Bảng đối
-chiếu 49 trường với nguồn dữ liệu trong hệ thống nằm ở Phụ lục của `PLAN2.md`.
+chiếu 49 trường với nguồn dữ liệu trong hệ thống nằm ở Phụ lục của kế hoạch cũ
+`docs/archive/plans/PLAN2-2026-07-22.md`.
 
 Mã ĐVHC cấp xã của Phường Phong Châu: **`07954`**.
 
@@ -57,9 +58,9 @@ Mã ĐVHC cấp xã của Phường Phong Châu: **`07954`**.
 **M0–M2 xong; cổng kê khai công khai `/ke-khai` đã chạy thật trên production.** Tạo nháp, autosave,
 upload thẳng lên Drive và gửi hồ sơ ghi metadata vào Supabase PostgreSQL, file vào Google Drive.
 
-**Kế hoạch nghiệp vụ tham chiếu là [`PLAN2.md`](../../PLAN2.md)**; quyết định “giữ Sheets” trong kế hoạch đã bị thay thế ngày 2026-07-23 — khi nó mâu thuẫn với `PLAN.md`
-(M0–M5) hay `PLAN_NL.md`, `PLAN2.md` thắng. Trạng thái chi tiết và danh sách chặn ở
-[`04-current-tasks.md`](04-current-tasks.md).
+**Roadmap hiện hành là [`PLAN.md`](../../PLAN.md)**; các kế hoạch `PLAN2` và `PLAN_NL` đã được lưu trong
+[`docs/archive/plans/`](../archive/README.md) và không còn là nguồn chỉ dẫn. Trạng thái chi tiết và
+danh sách chặn ở [`04-current-tasks.md`](04-current-tasks.md).
 
 Nguồn nghiệp vụ gốc cần giữ lại nguyên vẹn, không chỉnh sửa:
 
