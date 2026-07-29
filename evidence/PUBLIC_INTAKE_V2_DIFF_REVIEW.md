@@ -1,5 +1,8 @@
 # PUBLIC INTAKE V2 — RÀ SOÁT DIFF `79f4ae6..HEAD`
 
+> **SNAPSHOT LỊCH SỬ:** phần này được viết trước khi thêm kill switch server-side ngày 2026-07-28.
+> Nguồn hiện hành là `docs/brain/03-decisions.md`, `docs/brain/04-current-tasks.md` và mã nguồn.
+
 Rà soát toàn bộ 61 file của chín commit V2 theo 14 điểm bắt buộc. Trạng thái lúc bắt đầu:
 `aa2135e`, working tree sạch, nhánh `claude/land-declaration-process-feedback-126f2e`.
 
@@ -153,8 +156,9 @@ Kế hoạch §12 có; chưa làm. Không chặn gì, chỉ là thao tác thừa
   lại để khỏi bị coi là lỗi.
 - **L-02** — `readConnectionHints` chỉ đọc `navigator.connection`; Safari luôn trả `null` nên hàng
   đợi ở đó luôn chạy 2 luồng. Chấp nhận được — 2 là mặc định an toàn.
-- **L-03** — Chế độ cán bộ hỗ trợ không có cờ bật/tắt. Có chủ đích: nó được bảo vệ bằng auth thật.
-  Xem mục "Cờ" bên dưới.
+- **L-03 (đã supersede)** — Snapshot này ghi nhận thời điểm chưa có cờ bật/tắt. Sau đó hệ thống đã
+  thêm `OFFICER_ASSISTED_INTAKE_ENABLED` là kill switch server-side, mặc định `false`; xem nguồn
+  hiện hành nêu ở đầu file.
 
 ---
 
@@ -185,8 +189,5 @@ Kế hoạch §12 có; chưa làm. Không chặn gì, chỉ là thao tác thừa
 |---|---|---|
 | `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED` | `false` | Giữ nguyên. Điều kiện bật ở `PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` |
 
-Chế độ cán bộ hỗ trợ **cố tình không có cờ**. Cờ phía client không bao giờ là hàng rào bảo mật —
-ai cũng đặt được biến trong bundle đã tải về. Hàng rào thật là ba lớp máy chủ: proxy Edge chặn
-`/ke-khai-ho/:path*` và `/api/staff/:path*`, `requireActiveUser(ASSISTED_INTAKE_ROLES)` ở trang,
-`requireActiveUser(ASSISTED_INTAKE_ROLES)` + `verifyCsrfToken` ở API. Thêm một cờ server chỉ tạo
-ảo giác về một lớp bảo vệ thứ tư mà không thêm gì thật; muốn tắt chế độ này thì thu hồi vai trò.
+Snapshot này không phản ánh feature flag hiện tại. Hiện tại proxy Edge, `requireActiveUser`, CSRF và
+`OFFICER_ASSISTED_INTAKE_ENABLED` cùng được kiểm ở server; cờ không thay thế phân quyền.

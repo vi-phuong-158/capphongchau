@@ -68,7 +68,9 @@ supabase/migrations/
 ├── 202607250004_submission_claim_guard.sql                 claim_note/claim_released_at + index
 ├── 202607250005_ai_extraction_tables.sql                   ai_extraction_jobs/results
 ├── 202607250007_land_uses_cascade_delete.sql                FK public_land_uses → on delete cascade
-└── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+├── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
+└── 202607290002_full_pl3_editor.sql                         cột PL3 còn thiếu cho owner/parcel/
+    asset + official projection + override B/V/AX
     (202607250001 hiện TỰ DO — file untracked từng chiếm số này đã bị xóa 2026-07-25, xem
      03-decisions.md; 202607250006 chưa cấp, dành cho Phase 12 — đổi quy ước `-1/-2` → `-01/-02`
      ĐÃ làm ở file-naming.ts nhưng CHƯA có migration đổi tên file cũ đã có trên Drive)
@@ -215,7 +217,10 @@ src/app/submissions/page.tsx / [submissionId]
     │   ├── Chỉ cán bộ đang giữ (claimedBy === actor) + status UNDER_REVIEW mới gọi được
     │   ├── Ghi working_payload_json VÀ draft_json cùng lúc (khớp quyết định 2026-07-24 "Cho phép
     │   │   cán bộ sửa trực tiếp draft_json" — không phải lỗi, staff edit cố ý hiển thị cho dân)
-    │   └── refreshCanonicalProjection nếu status khác DRAFT
+    │   ├── refreshCanonicalProjection nếu status khác DRAFT
+    │   ├── audit chỉ ghi changedFieldPaths + lý do override, không ghi giá trị PII trước/sau
+    │   └── WorkingPayloadEditor bao phủ B–AX: owner/org/representative/current user, parcel,
+    │       tối đa 3 land-use và asset AO–AW; B/V/AX hiện nguồn + override có lý do
     ├── commitOfficialAmendment (transaction) — PATCH sửa hồ sơ ĐÃ tiếp nhận (Q2, 2026-07-25)
     │   ├── mayAmendOfficialRecord — ACCEPTED + có official_case_id + (người giữ | admin)
     │   ├── bắt buộc amendmentReason >= 10 ký tự → audit OFFICIAL_RECORD_AMENDED
@@ -276,6 +281,9 @@ src/app/api/submissions/[submissionId]/accept/route.ts
 
 src/modules/public-intake/pl3-export.ts (thuần, không I/O)
 ├── buildPl3Content / createPl3Accumulator → tách sheet PL3 (ACCEPTED) / Ton dong (đang xử lý)
+├── PL3_COLUMNS khóa nguyên văn 49 nhãn B–AX của `Tai lieu/PL3.xlsx`
+├── cột W lấy `cadastralParcelNumber`; AO–AW lấy tài sản gắn theo thửa, không để rỗng cố định
+├── B/V/AX dùng nguồn tự động trừ khi working payload có override + lý do hợp lệ
 ├── scannedFileNames (trường 49) → buildOriginalFileNames cùng file-naming.ts,
 │   dùng chung quy ước với bước FILES_MOVED để tên không lệch nhau
 └── POST /api/exports (route.ts) — ĐÃ SỬA (Phase 2, 2026-07-25): dùng

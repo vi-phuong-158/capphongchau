@@ -1,17 +1,8 @@
 # 06 — AI Working Log
 
-## [2026-07-29] Làm rõ điều kiện chặn trước tiếp nhận chính thức
-
-- **Agent:** Codex
-- **Thay đổi:** `blockingCompletionIssueDetails()` rút các lỗi `BLOCKING` thành DTO an toàn
-  `code`/`label`/`message`. `POST /api/submissions/:submissionId/accept` trả DTO này tại
-  `error.details.issues`; `SubmissionDetail` hiển thị danh sách “Các mục cần hoàn thiện…” bên dưới
-  thông báo lỗi thay vì chỉ có lỗi tổng quát. Bổ sung unit test DTO và assertion E2E cho nhãn UI.
-- **Bảo mật:** Không nới `completionChecks`, không đổi schema hay saga; chỉ route nội bộ, sau auth
-  và CSRF, nhận chi tiết cố định không chứa PII/Drive ID/token.
-- **Kiểm tra:** focused Vitest 8/8, `npm run typecheck`, ESLint tệp tác động và `git diff --check`
-  đều đạt; full `npm test` 621 pass/10 skip, `npm run lint` và `npm run build` exit 0. Build in ra
-  cảnh báo OOM muộn từ worktree `.claude` không thuộc thay đổi này nhưng lệnh vẫn exit 0.
+> Đây là nhật ký lịch sử bắt buộc để truy vết, không phải danh sách chỉ dẫn hiện hành. Tên file/kế
+> hoạch cũ trong các entry giữ nguyên theo thời điểm phát sinh; xem `PLAN.md` và `docs/README.md`
+> để biết nguồn sự thật hiện tại.
 
 ## [2026-07-29] Đồng bộ E2E và tài liệu sau khi đổi thứ tự Public Intake wizard
 
@@ -2365,3 +2356,39 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Sửa:** Dùng Unicode letter class `\p{L}` sau chuẩn hóa; vẫn chặn dấu câu/ký tự đặc biệt. Thêm
   regression test cho `ađ 266864` → `AĐ266864` và ngày `2006-02-20`.
 - **Kiểm tra:** focused 14/14 pass, typecheck pass, localhost trả HTTP 200.
+## [2026-07-29] Rút ngắn luồng tải CCCD bằng QR nền
+
+- **Agent:** Codex
+- **Thay đổi:** Wizard tự giải mã QR theo thứ tự ảnh CCCD được tải cho đến khi một ảnh thành công; ảnh còn lại sau đó chỉ upload, không quét lại. Việc giải mã chạy nền nên không khóa nút “Tiếp tục”; nút “Đọc lại QR” vẫn thử cả hai mặt khi cán bộ/người dân chủ động yêu cầu.
+- **Bảo mật:** QR tiếp tục chỉ được đọc tại thiết bị. Không gửi payload QR, không thay đổi API, schema, Drive hoặc Supabase.
+- **Kiểm tra:** focused Vitest 67/67, typecheck, ESLint các file thay đổi, build và `git diff --check` đều đạt.
+## [2026-07-29] Làm rõ điều kiện chặn trước tiếp nhận chính thức
+
+- **Agent:** Codex
+- **Thay đổi:** `blockingCompletionIssueDetails()` rút các lỗi `BLOCKING` thành DTO an toàn
+  `code`/`label`/`message`. `POST /api/submissions/:submissionId/accept` trả DTO này tại
+  `error.details.issues`; `SubmissionDetail` hiển thị danh sách “Các mục cần hoàn thiện…” bên dưới
+  thông báo lỗi thay vì chỉ có lỗi tổng quát. Bổ sung unit test DTO và assertion E2E cho nhãn UI.
+- **Bảo mật:** Không nới `completionChecks`, không đổi schema hay saga; chỉ route nội bộ, sau auth
+  và CSRF, nhận chi tiết cố định không chứa PII/Drive ID/token.
+- **Kiểm tra:** focused Vitest 8/8, `npm run typecheck`, ESLint tệp tác động và `git diff --check`
+  đều đạt; full `npm test` 621 pass/10 skip, `npm run lint` và `npm run build` exit 0. Build in ra
+  cảnh báo OOM muộn từ worktree `.claude` không thuộc thay đổi này nhưng lệnh vẫn exit 0.
+
+## [2026-07-29] Nâng cấp Bàn làm việc biên tập đầy đủ theo PL3 B–AX
+
+- **Agent:** Codex.
+- **Nguồn đối chiếu:** Đọc và render trực tiếp `Tai lieu/PL3.xlsx`, sheet `Phong Châu`; khóa 49
+  cột dữ liệu B–AX, kể cả hai cột O/P không đánh số và bước nhảy 20→23.
+- **Thay đổi:** Tách tổ chức F/G khỏi chủ/người đại diện H–L; CRUD người sử dụng hiện tại O–R;
+  bổ sung thửa S–Y, cột W thủ công, tối đa ba bộ mục đích Z–AN và tài sản AO–AW gắn theo thửa.
+  B/V/AX hiện nguồn tự động và cho ghi đè khi có lý do ≥10 ký tự. Repository ghi JSON + projection
+  + history + audit trong cùng transaction; official sync giữ payload đầy đủ.
+- **Schema:** Thêm migration additive `202607290002_full_pl3_editor.sql`; chưa áp dụng môi trường
+  ngoài local. Payload cũ thiếu trường mới và tổ chức legacy vẫn đọc/xuất tương thích.
+- **Bảo mật/audit:** Audit chỉ ghi đường dẫn trường thay đổi và lý do override, không ghi giá trị
+  CCCD, tên hoặc địa chỉ trước/sau.
+- **Kiểm tra cuối:** focused Vitest 106/106 đạt; full Vitest 631 pass/10 skip; typecheck và
+  production build đạt; ESLint các file chức năng PL3 đạt; `git diff --check` đạt. Lint toàn
+  repository vẫn thất bại vì quét mã build sinh tự động trong `.claude/worktrees/**/.next`
+  (cùng nguyên nhân đã có ở baseline), không có lỗi từ file chức năng của hạng mục.

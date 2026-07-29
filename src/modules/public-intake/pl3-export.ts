@@ -26,6 +26,7 @@ import {
   LAND_USE_FORM_OPTIONS,
   LAND_USE_TERM_OPTIONS,
   normalizeCertificateRole,
+  WARD_ADMIN_CODE,
   type ReferenceOption,
 } from "./reference";
 import type { SubmissionRecord } from "./repository";
@@ -38,8 +39,7 @@ import {
 } from "./types";
 import type { PublicFileSummary, PublicStatus } from "./workflow";
 
-/** Mã ĐVHC cấp xã Phường Phong Châu (trường 1) — hằng số, giữ số 0 đứng đầu. */
-export const WARD_ADMIN_CODE = "07954";
+export { WARD_ADMIN_CODE } from "./reference";
 
 /**
  * Chỉ hồ sơ đã tiếp nhận mới vào báo cáo chính thức (PLAN2 §7). Các trạng thái đang xử lý xuất
@@ -62,49 +62,49 @@ export const PL3_COLUMNS: readonly { readonly field: number | null; readonly lab
   { field: 4, label: "Số vào sổ GCN" },
   { field: 5, label: "Tên tổ chức" },
   { field: 6, label: "Số định danh tổ chức" },
-  { field: 7, label: "Họ và tên chủ sử dụng / người đại diện tổ chức" },
+  { field: 7, label: "Họ và tên chủ sử dụng/\nHọ tên người đại diện tổ chức" },
   { field: 8, label: "Ngày, tháng, năm sinh" },
   { field: 9, label: "Giới tính" },
-  { field: 10, label: "Số định danh cá nhân / CCCD" },
+  { field: 10, label: "Số định danh cá nhân/CCCD" },
   { field: 11, label: "Địa chỉ thường trú" },
   { field: 12, label: "Pháp nhân trên GCN" },
   { field: 13, label: "Vai trò pháp nhân trên GCN" },
   { field: null, label: "Tên người sử dụng hiện tại" },
-  { field: null, label: "Số định danh người sử dụng hiện tại" },
-  { field: 14, label: "Địa chỉ thường trú (2 cấp)" },
-  { field: 15, label: "Lý do thay đổi" },
+  { field: null, label: "Số định danh cá nhân (CCCD)" },
+  { field: 14, label: "địa chỉ thường trú (2 cấp)" },
+  { field: 15, label: "Lý do thay đổi (thừa kế, tặng cho, chuyển nhượng...)" },
   { field: 16, label: "Mã định danh thửa đất" },
   { field: 17, label: "Số tờ bản đồ ghi trên GCN" },
-  { field: 18, label: "Số thứ tự thửa ghi trên GCN" },
+  { field: 18, label: "Số thứ tự thửa đất ghi trên GCN" },
   { field: 19, label: "Số hiệu tờ trên bản đồ địa chính" },
   { field: 20, label: "Số thứ tự thửa trên bản đồ địa chính" },
   { field: 23, label: "Địa chỉ thửa đất" },
   { field: 24, label: "Diện tích thửa đất" },
-  { field: 25, label: "Loại đất 1" },
-  { field: 26, label: "Diện tích (loại đất 1)" },
-  { field: 27, label: "Nguồn gốc sử dụng (loại đất 1)" },
-  { field: 28, label: "Hình thức sử dụng (loại đất 1)" },
-  { field: 29, label: "Thời hạn sử dụng (loại đất 1)" },
-  { field: 30, label: "Loại đất 2" },
-  { field: 31, label: "Diện tích (loại đất 2)" },
-  { field: 32, label: "Nguồn gốc sử dụng (loại đất 2)" },
-  { field: 33, label: "Hình thức sử dụng (loại đất 2)" },
-  { field: 34, label: "Thời hạn sử dụng (loại đất 2)" },
-  { field: 35, label: "Loại đất 3" },
-  { field: 36, label: "Diện tích (loại đất 3)" },
-  { field: 37, label: "Nguồn gốc sử dụng (loại đất 3)" },
-  { field: 38, label: "Hình thức sử dụng (loại đất 3)" },
-  { field: 39, label: "Thời hạn sử dụng (loại đất 3)" },
+  { field: 25, label: "Loại đất" },
+  { field: 26, label: "Diện tích" },
+  { field: 27, label: "Nguồn gốc sử dụng" },
+  { field: 28, label: "Hình thức sử dụng " },
+  { field: 29, label: "Thời hạn sử dụng" },
+  { field: 30, label: "Loại đất" },
+  { field: 31, label: "Diện tích" },
+  { field: 32, label: "Nguồn gốc sử dụng" },
+  { field: 33, label: "Hình thức sử dụng " },
+  { field: 34, label: "Thời hạn sử dụng" },
+  { field: 35, label: "Loại đất" },
+  { field: 36, label: "Diện tích" },
+  { field: 37, label: "Nguồn gốc sử dụng" },
+  { field: 38, label: "Hình thức sử dụng " },
+  { field: 39, label: "Thời hạn sử dụng" },
   { field: 40, label: "Loại tài sản gắn liền với đất" },
-  { field: 41, label: "Khu chung cư / nhà hỗn hợp" },
-  { field: 42, label: "Số căn hộ" },
-  { field: 43, label: "Diện tích xây dựng" },
-  { field: 44, label: "Diện tích sàn" },
-  { field: 45, label: "Hình thức sở hữu" },
-  { field: 46, label: "Thời hạn sở hữu" },
-  { field: 47, label: "Hạng nhà" },
-  { field: 48, label: "Cấp nhà" },
-  { field: 49, label: "Tên file quét GCN / CCCD" },
+  { field: 41, label: "Khu nhà chung cư, nhà hỗn hợp" },
+  { field: 42, label: "Nhà chung cư" },
+  { field: 43, label: "Số căn hộ" },
+  { field: 44, label: "Diện tích xây dựng" },
+  { field: 45, label: "Diện tích sàn" },
+  { field: 46, label: "Hình thức sở hữu" },
+  { field: 47, label: "Thời hạn sở hữu" },
+  { field: 48, label: "Cấp hạng" },
+  { field: 49, label: "Tên file quét GCN/CCCD" },
 ];
 
 /** Số cột dữ liệu (không kể STT). Kiểm bất biến để mapping và header không lệch nhau. */
@@ -150,8 +150,13 @@ function isOldWard(value: string): value is OldWard {
   return (OLD_WARDS as readonly string[]).includes(value);
 }
 
-/** Trường 19 — số hiệu tờ trên bản đồ địa chính. Mập mờ / không tra được → "" + cảnh báo. */
+/** Trường 19 — tự suy ra, trừ khi cán bộ đã ghi đè kèm lý do trong bản làm việc. */
 function field19(parcel: Parcel, context: string, warnings: string[]): string {
+  const override = parcel.cadastralMapSheetNumber?.trim() ?? "";
+  if (override) {
+    warnings.push(`${context}: trường 19 dùng giá trị cán bộ ghi đè (đã lưu lý do trong audit).`);
+    return override;
+  }
   const ward = parcel.oldWard.trim();
   const sheet = parcel.mapSheetNumber.trim();
   if (!isOldWard(ward) || !sheet) return "";
@@ -217,6 +222,11 @@ function landPurposeLabel(use: LandUse, context: string, warnings: string[]): st
 /** Ba bộ cột loại đất (25–29, 30–34, 35–39). Thửa thừa dòng thứ tư đã bị chặn lúc khai. */
 function landUseCells(parcel: Parcel, context: string, warnings: string[]): string[] {
   const cells: string[] = [];
+  if (parcel.landUses.length > 3) {
+    warnings.push(
+      `${context}: có ${parcel.landUses.length} mục đích sử dụng; PL3 chỉ có 3 nhóm cột. Cần sửa bản làm việc trước khi nộp.`,
+    );
+  }
   for (let index = 0; index < 3; index += 1) {
     const use = parcel.landUses[index];
     if (!use) {
@@ -234,14 +244,32 @@ function landUseCells(parcel: Parcel, context: string, warnings: string[]): stri
   return cells;
 }
 
-/** Trường 40 — gộp nhãn loại tài sản của cả phiếu (mô hình không gắn tài sản theo từng thửa). */
-function assetTypeCell(record: SubmissionRecord, warnings: string[]): string {
-  const assets = record.draft?.assets ?? [];
-  const labels = assets
-    .map((asset) => asset.assetType.trim())
-    .filter((code) => code.length > 0)
-    .map((code) => labelOf(ASSET_TYPE_OPTIONS, code, "Tài sản", warnings));
-  return Array.from(new Set(labels)).join("; ");
+function joined(values: readonly string[]): string {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join("; ");
+}
+
+/** Cột AO–AW. Tài sản legacy chưa có `parcelId` được giữ cho mọi thửa để không mất dữ liệu. */
+function assetCells(record: SubmissionRecord, parcel: Parcel, warnings: string[]): string[] {
+  const assets = (record.draft?.assets ?? []).filter(
+    (asset) => !asset.parcelId || asset.parcelId === parcel.id,
+  );
+  return [
+    joined(
+      assets.map((asset) =>
+        asset.assetType.trim()
+          ? labelOf(ASSET_TYPE_OPTIONS, asset.assetType, "Tài sản", warnings)
+          : "",
+      ),
+    ),
+    joined(assets.map((asset) => asset.mixedUseBuildingName ?? "")),
+    joined(assets.map((asset) => asset.apartmentBuildingName ?? "")),
+    joined(assets.map((asset) => asset.apartmentNumber ?? "")),
+    joined(assets.map((asset) => asset.constructionArea ?? "")),
+    joined(assets.map((asset) => asset.floorArea ?? "")),
+    joined(assets.map((asset) => asset.ownershipForm ?? "")),
+    joined(assets.map((asset) => asset.ownershipTerm ?? "")),
+    joined(assets.map((asset) => asset.grade ?? "")),
+  ];
 }
 
 /** Dựng một dòng 49 cột cho một cặp (thửa, người). */
@@ -250,7 +278,6 @@ function buildRow(
   parcel: Parcel,
   owner: Owner,
   parcelContext: string,
-  assetCell: string,
   warnings: string[],
 ): string[] {
   const certificate = record.draft?.certificate ?? {
@@ -259,22 +286,35 @@ function buildRow(
     registryNumber: "",
   };
   const org = isOrganisationOwner(owner.ownerType);
+  const hasSeparateOrganisationFields = Boolean(
+    owner.organisationName?.trim() || owner.organisationIdentityNumber?.trim(),
+  );
+  const organisationName = org
+    ? (owner.organisationName?.trim() ?? "") ||
+      (!hasSeparateOrganisationFields ? owner.fullName.trim() : "")
+    : "";
+  const organisationIdentityNumber = org
+    ? (owner.organisationIdentityNumber?.trim() ?? "") ||
+      (!hasSeparateOrganisationFields ? owner.identityNumber.trim() : "")
+    : "";
+  const personName = org && !hasSeparateOrganisationFields ? "" : owner.fullName.trim();
+  const personIdentity = org && !hasSeparateOrganisationFields ? "" : owner.identityNumber.trim();
   const roleCode = normalizeCertificateRole(owner.roleOnCertificate);
   const roleLabel = roleCode
     ? labelOf(CERTIFICATE_ROLE_OPTIONS, roleCode, `${parcelContext} vai trò`, warnings)
     : "";
 
   return [
-    WARD_ADMIN_CODE, // 1
+    record.draft?.wardAdministrativeCodeOverride?.trim() || WARD_ADMIN_CODE, // B / trường 1
     certificate.issueNumber.trim(), // 2
     formatExportDate(certificate.issueDate), // 3
     certificate.registryNumber.trim(), // 4
-    org ? owner.fullName.trim() : "", // 5 tên tổ chức
-    org ? owner.identityNumber.trim() : "", // 6 số định danh tổ chức
-    org ? "" : owner.fullName.trim(), // 7 họ tên chủ sử dụng
-    org ? "" : formatExportDate(owner.dateOfBirth), // 8 ngày sinh
-    org ? "" : genderLabel(owner.gender), // 9 giới tính
-    org ? "" : owner.identityNumber.trim(), // 10 CCCD
+    organisationName, // F / trường 5
+    organisationIdentityNumber, // G / trường 6
+    personName, // H / trường 7
+    formatExportDate(owner.dateOfBirth), // I / trường 8
+    genderLabel(owner.gender), // J / trường 9
+    personIdentity, // K / trường 10
     owner.residenceAddress.trim(), // 11 địa chỉ thường trú
     OWNER_TYPE_LABELS[owner.ownerType] ?? owner.ownerType, // 12 pháp nhân
     roleLabel, // 13 vai trò
@@ -293,20 +333,13 @@ function buildRow(
     parcel.mapSheetNumber.trim(), // 17 số tờ trên GCN
     parcel.parcelNumber.trim(), // 18 số thứ tự thửa trên GCN
     field19(parcel, parcelContext, warnings), // 19
-    "", // 20 số thứ tự thửa trên BĐ địa chính — không có nguồn
+    parcel.cadastralParcelNumber?.trim() ?? "", // W / trường 20
     parcel.addressOnCertificate.trim(), // 23 địa chỉ thửa
     parcel.area.trim(), // 24 diện tích thửa
     ...landUseCells(parcel, parcelContext, warnings), // 25–39
-    assetCell, // 40 loại tài sản
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "", // 41–48 nhà ở / chung cư — chưa thu
-    scannedFileNames(certificate.issueNumber, record.fileSummaries), // 49 tên file quét
+    ...assetCells(record, parcel, warnings), // AO–AW / trường 40–48
+    record.draft?.scannedFileNamesOverride?.trim() ||
+      scannedFileNames(certificate.issueNumber, record.fileSummaries), // AX / trường 49
   ];
 }
 
@@ -323,12 +356,11 @@ export function buildSubmissionRows(record: SubmissionRecord): Pl3BuildResult {
     return { rows: [], warnings };
   }
 
-  const assetCell = assetTypeCell(record, warnings);
   const rows: string[][] = [];
   parcels.forEach((parcel, parcelIndex) => {
     const parcelContext = `Hồ sơ ${label} thửa ${parcelIndex + 1}`;
     owners.forEach((owner) => {
-      const row = buildRow(record, parcel, owner, parcelContext, assetCell, warnings);
+      const row = buildRow(record, parcel, owner, parcelContext, warnings);
       if (row.length !== PL3_DATA_COLUMN_COUNT) {
         throw new Error(`Dòng PL3 phải có ${PL3_DATA_COLUMN_COUNT} cột, đang có ${row.length}.`);
       }

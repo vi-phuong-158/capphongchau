@@ -67,6 +67,8 @@ export const draftSchema = z
         .object({
           id: z.string(),
           ownerType: z.enum(OWNER_TYPES as unknown as [string, ...string[]]),
+          organisationName: z.string().max(500).optional().default(""),
+          organisationIdentityNumber: z.string().max(100).optional().default(""),
           fullName: z.string(),
           identityNumber: z.string(),
           dateOfBirth: z.string(),
@@ -104,6 +106,9 @@ export const draftSchema = z
           addressOnCertificate: z.string(),
           addressTwoLevel: z.string(),
           oldWard: z.string(),
+          cadastralMapSheetNumber: z.string().max(100).optional().default(""),
+          cadastralMapSheetOverrideReason: z.string().max(500).optional().default(""),
+          cadastralParcelNumber: z.string().max(100).optional().default(""),
           area: z.string(),
           landUses: z.array(
             z
@@ -125,8 +130,17 @@ export const draftSchema = z
       z
         .object({
           id: z.string(),
+          parcelId: z.string().max(100).optional().default(""),
           assetType: z.string(),
           description: z.string(),
+          mixedUseBuildingName: z.string().max(500).optional().default(""),
+          apartmentBuildingName: z.string().max(500).optional().default(""),
+          apartmentNumber: z.string().max(100).optional().default(""),
+          constructionArea: z.string().max(100).optional().default(""),
+          floorArea: z.string().max(100).optional().default(""),
+          ownershipForm: z.string().max(500).optional().default(""),
+          ownershipTerm: z.string().max(500).optional().default(""),
+          grade: z.string().max(500).optional().default(""),
         })
         .strict(),
     ),
@@ -140,10 +154,55 @@ export const draftSchema = z
           .strict(),
       )
       .optional(),
+    wardAdministrativeCodeOverride: z.string().max(20).optional().default(""),
+    wardAdministrativeCodeOverrideReason: z.string().max(500).optional().default(""),
+    scannedFileNamesOverride: z.string().max(2000).optional().default(""),
+    scannedFileNamesOverrideReason: z.string().max(500).optional().default(""),
     phone: z.string(),
     consentAccepted: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((draft, context) => {
+    const requireOverrideReason = (
+      value: string | undefined,
+      reason: string | undefined,
+      path: (string | number)[],
+    ) => {
+      if (value?.trim() && (reason?.trim().length ?? 0) < 10) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: "Ghi đè trường tự động phải có lý do từ 10 ký tự.",
+        });
+      }
+    };
+
+    requireOverrideReason(
+      draft.wardAdministrativeCodeOverride,
+      draft.wardAdministrativeCodeOverrideReason,
+      ["wardAdministrativeCodeOverrideReason"],
+    );
+    requireOverrideReason(draft.scannedFileNamesOverride, draft.scannedFileNamesOverrideReason, [
+      "scannedFileNamesOverrideReason",
+    ]);
+    draft.parcels.forEach((parcel, index) =>
+      requireOverrideReason(
+        parcel.cadastralMapSheetNumber,
+        parcel.cadastralMapSheetOverrideReason,
+        ["parcels", index, "cadastralMapSheetOverrideReason"],
+      ),
+    );
+    const parcelIds = new Set(draft.parcels.map((parcel) => parcel.id));
+    draft.assets.forEach((asset, index) => {
+      if (asset.parcelId?.trim() && !parcelIds.has(asset.parcelId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["assets", index, "parcelId"],
+          message: "Tài sản phải tham chiếu một thửa đất trong cùng hồ sơ.",
+        });
+      }
+    });
+  });
 
 /**
  * Chỉ kiểm **hình dạng** dữ liệu: schema và giới hạn mảng. Không kiểm nội dung nghiệp vụ.
@@ -193,6 +252,22 @@ export function validateDraftForSave(draft: IntakeDraft): string | null {
 
   if (draft.phone && !isValidPhone(draft.phone)) {
     return "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.";
+  }
+  return null;
+}
+
+/**
+ * Bàn biên tập cán bộ dùng cùng schema payload nhưng phải chặn giới hạn PL3 ngay khi lưu.
+ *
+ * Giữ quy tắc này ngoài `draftSchema`: các luồng gửi hồ sơ công khai cần trả mã lỗi/ngữ cảnh
+ * nghiệp vụ riêng thay vì bị rút gọn thành lỗi cấu trúc chung.
+ */
+export function validateWorkingPayloadForSave(draft: IntakeDraft): string | null {
+  const saveError = validateDraftForSave(draft);
+  if (saveError) return saveError;
+
+  if (draft.parcels.some((parcel) => parcel.landUses.length > MAX_LAND_USES_PER_PARCEL)) {
+    return `Mỗi thửa chỉ ghi tối đa ${MAX_LAND_USES_PER_PARCEL} dòng mục đích sử dụng.`;
   }
   return null;
 }

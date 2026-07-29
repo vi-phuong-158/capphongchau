@@ -55,9 +55,15 @@ export function isOrganisationOwner(ownerType: OwnerType): boolean {
 export interface Owner {
   readonly id: string;
   ownerType: OwnerType;
-  /** Trường 5 — tên chủ sử dụng hoặc tên tổ chức. */
+  /**
+   * Cột F/G của PL3. Hai trường riêng để không còn dùng `fullName`/`identityNumber` cho cả tổ chức
+   * lẫn người đại diện. Dấu `?` giữ tương thích với payload đã lưu trước migration 202607290002.
+   */
+  organisationName?: string;
+  organisationIdentityNumber?: string;
+  /** Cột H — tên chủ sử dụng hoặc người đại diện theo pháp luật của tổ chức. */
   fullName: string;
-  /** Trường 6 — CCCD 12 số, hoặc số định danh tổ chức. */
+  /** Cột K — CCCD của chủ sử dụng/người đại diện. */
   identityNumber: string;
   /** Dữ liệu gợi ý từ QR CCCD hoặc do người kê khai nhập tay. */
   dateOfBirth: string;
@@ -140,16 +146,34 @@ export interface Parcel {
    * chính"): ba xã cũ đều đánh số tờ bản đồ từ 1, nên không biết đơn vị cũ thì "tờ 5" có ba đáp án.
    */
   oldWard: string;
+  /**
+   * Cột V. Rỗng nghĩa là dùng giá trị tự động suy ra từ `oldWard` + `mapSheetNumber`; có giá trị
+   * nghĩa là cán bộ ghi đè và bắt buộc kèm `cadastralMapSheetOverrideReason`.
+   */
+  cadastralMapSheetNumber?: string;
+  cadastralMapSheetOverrideReason?: string;
+  /** Cột W — số thứ tự thửa trên bản đồ địa chính, nhập thủ công khi có nguồn đối chiếu. */
+  cadastralParcelNumber?: string;
   /** Trường 11 — bắt buộc, đơn vị m². */
   area: string;
   landUses: LandUse[];
 }
 
-/** Trường 13 — "Nếu có". */
+/** Cột AO–AW — tài sản gắn liền với đất/nhà ở. */
 export interface Asset {
   readonly id: string;
+  /** Thửa liên quan; rỗng chỉ dành cho payload cũ và được xuất cho mọi thửa để không mất dữ liệu. */
+  parcelId?: string;
   assetType: string;
   description: string;
+  mixedUseBuildingName?: string;
+  apartmentBuildingName?: string;
+  apartmentNumber?: string;
+  constructionArea?: string;
+  floorArea?: string;
+  ownershipForm?: string;
+  ownershipTerm?: string;
+  grade?: string;
 }
 
 /** Trường 2, 3, 4. */
@@ -175,6 +199,14 @@ export interface IntakeDraft {
    * thiết bị, còn trạng thái và Drive ID vẫn chỉ lấy từ `PUBLIC_FILES`.
    */
   certificateFileMetadata?: CertificateFileMetadata[];
+  /**
+   * Cột B và AX là trường hệ thống. Chuỗi override rỗng/không có nghĩa là dùng giá trị tự động;
+   * khi ghi đè phải có lý do để audit và truy nguyên.
+   */
+  wardAdministrativeCodeOverride?: string;
+  wardAdministrativeCodeOverrideReason?: string;
+  scannedFileNamesOverride?: string;
+  scannedFileNamesOverrideReason?: string;
   /** Không thuộc Phụ lục 8 — thu để cán bộ gọi điện liên hệ (PLAN_NL §4.5). */
   phone: string;
   consentAccepted: boolean;
@@ -201,6 +233,9 @@ export function emptyParcel(id: string, landUseId: string): Parcel {
     addressOnCertificate: "",
     addressTwoLevel: "",
     oldWard: "",
+    cadastralMapSheetNumber: "",
+    cadastralMapSheetOverrideReason: "",
+    cadastralParcelNumber: "",
     area: "",
     landUses: [emptyLandUse(landUseId)],
   };
@@ -210,6 +245,8 @@ export function emptyOwner(id: string): Owner {
   return {
     id,
     ownerType: "CA_NHAN",
+    organisationName: "",
+    organisationIdentityNumber: "",
     fullName: "",
     identityNumber: "",
     dateOfBirth: "",
@@ -231,8 +268,21 @@ export function emptyOwner(id: string): Owner {
   };
 }
 
-export function emptyAsset(id: string): Asset {
-  return { id, assetType: "", description: "" };
+export function emptyAsset(id: string, parcelId = ""): Asset {
+  return {
+    id,
+    parcelId,
+    assetType: "",
+    description: "",
+    mixedUseBuildingName: "",
+    apartmentBuildingName: "",
+    apartmentNumber: "",
+    constructionArea: "",
+    floorArea: "",
+    ownershipForm: "",
+    ownershipTerm: "",
+    grade: "",
+  };
 }
 
 export function emptyDraft(ownerId: string, parcelId: string, landUseId: string): IntakeDraft {
@@ -242,6 +292,10 @@ export function emptyDraft(ownerId: string, parcelId: string, landUseId: string)
     parcels: [emptyParcel(parcelId, landUseId)],
     assets: [],
     certificateFileMetadata: [],
+    wardAdministrativeCodeOverride: "",
+    wardAdministrativeCodeOverrideReason: "",
+    scannedFileNamesOverride: "",
+    scannedFileNamesOverrideReason: "",
     phone: "",
     consentAccepted: false,
   };

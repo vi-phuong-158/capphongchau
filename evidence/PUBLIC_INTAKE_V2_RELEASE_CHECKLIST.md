@@ -1,5 +1,8 @@
 # PUBLIC INTAKE V2 — RELEASE CHECKLIST
 
+> **SNAPSHOT LỊCH SỬ:** checklist này được lập trước khi thêm kill switch server-side. Không dùng
+> kết luận cũ về feature flag trong snapshot để suy ra trạng thái hiện tại; xem `docs/brain/03-decisions.md`.
+
 Nhánh `claude/land-declaration-process-feedback-126f2e`. **Chưa merge, chưa deploy, chưa chạy
 migration ở bất kỳ môi trường nào.**
 
@@ -23,8 +26,8 @@ migration ở bất kỳ môi trường nào.**
 |---|---|---|
 | `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED` | `false` | Chỉ bật sau khi qua bộ kiểm chất lượng ảnh |
 
-Không thêm biến nào khác. Chế độ cán bộ hỗ trợ **không** có cờ bật/tắt — nó được bảo vệ bằng auth
-thật, không phải bằng cờ; cờ client không bao giờ là hàng rào bảo mật.
+Chế độ cán bộ hỗ trợ hiện dùng `OFFICER_ASSISTED_INTAKE_ENABLED` ở server, mặc định `false`, độc lập
+với `ASSISTED_INTAKE_ROLES`. Cờ client không bao giờ là hàng rào bảo mật.
 
 ## 3. Sau khi deploy — kiểm ngay
 

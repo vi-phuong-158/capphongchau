@@ -188,4 +188,34 @@ describe("PUT /api/submissions/:id/working-payload route tests", () => {
 
     expect(res.status).toBe(409);
   });
+
+  it("W4: từ chối ghi đè trường tự động khi thiếu lý do", async () => {
+    const commitCallsBefore = mockCommitWorkingPayload.mock.calls.length;
+    const payload = makeDraft();
+    payload.wardAdministrativeCodeOverride = "07999";
+    payload.wardAdministrativeCodeOverrideReason = "ngắn";
+
+    const res = await PUT(makeRequest({ expectedVersion: 1, payload }), {
+      params: Promise.resolve({ submissionId: "sub_1" }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockCommitWorkingPayload).toHaveBeenCalledTimes(commitCallsBefore);
+  });
+
+  it("W5: từ chối payload có hơn 3 mục đích sử dụng trên một thửa", async () => {
+    const commitCallsBefore = mockCommitWorkingPayload.mock.calls.length;
+    const payload = makeDraft();
+    payload.parcels[0].landUses = [1, 2, 3, 4].map((index) => ({
+      ...emptyLandUse(`land-use-${index}`),
+      purposeCode: "ODT",
+    }));
+
+    const res = await PUT(makeRequest({ expectedVersion: 1, payload }), {
+      params: Promise.resolve({ submissionId: "sub_1" }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockCommitWorkingPayload).toHaveBeenCalledTimes(commitCallsBefore);
+  });
 });
