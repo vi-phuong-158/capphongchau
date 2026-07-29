@@ -68,8 +68,9 @@ export class PublicIntakeStorage {
 
   async ensureSubmissionFolder(submissionId: string): Promise<string> {
     // `01_INBOX` is shared by every submission, so retain the existing advisory-lock helper for
-    // that one folder. The per-submission lease in `submission-folder.ts` is the coordinator for
-    // both descendants; no database transaction remains open while those Drive calls run.
+    // that one folder — only a cache miss (in practice once per cold start) still holds a
+    // transaction while Drive answers. The two descendants are serialized by the per-submission
+    // lease in `submission-folder.ts` instead, so they open no transaction at all.
     const inbox = await this.findOrCreateFolder(
       "01_INBOX",
       this.environment.GOOGLE_MY_DRIVE_ROOT_FOLDER_ID,
@@ -305,33 +306,7 @@ export class PublicIntakeStorage {
       const recheckedId = PublicIntakeStorage.folderCache.get(cacheKey);
       if (recheckedId) return recheckedId;
 
-      const drive = createGoogleWorkspaceClient(this.credentials).drive;
-      const existing = await drive.files.list({
-        q: [
-          `name = '${escapeQueryValue(name)}'`,
-          `mimeType = '${FOLDER_MIME_TYPE}'`,
-          `'${parentId}' in parents`,
-          "trashed = false",
-        ].join(" and "),
-        fields: "files(id)",
-        pageSize: 1,
-      });
-
-      const existingId = existing.data.files?.[0]?.id;
-      if (existingId) {
-        PublicIntakeStorage.folderCache.set(cacheKey, existingId);
-        return existingId;
-      }
-
-      const created = await drive.files.create({
-        requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
-        fields: "id",
-      });
-
-      const folderId = created.data.id;
-      if (!folderId) {
-        throw new Error(`Google Drive không tạo được thư mục: ${name}`);
-      }
+      const folderId = await this.listOrCreateOnDrive(name, parentId);
       PublicIntakeStorage.folderCache.set(cacheKey, folderId);
       return folderId;
     });
@@ -349,6 +324,16 @@ export class PublicIntakeStorage {
     const cachedId = PublicIntakeStorage.folderCache.get(cacheKey);
     if (cachedId) return cachedId;
 
+    const folderId = await this.listOrCreateOnDrive(name, parentId);
+    PublicIntakeStorage.folderCache.set(cacheKey, folderId);
+    return folderId;
+  }
+
+  /**
+   * Chỉ phần gọi Drive: list trước, create sau. Không cache, không khóa — hai việc đó do caller
+   * quyết định, nên khác biệt duy nhất giữa hai helper ở trên đúng là cơ chế đồng bộ.
+   */
+  private async listOrCreateOnDrive(name: string, parentId: string): Promise<string> {
     const drive = createGoogleWorkspaceClient(this.credentials).drive;
     const existing = await drive.files.list({
       q: [
@@ -360,21 +345,19 @@ export class PublicIntakeStorage {
       fields: "files(id)",
       pageSize: 1,
     });
+
     const existingId = existing.data.files?.[0]?.id;
-    if (existingId) {
-      PublicIntakeStorage.folderCache.set(cacheKey, existingId);
-      return existingId;
-    }
+    if (existingId) return existingId;
 
     const created = await drive.files.create({
       requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
       fields: "id",
     });
+
     const folderId = created.data.id;
     if (!folderId) {
       throw new Error(`Google Drive không tạo được thư mục: ${name}`);
     }
-    PublicIntakeStorage.folderCache.set(cacheKey, folderId);
     return folderId;
   }
 }

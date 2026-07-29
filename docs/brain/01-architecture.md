@@ -245,9 +245,12 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │   client gửi version gần nhất và cập nhật version từ response
 ├── POST .../uploads/initiate → ensureSubmissionFolderReady → phiên resumable Drive
 │   ├── submission-folder.ts — lease PostgreSQL 60 giây, commit TRƯỚC Google; request thua lease
-│   │   trả 503 + Retry-After; expired lease cho retry tiếp tục
+│   │   trả 503 + Retry-After; expired lease cho retry tiếp tục; trần 10 lần thử
+│   │   ⚠️ leaseToken đọc bằng `::text`, KHÔNG bao giờ qua `Date` — timestamptz micro-giây bị
+│   │   Date (mili-giây) cắt cụt thì mệnh đề fencing khớp 0 dòng, hồ sơ kẹt CREATING vĩnh viễn
 │   ├── storage.ensureSubmissionFolder — list-before-create cho folder riêng; retry sau crash nhận
-│   │   lại folder đã tạo, không giữ transaction DB trong Drive call
+│   │   lại folder đã tạo; hai cấp con không mở transaction DB, riêng 01_INBOX dùng chung vẫn qua
+│   │   findOrCreateFolder nên cache miss (một lần mỗi cold start) còn giữ transaction khi gọi Drive
 │   ⚠️ tên tệp trong kho do MÁY CHỦ đặt, KHÔNG ghép body.fileName (tên máy ảnh hay mang CCCD,
 │   họ tên); chỉ đuôi mở rộng lấy từ mimeType đã qua canonicalImageMimeType
 ├── POST .../uploads/complete → verifyUploadedFile → appendFile + số đo

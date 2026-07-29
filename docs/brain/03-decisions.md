@@ -1719,3 +1719,25 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
   request thua lease nhận 503 có `Retry-After`. Complete/delete/acceptance fail closed nếu thiếu folder.
 - **An toàn và rollback:** cờ mặc định `false`, nên Production tiếp tục eager cho tới khi có Preview
   E2E/orphan evidence. Không lưu thông báo lỗi Drive, ID hay link; tắt cờ không cần rollback schema.
+
+## [2026-07-29] Phase 3 — Lease token đọc dạng text, không đi qua `Date`
+
+- **Bối cảnh:** vòng review PR #10 phát hiện lease token bị cắt độ chính xác. `now()` của PostgreSQL
+  chính xác tới micro-giây; driver `postgres` parse `timestamptz` thành `Date` của JS vốn chỉ tới
+  mili-giây. Mệnh đề fencing `drive_folder_lease_until = $token::timestamptz` vì thế khớp 0 dòng và
+  checkpoint `READY` không bao giờ ghi được — mọi lần lazy tạo folder đều kẹt `CREATING` rồi 503.
+- **Quyết định:** mọi truy vấn đọc cột này phải cast `::text`; kiểu dòng khai báo `string | null`;
+  field trong snapshot tên là `leaseToken`, không phải `leaseUntil`. Đây là **token đối sánh**, không
+  phải mốc thời gian để hiển thị hay tính toán — không được đưa qua `Date` ở bất kỳ đâu.
+- **Đã cân nhắc:** thêm cột `drive_folder_lease_token uuid` riêng do app sinh. Bền hơn về nguyên tắc
+  nhưng cần sửa migration và thêm cột chỉ để giải một vấn đề đã đóng bằng `::text`. Chọn phương án
+  nhỏ hơn; nếu sau này lease cần thêm ngữ nghĩa (chủ sở hữu, thế hệ) thì chuyển sang cột uuid.
+- **Kèm theo:** trần `MAX_SUBMISSION_FOLDER_ATTEMPTS = 10` chặn retry vô hạn khi Drive lỗi kéo dài;
+  hồ sơ chạm trần cần can thiệp thủ công (chưa có runbook). `Retry-After` 3 giây thay vì 1 để không
+  dồn request lên pool `max: 1`.
+- **Đánh đổi còn mở:** nếu một lần gọi Drive vượt 60 giây lease, worker thứ hai có thể tạo thư mục
+  `{submissionId}` trùng; `list-before-create` thu hẹp chứ không đóng hẳn cửa sổ này. Chấp nhận vì
+  tạo folder thường dưới vài giây.
+- **Điều kiện bắt buộc:** file `tests/staging-rehearsal-acceptance-saga.integration.test.ts` phải
+  chạy với database rehearsal thật trước khi bật cờ ở bất kỳ môi trường nào. Không unit test nào
+  chạm tới đường lease thật — toàn bộ đều mock repository.

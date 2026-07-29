@@ -1,5 +1,6 @@
 import {
   getPublicIntakeRepository,
+  MAX_SUBMISSION_FOLDER_ATTEMPTS,
   type PublicIntakeRepository,
   type SubmissionRecord,
 } from "./repository";
@@ -8,7 +9,8 @@ import { getPublicIntakeStorage, type PublicIntakeStorage } from "./storage";
 const FOLDER_LEASE_SECONDS = 60;
 
 export class SubmissionFolderBusyError extends Error {
-  readonly retryAfterSeconds = 1;
+  /** Tạo folder Drive mất vài giây; 1 giây chỉ khiến client dồn request vô ích lên pool max:1. */
+  readonly retryAfterSeconds = 3;
 
   constructor() {
     super("Thư mục tải ảnh đang được chuẩn bị.");
@@ -63,7 +65,10 @@ export async function ensureSubmissionFolderReady(
     if (current?.state === "READY" && current.driveFolderId) {
       return current.driveFolderId;
     }
-    if (current) throw new SubmissionFolderBusyError();
+    // Hết trần thử lại thì báo không khả dụng thay vì mời client quay lại vô hạn.
+    if (current && current.attempts < MAX_SUBMISSION_FOLDER_ATTEMPTS) {
+      throw new SubmissionFolderBusyError();
+    }
     throw new SubmissionFolderUnavailableError();
   }
 
@@ -72,7 +77,7 @@ export async function ensureSubmissionFolderReady(
     const ready = await dependencies.repository.markSubmissionFolderReady(
       record.submissionId,
       driveFolderId,
-      acquired.leaseUntil,
+      acquired.leaseToken,
     );
     if (ready?.state === "READY" && ready.driveFolderId) {
       return ready.driveFolderId;
@@ -80,7 +85,7 @@ export async function ensureSubmissionFolderReady(
     throw new SubmissionFolderUnavailableError();
   } catch {
     await dependencies.repository
-      .markSubmissionFolderFailed(record.submissionId, acquired.leaseUntil)
+      .markSubmissionFolderFailed(record.submissionId, acquired.leaseToken)
       .catch(() => undefined);
     throw new SubmissionFolderUnavailableError();
   }

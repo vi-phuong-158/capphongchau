@@ -2638,3 +2638,27 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   crash; `01_INBOX` dùng chung vẫn giữ advisory lock. Lỗi Drive chỉ chuyển state `FAILED`.
 - Bổ sung test feature flag/create, lease/READY/busy/recovery/failure và mở rộng preflight để kiểm
   migration mới. Chưa áp migration, chưa deploy Preview/Production và chưa bật cờ ở môi trường nào.
+
+## [2026-07-29] Claude Code — sửa review PR #10 (lease token Phase 3)
+
+- **Agent:** Claude Code.
+- **Base:** `dfb6cae` (head PR #10, branch `codex/phase3-lazy-drive-folder`); branch làm việc `claude/pr-review-cjlypf`.
+- **Baseline trước sửa:** typecheck PASS, lint PASS, `npm test` 79 file/688 test PASS + 12 skip, webpack build 23/23 PASS.
+- **Thay đổi (blocking):** token lease của `submission-folder` từng đi qua `Date` của JS nên bị cắt
+  từ micro-giây xuống mili-giây; mệnh đề `drive_folder_lease_until = $token::timestamptz` vì thế
+  khớp 0 dòng và checkpoint `READY` không bao giờ ghi được — mọi lần lazy tạo folder đều kẹt
+  `CREATING` rồi trả 503 vĩnh viễn. Nay đọc cột bằng `::text`, đổi tên field thành `leaseToken` để
+  không ai vô tình ép sang `Date`.
+- **Thay đổi (phụ):** thêm trần `MAX_SUBMISSION_FOLDER_ATTEMPTS = 10` chặn retry vô hạn khi Drive
+  lỗi kéo dài; `Retry-After` từ 1s lên 3s; tách `listOrCreateOnDrive` bỏ ~30 dòng trùng giữa hai
+  helper folder; sửa comment `ensureSubmissionFolder` vốn nói sai rằng không còn transaction nào mở
+  khi gọi Drive (nhánh `01_INBOX` cache miss vẫn giữ advisory lock); ghi rõ index lease chỉ dùng cho
+  vận hành, không truy vấn ứng dụng nào đọc.
+- **File đã sửa:** `src/modules/public-intake/repository.ts`, `submission-folder.ts`, `storage.ts`,
+  `supabase/migrations/202607290005_lazy_drive_folder_creation.sql`,
+  `tests/submission-folder.test.ts`, `tests/staging-rehearsal-acceptance-saga.integration.test.ts`.
+- **Kiểm tra:** typecheck PASS; lint PASS; `npm test` 79 file/689 test PASS + 13 skip; webpack build
+  23/23 PASS; `git diff --check` PASS.
+- **Còn lại:** test round-trip lease token nằm trong file integration, vẫn tự skip khi không có
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL`. **Bắt buộc chạy file này với database rehearsal thật trước
+  khi bật `LAZY_DRIVE_FOLDER_CREATION_ENABLED` ở Preview** — không unit test nào chạm tới lỗi trên.

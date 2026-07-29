@@ -447,6 +447,38 @@ describe.skipIf(!hasTestDb)(
     }
 
     it(
+      "Phase 3: lease token round-trip nguyên vẹn qua PostgreSQL (micro-giây không bị cắt)",
+      async () => {
+        const submissionId = `lazy-token-${randomUUID()}`;
+        await bootstrapSql`
+          insert into public.public_submissions (
+            submission_id, receipt_code, status, phone, access_code_hash, consent_version,
+            drive_folder_id, drive_folder_state, draft_json
+          ) values (
+            ${submissionId}, ${`PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`},
+            'DRAFT', '0912345678', 'hash', 'v1', null, 'PENDING', '{}'::jsonb
+          )
+        `;
+
+        const repository = getPublicIntakeRepository();
+        const acquired = await repository.tryAcquireSubmissionFolderLease(submissionId, 60);
+        expect(acquired).not.toBeNull();
+
+        // `timestamptz` chính xác tới micro-giây, `Date` của JS chỉ tới mili-giây. Nếu token
+        // lease đi qua `Date`, mệnh đề `= ${token}::timestamptz` khớp 0 dòng và checkpoint
+        // READY không bao giờ ghi được — hồ sơ kẹt CREATING vĩnh viễn.
+        const ready = await repository.markSubmissionFolderReady(
+          submissionId,
+          "lazy-token-folder",
+          acquired?.leaseToken ?? "",
+        );
+        expect(ready).not.toBeNull();
+        expect(ready).toMatchObject({ state: "READY", driveFolderId: "lazy-token-folder" });
+      },
+      20_000,
+    );
+
+    it(
       "Phase 3: hai request đồng thời chỉ một request thắng lease PostgreSQL và tạo folder",
       async () => {
         const submissionId = `lazy-${randomUUID()}`;

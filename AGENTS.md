@@ -146,7 +146,11 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
   `public_submissions` + `request_log` + audit trong một transaction nhưng không gọi Drive.
   `submission-folder.ts` dùng lease PostgreSQL 60 giây, commit trước khi gọi Drive và
   list-before-create để retry sau crash không tạo cây thư mục thứ hai. Request thua lease trả
-  `503 SERVICE_UNAVAILABLE` kèm `Retry-After`; không lưu nội dung lỗi Drive.
+  `503 SERVICE_UNAVAILABLE` kèm `Retry-After`; không lưu nội dung lỗi Drive. Quá 10 lần thử thì
+  ngừng gọi Drive, cần can thiệp thủ công đặt lại `drive_folder_attempts`.
+  Token fencing của lease (`drive_folder_lease_until`) **luôn đọc bằng `::text`** — `timestamptz`
+  chính xác tới micro-giây còn `Date` của JS chỉ tới mili-giây, đưa qua `Date` là mệnh đề đối sánh
+  khớp 0 dòng và hồ sơ kẹt `CREATING` vĩnh viễn.
 - Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
 - Xác minh file sau upload theo thư mục cha, metadata, dung lượng và checksum trước khi cập nhật trạng thái.
 - Lưu `file_id` nội bộ bất biến, tách khỏi `drive_file_id` để chuẩn bị cho migration sang Shared Drive về sau.

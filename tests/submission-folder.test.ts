@@ -6,9 +6,10 @@ import {
   SubmissionFolderUnavailableError,
   type SubmissionFolderDependencies,
 } from "@/modules/public-intake/submission-folder";
-import type {
-  SubmissionFolderSnapshot,
-  SubmissionFolderState,
+import {
+  MAX_SUBMISSION_FOLDER_ATTEMPTS,
+  type SubmissionFolderSnapshot,
+  type SubmissionFolderState,
 } from "@/modules/public-intake/repository";
 
 function snapshot(
@@ -16,7 +17,7 @@ function snapshot(
   driveFolderId: string | null = null,
   attempts = 0,
 ): SubmissionFolderSnapshot {
-  return { state, driveFolderId, attempts, leaseUntil: state === "CREATING" ? "future" : "" };
+  return { state, driveFolderId, attempts, leaseToken: state === "CREATING" ? "future" : "" };
 }
 
 function dependencies(overrides?: {
@@ -93,6 +94,18 @@ describe("Phase 3 lazy submission folder", () => {
 
     await expect(ensureSubmissionFolderReady(lazyRecord, deps)).rejects.toBeInstanceOf(
       SubmissionFolderBusyError,
+    );
+    expect(deps.storage.ensureSubmissionFolder).not.toHaveBeenCalled();
+  });
+
+  it("hết trần thử lại thì báo không khả dụng thay vì mời client retry vô hạn", async () => {
+    const deps = dependencies({
+      acquire: null,
+      current: snapshot("FAILED", null, MAX_SUBMISSION_FOLDER_ATTEMPTS),
+    });
+
+    await expect(ensureSubmissionFolderReady(lazyRecord, deps)).rejects.toBeInstanceOf(
+      SubmissionFolderUnavailableError,
     );
     expect(deps.storage.ensureSubmissionFolder).not.toHaveBeenCalled();
   });

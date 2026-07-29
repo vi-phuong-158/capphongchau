@@ -121,10 +121,20 @@ export interface SubmissionSummary {
 
 export type SubmissionFolderState = "PENDING" | "CREATING" | "READY" | "FAILED";
 
+/**
+ * Số lần thử tạo thư mục Drive tối đa cho một hồ sơ. Vượt trần thì ngừng gọi Google thay vì
+ * retry vô hạn khi Drive lỗi kéo dài; cần can thiệp thủ công để đặt lại `drive_folder_attempts`.
+ */
+export const MAX_SUBMISSION_FOLDER_ATTEMPTS = 10;
+
 export interface SubmissionFolderSnapshot {
   readonly driveFolderId: string | null;
   readonly state: SubmissionFolderState;
-  readonly leaseUntil: string;
+  /**
+   * Token sở hữu lease — chuỗi PostgreSQL trả về nguyên văn, KHÔNG phải mốc thời gian để hiển
+   * thị hay tính toán. Không bao giờ đưa qua `Date`: xem chú thích ở `SubmissionFolderRow`.
+   */
+  readonly leaseToken: string;
   readonly attempts: number;
 }
 
@@ -260,7 +270,12 @@ interface FileRow {
 interface SubmissionFolderRow {
   readonly drive_folder_id: string | null;
   readonly drive_folder_state: SubmissionFolderState;
-  readonly drive_folder_lease_until: Date | null;
+  /**
+   * Luôn đọc bằng `::text`, KHÔNG để driver ép sang `Date`: `timestamptz` chính xác tới
+   * micro-giây còn `Date` của JS chỉ tới mili-giây. Ép sang `Date` rồi so
+   * `= ${token}::timestamptz` sẽ lệch ở phần micro-giây và checkpoint READY không bao giờ khớp.
+   */
+  readonly drive_folder_lease_until: string | null;
   readonly drive_folder_attempts: number;
 }
 
@@ -376,7 +391,7 @@ function mapSubmissionFolder(row: SubmissionFolderRow): SubmissionFolderSnapshot
   return {
     driveFolderId: row.drive_folder_id,
     state: row.drive_folder_state,
-    leaseUntil: asIso(row.drive_folder_lease_until),
+    leaseToken: row.drive_folder_lease_until ?? "",
     attempts: row.drive_folder_attempts,
   };
 }
@@ -480,6 +495,7 @@ export class PublicIntakeRepository {
           drive_folder_attempts = drive_folder_attempts + 1
       where submission_id = ${submissionId}
         and drive_folder_id is null
+        and drive_folder_attempts < ${MAX_SUBMISSION_FOLDER_ATTEMPTS}
         and (
           drive_folder_state in ('PENDING', 'FAILED')
           or (
@@ -490,7 +506,8 @@ export class PublicIntakeRepository {
             )
           )
         )
-      returning drive_folder_id, drive_folder_state, drive_folder_lease_until,
+      returning drive_folder_id, drive_folder_state,
+        drive_folder_lease_until::text as drive_folder_lease_until,
         drive_folder_attempts
     `;
     return rows[0] ? mapSubmissionFolder(rows[0]) : null;
@@ -501,7 +518,8 @@ export class PublicIntakeRepository {
   ): Promise<SubmissionFolderSnapshot | null> {
     const database = getDatabase();
     const rows = await database<SubmissionFolderRow[]>`
-      select drive_folder_id, drive_folder_state, drive_folder_lease_until,
+      select drive_folder_id, drive_folder_state,
+        drive_folder_lease_until::text as drive_folder_lease_until,
         drive_folder_attempts
       from public.public_submissions
       where submission_id = ${submissionId}
@@ -513,7 +531,7 @@ export class PublicIntakeRepository {
   async markSubmissionFolderReady(
     submissionId: string,
     driveFolderId: string,
-    leaseUntil: string,
+    leaseToken: string,
   ): Promise<SubmissionFolderSnapshot | null> {
     const database = getDatabase();
     const rows = await database<SubmissionFolderRow[]>`
@@ -524,15 +542,16 @@ export class PublicIntakeRepository {
       where submission_id = ${submissionId}
         and drive_folder_id is null
         and drive_folder_state = 'CREATING'
-        and drive_folder_lease_until = ${leaseUntil}::timestamptz
-      returning drive_folder_id, drive_folder_state, drive_folder_lease_until,
+        and drive_folder_lease_until = ${leaseToken}::timestamptz
+      returning drive_folder_id, drive_folder_state,
+        drive_folder_lease_until::text as drive_folder_lease_until,
         drive_folder_attempts
     `;
     return rows[0] ? mapSubmissionFolder(rows[0]) : null;
   }
 
   /** Store only a state transition; Drive errors can contain internal IDs and must not persist. */
-  async markSubmissionFolderFailed(submissionId: string, leaseUntil: string): Promise<void> {
+  async markSubmissionFolderFailed(submissionId: string, leaseToken: string): Promise<void> {
     const database = getDatabase();
     await database`
       update public.public_submissions
@@ -541,7 +560,7 @@ export class PublicIntakeRepository {
       where submission_id = ${submissionId}
         and drive_folder_id is null
         and drive_folder_state = 'CREATING'
-        and drive_folder_lease_until = ${leaseUntil}::timestamptz
+        and drive_folder_lease_until = ${leaseToken}::timestamptz
     `;
   }
 

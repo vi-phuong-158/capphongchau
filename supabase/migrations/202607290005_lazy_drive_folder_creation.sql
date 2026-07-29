@@ -44,6 +44,9 @@ begin
 end
 $$;
 
+-- Không có truy vấn ứng dụng nào dùng index này: mọi thao tác lease đều tra theo `submission_id`
+-- (khóa chính). Giữ lại cho vận hành — tra nhanh hồ sơ kẹt ở `CREATING` khi Drive lỗi kéo dài.
+-- Predicate rất hẹp nên index gần như rỗng, chi phí ghi không đáng kể.
 create index if not exists public_submissions_drive_folder_lease_idx
   on public.public_submissions (drive_folder_lease_until)
   where drive_folder_id is null and drive_folder_state = 'CREATING';
