@@ -9,7 +9,7 @@
 - Branch/base: `codex/phase2-detail-lazy-preview` from `c17254c`
 - Phase 2 commit: `perf(submissions): server-prime detail previews` (the final commit ID is recorded in the delivery message).
 - Git state after commit: clean before remote push; only the Phase 2 files listed in this report are included.
-- Status: `READY_FOR_DEPLOY_REVIEW`; authenticated Preview E2E remains blocked.
+- Status: `BLOCKED_PREVIEW_BUILD`; authenticated Preview E2E remains blocked.
 - Source: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md` §6 Phase 2.
 
 ### Implemented scope
@@ -36,7 +36,7 @@
 | `npm.cmd run lint -- --quiet` | pass |
 | `npm.cmd run build -- --webpack` | pass |
 | Default Turbopack build | blocked by pre-existing worktree `node_modules` symlink restriction; webpack validates the same source. |
-| Vercel deployment state | Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` is building; the unintended initializing Production deployment was removed before Ready. |
+| Vercel deployment state | Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` was still Building after 13 minutes at last check; the unintended initializing Production deployment was removed before Ready. |
 
 New tests cover shared detail loading/audit, missing-record no-audit, initial SSR/no mount fetch, deferred AI/image source, scoped active-file query and timing contract.
 
