@@ -2465,3 +2465,32 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `WorkingPayloadEditor` thật, thao tác bằng chuột/bàn phím qua trình duyệt, KHÔNG chạm database
   (`SUPABASE_DATABASE_URL` trỏ dữ liệu thật — không tạo hồ sơ giả trong đó). Harness đã xóa sau khi
   đo, không nằm trong commit. Kết quả: 4/4 tình huống PASS, chi tiết ở `CHATGPT_HANDOFF.md` §14.
+
+## [2026-07-29] Áp migration PL3, chạy preflight thật, rà soát tác động
+
+- **Agent:** Claude Code
+- **Thay đổi:** không sửa mã nghiệp vụ. Thêm 3 script vận hành:
+  `scripts/probe-preview-state.ts` (khảo sát chỉ đọc trạng thái schema + số bản ghi),
+  `scripts/apply-pl3-editor-migrations.ts` (áp 2 migration, mỗi file một transaction),
+  `scripts/survey-organisation-submissions.ts` (thống kê hồ sơ tổ chức thiếu thông tin người đại
+  diện — chỉ đọc, không in thông tin cá nhân).
+- **Đã chạy thật trên database dự án:**
+  - `202607290002_full_pl3_editor.sql` — OK, 1384 ms.
+  - `202607290003_drop_working_payload_override_columns.sql` — OK, 226 ms.
+  - `npm run preflight:public-intake-v2-migrations` — **25/25 đạt, exit 0** (AC-28 xong).
+  - 4 cột ghi đè song song xác nhận **KHÔNG CÒN** qua `information_schema.columns`.
+- **Rà soát tác động:** 13 hồ sơ chờ tiếp nhận, **0** hồ sơ có chủ sử dụng là tổ chức, **0** bị
+  chặn theo thay đổi hành vi ở release note §7.1. Đã kiểm chứng ngược (13/13 payload parse được)
+  để chắc con số 0 không phải do lỗi đọc dữ liệu.
+- **⚠️ Ghi nhận sai lệch giả định:** người dùng cho phép dùng database thật vì "chưa có hồ sơ nào
+  được nộp", nhưng thực tế có **80** `public_submissions`, 15 owner, 22 parcel, 286 audit log và
+  **1** hồ sơ đã đi hết luồng tiếp nhận chính thức (`cases`/`certificates`/`official_parcels` đều
+  có 1 bản ghi). Vẫn tiếp tục vì đã kiểm chứng hai migration không thể mất dữ liệu ở trạng thái đó:
+  `202607290002` toàn bộ `add column if not exists`; `202607290003` gỡ đúng 4 cột mà
+  `202607290002` vừa tạo ra RỖNG và không còn code nào ghi vào.
+- **⚠️ Sự cố bảo mật đã xảy ra:** một lệnh kiểm tra project-ref dùng regex sai đã in **một đoạn mật
+  khẩu database** ra terminal (mật khẩu chứa ký tự `@` nên regex cắt nhầm, phần đuôi bị in vào ô
+  "host"). **Cần đổi mật khẩu database Supabase.** Không lặp lại cách parse đó.
+- **Kiểm tra:** `npm test` 642 pass/10 skip; `npm run typecheck` đạt (sau khi sửa một lỗi ép kiểu
+  trong `probe-preview-state.ts` do chính đợt này tạo ra); `npm run build` đạt; `npm run lint`
+  0 error/5 warning có sẵn; `git diff --check` đạt.

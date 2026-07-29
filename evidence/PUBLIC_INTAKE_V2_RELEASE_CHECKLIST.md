@@ -153,8 +153,44 @@ Sheet **"Canh bao"** có một dòng nhắc mỗi thửa như vậy. Hồ sơ c�
 | `202607290002_full_pl3_editor.sql` | Thêm cột PL3 cho owner/parcel/asset + projection chính thức | Áp trước khi deploy code |
 | `202607290003_drop_working_payload_override_columns.sql` | Gỡ 4 cột ghi đè song song trên `public_submissions` | Áp cùng đợt; idempotent, chạy được dù `202607290002` đã áp hay chưa |
 
-Sau khi áp, chạy `npm run preflight:public-intake-v2` — script kiểm cả hai chiều: cột PL3 phải
-**có**, và 4 cột ghi đè song song phải **không còn**.
+Sau khi áp, chạy `npm run preflight:public-intake-v2-migrations` — script kiểm cả hai chiều: cột
+PL3 phải **có**, và 4 cột ghi đè song song phải **không còn**.
+
+**ĐÃ THỰC HIỆN 2026-07-29.** Cả hai migration đã áp lên database Supabase của dự án
+(project `vzouriblxzjlfwtwhnkx`), mỗi file trong một transaction riêng:
+
+```
+[OK] 202607290002_full_pl3_editor.sql — 1384 ms
+[OK] 202607290003_drop_working_payload_override_columns.sql — 226 ms
+```
+
+Preflight sau đó: **25/25 đạt, exit code 0**, gồm ba dòng của hạng mục này:
+
+```
+[OK] Có đủ cột lưu PL3 B–AX (202607290002) — OK
+[OK] Index public_assets_parcel_idx tồn tại (202607290002) — OK
+[OK] Đã gỡ cột ghi đè song song trên public_submissions (202607290003) — OK
+```
+
+Project **không có** bảng `supabase_migrations.schema_migrations` — các migration trước được áp thủ
+công, nên hai file này cũng áp thủ công cho nhất quán (`npx tsx scripts/apply-pl3-editor-migrations.ts`).
+Cả hai idempotent nên nếu sau này chuyển sang Supabase CLI, `db push` chạy lại là vô hại.
+
+### 7.7. Rà soát tác động của §7.1 trên dữ liệu thật (2026-07-29)
+
+| Chỉ số | Số lượng |
+|---|---|
+| Hồ sơ ở trạng thái chờ tiếp nhận | 13 |
+| Trong đó có chủ sử dụng là **tổ chức** | **0** |
+| **Sẽ bị chặn theo §7.1** | **0** |
+
+Toàn bộ 13 dòng chủ sử dụng đều là `CA_NHAN`. Đã kiểm chứng ngược để loại trừ lỗi đọc payload:
+13/13 hồ sơ parse được payload, 0 payload rỗng/hỏng.
+
+**Kết luận: §7.1 không ảnh hưởng hồ sơ nào đang tồn tại.** Vẫn phải phổ biến cho cán bộ vì nó áp
+dụng cho hồ sơ tổ chức **tạo mới** từ nay về sau.
+
+Tái lập: `npx tsx scripts/survey-organisation-submissions.ts` (chỉ đọc, không in thông tin cá nhân).
 
 `working_payload_json` là nguồn sự thật **duy nhất** cho mã ĐVHC ghi đè và tên file quét ghi đè.
 Không khôi phục lại 4 cột đó dưới bất kỳ hình thức nào.
