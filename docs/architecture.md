@@ -1,5 +1,12 @@
 # Kiến trúc hệ thống
 
+> Bổ sung PR #8 (2026-07-29): trong `UNDER_REVIEW`, mọi sửa PL3 đi qua
+> `WorkingPayloadEditor`/`PUT /working-payload`. Server so sánh payload ứng viên với payload hiệu lực:
+> sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý do và thành
+> `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` về `PENDING_CONFIRMATION`. Không nhận
+> trạng thái/nguồn/thời điểm xác nhận do client tự gửi. GET detail cán bộ trả `files[].ownerId` chỉ để
+> nhãn “CCCD chủ n – mặt trước/sau”, không mở rộng Drive ID/link.
+
 ## Tổng quan
 
 | Thành phần                              | Trách nhiệm                                                                  |
@@ -81,6 +88,18 @@ Các nhóm bảng chính trong `supabase/migrations/202607230001_supabase_schema
 - Báo cáo: `export_jobs`.
 
 `legacy_row_index` trên `public_submissions` giữ locator ổn định cho cookie phiên v2 trong giai đoạn chuyển đổi; nó không còn mang nghĩa “số dòng Sheet” trong runtime mới.
+
+### Hàng chờ cán bộ
+
+`GET /api/submissions` gọi `PublicIntakeRepository.listQueuePage()`: PostgreSQL thực hiện `WHERE`,
+tìm kiếm, `ORDER BY updated_at DESC, submission_id DESC` và `LIMIT 101`; Node chỉ ánh xạ tối đa 100
+dòng trả về. Cursor là base64url của `{updatedAt, submissionId}` đã validate và dùng keyset, nên các
+hồ sơ có cùng `updated_at` không bị lẫn vị trí.
+
+Migration `202607290004_queue_search_performance.sql` thêm generated column
+`queue_owner_name`/`queue_issue_number`, index trang và trigram index cho mã tiếp nhận, số GCN, tên
+chủ. Đây là projection tìm kiếm, không phải nguồn dữ liệu nghiệp vụ; nguồn vẫn là `draft_json`.
+Client debounce 350 ms, không gửi tìm kiếm một ký tự và giữ bảng cũ trong lúc tải trang mới.
 
 ### Tra cứu công khai theo GCN
 

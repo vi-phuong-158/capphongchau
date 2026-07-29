@@ -6,6 +6,11 @@ import type { Sql } from "postgres";
 import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository";
 import { getDatabase } from "@/modules/supabase/database";
+import {
+  decodeQueueCursor,
+  encodeQueueCursor,
+  type QueueCursor,
+} from "@/modules/submissions/queue-pagination";
 
 import type { IntakeDraft } from "./types";
 import {
@@ -112,6 +117,24 @@ export interface SubmissionSummary {
   readonly claimedByDisplayName: string;
   readonly updatedAt: string;
   readonly rowIndex: number;
+}
+
+export interface QueueSubmissionSummary {
+  readonly submissionId: string;
+  readonly receiptCode: string;
+  readonly status: PublicStatus;
+  readonly phone: string;
+  readonly version: number;
+  readonly claimedBy: string;
+  readonly claimedByDisplayName: string;
+  readonly updatedAt: string;
+  readonly issueNumber: string;
+  readonly ownerName: string;
+}
+
+export interface QueueSubmissionPage {
+  readonly items: readonly QueueSubmissionSummary[];
+  readonly nextCursor: string | null;
 }
 
 export interface StoredFile {
@@ -1389,6 +1412,91 @@ export class PublicIntakeRepository {
         break;
       }
     }
+  }
+
+  /**
+   * Hàng chờ cán bộ được lọc, tìm và phân trang hoàn toàn trong PostgreSQL.
+   *
+   * `limit + 1` chỉ dùng để phát hiện trang kế; route không còn tải toàn bảng hoặc `draft_json`.
+   */
+  async listQueuePage(input: {
+    status?: PublicStatus;
+    query?: string;
+    cursor?: string | null;
+    limit?: number;
+  }): Promise<QueueSubmissionPage> {
+    const database = getDatabase();
+    const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
+    const cursor: QueueCursor | null = decodeQueueCursor(input.cursor);
+    const normalizedQuery = input.query?.trim() ?? "";
+    const searchPattern = normalizedQuery
+      ? `%${normalizedQuery.replace(/[!%_]/g, (character) => `!${character}`)}%`
+      : null;
+    const rows = await database.unsafe<
+      {
+        submission_id: string;
+        receipt_code: string;
+        status: PublicStatus;
+        phone: string;
+        version: number;
+        claimed_by: string | null;
+        claimed_by_display_name: string | null;
+        updated_at: Date;
+        queue_issue_number: string;
+        queue_owner_name: string;
+      }[]
+    >(
+      `select submission_id, receipt_code::text, status, phone, version, claimed_by,
+         claimed_by_display_name, updated_at, queue_issue_number, queue_owner_name
+       from public.public_submissions
+       where ($1::text is null or status = $1)
+         and (
+           $2::text is null
+           or receipt_code::text ilike $2 escape '!'
+           or queue_issue_number ilike $2 escape '!'
+           or queue_owner_name ilike $2 escape '!'
+         )
+         and (
+           $3::timestamptz is null
+           or updated_at < $3::timestamptz
+           or (updated_at = $3::timestamptz and submission_id < $4)
+         )
+       order by updated_at desc, submission_id desc
+       limit $5`,
+      [
+        input.status ?? null,
+        searchPattern,
+        cursor?.updatedAt ?? null,
+        cursor?.submissionId ?? null,
+        pageLimit + 1,
+      ],
+    );
+
+    const pageRows = rows.slice(0, pageLimit);
+    const items = pageRows.map((row) => ({
+      submissionId: row.submission_id,
+      receiptCode: row.receipt_code,
+      status: row.status,
+      phone: row.phone,
+      version: row.version,
+      claimedBy: row.claimed_by ?? "",
+      claimedByDisplayName: row.claimed_by_display_name ?? "",
+      updatedAt: row.updated_at.toISOString(),
+      issueNumber: row.queue_issue_number,
+      ownerName: row.queue_owner_name,
+    }));
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        rows.length > pageLimit && lastItem
+          ? encodeQueueCursor({
+              updatedAt: lastItem.updatedAt,
+              submissionId: lastItem.submissionId,
+            })
+          : null,
+    };
   }
 
   async listSummaries(): Promise<SubmissionSummary[]> {

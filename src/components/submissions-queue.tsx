@@ -34,25 +34,46 @@ const statusStyles: Record<string, { label: string; bg: string }> = {
   NEEDS_SUPPLEMENT: { label: "Cần bổ sung", bg: "bg-orange-50 text-orange-800 border-orange-200" },
   RESUBMITTED: { label: "Đã gửi lại", bg: "bg-blue-50 text-blue-800 border-blue-200" },
   REJECTED: { label: "Từ chối", bg: "bg-rose-50 text-rose-800 border-rose-200" },
-  ACCEPTING: { label: "Đang tiếp nhận", bg: "bg-emerald-50 text-emerald-800 border-emerald-200 animate-pulse" },
+  ACCEPTING: {
+    label: "Đang tiếp nhận",
+    bg: "bg-emerald-50 text-emerald-800 border-emerald-200 animate-pulse",
+  },
   ACCEPTED: { label: "Đã tiếp nhận", bg: "bg-emerald-50 text-emerald-800 border-emerald-200" },
   DRAFT: { label: "Nháp", bg: "bg-stone-50 text-stone-700 border-stone-200" },
   EXPIRED: { label: "Hết hạn", bg: "bg-stone-50 text-stone-600 border-stone-200" },
 };
+
+const SEARCH_DEBOUNCE_MS = 350;
 
 export function SubmissionsQueue() {
   const [items, setItems] = useState<readonly Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    const nextQuery = normalizedQuery.length >= 2 ? normalizedQuery : "";
+    if (nextQuery === debouncedQuery) return;
+
+    const timeout = window.setTimeout(
+      () => {
+        setState("loading");
+        setDebouncedQuery(nextQuery);
+      },
+      nextQuery ? SEARCH_DEBOUNCE_MS : 0,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [debouncedQuery, query]);
 
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams();
     if (status) params.set("status", status);
-    if (query.trim()) params.set("q", query.trim());
+    if (debouncedQuery) params.set("q", debouncedQuery);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Không thể tải hàng chờ.");
@@ -67,13 +88,13 @@ export function SubmissionsQueue() {
         if ((error as { name?: string }).name !== "AbortError") setState("error");
       });
     return () => controller.abort();
-  }, [status, query]);
+  }, [status, debouncedQuery]);
 
   const loadMore = (cursor: string) => {
     setLoadingMore(true);
     const params = new URLSearchParams();
     if (status) params.set("status", status);
-    if (query.trim()) params.set("q", query.trim());
+    if (debouncedQuery) params.set("q", debouncedQuery);
     params.set("cursor", cursor);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store" })
       .then(async (response) => {
@@ -93,7 +114,9 @@ export function SubmissionsQueue() {
       });
   };
 
-  const countPending = items.filter((i) => i.status === "SUBMITTED" || i.status === "RESUBMITTED").length;
+  const countPending = items.filter(
+    (i) => i.status === "SUBMITTED" || i.status === "RESUBMITTED",
+  ).length;
   const countReviewing = items.filter((i) => i.status === "UNDER_REVIEW").length;
   const countAccepted = items.filter((i) => i.status === "ACCEPTED").length;
 
@@ -123,10 +146,7 @@ export function SubmissionsQueue() {
         <input
           className="pc-input"
           value={query}
-          onChange={(event) => {
-            setState("loading");
-            setQuery(event.target.value);
-          }}
+          onChange={(event) => setQuery(event.target.value)}
           placeholder="Tìm theo Mã tiếp nhận, số GCN hoặc tên Chủ sử dụng"
           aria-label="Tìm hồ sơ"
         />
@@ -146,10 +166,18 @@ export function SubmissionsQueue() {
             </option>
           ))}
         </select>
+        {query.trim().length === 1 ? (
+          <p className="text-xs text-stone-500 md:col-span-2">Nhập ít nhất 2 ký tự để tìm kiếm.</p>
+        ) : null}
       </div>
 
-      {state === "loading" ? (
+      {state === "loading" && items.length === 0 ? (
         <p className="rounded-xl bg-stone-100 p-5 text-stone-600">Đang tải hàng chờ…</p>
+      ) : null}
+      {state === "loading" && items.length > 0 ? (
+        <p className="text-sm text-stone-500" role="status">
+          Đang cập nhật danh sách…
+        </p>
       ) : null}
       {state === "error" ? (
         <p className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-800">
@@ -161,7 +189,7 @@ export function SubmissionsQueue() {
           Chưa có hồ sơ phù hợp bộ lọc.
         </p>
       ) : null}
-      {state === "ready" && items.length > 0 ? (
+      {state !== "error" && items.length > 0 ? (
         <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-stone-50 text-stone-600 border-b border-stone-200 font-semibold text-xs uppercase tracking-wider">
@@ -184,11 +212,17 @@ export function SubmissionsQueue() {
                 return (
                   <tr className="hover:bg-stone-50/80 transition" key={item.submissionId}>
                     <td className="p-3.5 font-bold text-emerald-900">{item.receiptCode}</td>
-                    <td className="p-3.5 font-medium text-stone-900">{item.ownerName || "Chưa khai"}</td>
-                    <td className="p-3.5 font-mono text-xs text-stone-700">{item.issueNumber || "Chưa khai"}</td>
+                    <td className="p-3.5 font-medium text-stone-900">
+                      {item.ownerName || "Chưa khai"}
+                    </td>
+                    <td className="p-3.5 font-mono text-xs text-stone-700">
+                      {item.issueNumber || "Chưa khai"}
+                    </td>
                     <td className="p-3.5 font-mono text-xs text-stone-700">{item.phone}</td>
                     <td className="p-3.5">
-                      <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium ${st.bg}`}>
+                      <span
+                        className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium ${st.bg}`}
+                      >
                         {st.label}
                       </span>
                     </td>
@@ -228,4 +262,3 @@ export function SubmissionsQueue() {
     </div>
   );
 }
-

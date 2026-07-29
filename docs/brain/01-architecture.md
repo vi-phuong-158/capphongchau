@@ -1,5 +1,33 @@
 # 01 — Architecture
 
+> Cập nhật PR #8 (2026-07-29): `PUT /api/submissions/:id/working-payload` so sánh payload hiệu lực
+> trước khi commit. Sửa bốn trường định danh sau `QR_CONFIRMED` bắt buộc lý do và server chuyển sang
+> `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` xóa dấu xác nhận và về
+> `PENDING_CONFIRMATION`. Client không tự gán trạng thái/nguồn/thời điểm định danh. GET detail trả
+> `files[].ownerId` nội bộ để `DocumentViewer` gắn đúng chủ ảnh CCCD.
+
+## Cập nhật Code Graph 2026-07-29 — Phase 1 hiệu năng hàng chờ
+
+```text
+src/components/submissions-queue.tsx
+├── query < 2 ký tự → không gửi tìm kiếm
+├── query hợp lệ → debounce 350 ms + AbortController request cũ
+└── GET /api/submissions?status&q&cursor
+    ├── requireActiveUser(SUBMISSION_READ_ROLES)
+    ├── validate status + decode cursor base64url {updatedAt, submissionId}
+    └── PublicIntakeRepository.listQueuePage
+        └── PostgreSQL:
+            WHERE status/search
+            + keyset (updated_at, submission_id)
+            + ORDER BY updated_at DESC, submission_id DESC
+            + LIMIT 101 → trả tối đa 100
+
+202607290004_queue_search_performance.sql
+├── generated: queue_owner_name, queue_issue_number
+├── btree: status/updated_at/submission_id + all-status page
+└── pg_trgm GIN: receipt_code, queue_issue_number, queue_owner_name
+```
+
 ## Cập nhật Code Graph 2026-07-29 — review PR #6
 
 ```text
@@ -208,7 +236,9 @@ src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-
 
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
-    ├── list/listSummaries/findById
+    ├── listQueuePage — hàng chờ SQL keyset; không đọc toàn bảng/draft_json
+    ├── list/listSummaries — giữ cho đường gọi cũ/nội bộ, không dùng ở GET hàng chờ
+    ├── findById
     ├── commitStaffAction (transaction) — CLAIM/FORCE_CLAIM/RELEASE/TRANSFER (2026-07-25, Phase 5)
     │   ├── UPDATE mang điều kiện atomic ngay trong SQL:
     │   │   `and ($force = true or claimed_by is null or claimed_by = '' or claimed_by = $actor)`

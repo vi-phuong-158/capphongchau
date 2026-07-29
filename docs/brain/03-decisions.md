@@ -1,5 +1,15 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] PR #8: server là nguồn chuyển trạng thái định danh
+
+- **Quyết định:** Tab Chủ sử dụng của `WorkingPayloadEditor` là luồng xác nhận trong
+  `UNDER_REVIEW`; `PUT /working-payload` không tin trạng thái/nguồn/thời điểm định danh của client.
+  Server so sánh payload hiệu lực, yêu cầu lý do cho sửa định danh QR và tự suy ra
+  `QR_OVERRIDE_PENDING_REVIEW` hoặc `PENDING_CONFIRMATION`.
+- **Lý do:** Tránh trạng thái QR cũ hoặc `MANUAL_COMPLETE` giả sau khi sửa PL3; PATCH xác nhận thủ
+  công tách biệt tiếp tục là đường duy nhất đặt `MANUAL_COMPLETE` với audit/request log idempotent.
+- **Bảo mật:** GET detail chỉ thêm `ownerId` nội bộ cho nhãn ảnh, không trả Drive ID/link hay PII mới.
+
 > Ghi lại quyết định kỹ thuật quan trọng để agent sau không "phát minh lại" hoặc đảo ngược
 > mà không biết lý do. Mỗi entry: quyết định gì, vì sao, đánh đổi gì.
 > Các quyết định dưới đây được trích từ `AGENTS.md`, `PLAN.md`, `docs/architecture.md` (đã chốt trước khi bộ brain này được tạo).
@@ -9,6 +19,24 @@
 >
 > Các tên `PLAN2`, `PLAN_NL` và kế hoạch Claude/Gemini xuất hiện trong các entry cũ chỉ là nguồn
 > lịch sử; bản đã lưu nằm trong `docs/archive/`. Không dùng các entry đó để đảo ngược quyết định mới.
+
+## [2026-07-29] Hàng chờ dùng SQL keyset và projection tìm kiếm sinh tự động
+
+- **Quyết định:** `GET /api/submissions` không gọi `repository.list()`/`listSummaries()` rồi lọc ở
+  Node. Repository mới `listQueuePage` đưa status, tìm chứa chuỗi, thứ tự và giới hạn xuống
+  PostgreSQL; mỗi lượt đọc `limit + 1` (tối đa 101) và cursor gồm cả `updated_at` lẫn
+  `submission_id`.
+- **Schema:** Migration `202607290004_queue_search_performance.sql` thêm generated column
+  `queue_owner_name`/`queue_issue_number`, B-tree index cho trang và GIN trigram index cho ba trường
+  tìm kiếm. Hai cột là projection từ `draft_json`, không phải nguồn dữ liệu thứ hai và không có
+  đường ghi riêng.
+- **API/UI:** `nextCursor` đổi từ raw `submissionId` sang base64url opaque của object đã validate;
+  component hiện hữu chỉ chuyển tiếp cursor nên tương thích nội bộ. Cursor/status hỏng trả
+  `400 VALIDATION_FAILED`. Tìm kiếm debounce 350 ms, dưới hai ký tự không gửi truy vấn và bảng cũ
+  vẫn hiển thị trong lúc tải.
+- **Bảo mật/đánh đổi:** Giữ nguyên `SUBMISSION_READ_ROLES`, masking số điện thoại, response
+  no-store và không log từ khóa/PII. `pg_trgm` và generated columns làm migration nặng hơn; phải áp
+  trên Preview, chạy `EXPLAIN (ANALYZE, BUFFERS)` với dữ liệu giả rồi mới deploy code.
 
 ## [2026-07-29] Xác nhận định danh thủ công phải ghi đúng working payload
 

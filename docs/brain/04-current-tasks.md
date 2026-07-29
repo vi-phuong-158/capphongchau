@@ -9,6 +9,17 @@
 
 ---
 
+## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
+
+- `GET /api/submissions` đã chuyển lọc/tìm/phân trang sang
+  `PublicIntakeRepository.listQueuePage`; mỗi request chỉ lấy tối đa 101 dòng và dùng cursor
+  `(updated_at, submission_id)`.
+- UI tìm kiếm debounce 350 ms, không gửi một ký tự và giữ bảng cũ khi đang tải.
+- **Chưa chạy migration:** áp `202607290004_queue_search_performance.sql` trên Preview sau các
+  migration đang chờ theo đúng thứ tự, rồi chạy `EXPLAIN (ANALYZE, BUFFERS)` với 500/5.000/20.000
+  hồ sơ giả. Không deploy code Phase 1 trước migration.
+- Chưa có P50/P95 Preview; không tuyên bố đạt mục tiêu ≤ 1,5 giây cho tới khi có số đo thật.
+
 ## [2026-07-29] Bàn làm việc biên tập đầy đủ PL3 — đã triển khai trong code
 
 - Đã đối chiếu trực tiếp `Tai lieu/PL3.xlsx`, sheet `Phong Châu`, toàn bộ cột B–AX.

@@ -148,6 +148,7 @@ export async function GET(
           files: files.map((file) => ({
             fileId: file.fileId,
             documentType: file.documentType,
+            ownerId: file.ownerId,
           })),
           canResetAccessSecret:
             user.roles.includes(UserRole.SYSTEM_ADMIN) || user.roles.includes(UserRole.WARD_ADMIN),
@@ -214,8 +215,9 @@ export async function PATCH(
           version: body.data.version,
           certificate: body.data.certificate ?? null,
           owners: body.data.owners ?? [],
-          manualIdentityConfirmationOwnerIds:
-            [...(body.data.manualIdentityConfirmation?.ownerIds ?? [])].sort(),
+          manualIdentityConfirmationOwnerIds: [
+            ...(body.data.manualIdentityConfirmation?.ownerIds ?? []),
+          ].sort(),
           // Phải nằm trong hash: phát lại cùng khóa nhưng khác lý do là hai thao tác khác nhau.
           amendmentReason: body.data.amendmentReason ?? null,
         }),

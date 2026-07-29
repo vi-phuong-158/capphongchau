@@ -20,9 +20,12 @@ import {
   type IntakeDraft,
   type Owner,
   type Parcel,
+  requiresCitizenId,
 } from "@/modules/public-intake/types";
 
 import { EditableParcelTable } from "./editable-parcel-table";
+
+export type WorkingPayloadEditorTab = "all" | "gcn" | "owners" | "parcels" | "assets";
 
 interface WorkingPayloadEditorProps {
   submissionId: string;
@@ -35,6 +38,10 @@ interface WorkingPayloadEditorProps {
   saving: boolean;
   saveError: string | null;
   saveSuccess: boolean;
+  activeTab: WorkingPayloadEditorTab;
+  onTabChange: (tab: WorkingPayloadEditorTab) => void;
+  onConfirmManualIdentity: (ownerId: string) => Promise<boolean>;
+  identityConfirmationBusy: boolean;
 }
 
 const inputClass =
@@ -100,6 +107,19 @@ function Options({
   );
 }
 
+function identityStatusLabel(owner: Owner): string {
+  switch (owner.identityStatus) {
+    case "QR_CONFIRMED":
+      return "Đã xác nhận từ QR CCCD";
+    case "QR_OVERRIDE_PENDING_REVIEW":
+      return "Chờ duyệt thay đổi định danh";
+    case "MANUAL_COMPLETE":
+      return "Đã xác nhận thủ công";
+    default:
+      return "Chưa xác nhận định danh";
+  }
+}
+
 export function WorkingPayloadEditor({
   draft,
   readOnly = false,
@@ -109,9 +129,13 @@ export function WorkingPayloadEditor({
   saving,
   saveError,
   saveSuccess,
+  activeTab,
+  onTabChange,
+  onConfirmManualIdentity,
+  identityConfirmationBusy,
 }: WorkingPayloadEditorProps) {
   const [changeNote, setChangeNote] = useState("");
-  const [activeTab, setActiveTab] = useState<"all" | "gcn" | "owners" | "parcels" | "assets">("all");
+  const [manualConfirmationOwnerIds, setManualConfirmationOwnerIds] = useState<string[]>([]);
 
   /**
    * Mọi thao tác sửa trên một dòng tổ chức cũ phải di trú F/G trước — xem
@@ -163,7 +187,7 @@ export function WorkingPayloadEditor({
       <div className="flex flex-wrap gap-1.5 border-b border-stone-200 pb-3">
         <button
           type="button"
-          onClick={() => setActiveTab("all")}
+          onClick={() => onTabChange("all")}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
             activeTab === "all"
               ? "bg-emerald-800 text-white shadow-sm"
@@ -174,7 +198,7 @@ export function WorkingPayloadEditor({
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("gcn")}
+          onClick={() => onTabChange("gcn")}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
             activeTab === "gcn"
               ? "bg-emerald-800 text-white shadow-sm"
@@ -185,7 +209,7 @@ export function WorkingPayloadEditor({
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("owners")}
+          onClick={() => onTabChange("owners")}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
             activeTab === "owners"
               ? "bg-emerald-800 text-white shadow-sm"
@@ -196,7 +220,7 @@ export function WorkingPayloadEditor({
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("parcels")}
+          onClick={() => onTabChange("parcels")}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
             activeTab === "parcels"
               ? "bg-emerald-800 text-white shadow-sm"
@@ -207,7 +231,7 @@ export function WorkingPayloadEditor({
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("assets")}
+          onClick={() => onTabChange("assets")}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
             activeTab === "assets"
               ? "bg-emerald-800 text-white shadow-sm"
@@ -220,125 +244,125 @@ export function WorkingPayloadEditor({
 
       {(activeTab === "all" || activeTab === "gcn") && (
         <>
-      <Section
-        title="Đối chiếu PL3 và các trường tự động"
-        description="Bàn làm việc bao phủ đúng 49 cột dữ liệu B–AX. Trường tự động luôn hiển thị nguồn; nếu ghi đè phải nhập lý do."
-      >
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
-            <Field
-              label={`B — Mã ĐVHC cấp xã (tự động: ${WARD_ADMIN_CODE})`}
-              hint="Nguồn: mã hành chính cố định của Phường Phong Châu. Để trống để dùng giá trị tự động."
-            >
-              <input
-                disabled={readOnly}
-                value={draft.wardAdministrativeCodeOverride ?? ""}
-                placeholder={WARD_ADMIN_CODE}
-                onChange={(event) =>
-                  onChange({ ...draft, wardAdministrativeCodeOverride: event.target.value })
-                }
-                className={inputClass}
-              />
-            </Field>
-            <div className="mt-3">
-              <Field
-                label="Lý do ghi đè cột B"
-                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
-              >
-                <input
-                  disabled={readOnly || !(draft.wardAdministrativeCodeOverride ?? "").trim()}
-                  value={draft.wardAdministrativeCodeOverrideReason ?? ""}
-                  onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      wardAdministrativeCodeOverrideReason: event.target.value,
-                    })
-                  }
-                  className={inputClass}
-                />
-              </Field>
+          <Section
+            title="Đối chiếu PL3 và các trường tự động"
+            description="Bàn làm việc bao phủ đúng 49 cột dữ liệu B–AX. Trường tự động luôn hiển thị nguồn; nếu ghi đè phải nhập lý do."
+          >
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="rounded border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+                <Field
+                  label={`B — Mã ĐVHC cấp xã (tự động: ${WARD_ADMIN_CODE})`}
+                  hint="Nguồn: mã hành chính cố định của Phường Phong Châu. Để trống để dùng giá trị tự động."
+                >
+                  <input
+                    disabled={readOnly}
+                    value={draft.wardAdministrativeCodeOverride ?? ""}
+                    placeholder={WARD_ADMIN_CODE}
+                    onChange={(event) =>
+                      onChange({ ...draft, wardAdministrativeCodeOverride: event.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </Field>
+                <div className="mt-3">
+                  <Field
+                    label="Lý do ghi đè cột B"
+                    hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
+                  >
+                    <input
+                      disabled={readOnly || !(draft.wardAdministrativeCodeOverride ?? "").trim()}
+                      value={draft.wardAdministrativeCodeOverrideReason ?? ""}
+                      onChange={(event) =>
+                        onChange({
+                          ...draft,
+                          wardAdministrativeCodeOverrideReason: event.target.value,
+                        })
+                      }
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+              </div>
+              <div className="rounded border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+                <Field
+                  label="AX — Tên file quét GCN/CCCD"
+                  hint="Nguồn tự động: tên tệp thực tế sau khi tiếp nhận và đổi tên trên Drive. Để trống để dùng danh sách tự động."
+                >
+                  <input
+                    disabled={readOnly}
+                    value={draft.scannedFileNamesOverride ?? ""}
+                    placeholder="Tự động từ tệp đã xác minh"
+                    onChange={(event) =>
+                      onChange({ ...draft, scannedFileNamesOverride: event.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </Field>
+                <div className="mt-3">
+                  <Field
+                    label="Lý do ghi đè cột AX"
+                    hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
+                  >
+                    <input
+                      disabled={readOnly || !(draft.scannedFileNamesOverride ?? "").trim()}
+                      value={draft.scannedFileNamesOverrideReason ?? ""}
+                      onChange={(event) =>
+                        onChange({
+                          ...draft,
+                          scannedFileNamesOverrideReason: event.target.value,
+                        })
+                      }
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+              </div>
             </div>
-          </div>
-          <div className="rounded border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
-            <Field
-              label="AX — Tên file quét GCN/CCCD"
-              hint="Nguồn tự động: tên tệp thực tế sau khi tiếp nhận và đổi tên trên Drive. Để trống để dùng danh sách tự động."
-            >
-              <input
-                disabled={readOnly}
-                value={draft.scannedFileNamesOverride ?? ""}
-                placeholder="Tự động từ tệp đã xác minh"
-                onChange={(event) =>
-                  onChange({ ...draft, scannedFileNamesOverride: event.target.value })
-                }
-                className={inputClass}
-              />
-            </Field>
-            <div className="mt-3">
-              <Field
-                label="Lý do ghi đè cột AX"
-                hint="Tối thiểu 10 ký tự. Chỉ ghi lý do nghiệp vụ ngắn (ví dụ: Theo bản đồ địa chính đã đối chiếu). KHÔNG ghi CCCD hay thông tin định danh cá nhân — hệ thống sẽ từ chối lưu."
-              >
-                <input
-                  disabled={readOnly || !(draft.scannedFileNamesOverride ?? "").trim()}
-                  value={draft.scannedFileNamesOverrideReason ?? ""}
-                  onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      scannedFileNamesOverrideReason: event.target.value,
-                    })
-                  }
-                  className={inputClass}
-                />
-              </Field>
-            </div>
-          </div>
-        </div>
-      </Section>
+          </Section>
 
-      <Section title="Giấy chứng nhận — cột C–E">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Field label="C — Số phát hành GCN">
-            <input
-              disabled={readOnly}
-              value={draft.certificate.issueNumber}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  certificate: { ...draft.certificate, issueNumber: event.target.value },
-                })
-              }
-              className={inputClass}
-            />
-          </Field>
-          <Field label="D — Ngày cấp GCN" hint="Định dạng lưu: YYYY-MM-DD.">
-            <input
-              disabled={readOnly}
-              value={draft.certificate.issueDate}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  certificate: { ...draft.certificate, issueDate: event.target.value },
-                })
-              }
-              className={inputClass}
-            />
-          </Field>
-          <Field label="E — Số vào sổ GCN">
-            <input
-              disabled={readOnly}
-              value={draft.certificate.registryNumber}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  certificate: { ...draft.certificate, registryNumber: event.target.value },
-                })
-              }
-              className={inputClass}
-            />
-          </Field>
-        </div>
-      </Section>
+          <Section title="Giấy chứng nhận — cột C–E">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="C — Số phát hành GCN">
+                <input
+                  disabled={readOnly}
+                  value={draft.certificate.issueNumber}
+                  onChange={(event) =>
+                    onChange({
+                      ...draft,
+                      certificate: { ...draft.certificate, issueNumber: event.target.value },
+                    })
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="D — Ngày cấp GCN" hint="Định dạng lưu: YYYY-MM-DD.">
+                <input
+                  disabled={readOnly}
+                  value={draft.certificate.issueDate}
+                  onChange={(event) =>
+                    onChange({
+                      ...draft,
+                      certificate: { ...draft.certificate, issueDate: event.target.value },
+                    })
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="E — Số vào sổ GCN">
+                <input
+                  disabled={readOnly}
+                  value={draft.certificate.registryNumber}
+                  onChange={(event) =>
+                    onChange({
+                      ...draft,
+                      certificate: { ...draft.certificate, registryNumber: event.target.value },
+                    })
+                  }
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+          </Section>
         </>
       )}
 
@@ -347,226 +371,295 @@ export function WorkingPayloadEditor({
           title={`Chủ sử dụng, tổ chức và người đại diện — cột F–N (${draft.owners.length})`}
           description="Tổ chức (F/G) và người đại diện (H–L) là hai nhóm riêng, không còn dùng chung một ô dữ liệu."
         >
-        {!readOnly ? (
-          <button
-            type="button"
-            onClick={() =>
-              onChange({ ...draft, owners: [...draft.owners, emptyOwner(newId("owner"))] })
-            }
-            className="mb-4 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"
-          >
-            + Thêm chủ/người đại diện
-          </button>
-        ) : null}
-        <div className="space-y-4">
-          {draft.owners.map((owner, index) => {
-            const organisation = isOrganisationOwner(owner.ownerType);
-            const legacyOrganisation =
-              organisation &&
-              !owner.organisationName?.trim() &&
-              !owner.organisationIdentityNumber?.trim();
-            return (
-              <article
-                key={owner.id}
-                className="rounded border border-gray-200 p-4 dark:border-gray-700"
-              >
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <strong className="text-xs">Dòng chủ/người {index + 1}</strong>
-                  {!readOnly ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onChange({
-                          ...draft,
-                          owners: draft.owners.filter((_, current) => current !== index),
-                        })
-                      }
-                      className="text-xs text-red-700"
-                    >
-                      Xóa
-                    </button>
-                  ) : null}
-                </div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <Field label="M — Pháp nhân trên GCN">
-                    <select
-                      disabled={readOnly}
-                      value={owner.ownerType}
-                      onChange={(event) =>
-                        updateOwnerType(index, event.target.value as Owner["ownerType"])
-                      }
-                      className={inputClass}
-                    >
-                      {OWNER_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {OWNER_TYPE_LABELS[type]}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="N — Vai trò pháp nhân trên GCN">
-                    <Options
-                      disabled={readOnly}
-                      value={owner.roleOnCertificate}
-                      options={CERTIFICATE_ROLE_OPTIONS}
-                      onChange={(value) => updateOwner(index, "roleOnCertificate", value)}
-                    />
-                  </Field>
-                  {organisation ? (
-                    <>
-                      <Field label="F — Tên tổ chức">
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={() =>
+                onChange({ ...draft, owners: [...draft.owners, emptyOwner(newId("owner"))] })
+              }
+              className="mb-4 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              + Thêm chủ/người đại diện
+            </button>
+          ) : null}
+          <div className="space-y-4">
+            {draft.owners.map((owner, index) => {
+              const organisation = isOrganisationOwner(owner.ownerType);
+              const needsCitizenIdentity =
+                requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser;
+              const selectedForManualConfirmation = manualConfirmationOwnerIds.includes(owner.id);
+              const legacyOrganisation =
+                organisation &&
+                !owner.organisationName?.trim() &&
+                !owner.organisationIdentityNumber?.trim();
+              return (
+                <article
+                  key={owner.id}
+                  className="rounded border border-gray-200 p-4 dark:border-gray-700"
+                >
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong className="text-xs">Dòng chủ/người {index + 1}</strong>
+                      {needsCitizenIdentity ? (
+                        <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800">
+                          {identityStatusLabel(owner)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {!readOnly ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChange({
+                            ...draft,
+                            owners: draft.owners.filter((_, current) => current !== index),
+                          })
+                        }
+                        className="text-xs text-red-700"
+                      >
+                        Xóa
+                      </button>
+                    ) : null}
+                  </div>
+                  {needsCitizenIdentity && owner.identityStatus !== "MANUAL_COMPLETE" ? (
+                    <div className="mb-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
+                      <label className="flex items-start gap-2">
                         <input
-                          disabled={readOnly}
-                          value={
-                            owner.organisationName || (legacyOrganisation ? owner.fullName : "")
-                          }
+                          checked={selectedForManualConfirmation}
+                          disabled={readOnly || isDirty || saving || identityConfirmationBusy}
                           onChange={(event) =>
-                            updateOwner(index, "organisationName", event.target.value)
+                            setManualConfirmationOwnerIds((current) =>
+                              event.target.checked
+                                ? [...current, owner.id]
+                                : current.filter((ownerId) => ownerId !== owner.id),
+                            )
                           }
-                          className={inputClass}
+                          type="checkbox"
                         />
-                      </Field>
-                      <Field label="G — Số định danh tổ chức">
-                        <input
-                          disabled={readOnly}
-                          value={
-                            owner.organisationIdentityNumber ||
-                            (legacyOrganisation ? owner.identityNumber : "")
-                          }
-                          onChange={(event) =>
-                            updateOwner(index, "organisationIdentityNumber", event.target.value)
-                          }
-                          className={inputClass}
-                        />
-                      </Field>
-                    </>
+                        <span>Tôi đã đối chiếu CCCD/bản giấy tờ gốc của chủ sử dụng này.</span>
+                      </label>
+                      {isDirty ? (
+                        <p className="mt-2 text-amber-800">
+                          Lưu thay đổi PL3 trước khi xác nhận định danh.
+                        </p>
+                      ) : null}
+                      {selectedForManualConfirmation ? (
+                        <button
+                          className="mt-2 rounded bg-emerald-800 px-3 py-1.5 font-semibold text-white disabled:opacity-50"
+                          disabled={readOnly || saving || identityConfirmationBusy || isDirty}
+                          onClick={async () => {
+                            const confirmed = await onConfirmManualIdentity(owner.id);
+                            if (confirmed) {
+                              setManualConfirmationOwnerIds((current) =>
+                                current.filter((ownerId) => ownerId !== owner.id),
+                              );
+                            }
+                          }}
+                          type="button"
+                        >
+                          Xác nhận định danh thủ công
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
-                  <Field
-                    label={
-                      organisation
-                        ? "H — Họ tên người đại diện tổ chức"
-                        : "H — Họ và tên chủ sử dụng"
-                    }
-                  >
-                    <input
-                      disabled={readOnly}
-                      value={legacyOrganisation ? "" : owner.fullName}
-                      onChange={(event) => updateOwner(index, "fullName", event.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field label="I — Ngày, tháng, năm sinh">
-                    <input
-                      disabled={readOnly}
-                      value={owner.dateOfBirth}
-                      onChange={(event) => updateOwner(index, "dateOfBirth", event.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field label="J — Giới tính">
-                    <select
-                      disabled={readOnly}
-                      value={owner.gender}
-                      onChange={(event) =>
-                        updateOwner(index, "gender", event.target.value as Owner["gender"])
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <Field label="M — Pháp nhân trên GCN">
+                      <select
+                        disabled={readOnly}
+                        value={owner.ownerType}
+                        onChange={(event) =>
+                          updateOwnerType(index, event.target.value as Owner["ownerType"])
+                        }
+                        className={inputClass}
+                      >
+                        {OWNER_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {OWNER_TYPE_LABELS[type]}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="N — Vai trò pháp nhân trên GCN">
+                      <Options
+                        disabled={readOnly}
+                        value={owner.roleOnCertificate}
+                        options={CERTIFICATE_ROLE_OPTIONS}
+                        onChange={(value) => updateOwner(index, "roleOnCertificate", value)}
+                      />
+                    </Field>
+                    {organisation ? (
+                      <>
+                        <Field label="F — Tên tổ chức">
+                          <input
+                            disabled={readOnly}
+                            value={
+                              owner.organisationName || (legacyOrganisation ? owner.fullName : "")
+                            }
+                            onChange={(event) =>
+                              updateOwner(index, "organisationName", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+                        <Field label="G — Số định danh tổ chức">
+                          <input
+                            disabled={readOnly}
+                            value={
+                              owner.organisationIdentityNumber ||
+                              (legacyOrganisation ? owner.identityNumber : "")
+                            }
+                            onChange={(event) =>
+                              updateOwner(index, "organisationIdentityNumber", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+                      </>
+                    ) : null}
+                    <Field
+                      label={
+                        organisation
+                          ? "H — Họ tên người đại diện tổ chức"
+                          : "H — Họ và tên chủ sử dụng"
                       }
-                      className={inputClass}
                     >
-                      <option value="">-- Chọn --</option>
-                      <option value="NAM">Nam</option>
-                      <option value="NU">Nữ</option>
-                    </select>
-                  </Field>
-                  <Field label="K — Số định danh cá nhân/CCCD">
-                    <input
-                      disabled={readOnly}
-                      value={legacyOrganisation ? "" : owner.identityNumber}
-                      onChange={(event) => updateOwner(index, "identityNumber", event.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <div className="md:col-span-2 xl:col-span-4">
-                    <Field label="L — Địa chỉ thường trú">
                       <input
                         disabled={readOnly}
-                        value={owner.residenceAddress}
+                        value={legacyOrganisation ? "" : owner.fullName}
+                        onChange={(event) => updateOwner(index, "fullName", event.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label="I — Ngày, tháng, năm sinh">
+                      <input
+                        disabled={readOnly}
+                        value={owner.dateOfBirth}
+                        onChange={(event) => updateOwner(index, "dateOfBirth", event.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label="J — Giới tính">
+                      <select
+                        disabled={readOnly}
+                        value={owner.gender}
                         onChange={(event) =>
-                          updateOwner(index, "residenceAddress", event.target.value)
+                          updateOwner(index, "gender", event.target.value as Owner["gender"])
+                        }
+                        className={inputClass}
+                      >
+                        <option value="">-- Chọn --</option>
+                        <option value="NAM">Nam</option>
+                        <option value="NU">Nữ</option>
+                      </select>
+                    </Field>
+                    <Field label="K — Số định danh cá nhân/CCCD">
+                      <input
+                        disabled={readOnly}
+                        value={legacyOrganisation ? "" : owner.identityNumber}
+                        onChange={(event) =>
+                          updateOwner(index, "identityNumber", event.target.value)
                         }
                         className={inputClass}
                       />
                     </Field>
+                    <div className="md:col-span-2 xl:col-span-4">
+                      <Field label="L — Địa chỉ thường trú">
+                        <input
+                          disabled={readOnly}
+                          value={owner.residenceAddress}
+                          onChange={(event) =>
+                            updateOwner(index, "residenceAddress", event.target.value)
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
+                    </div>
                   </div>
-                </div>
 
-                <div className="mt-4 rounded bg-gray-50 p-3 dark:bg-gray-800/60">
-                  <label className="flex items-center gap-2 text-xs font-semibold">
-                    <input
-                      type="checkbox"
-                      disabled={readOnly}
-                      checked={owner.hasDistinctCurrentUser}
-                      onChange={(event) =>
-                        updateOwner(index, "hasDistinctCurrentUser", event.target.checked)
-                      }
-                    />
-                    Có người sử dụng đất hiện tại khác chủ sử dụng pháp lý
-                  </label>
-                  {owner.hasDistinctCurrentUser ? (
-                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <Field label="O — Tên người sử dụng hiện tại">
-                        <input
+                  {needsCitizenIdentity &&
+                  (owner.identityStatus === "QR_CONFIRMED" ||
+                    owner.identityStatus === "QR_OVERRIDE_PENDING_REVIEW") ? (
+                    <div className="mt-3">
+                      <Field
+                        label="Lý do nếu sửa họ tên, CCCD, ngày sinh hoặc giới tính đã xác nhận QR"
+                        hint="Bắt buộc khi thay đổi thông tin định danh từ QR; không ghi số CCCD vào lý do."
+                      >
+                        <textarea
                           disabled={readOnly}
-                          value={owner.currentUserName}
+                          value={owner.identityOverrideReason}
                           onChange={(event) =>
-                            updateOwner(index, "currentUserName", event.target.value)
+                            updateOwner(index, "identityOverrideReason", event.target.value)
                           }
                           className={inputClass}
-                        />
-                      </Field>
-                      <Field label="P — Số định danh cá nhân (CCCD)">
-                        <input
-                          disabled={readOnly}
-                          value={owner.currentUserCitizenId}
-                          onChange={(event) =>
-                            updateOwner(index, "currentUserCitizenId", event.target.value)
-                          }
-                          className={inputClass}
-                        />
-                      </Field>
-                      <Field label="Q — Địa chỉ thường trú (2 cấp)">
-                        <input
-                          disabled={readOnly}
-                          value={owner.currentUserAddress}
-                          onChange={(event) =>
-                            updateOwner(index, "currentUserAddress", event.target.value)
-                          }
-                          className={inputClass}
-                        />
-                      </Field>
-                      <Field label="R — Lý do thay đổi">
-                        <Options
-                          disabled={readOnly}
-                          value={owner.changeReason}
-                          options={CHANGE_REASON_OPTIONS}
-                          onChange={(value) => updateOwner(index, "changeReason", value)}
                         />
                       </Field>
                     </div>
                   ) : null}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </Section>
+
+                  <div className="mt-4 rounded bg-gray-50 p-3 dark:bg-gray-800/60">
+                    <label className="flex items-center gap-2 text-xs font-semibold">
+                      <input
+                        type="checkbox"
+                        disabled={readOnly}
+                        checked={owner.hasDistinctCurrentUser}
+                        onChange={(event) =>
+                          updateOwner(index, "hasDistinctCurrentUser", event.target.checked)
+                        }
+                      />
+                      Có người sử dụng đất hiện tại khác chủ sử dụng pháp lý
+                    </label>
+                    {owner.hasDistinctCurrentUser ? (
+                      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <Field label="O — Tên người sử dụng hiện tại">
+                          <input
+                            disabled={readOnly}
+                            value={owner.currentUserName}
+                            onChange={(event) =>
+                              updateOwner(index, "currentUserName", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+                        <Field label="P — Số định danh cá nhân (CCCD)">
+                          <input
+                            disabled={readOnly}
+                            value={owner.currentUserCitizenId}
+                            onChange={(event) =>
+                              updateOwner(index, "currentUserCitizenId", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+                        <Field label="Q — Địa chỉ thường trú (2 cấp)">
+                          <input
+                            disabled={readOnly}
+                            value={owner.currentUserAddress}
+                            onChange={(event) =>
+                              updateOwner(index, "currentUserAddress", event.target.value)
+                            }
+                            className={inputClass}
+                          />
+                        </Field>
+                        <Field label="R — Lý do thay đổi">
+                          <Options
+                            disabled={readOnly}
+                            value={owner.changeReason}
+                            options={CHANGE_REASON_OPTIONS}
+                            onChange={(value) => updateOwner(index, "changeReason", value)}
+                          />
+                        </Field>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </Section>
       )}
 
       {(activeTab === "all" || activeTab === "parcels") && (
-        <EditableParcelTable
-          parcels={draft.parcels}
-          readOnly={readOnly}
-          onChange={updateParcels}
-        />
+        <EditableParcelTable parcels={draft.parcels} readOnly={readOnly} onChange={updateParcels} />
       )}
 
       {(activeTab === "all" || activeTab === "assets") && (
@@ -621,7 +714,8 @@ export function WorkingPayloadEditor({
                     >
                       {draft.parcels.map((parcel, parcelIdx) => (
                         <option key={parcel.id} value={parcel.id}>
-                          Thửa {parcel.parcelNumber || parcelIdx + 1} (Tờ {parcel.mapSheetNumber || "-"})
+                          Thửa {parcel.parcelNumber || parcelIdx + 1} (Tờ{" "}
+                          {parcel.mapSheetNumber || "-"})
                         </option>
                       ))}
                     </select>
@@ -658,7 +752,9 @@ export function WorkingPayloadEditor({
                     <input
                       disabled={readOnly}
                       value={asset.apartmentNumber ?? ""}
-                      onChange={(event) => updateAsset(index, "apartmentNumber", event.target.value)}
+                      onChange={(event) =>
+                        updateAsset(index, "apartmentNumber", event.target.value)
+                      }
                       className={inputClass}
                     />
                   </Field>
@@ -666,7 +762,9 @@ export function WorkingPayloadEditor({
                     <input
                       disabled={readOnly}
                       value={asset.constructionArea ?? ""}
-                      onChange={(event) => updateAsset(index, "constructionArea", event.target.value)}
+                      onChange={(event) =>
+                        updateAsset(index, "constructionArea", event.target.value)
+                      }
                       className={inputClass}
                     />
                   </Field>

@@ -9,7 +9,10 @@ import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
 import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
-import { WorkingPayloadEditor } from "@/components/admin/working-payload-editor";
+import {
+  WorkingPayloadEditor,
+  type WorkingPayloadEditorTab,
+} from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 import { DocumentViewer } from "@/components/admin/document-viewer";
 import {
@@ -37,6 +40,7 @@ type Submission = {
   files: {
     fileId: string;
     documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
+    ownerId: string;
   }[];
 };
 
@@ -145,9 +149,7 @@ export function SubmissionDetail({
     registryNumber: "",
   });
   const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
-  const [manualIdentityConfirmationOwnerIds, setManualIdentityConfirmationOwnerIds] = useState<
-    string[]
-  >([]);
+  const [workingPayloadTab, setWorkingPayloadTab] = useState<WorkingPayloadEditorTab>("all");
   /** Giữ nguyên qua các lần bấm lại để saga tiếp tục từ checkpoint, không tạo hồ sơ chính thức mới. */
   const acceptKeyRef = useRef("");
   const isClaimedByMe =
@@ -167,7 +169,6 @@ export function SubmissionDetail({
     if (!submission?.draft) return;
     setAmendMode(mode === "AMEND");
     setAmendmentReason("");
-    setManualIdentityConfirmationOwnerIds([]);
     setEditCertificate({ ...submission.draft.certificate });
     setEditOwners(
       submission.draft.owners.map((owner) => ({
@@ -256,8 +257,8 @@ export function SubmissionDetail({
       setBusy(false);
     }
   }
-  async function confirmManualIdentity() {
-    if (!submission || manualIdentityConfirmationOwnerIds.length === 0) return;
+  async function confirmManualIdentity(ownerId: string): Promise<boolean> {
+    if (!submission || workingPayload.isDirty) return false;
     setBusy(true);
     setMessage(null);
     try {
@@ -271,7 +272,7 @@ export function SubmissionDetail({
         },
         body: JSON.stringify({
           version: submission.version,
-          manualIdentityConfirmation: { ownerIds: manualIdentityConfirmationOwnerIds },
+          manualIdentityConfirmation: { ownerIds: [ownerId] },
         }),
       });
       const data = (await response.json()) as {
@@ -282,10 +283,11 @@ export function SubmissionDetail({
         throw new Error(data.error?.message ?? "Không thể xác nhận định danh.");
       }
       setSubmission(await loadSubmission(submission.submissionId));
-      setEditOpen(false);
       setMessage("Đã ghi nhận cán bộ đối chiếu và xác nhận định danh thủ công.");
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể xác nhận định danh.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -315,9 +317,14 @@ export function SubmissionDetail({
                     itemType: supplementKind || "FIELD",
                     targetEntityType: "SUBMISSION",
                     targetEntityId: "",
-                    fieldPath: supplementKind === "FIELD" ? (supplementTarget.trim() || "certificate") : "",
-                    documentType: supplementKind === "FILE" ? (supplementDocument || "CERTIFICATE") : "",
-                    instruction: supplementInstruction.trim() || supplementMessage.trim() || "Vui lòng kiểm tra và bổ sung hồ sơ theo hướng dẫn.",
+                    fieldPath:
+                      supplementKind === "FIELD" ? supplementTarget.trim() || "certificate" : "",
+                    documentType:
+                      supplementKind === "FILE" ? supplementDocument || "CERTIFICATE" : "",
+                    instruction:
+                      supplementInstruction.trim() ||
+                      supplementMessage.trim() ||
+                      "Vui lòng kiểm tra và bổ sung hồ sơ theo hướng dẫn.",
                   },
                 ],
               }
@@ -462,11 +469,20 @@ export function SubmissionDetail({
   const statusLabels: Record<string, { label: string; color: string }> = {
     SUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
     UNDER_REVIEW: { label: "Đang xử lý", color: "bg-sky-100 text-sky-900 border-sky-300" },
-    NEEDS_SUPPLEMENT: { label: "Cần bổ sung", color: "bg-orange-100 text-orange-900 border-orange-300" },
+    NEEDS_SUPPLEMENT: {
+      label: "Cần bổ sung",
+      color: "bg-orange-100 text-orange-900 border-orange-300",
+    },
     RESUBMITTED: { label: "Đã gửi lại", color: "bg-blue-100 text-blue-900 border-blue-300" },
     REJECTED: { label: "Từ chối", color: "bg-rose-100 text-rose-900 border-rose-300" },
-    ACCEPTING: { label: "Đang tiếp nhận", color: "bg-emerald-100 text-emerald-900 border-emerald-300 animate-pulse" },
-    ACCEPTED: { label: "Đã tiếp nhận", color: "bg-emerald-100 text-emerald-900 border-emerald-300" },
+    ACCEPTING: {
+      label: "Đang tiếp nhận",
+      color: "bg-emerald-100 text-emerald-900 border-emerald-300 animate-pulse",
+    },
+    ACCEPTED: {
+      label: "Đã tiếp nhận",
+      color: "bg-emerald-100 text-emerald-900 border-emerald-300",
+    },
     DRAFT: { label: "Nháp", color: "bg-stone-100 text-stone-700 border-stone-300" },
     EXPIRED: { label: "Hết hạn", color: "bg-stone-100 text-stone-600 border-stone-300" },
   };
@@ -478,10 +494,15 @@ export function SubmissionDetail({
   return (
     <main className="mx-auto min-h-screen max-w-[1600px] px-4 py-6 sm:px-6">
       <div className="flex items-center justify-between">
-        <Link className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-800 hover:underline" href="/submissions">
+        <Link
+          className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-800 hover:underline"
+          href="/submissions"
+        >
           ← Hàng chờ tiếp nhận
         </Link>
-        <span className="text-xs text-stone-500">Mã tiếp nhận: <strong className="text-stone-900">{submission.receiptCode}</strong></span>
+        <span className="text-xs text-stone-500">
+          Mã tiếp nhận: <strong className="text-stone-900">{submission.receiptCode}</strong>
+        </span>
       </div>
 
       <div className="mt-3">
@@ -503,12 +524,15 @@ export function SubmissionDetail({
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-stone-950">Bản kê khai hồ sơ đất đai</h1>
-              <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold ${statusBadge.color}`}>
+              <span
+                className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold ${statusBadge.color}`}
+              >
                 {statusBadge.label}
               </span>
             </div>
             <p className="mt-1 text-xs text-stone-500">
-              Liên hệ: <span className="font-semibold text-stone-800">{submission.phone}</span> · Phụ trách:{" "}
+              Liên hệ: <span className="font-semibold text-stone-800">{submission.phone}</span> ·
+              Phụ trách:{" "}
               <span className="font-semibold text-stone-800">
                 {assignedOfficerLabel({
                   claimedBy: submission.claimedBy ?? "",
@@ -516,7 +540,11 @@ export function SubmissionDetail({
                 })}
               </span>
               {submission.officialCaseId && (
-                <> · Mã chính thức: <strong className="text-emerald-800">{submission.officialCaseId}</strong></>
+                <>
+                  {" "}
+                  · Mã chính thức:{" "}
+                  <strong className="text-emerald-800">{submission.officialCaseId}</strong>
+                </>
               )}
             </p>
           </div>
@@ -543,7 +571,12 @@ export function SubmissionDetail({
               type="button"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
               {submission.status === "ACCEPTING" ? "Tiếp tục tiếp nhận" : "Tiếp nhận chính thức"}
             </button>
@@ -561,11 +594,16 @@ export function SubmissionDetail({
             )}
             <button
               className="rounded-lg border border-sky-700 bg-sky-50 px-3.5 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW" || !submission.draft}
-              onClick={() => openEdit("EDIT")}
+              disabled={busy || submission.status !== "UNDER_REVIEW" || !workingPayload.draft}
+              onClick={() => {
+                setWorkingPayloadTab("owners");
+                document
+                  .getElementById("working-payload-editor")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
               type="button"
             >
-              Chỉnh sửa thông tin
+              Mở tab Chủ sử dụng
             </button>
             {submission.status === "ACCEPTED" && (
               <button
@@ -586,7 +624,9 @@ export function SubmissionDetail({
               onClick={() => {
                 setSupplementMessage("");
                 setSupplementInstruction("");
-                const promptMsg = window.prompt("Nhập nội dung thông báo yêu cầu bổ sung gửi người dân:");
+                const promptMsg = window.prompt(
+                  "Nhập nội dung thông báo yêu cầu bổ sung gửi người dân:",
+                );
                 if (promptMsg && promptMsg.trim()) {
                   setSupplementMessage(promptMsg.trim());
                   setSupplementInstruction(promptMsg.trim());
@@ -601,7 +641,9 @@ export function SubmissionDetail({
               className="rounded-lg border border-rose-700 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-50"
               disabled={busy || submission.status !== "UNDER_REVIEW"}
               onClick={() => {
-                if (window.confirm("Xác nhận TỪ CHỐI hồ sơ này? Thao tác này không thể hoàn tác.")) {
+                if (
+                  window.confirm("Xác nhận TỪ CHỐI hồ sơ này? Thao tác này không thể hoàn tác.")
+                ) {
                   void action("REJECT");
                 }
               }}
@@ -613,7 +655,10 @@ export function SubmissionDetail({
         </div>
 
         {message && (
-          <p aria-live="polite" className="mt-3 rounded-lg bg-stone-100 p-3 text-sm text-stone-700 border border-stone-200">
+          <p
+            aria-live="polite"
+            className="mt-3 rounded-lg bg-stone-100 p-3 text-sm text-stone-700 border border-stone-200"
+          >
             {message}
           </p>
         )}
@@ -644,7 +689,11 @@ export function SubmissionDetail({
             </h2>
             <span className="text-xs text-stone-500">{submission.files.length} ảnh</span>
           </div>
-          <DocumentViewer submissionId={submission.submissionId} files={submission.files} />
+          <DocumentViewer
+            submissionId={submission.submissionId}
+            files={submission.files}
+            ownerIds={draft?.owners.map((owner) => owner.id) ?? []}
+          />
         </div>
 
         {/* Right Column: Information & Working Payload Editor (7 Cols on large screen) */}
@@ -675,9 +724,14 @@ export function SubmissionDetail({
 
           {/* Working Payload Editor (Full 49 PL3 columns tabbed) */}
           {submission.status === "UNDER_REVIEW" && workingPayload.draft ? (
-            <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
+            <section
+              id="working-payload-editor"
+              className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm"
+            >
               <div className="mb-3">
-                <h2 className="text-base font-bold text-stone-900">2. Bàn làm việc biên tập 49 cột PL3</h2>
+                <h2 className="text-base font-bold text-stone-900">
+                  2. Bàn làm việc biên tập 49 cột PL3
+                </h2>
                 <p className="text-xs text-stone-500">
                   {isClaimedByMe
                     ? "Sửa thông tin GCN, Chủ sử dụng, Thửa đất và Tài sản. Dữ liệu sẽ lưu vào Bản làm việc."
@@ -702,6 +756,10 @@ export function SubmissionDetail({
                 saving={workingPayload.saving}
                 saveError={workingPayload.saveError}
                 saveSuccess={workingPayload.saveSuccess}
+                activeTab={workingPayloadTab}
+                onTabChange={setWorkingPayloadTab}
+                onConfirmManualIdentity={confirmManualIdentity}
+                identityConfirmationBusy={busy}
               />
             </section>
           ) : draft ? (
@@ -725,12 +783,17 @@ export function SubmissionDetail({
                 </dl>
               </section>
               <section className="rounded-xl border border-stone-200 bg-white p-4">
-                <h2 className="text-sm font-bold text-stone-900 mb-2">Chủ sử dụng ({draft.owners.length})</h2>
+                <h2 className="text-sm font-bold text-stone-900 mb-2">
+                  Chủ sử dụng ({draft.owners.length})
+                </h2>
                 <div className="space-y-2 text-xs">
                   {draft.owners.map((owner, idx) => (
                     <div key={idx} className="rounded bg-stone-50 p-2.5 border border-stone-200">
                       <p className="font-semibold">{owner.fullName || "Chưa khai"}</p>
-                      <p className="text-stone-600">CCCD: {owner.identityNumber || "-"} · Sinh: {owner.dateOfBirth || "-"} · Giới tính: {owner.gender || "-"}</p>
+                      <p className="text-stone-600">
+                        CCCD: {owner.identityNumber || "-"} · Sinh: {owner.dateOfBirth || "-"} ·
+                        Giới tính: {owner.gender || "-"}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -754,7 +817,8 @@ export function SubmissionDetail({
             <section className="rounded-xl border border-stone-200 bg-white p-4 text-xs">
               <h2 className="font-bold text-stone-900">Cấp lại mã bí mật cho người dân</h2>
               <p className="mt-1 text-stone-600">
-                Chỉ thực hiện khi người dân đến trực tiếp và cán bộ đã đối chiếu giấy tờ. Nhập “ĐÃ XÁC MINH”.
+                Chỉ thực hiện khi người dân đến trực tiếp và cán bộ đã đối chiếu giấy tờ. Nhập “ĐÃ
+                XÁC MINH”.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <input
@@ -774,7 +838,9 @@ export function SubmissionDetail({
               {newAccessSecret && (
                 <div className="mt-3 rounded bg-amber-50 p-2.5 border border-amber-200">
                   <p className="font-semibold text-amber-900">Mã mới — chỉ hiển thị lần này</p>
-                  <p className="mt-1 select-all font-mono text-base font-bold text-amber-950">{newAccessSecret}</p>
+                  <p className="mt-1 select-all font-mono text-base font-bold text-amber-950">
+                    {newAccessSecret}
+                  </p>
                 </div>
               )}
             </section>
@@ -879,17 +945,6 @@ export function SubmissionDetail({
               <h3 className="font-semibold">Chủ sử dụng</h3>
               {editOwners.map((owner, index) => {
                 const qrConfirmed = isOwnerIdentityQrConfirmed(owner.identityStatus);
-                const manuallyConfirmed = owner.identityStatus === "MANUAL_COMPLETE";
-                const canConfirmManually =
-                  !amendMode &&
-                  !qrConfirmed &&
-                  !manuallyConfirmed &&
-                  !owner.hasDistinctCurrentUser &&
-                  owner.ownerType !== "TO_CHUC" &&
-                  owner.ownerType !== "CONG_DONG_DAN_CU";
-                const selectedForManualConfirmation = manualIdentityConfirmationOwnerIds.includes(
-                  owner.id,
-                );
                 function updateOwner(patch: Partial<EditableOwner>) {
                   setEditOwners((current) =>
                     current.map((item, itemIndex) =>
@@ -903,30 +958,6 @@ export function SubmissionDetail({
                       <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
                         Đọc từ chip CCCD qua QR. Sửa được, nhưng mỗi lần ghi đè đều được ghi nhận
                         riêng trong nhật ký — chỉ sửa khi đối chiếu bìa/thẻ thấy sai thật.
-                      </p>
-                    ) : null}
-                    {canConfirmManually ? (
-                      <label className="mb-3 flex cursor-pointer items-start gap-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
-                        <input
-                          checked={selectedForManualConfirmation}
-                          className="mt-1"
-                          onChange={(event) => {
-                            setManualIdentityConfirmationOwnerIds((current) =>
-                              event.target.checked
-                                ? [...current, owner.id]
-                                : current.filter((ownerId) => ownerId !== owner.id),
-                            );
-                          }}
-                          type="checkbox"
-                        />
-                        <span>
-                          Tôi đã đối chiếu CCCD/bản giấy tờ gốc và xác nhận thông tin định danh
-                          của chủ sử dụng này.
-                        </span>
-                      </label>
-                    ) : manuallyConfirmed ? (
-                      <p className="mb-3 rounded bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
-                        Thông tin định danh đã được xác nhận thủ công.
                       </p>
                     ) : null}
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -1021,27 +1052,13 @@ export function SubmissionDetail({
               >
                 Hủy
               </button>
-              {!amendMode && manualIdentityConfirmationOwnerIds.length > 0 ? (
-                <button
-                  className="rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => void confirmManualIdentity()}
-                  type="button"
-                >
-                  Xác nhận đã đối chiếu CCCD
-                </button>
-              ) : null}
               <button
                 className={
                   amendMode
                     ? "rounded-lg bg-orange-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
                     : "rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
                 }
-                disabled={
-                  busy ||
-                  manualIdentityConfirmationOwnerIds.length > 0 ||
-                  (amendMode && amendmentReason.trim().length < 10)
-                }
+                disabled={busy || (amendMode && amendmentReason.trim().length < 10)}
                 onClick={() => void saveEdit()}
                 type="button"
               >

@@ -1,5 +1,38 @@
 # 06 — AI Working Log
 
+## [2026-07-29] Hoàn thiện PR #8 — PL3 là luồng xác nhận định danh chính thức
+
+- Đưa xác nhận thủ công vào tab Chủ sử dụng của `WorkingPayloadEditor`; khi `UNDER_REVIEW`, nút
+  hành động chỉ điều hướng tới tab này. `PUT /working-payload` so sánh payload hiệu lực và tự suy ra
+  `QR_OVERRIDE_PENDING_REVIEW`/`PENDING_CONFIRMATION`, từ chối trạng thái xác nhận client giả mạo.
+- GET detail trả `files[].ownerId`; `DocumentViewer` gắn “CCCD chủ n – mặt trước/sau”, đánh số GCN
+  độc lập, reset khi bộ ảnh đổi, đóng lightbox bằng Esc và có nhãn dialog truy cập được.
+- Thêm test transition QR/thủ công, nhãn DocumentViewer và replay PATCH xác nhận; không migration,
+  không nới `completionChecks`.
+
+## [2026-07-29] E2E Preview với fixture cán bộ — bị chặn bởi Vercel Deployment Protection
+
+- **Lệnh:** chạy `npm run test:e2e:preview` tương đương với `E2E_BASE_URL=https://capphongchau-87rwc5g4n-vi-phuong-158s-projects.vercel.app`, fixture PNG trong `tests/fixtures/`, cán bộ `SYSTEM_ADMIN` và `REVIEW_OFFICER` active của preview.
+- **Kết quả:** 15 test được thu nhận; 1 pass (E2E-07), 14 fail trước khi vào ứng dụng vì Preview chuyển hướng tới `vercel.com/login` (Deployment Protection). E2E-06c nhận 401 thay vì 403 cùng nguyên nhân phiên chưa tới app.
+- **Dọn dẹp:** chạy dry-run rồi xóa 2 hồ sơ đúng số điện thoại E2E `0912345678` và các bảng con; không xóa 9 file Drive mồ côi khác vì chúng thuộc nhiều hồ sơ cần đối chiếu.
+- **Còn lại:** cần URL Preview có bypass hợp lệ hoặc tạm tắt Deployment Protection để chạy lại; không phải lỗi fixture hay code PR #8.
+
+## [2026-07-29] Phase 1 hiệu năng — hàng chờ SQL keyset và tìm kiếm có index
+
+- **Agent:** Codex.
+- **Thay đổi:** `GET /api/submissions` chuyển từ `repository.list()`/`listSummaries()` + lọc/sắp
+  xếp/chia trang trong Node sang `PublicIntakeRepository.listQueuePage`. PostgreSQL lọc status, tìm
+  mã tiếp nhận/số GCN/tên chủ, keyset theo `(updated_at, submission_id)`, `ORDER BY` và `LIMIT 101`;
+  route vẫn giữ `SUBMISSION_READ_ROLES`, masking phone và `no-store`.
+- **Schema:** Thêm migration additive `202607290004_queue_search_performance.sql` với hai generated
+  column, hai B-tree page index và ba GIN trigram index. Preflight được mở rộng để kiểm đủ cột/index
+  trước deploy.
+- **UI:** Tìm kiếm debounce 350 ms, không gửi một ký tự, abort request cũ và giữ bảng hiện tại khi
+  đang tải. Cursor mới là base64url opaque của `{updatedAt, submissionId}` đã validate.
+- **Kiểm tra:** focused 41/41 pass; full Vitest 664 pass/10 skip; typecheck và production build
+  pass; full ESLint 0 lỗi/10 warning có sẵn, tập file Phase 1 có 0 warning. Chưa áp
+  migration/benchmark Preview, chưa có P50/P95.
+
 > Đây là nhật ký lịch sử bắt buộc để truy vết, không phải danh sách chỉ dẫn hiện hành. Tên file/kế
 > hoạch cũ trong các entry giữ nguyên theo thời điểm phát sinh; xem `PLAN.md` và `docs/README.md`
 > để biết nguồn sự thật hiện tại.
@@ -2539,3 +2572,20 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   tiêu giảm 35% thời gian/50% dung lượng, chất lượng chữ nhỏ hoặc tỷ lệ QR. Tài liệu nguồn sự thật
   được đồng bộ để ghi rõ ngoại lệ “bản tiếp nhận vận hành”. Rollback: đặt cờ `false` và redeploy,
   không có migration.
+## [2026-07-29] Migration queue performance và benchmark Preview 20.000
+
+- **Agent:** Codex.
+- **Thao tác:** Xác nhận rehearsal/Preview Supabase project ref `ddiaaweuqfvutogjckwc`, không dùng project ref trong `.env.local`.
+- **Migration:** Chạy `202607290004_queue_search_performance.sql` thành công; xác nhận 5 index queue và generated columns.
+- **Benchmark:** Chèn 20.000 hồ sơ synthetic trong transaction, `EXPLAIN (ANALYZE, BUFFERS)`, sau đó rollback. Trang status 17,99 ms; owner trigram 4,95 ms; receipt trigram 47,22 ms; issue 62,60 ms (planner vẫn dùng status index + filter).
+- **Preflight:** 29/32; 3 fail do rehearsal chưa có migration `202607290001`/`202607290002`. Không deploy code mới từ database này cho đến khi chạy đủ migration phụ thuộc.
+- **An toàn:** Không seed dữ liệu lưu lại; không in secret; `.env.local` không bị sử dụng.
+## [2026-07-29] Phase 1 rehearsal reset, preflight 32/32 và Preview deploy
+
+- **Agent:** Codex.
+- **Migration dependency:** `202607290001` bật RLS/revoke trên `public_upload_attempts`; `202607290002` phụ thuộc schema PL3 gốc và thêm cột/FK/index additive.
+- **Thao tác:** Reset schema `public` trên rehearsal project ref `ddiaaweuqfvutogjckwc` trong transaction; áp 20 migration theo thứ tự tên file; commit thành công. Không đọc/ghi `.env.local`.
+- **Kết quả:** Preflight **32/32**; health database/schema `ok`; `202607290004` vẫn hoạt động sau toàn bộ migration.
+- **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
+- **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
+- **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.

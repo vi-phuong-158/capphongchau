@@ -1,5 +1,437 @@
 # CHATGPT HANDOFF REPORT
 
+## Phase 1 performance report — SQL queue pagination/search (2026-07-29)
+
+### 1. Report metadata
+
+- Project: Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu (`land-ocr-180`)
+- Repository path: `D:\04. Github\capphongchau`
+- Generated at: 2026-07-29 16:14 +07:00
+- Agent: Codex
+- Task: Triển khai Phase 1 của `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md`
+- Status: `READY_FOR_REVIEW`
+- Preview migration/benchmark follow-up: migration `202607290004_queue_search_performance.sql` applied on rehearsal project ref `ddiaaweuqfvutogjckwc`; 20,000 synthetic rows benchmarked inside a transaction and rolled back. Status 17.99 ms, owner trigram 4.95 ms, receipt trigram 47.22 ms, issue 62.60 ms. Full preflight is 29/32 because rehearsal lacks older migrations `202607290001`/`202607290002`; do not deploy code to that DB until dependencies are applied.
+- Phase 1 acceptance follow-up: rehearsal `public` schema was reset transactionally and all 20 migrations were applied in filename order; preflight is now **32/32 PASS**. Preview deployment is Ready at `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app` (`dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`). `GET /api/health/database` returned 200/schema ok; unauthenticated `GET /api/submissions` returned 401. Added `Server-Timing` (`auth`, `queue_db`, `total`) on successful queue responses. Authenticated end-to-end queue benchmark (P50/P95, search/cursor/phone masking) is **blocked** because Preview auth credentials/session cookie are not available; Vercel env pull redacts secrets. Phase 1 is not marked PASS.
+- Source plan: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md` §6 Phase 1
+- Source acceptance criteria: tài liệu trên §6, §7, §8
+- Source security constraints: `AGENTS.md` §5–§7
+
+### 2. Git identity
+
+- Current branch: `codex/perf-queue-sql-pagination`
+- Remote: `origin https://github.com/vi-phuong-158/capphongchau.git`
+- Base commit before work: `2fca1f363c8c6212692ca048c61e3929750493e8`
+- Head commit after work: `2fca1f363c8c6212692ca048c61e3929750493e8` + uncommitted changes
+- Commit created: Không
+- Working tree state: Dirty; gồm thay đổi Phase 1 và thay đổi PR #8 xuất hiện đồng thời
+- User changes detected before work: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md`
+  là file untracked
+- User changes preserved: Có; không sửa tài liệu review nguồn và không ghi đè nhóm PR #8
+
+#### Git status
+
+```text
+## codex/perf-queue-sql-pagination
+ M AGENTS.md
+ M CHATGPT_HANDOFF.md
+ M docs/architecture.md
+ M docs/brain/01-architecture.md
+ M docs/brain/03-decisions.md
+ M docs/brain/04-current-tasks.md
+ M docs/brain/06-ai-working-log.md
+ M scripts/preflight-public-intake-v2-migrations.ts
+ M src/app/api/submissions/[submissionId]/route.ts                 # PR #8 đồng thời
+ M src/app/api/submissions/[submissionId]/working-payload/route.ts # PR #8 đồng thời
+ M src/app/api/submissions/route.ts
+ M src/components/admin/document-viewer.tsx                        # PR #8 đồng thời
+ M src/components/admin/working-payload-editor.tsx                 # PR #8 đồng thời
+ M src/components/submission-detail.tsx                            # PR #8 đồng thời
+ M src/components/submissions-queue.tsx
+ M src/modules/public-intake/repository.ts
+?? docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md # có trước task
+?? evidence/PERFORMANCE_BASELINE.md
+?? src/modules/submissions/queue-pagination.ts
+?? src/modules/submissions/working-identity-transitions.ts         # PR #8 đồng thời
+?? supabase/migrations/202607290004_queue_search_performance.sql
+?? tests/document-viewer.test.ts                                  # PR #8 đồng thời
+?? tests/manual-identity-confirmation-route.test.ts                # PR #8 đồng thời
+?? tests/submissions-queue-performance.test.ts
+?? tests/submissions-queue-repository.test.ts
+?? tests/working-identity-transitions.test.ts                      # PR #8 đồng thời
+```
+
+#### Phase 1 diff statistics
+
+```text
+10 tracked files: 349 insertions, 88 deletions
+5 Phase 1 files mới: evidence, cursor module, migration, 2 test files
+```
+
+#### Phase 1 name status
+
+```text
+M AGENTS.md
+M docs/architecture.md
+M docs/brain/01-architecture.md
+M docs/brain/03-decisions.md
+M docs/brain/04-current-tasks.md
+M docs/brain/06-ai-working-log.md
+M scripts/preflight-public-intake-v2-migrations.ts
+M src/app/api/submissions/route.ts
+M src/components/submissions-queue.tsx
+M src/modules/public-intake/repository.ts
+A evidence/PERFORMANCE_BASELINE.md
+A src/modules/submissions/queue-pagination.ts
+A supabase/migrations/202607290004_queue_search_performance.sql
+A tests/submissions-queue-performance.test.ts
+A tests/submissions-queue-repository.test.ts
+```
+
+### 3. Executive summary
+
+Hàng chờ trước đây đọc toàn bộ danh sách, và khi tìm kiếm còn đọc toàn bộ `draft_json`, rồi mới lọc,
+sắp xếp và cắt 100 dòng trong Node. Phase 1 chuyển toàn bộ thao tác này vào PostgreSQL:
+
+- `PublicIntakeRepository.listQueuePage()` thực hiện status/search/keyset/order/limit;
+- mỗi request đọc tối đa 101 dòng kết quả chính và trả tối đa 100;
+- cursor dùng cả `updated_at` và `submission_id`, không bỏ sót do timestamp trùng;
+- migration thêm generated columns và index B-tree/GIN trigram;
+- UI debounce 350 ms, không tìm một ký tự và giữ bảng cũ khi tải;
+- auth, role, masking số điện thoại và `cache-control: no-store` giữ nguyên.
+
+Code, unit test, typecheck, lint và build đạt. Chưa áp migration hoặc đo Preview 20.000 hồ sơ, nên chưa
+tuyên bố đạt P95 ≤ 1,5 giây và chưa sẵn sàng deploy.
+
+### 4. Baseline before changes
+
+| Check | Command | Result | Evidence |
+|---|---|---|---|
+| Unit tests | `npm test` | PASS — 646 pass, 10 skip | Exit 0, 8,29 giây |
+| Integration tests | Không chạy DB | NOT TESTED | Không có Preview DB được phép |
+| E2E tests | Không chạy | NOT TESTED | Ngoài Phase 1 local |
+| Build | `npm run build` | PASS | Exit 0 |
+| Lint | `npm run lint` | PASS — 0 error, 10 warning có sẵn | Exit 0 |
+| Typecheck | `npm run typecheck` | PASS | Exit 0 |
+
+Baseline chi tiết và giới hạn đo nằm ở `evidence/PERFORMANCE_BASELINE.md`.
+
+### 5. Scope
+
+#### In scope
+
+- SQL keyset pagination/search cho `GET /api/submissions`
+- Cursor encode/decode/validation
+- Generated columns và indexes
+- Debounce UI và giữ bảng cũ khi tải
+- Test, preflight migration, tài liệu và handoff
+
+#### Out of scope
+
+- Phase 2 server-prime detail/lazy preview
+- Lazy Drive folder, pool size, acceptance batching
+- Deploy, merge, migration thật, load test Production
+- Sửa nhóm PR #8 xuất hiện đồng thời
+
+#### Deviations from approved plan
+
+- Không chạy `EXPLAIN ANALYZE`/P50/P95 vì không có database Preview tách biệt được cho phép.
+- Bổ sung preflight cho migration `202607290004`; full test bắt buộc việc này và đây là đúng phạm vi
+  an toàn triển khai.
+
+### 6. Decisions implemented
+
+| Decision | Implementation | Evidence |
+|---|---|---|
+| PostgreSQL phân trang | `listQueuePage`, `LIMIT pageLimit + 1` | repository test |
+| Keyset ổn định | `(updated_at, submission_id)` | cursor + repository tests |
+| Tìm kiếm có index | generated columns + `pg_trgm` GIN | migration/source test |
+| Không tải lại theo từng phím | debounce 350 ms, min 2 ký tự | source test |
+| Giữ bảo mật hiện hữu | same role check, `maskPhone`, no-store | route test/source |
+
+### 7. Changed files
+
+| File | Change | Symbols/components | Purpose | Risk |
+|---|---|---|---|---|
+| `src/modules/submissions/queue-pagination.ts` | Added | `QueueCursor`, encode/decode | Cursor opaque, validate | Low |
+| `src/modules/public-intake/repository.ts` | Modified | `listQueuePage`, queue DTO | SQL page/search | Medium |
+| `src/app/api/submissions/route.ts` | Modified | `GET` | Dùng repository page, validate input | Medium |
+| `src/components/submissions-queue.tsx` | Modified | `SubmissionsQueue` | Debounce/giữ bảng | Low |
+| `supabase/migrations/202607290004_queue_search_performance.sql` | Added | columns/indexes | Tăng tốc DB | Medium |
+| `scripts/preflight-public-intake-v2-migrations.ts` | Modified | `runChecks` | Gate cột/index mới | Low |
+| `tests/submissions-queue-performance.test.ts` | Added | 12 tests | Cursor/source invariants | Low |
+| `tests/submissions-queue-repository.test.ts` | Added | 2 tests | SQL params/page cursor | Low |
+| `evidence/PERFORMANCE_BASELINE.md` | Added | baseline/runbook | Bằng chứng và benchmark còn lại | Low |
+| `AGENTS.md`, `docs/architecture.md`, `docs/brain/01/03/04/06` | Modified | docs | Đồng bộ schema/Code Graph/log | Low |
+| `CHATGPT_HANDOFF.md` | Modified | report | Bàn giao chính thức | Low |
+
+### 8. Detailed implementation by phase
+
+#### Phase 0 — Baseline
+
+- Ghi Git/base commit và chạy unit/typecheck/lint/build trước sửa.
+- Không dùng `.env.local` để đo DB vì không chứng minh được đó là Preview.
+
+#### Phase 1 — Queue SQL pagination/search
+
+- Thêm projection generated từ `draft_json`.
+- Tìm literal an toàn: escape `!`, `%`, `_` trước `ILIKE ... ESCAPE '!'`.
+- Predicate keyset:
+  `updated_at < cursor.updatedAt OR (updated_at = cursor.updatedAt AND submission_id < cursor.id)`.
+- Trả cursor từ dòng thứ 100 khi có dòng thứ 101.
+- Invalid status/cursor trả `400 VALIDATION_FAILED`.
+
+### 9. Behavior before and after
+
+| Scenario | Before | After | Verification |
+|---|---|---|---|
+| Mở queue | Đọc toàn bảng summary | SQL `LIMIT 101` | source/repository test |
+| Tìm kiếm | Đọc toàn `draft_json` | SQL + trigram indexes | migration/source test |
+| Cursor | raw submission ID + `findIndex` | base64url timestamp + ID | unit tests |
+| Gõ tìm | request từng ký tự | debounce 350 ms, min 2 | source test |
+| Đổi filter | Ẩn bảng thành loading | giữ bảng, trạng thái nhỏ | source test |
+
+### 10. API, data and security impact
+
+#### Authentication / authorization / DataScope
+
+- Không đổi: `requireActiveUser(SUBMISSION_READ_ROLES)` vẫn chạy trước repository.
+- Không thêm DataScope mới; endpoint giữ phạm vi staff queue hiện hành.
+
+#### API contract
+
+- Endpoint: `GET /api/submissions`
+- Request: `status`, `q`, `cursor` giữ tên cũ.
+- Response: cấu trúc submission giữ nguyên; `nextCursor` đổi từ raw submission ID sang opaque
+  base64url. Component chỉ chuyển tiếp nên tương thích nội bộ.
+- Invalid status/cursor: `400 VALIDATION_FAILED`, error envelope chuẩn.
+
+#### Database and migrations
+
+- Migration: `202607290004_queue_search_performance.sql`
+- Additive: 2 generated columns, 2 B-tree indexes, 3 GIN trigram indexes, `pg_trgm`.
+- Dữ liệu cũ được PostgreSQL sinh projection khi migration chạy; không ghi đè `draft_json`.
+- Production action: áp migration trước code; chạy preflight và benchmark Preview trước.
+
+#### Sensitive data
+
+- Tên chủ/số GCN vốn nằm trong `draft_json`; generated columns không tạo phạm vi quyền mới.
+- Không log query, tên, số GCN, phone hoặc cursor.
+- Phone vẫn đi qua `maskPhone()` trước response.
+- Cursor chỉ chứa timestamp và internal submission ID; không là bằng chứng quyền.
+
+### 11. Tests added or changed
+
+| Test file | Coverage | Result |
+|---|---|---|
+| `tests/submissions-queue-performance.test.ts` | 10 test cursor, route không list toàn bảng, SQL/index/UI | PASS |
+| `tests/submissions-queue-repository.test.ts` | `limit+1`, cursor dòng cuối, search escaping, keyset params | PASS |
+| `tests/pr6-review-round-two.test.ts` | Preflight nhắc đủ migration | PASS sau khi nối 290004 |
+| `tests/migration-versions.test.ts` | Version migration duy nhất | PASS |
+
+### 12. Final verification
+
+| Check | Command | Result | Evidence |
+|---|---|---|---|
+| Focused tests | `npx vitest run ...queue... pr6... migration...` | PASS — 41/41 | Exit 0 |
+| Full unit | `npm test` | PASS — 664 pass, 10 skip | Exit 0, 11,35 giây |
+| QR flaky recheck | `...citizen-id-qr-decoding... --testTimeout=15000` | PASS — 8/8 | Exit 0 |
+| Typecheck | `npm run typecheck` | PASS | Exit 0 |
+| Build | `npm run build` | PASS | Exit 0 |
+| Focused lint | `npx eslint <Phase 1 files>` | PASS — 0 warning/error | Exit 0 |
+| Full lint | `npm run lint` | PASS — 0 error, 10 warning có sẵn | Exit 0 |
+| Format check | `npm run format:check` | FAIL — 51 file | Nợ có sẵn + PR #8; file Phase 1 mới đã format |
+| Diff whitespace | `git diff --check` | PASS | Exit 0 |
+| DB migration/EXPLAIN | Không chạy | NOT TESTED | Cần Preview |
+| E2E/load | Không chạy | NOT TESTED | Cần Preview/dữ liệu giả |
+
+Lần full unit đầu trong chuỗi quality gate có hai lỗi: preflight chưa nhắc migration mới (đã sửa)
+và QR test timeout dưới tải cao. Rerun QR riêng đạt 8/8; full unit sau sửa đạt 664/10. Full lint
+lần đầu trùng lúc PR #8 đang sửa `DocumentViewer`; sau khi thay đổi đồng thời hoàn tất, full lint
+chạy lại đạt exit 0 với đúng 10 warning baseline.
+
+### 13. Acceptance criteria matrix
+
+| ID | Acceptance criterion | Status | Evidence | Notes |
+|---|---|---|---|---|
+| AC-01 | Route không gọi `list()`/`listSummaries()` | PASS | source test | |
+| AC-02 | Request đọc tối đa ~101 dòng chính | PASS_CODE | repository test | Chưa đo DB thật |
+| AC-03 | SQL filter/search/order/keyset | PASS_CODE | focused tests | Chưa EXPLAIN |
+| AC-04 | Timestamp trùng không lặp/bỏ do cursor | PASS | cursor/repository tests | |
+| AC-05 | Quyền/masking giữ nguyên | PASS | route source test | |
+| AC-06 | Debounce 350 ms, min 2 ký tự | PASS_CODE | source test | Chưa browser E2E |
+| AC-07 | Migration/preflight chạy Preview | NOT_TESTED | Không có Preview DB | Bắt buộc trước deploy |
+| AC-08 | P95 ≤ 1,5 giây với 20k giả | NOT_TESTED | Chưa có P50/P95 | Không tuyên bố đạt |
+
+### 14. Manual verification required
+
+- Áp toàn bộ migration đang chờ theo thứ tự trên Supabase Preview.
+- Chạy `npm run preflight:public-intake-v2-migrations`.
+- Dùng 500/5.000/20.000 hồ sơ giả và chạy EXPLAIN theo
+  `evidence/PERFORMANCE_BASELINE.md`.
+- Trên browser: mở queue, gõ nhanh, đổi status, tải thêm; xác nhận không duplicate và bảng không
+  trắng khi tải.
+
+### 15. Remaining issues and warnings
+
+| Severity | Issue | Impact | Recommended action |
+|---|---|---|---|
+| High | Migration 290004 chưa áp | Code mới sẽ lỗi thiếu cột nếu deploy trước | Migration + preflight trước deploy |
+| Medium | Chưa P50/P95/EXPLAIN 20k | Chưa chứng minh mục tiêu tốc độ | Benchmark Preview |
+| Low | Format check toàn repo đỏ | Không phải hồi quy riêng Phase 1 | Xử lý theo task formatting riêng |
+
+### 16. Regression and compatibility notes
+
+- Browser/API client nội bộ coi cursor là opaque nên không cần đổi ngoài component hiện hữu.
+- Generated columns yêu cầu PostgreSQL/Supabase hỗ trợ `pg_trgm`; migration tạo extension ở schema
+  `extensions`.
+- Không đổi file handling, Drive, upload, Auth.js, export hoặc PL3.
+
+### 17. Rollback plan
+
+- Rollback code: phục hồi route/UI/repository cũ trước.
+- Rollback schema bằng migration mới: drop 5 index và 2 generated columns; giữ `pg_trgm` nếu có thể
+  đang được thành phần khác dùng.
+- Không cần phục hồi dữ liệu nghiệp vụ vì migration không sửa `draft_json`.
+- Không rollback thủ công trên Production khi chưa chụp schema/kiểm dependency.
+
+### 18. Recommended next action
+
+`READY_FOR_CHATGPT_REVIEW`.
+
+Sau review code, áp migration trên Preview và hoàn thành EXPLAIN/P95. Chưa đủ bằng chứng cho
+`READY_FOR_DEPLOY_REVIEW`.
+
+### 19. Commands to reproduce
+
+```powershell
+npm.cmd test
+npm.cmd run typecheck
+npm.cmd run build
+npx.cmd vitest run tests/submissions-queue-performance.test.ts tests/submissions-queue-repository.test.ts tests/pr6-review-round-two.test.ts tests/migration-versions.test.ts
+npx.cmd eslint src/modules/submissions/queue-pagination.ts src/modules/public-intake/repository.ts src/app/api/submissions/route.ts src/components/submissions-queue.tsx scripts/preflight-public-intake-v2-migrations.ts tests/submissions-queue-performance.test.ts tests/submissions-queue-repository.test.ts
+npm.cmd run preflight:public-intake-v2-migrations
+git diff --check
+```
+
+### 20. Key diff excerpts
+
+```diff
++ async listQueuePage(input) {
++   ... where ($1::text is null or status = $1)
++   ... or queue_issue_number ilike $2 escape '!'
++   ... or queue_owner_name ilike $2 escape '!'
++   ... or (updated_at = $3::timestamptz and submission_id < $4)
++   ... order by updated_at desc, submission_id desc
++   ... limit $5
++ }
+
+- const filtered = (await repository.list()).filter(...).sort(...)
++ const page = await repository.listQueuePage({ status, query, cursor, limit: 100 })
+
++ add column queue_owner_name text generated always as (...) stored
++ create index public_submissions_queue_page_idx
++ create index ... using gin (... extensions.gin_trgm_ops)
+```
+
+### 21. Full unified diff
+
+```text
+FULL_DIFF_OMITTED_DUE_TO_SIZE
+Reason: toàn working tree gồm tài liệu review nguồn, báo cáo cũ và nhóm PR #8 đồng thời; chèn toàn
+bộ sẽ trộn quyền sở hữu thay đổi và vượt ngưỡng báo cáo sau khi tính cả file untracked/handoff.
+Files requiring deeper review:
+- src/modules/public-intake/repository.ts
+- src/app/api/submissions/route.ts
+- src/components/submissions-queue.tsx
+- src/modules/submissions/queue-pagination.ts
+- supabase/migrations/202607290004_queue_search_performance.sql
+- scripts/preflight-public-intake-v2-migrations.ts
+- tests/submissions-queue-performance.test.ts
+- tests/submissions-queue-repository.test.ts
+```
+
+### 22. Agent declaration
+
+- Đã đọc tài liệu nguồn sự thật và Code Graph trước khi code.
+- Không tự mở rộng sang Phase 2–6, không thao tác Production, merge hoặc deploy.
+- Không ghi đè file review có trước hoặc nhóm PR #8 xuất hiện đồng thời.
+- Không đưa secret/PII vào code, test, evidence hoặc handoff.
+- Kết quả chưa đo được đã ghi `NOT_TESTED`, không tuyên bố tốc độ cảm tính.
+
+---
+
+## PR #8 update — tương thích luồng xác nhận định danh (2026-07-29)
+
+### Outcome
+
+- Hoàn thiện tab **Chủ sử dụng** của `WorkingPayloadEditor` thành luồng sửa/xác nhận chính thức khi
+  hồ sơ `UNDER_REVIEW`; nút trên chi tiết chỉ điều hướng đến tab này. Modal cũ không còn được mở từ
+  luồng `UNDER_REVIEW`, chỉ dùng cho điều chỉnh hồ sơ `ACCEPTED`.
+- `PUT /api/submissions/:submissionId/working-payload` so sánh payload ứng viên với payload hiệu lực:
+  sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý do và server đặt
+  `QR_OVERRIDE_PENDING_REVIEW`; sửa sau `MANUAL_COMPLETE` trả về `PENDING_CONFIRMATION`. API từ chối
+  trạng thái, nguồn hoặc thời điểm xác nhận do client tự gửi.
+- `PATCH /api/submissions/:submissionId` vẫn là lối duy nhất đặt `MANUAL_COMPLETE`; test xác minh
+  request log kind `MANUAL_IDENTITY_CONFIRMATION`, payload đã cập nhật và retry cùng key không commit
+  lần hai. Audit repository chỉ chứa đường dẫn/số lượng, không có PII.
+- GET detail thêm `files[].ownerId` nội bộ; `DocumentViewer` hiển thị CCCD theo chủ, đánh số GCN độc
+  lập, reset khi tập file đổi, Esc đóng lightbox và dialog có nhãn truy cập được.
+
+### Baseline, Git và phạm vi
+
+- Branch hiện tại: `codex/perf-queue-sql-pagination`; HEAD: `2fca1f363c8c6212692ca048c61e3929750493e8`.
+  Không commit, push, merge hay deploy.
+- Baseline trước phần PR #8: source PR #8 hiện hữu và một tệp tài liệu hiệu năng chưa theo dõi được
+  giữ nguyên. Trong lúc thực hiện xuất hiện nhóm thay đổi hàng đợi/SQL/preflight ngoài phạm vi này
+  (`queue-pagination`, migration `202607290004`, `src/app/api/submissions/route.ts`, benchmark và
+  test tương ứng); không chỉnh logic hay gộp commit của nhóm đó.
+- Không migration cho phần PR #8; không đổi quyền hay nới `completionChecks`.
+
+### Files/symbols PR #8
+
+- `src/modules/submissions/working-identity-transitions.ts` —
+  `normalizeWorkingIdentityTransitions`.
+- `src/app/api/submissions/[submissionId]/working-payload/route.ts` — gác cổng transition server.
+- `src/app/api/submissions/[submissionId]/route.ts` — `files[].ownerId` staff detail.
+- `src/components/admin/{working-payload-editor,document-viewer}.tsx` và
+  `src/components/submission-detail.tsx` — tab Chủ sử dụng, xác nhận thủ công, nhãn/tương tác ảnh.
+- `tests/{working-identity-transitions,manual-identity-confirmation-route,document-viewer}.test.ts`
+  — transition, replay và label đa chủ/GCN.
+- `AGENTS.md`, `docs/architecture.md`, `docs/brain/{01-architecture,03-decisions,06-ai-working-log}.md`
+  — đồng bộ contract/Code Graph/quyết định/nhật ký.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Focused Vitest | PASS — 5 files, 15/15 |
+| Full Vitest | PASS — 73 files, 664 passed, 10 skipped |
+| Typecheck | PASS — `npm run typecheck` |
+| Lint | PASS — 0 error; 10 warning có sẵn |
+| Prettier (file PR #8) | PASS — 9 file TypeScript đã format/check |
+| Prettier (toàn repo) | NOT_CLEAN — 50 file lịch sử/ngoài phạm vi báo style; không format hàng loạt workspace |
+| Production build | PASS — Next.js 16.2.10, 23/23 static pages |
+| `git diff --check` | PASS (chỉ cảnh báo line ending cũ ở working log) |
+| Staff E2E claim → edit QR → confirm → accept | NOT_RUN — suite Playwright hiện không có fixture/credential cán bộ an toàn cho luồng này |
+
+### Acceptance and remaining work
+
+- Đạt: không giả `MANUAL_COMPLETE` qua working-payload; QR override cần lý do; sửa định danh đã
+  xác nhận tay buộc xác nhận lại; nhãn ảnh đúng nhiều chủ và nhiều GCN; lỗi GCN/thửa đất vẫn do
+  `completionChecks` quyết định.
+- Cần trước khi mark PR ready: chạy E2E trên Preview với fixture giả và tài khoản cán bộ được cấp,
+  rồi đợi GitHub `quality` và Vercel Preview pass sau khi chủ sở hữu commit/push. Không có hành động
+  deploy/merge trong nhiệm vụ này.
+
+### Diff trọng yếu
+
+```diff
++ normalizeWorkingIdentityTransitions(effectivePayload(record), candidate)
++ QR_CONFIRMED + sửa định danh + lý do -> QR_OVERRIDE_PENDING_REVIEW
++ MANUAL_COMPLETE + sửa định danh -> PENDING_CONFIRMATION
++ GET /api/submissions/:id -> files[].ownerId
+```
+
 ## 1. Report metadata
 
 - Project: Hệ thống thu thập và kiểm tra nhanh hồ sơ đất đai Phường Phong Châu (`land-ocr-180`)
@@ -342,3 +774,15 @@ evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md.
   và build vẫn đạt.
 - Chưa commit: cần người sở hữu quyết định gộp các thay đổi tài liệu tồn đọng và các thay đổi source
   ngoài phạm vi trước khi tạo commit.
+
+## E2E Preview update — fixture cán bộ (2026-07-29)
+
+- Preview được thử: `https://capphongchau-87rwc5g4n-vi-phuong-158s-projects.vercel.app`.
+- Dùng fixture PNG tại `tests/fixtures/`, tài khoản active `SYSTEM_ADMIN` làm cán bộ và
+  `REVIEW_OFFICER` cho kiểm tra quyền. Kết quả Playwright: 15 test, 1 pass (E2E-07), 14 fail trước
+  khi app render vì Vercel Deployment Protection chuyển hướng tới `vercel.com/login`; đây không phải
+  lỗi fixture hay lỗi luồng PR #8.
+- Đã chạy cleanup đúng nhãn E2E `0912345678`: xóa 2 hồ sơ E2E và bảng con. Audit Drive chỉ báo 9 file
+  mồ côi thuộc nhiều hồ sơ; không xóa tự động vì cần đối chiếu thủ công.
+- Để chạy lại cần cung cấp `x-vercel-protection-bypass` hợp lệ/bật quyền Preview cho runner, sau đó
+  chạy lại cùng lệnh. Chưa commit, push, merge hoặc deploy.

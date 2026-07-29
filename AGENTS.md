@@ -1,5 +1,16 @@
 # AGENTS.md
 
+## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
+
+- Trong `UNDER_REVIEW`, `WorkingPayloadEditor` là nơi duy nhất sửa PL3; nút hành động chỉ mở tab
+  Chủ sử dụng. `PUT /working-payload` phải so sánh payload hiệu lực ở server: sửa họ tên/CCCD/ngày
+  sinh/giới tính sau `QR_CONFIRMED` cần lý do và server chuyển sang `QR_OVERRIDE_PENDING_REVIEW`;
+  sửa sau `MANUAL_COMPLETE` làm mất xác nhận, về `PENDING_CONFIRMATION`. Client không được tự đặt
+  trạng thái, nguồn hay thời điểm xác nhận.
+- GET chi tiết cán bộ chỉ trả `files[].ownerId` nội bộ để gắn nhãn CCCD đúng chủ; không trả Drive
+  ID/link hay PII mới. Xác nhận `MANUAL_COMPLETE` vẫn chỉ qua PATCH riêng, CSRF + idempotency + audit
+  không chứa PII, dành cho cán bộ đang giữ hồ sơ.
+
 > Dành riêng cho **Codex**. Claude Code dùng `CLAUDE.md`.
 >
 > **BẮT BUỘC: đọc `docs/brain/` trước khi code**, đặc biệt **Code Graph** trong
@@ -146,6 +157,10 @@ Tạo các bảng sau (tên vật lý dùng `snake_case` trong migration SQL):
 - `FILES`: `file_id`, `case_id`, `owner_id`, document type, biến thể `ORIGINAL`/`PREVIEW`, Drive ID, MIME, dung lượng, checksum, trạng thái.
 - `IDENTITY_QR_SCANS`: dữ liệu QR đã tách, `owner_id`, trạng thái, hash payload, phiên bản parser/decoder, người xác nhận.
 - `USERS`, `REFERENCE_DATA`, `AUDIT_LOGS`, `ID_RESERVATIONS`, `REQUEST_LOG`, `SEARCH_INDEX`.
+- `PUBLIC_SUBMISSIONS` có hai generated column `queue_owner_name`/`queue_issue_number` chỉ phục vụ
+  hiển thị và tìm kiếm hàng chờ. `GET /api/submissions` phải lọc/tìm/phân trang keyset trong
+  PostgreSQL theo `(updated_at, submission_id)`, không đọc toàn bảng hoặc toàn bộ `draft_json` vào
+  Node để chia trang.
 - Khu vực tra cứu/đối chiếu bổ sung các bảng append-only: `PUBLIC_STATUS_EVENTS`,
   `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`,
   `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS` và

@@ -1,34 +1,69 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 export type DocumentFile = {
   fileId: string;
   documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
+  ownerId: string;
 };
 
 interface DocumentViewerProps {
   submissionId: string;
   files: DocumentFile[];
+  ownerIds: readonly string[];
 }
 
-const DOCUMENT_TYPE_LABELS: Record<DocumentFile["documentType"], string> = {
-  CITIZEN_ID_FRONT: "CCCD Mặt trước",
-  CITIZEN_ID_BACK: "CCCD Mặt sau",
-  CERTIFICATE: "Giấy chứng nhận",
-};
+export function documentFileLabel(
+  file: DocumentFile,
+  files: readonly DocumentFile[],
+  ownerIds: readonly string[],
+): string {
+  if (file.documentType === "CERTIFICATE") {
+    return `GCN trang ${files.slice(0, files.indexOf(file) + 1).filter((item) => item.documentType === "CERTIFICATE").length}`;
+  }
+  const ownerNumber = ownerIds.indexOf(file.ownerId) + 1;
+  const ownerLabel = ownerNumber > 0 ? `chủ ${ownerNumber}` : "chủ chưa gắn";
+  const side = file.documentType === "CITIZEN_ID_FRONT" ? "mặt trước" : "mặt sau";
+  return `CCCD ${ownerLabel} — ${side}`;
+}
 
-export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
+export function DocumentViewer(props: DocumentViewerProps) {
+  const filesKey = props.files.map((file) => file.fileId).join(":");
+  return <DocumentViewerState key={filesKey} {...props} />;
+}
+
+function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  const lightboxTitleId = useId();
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [fullscreen]);
 
   if (files.length === 0) {
     return (
       <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-stone-300 bg-stone-50 p-6 text-center text-stone-500">
-        <svg className="h-10 w-10 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        <svg
+          className="h-10 w-10 text-stone-400"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+          />
         </svg>
         <p className="mt-2 text-sm font-medium">Chưa có ảnh giấy tờ được tải lên</p>
       </div>
@@ -36,10 +71,7 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
   }
 
   const activeFile = files[selectedIndex] || files[0];
-  const activeLabel =
-    activeFile.documentType === "CERTIFICATE"
-      ? `GCN (Trang ${files.filter((f, i) => f.documentType === "CERTIFICATE" && i <= selectedIndex).length})`
-      : DOCUMENT_TYPE_LABELS[activeFile.documentType];
+  const activeLabel = documentFileLabel(activeFile, files, ownerIds);
 
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 3));
   const handleZoomOut = () => setZoom((z) => Math.max(z - 0.5, 1));
@@ -58,7 +90,12 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200">
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
             </svg>
             {activeLabel}
           </span>
@@ -91,7 +128,12 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
             className="rounded p-1 text-stone-600 hover:bg-stone-200 disabled:opacity-30"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
             </svg>
           </button>
           <div className="h-4 w-px bg-stone-300 mx-1" />
@@ -102,7 +144,12 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
             className="rounded p-1 text-stone-600 hover:bg-stone-200"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
             </svg>
           </button>
           {(zoom > 1 || rotation > 0) && (
@@ -123,7 +170,12 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
             className="rounded p-1 text-stone-600 hover:bg-stone-200"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-2V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 8V4m0 0h4M4 4l5 5m11-2V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+              />
             </svg>
           </button>
         </div>
@@ -132,12 +184,7 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
       {/* Image Thumbnail Selector Tabs */}
       <div className="flex gap-1.5 overflow-x-auto border-b border-stone-200 bg-stone-100 p-2">
         {files.map((file, idx) => {
-          const label =
-            file.documentType === "CITIZEN_ID_FRONT"
-              ? "CCCD Trước"
-              : file.documentType === "CITIZEN_ID_BACK"
-                ? "CCCD Sau"
-                : `GCN #${idx + 1}`;
+          const label = documentFileLabel(file, files, ownerIds);
           const isSelected = idx === selectedIndex;
           return (
             <button
@@ -154,7 +201,9 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
                   : "text-stone-600 hover:bg-stone-200/70"
               }`}
             >
-              <span className={`h-2 w-2 rounded-full ${isSelected ? "bg-emerald-600" : "bg-stone-400"}`} />
+              <span
+                className={`h-2 w-2 rounded-full ${isSelected ? "bg-emerald-600" : "bg-stone-400"}`}
+              />
               {label}
             </button>
           );
@@ -181,10 +230,17 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
 
       {/* Fullscreen Lightbox Modal */}
       {fullscreen && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-black/95 p-4">
+        <div
+          aria-labelledby={lightboxTitleId}
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex flex-col bg-black/95 p-4"
+          role="dialog"
+        >
           <div className="flex items-center justify-between border-b border-stone-800 pb-3 text-white">
             <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold">{activeLabel}</span>
+              <span className="text-sm font-semibold" id={lightboxTitleId}>
+                {activeLabel}
+              </span>
               <span className="text-xs text-stone-400">
                 ({selectedIndex + 1}/{files.length})
               </span>
@@ -200,6 +256,7 @@ export function DocumentViewer({ submissionId, files }: DocumentViewerProps) {
               <button
                 type="button"
                 onClick={() => setFullscreen(false)}
+                aria-label="Đóng xem ảnh toàn màn hình"
                 className="rounded bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
               >
                 Đóng (Esc)

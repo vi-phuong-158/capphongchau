@@ -12,12 +12,14 @@ import {
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
 import type { IntakeDraft } from "@/modules/public-intake/types";
+import { effectivePayload } from "@/modules/public-intake/payload-layers";
 import {
   citizenIdsForLookup,
   draftSchema,
   validateWorkingPayloadForSave,
 } from "@/modules/public-intake/validation";
 import { identityHmac } from "@/modules/public-intake/workflow";
+import { normalizeWorkingIdentityTransitions } from "@/modules/submissions/working-identity-transitions";
 import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
@@ -71,11 +73,11 @@ export async function PUT(
         400,
       );
     }
-
-    const workingDraft = body.data.payload as unknown as IntakeDraft;
-    const workingPayloadError = validateWorkingPayloadForSave(workingDraft);
-    if (workingPayloadError) {
-      return fail("VALIDATION_FAILED", workingPayloadError, requestId, 400);
+    const payloadValidationError = validateWorkingPayloadForSave(
+      body.data.payload as unknown as IntakeDraft,
+    );
+    if (payloadValidationError) {
+      return fail("VALIDATION_FAILED", payloadValidationError, requestId, 400);
     }
 
     const { submissionId } = await context.params;
@@ -134,6 +136,26 @@ export async function PUT(
         requestId,
         403,
       );
+    }
+
+    const baseline = effectivePayload(record);
+    if (!baseline) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Hồ sơ chưa có dữ liệu kê khai để biên tập.",
+        requestId,
+        400,
+      );
+    }
+    const transition = normalizeWorkingIdentityTransitions(
+      baseline,
+      body.data.payload as unknown as IntakeDraft,
+    );
+    if (!transition.ok) return fail("VALIDATION_FAILED", transition.message, requestId, 400);
+    const workingDraft = transition.draft;
+    const workingPayloadError = validateWorkingPayloadForSave(workingDraft);
+    if (workingPayloadError) {
+      return fail("VALIDATION_FAILED", workingPayloadError, requestId, 400);
     }
 
     const updated = await repository.commitWorkingPayload({
