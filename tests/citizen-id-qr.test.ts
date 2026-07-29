@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCitizenIdQr } from "@/modules/public-intake/citizen-id-qr";
+import { parseCitizenIdQr, shouldAutoReadCitizenIdQr } from "@/modules/public-intake/citizen-id-qr";
 
 describe("parseCitizenIdQr", () => {
   it("tách dữ liệu từ định dạng QR CCCD bảy trường", () => {
@@ -27,5 +27,13 @@ describe("parseCitizenIdQr", () => {
   it("không suy đoán payload không đủ cấu trúc", () => {
     expect(parseCitizenIdQr("012345678901|NGUYEN VAN DEMO")).toBeNull();
     expect(parseCitizenIdQr("123|x|y|15081992|Nam|Phú Thọ|08042021")).toBeNull();
+  });
+});
+
+describe("shouldAutoReadCitizenIdQr", () => {
+  it("thử các ảnh CCCD đến khi QR thành công, sau đó bỏ qua ảnh còn lại", () => {
+    expect(shouldAutoReadCitizenIdQr("")).toBe(true);
+    expect(shouldAutoReadCitizenIdQr("QR")).toBe(false);
+    expect(shouldAutoReadCitizenIdQr("MANUAL")).toBe(false);
   });
 });

@@ -45,6 +45,7 @@ import {
   readCitizenIdQr,
   type CitizenIdQrReadResult,
 } from "@/modules/public-intake/citizen-id-qr.client";
+import { shouldAutoReadCitizenIdQr } from "@/modules/public-intake/citizen-id-qr";
 import {
   normalizeIntakeImage,
   safeUploadFileName,
@@ -597,6 +598,8 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const taskAborts = useRef(new Map<string, AbortController>());
   const createIdempotencyKey = useRef<string | null>(null);
   const submitIdempotencyKey = useRef<string | null>(null);
+  /** Bỏ thông báo QR cũ nếu người dùng thay ảnh mặt sau trong lúc máy đang giải mã. */
+  const latestQrScan = useRef(0);
   const serverErrorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1424,17 +1427,38 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
               [documentType]: { file: prepared, fileId, name: prepared.name },
             },
           }));
-          setUploadNote(`Đã tải ảnh CCCD ${sideLabel}. Đang đọc QR ngay trên thiết bị…`);
-          // Đọc QR trên bản đã chuẩn hóa trước (2400 px vẫn thừa nét cho một mã QR trên thẻ).
-          // Chỉ khi thất bại mới thử lại trên ảnh nguồn — làm ngược lại thì mọi ảnh 12MP/HEIC
-          // đều phải giải mã hai lần dù bản chuẩn hóa đọc được ngay.
-          let qr = await readCitizenIdQr(prepared);
-          if (!qr && normalized.changed) qr = await readCitizenIdQr(file);
-          setUploadNote(
-            applyQrResult(ownerId, qr)
-              ? "Đã đọc QR. Kiểm tra và xác nhận các thông tin vừa tự điền."
-              : "Không đọc được QR từ ảnh đã tải. Vui lòng nhập thông tin bằng tay.",
-          );
+          const identitySource = draft.owners.find((owner) => owner.id === ownerId)?.identitySource ?? "";
+          if (!shouldAutoReadCitizenIdQr(identitySource)) {
+            setUploadNote(`Đã tải ảnh CCCD ${sideLabel}.`);
+            return;
+          }
+
+          // Ảnh đã ở Drive và có thể dùng tiếp ngay. Giải mã QR là gợi ý cục bộ, không được làm
+          // chậm tải ảnh hay khóa nút “Tiếp tục”. Cả hai mặt được thử cho đến khi có một kết quả;
+          // sau đó ảnh còn lại sẽ bỏ qua bước tốn CPU này. Việc quét chủ động vẫn có thể thử cả
+          // hai mặt tại `rereadQr` khi ảnh/thiết bị khác thường.
+          const scanId = ++latestQrScan.current;
+          setUploadNote(`Đã tải ảnh CCCD ${sideLabel}. Đang đọc QR trên thiết bị…`);
+          void (async () => {
+            try {
+              // Đọc bản chuẩn hóa trước; chỉ khi thất bại mới thử ảnh nguồn để tránh giải mã
+              // 12MP/HEIC hai lần trong trường hợp thông thường.
+              let qr = await readCitizenIdQr(prepared);
+              if (!qr && normalized.changed) qr = await readCitizenIdQr(file);
+              if (scanId !== latestQrScan.current) return;
+              setUploadNote(
+                applyQrResult(ownerId, qr)
+                  ? "Đã đọc QR. Kiểm tra và xác nhận các thông tin vừa tự điền."
+                  : "Không đọc được QR từ ảnh đã tải. Vui lòng nhập thông tin bằng tay.",
+              );
+            } catch {
+              if (scanId === latestQrScan.current) {
+                setUploadNote(
+                  "Đã tải ảnh CCCD. Không đọc được QR; bạn có thể nhập thông tin bằng tay.",
+                );
+              }
+            }
+          })();
         } else {
           setUploadNote("");
         }
@@ -1449,7 +1473,7 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
         uploadAbort.current = null;
       }
     },
-    [applyQrResult, identityPhotos, flushDraft, uploadFile],
+    [applyQrResult, draft.owners, identityPhotos, flushDraft, uploadFile],
   );
 
   const checkExistingRecords = useCallback(

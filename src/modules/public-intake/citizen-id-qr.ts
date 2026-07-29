@@ -2,6 +2,17 @@
 export const CITIZEN_ID_QR_PARSER_VERSION = "cccd-pipe-v1";
 export const CITIZEN_ID_QR_DECODER_VERSION = "zxing-browser-0.1.5";
 
+/**
+ * Tự đọc QR cho ảnh CCCD tiếp theo chỉ khi chưa có kết quả QR hoặc nhập tay.
+ *
+ * Cả hai mặt được thử theo thứ tự người dùng tải để không bỏ lỡ ảnh chụp khác thường. Ngay khi
+ * một mặt đọc được QR, ảnh còn lại chỉ tải lên mà không giải mã lại; dữ liệu đã nhập tay cũng
+ * không bị tốn CPU quét rồi bị bỏ qua. Nút “Đọc lại QR” vẫn thử cả hai mặt theo yêu cầu chủ động.
+ */
+export function shouldAutoReadCitizenIdQr(identitySource: "QR" | "MANUAL" | ""): boolean {
+  return identitySource === "";
+}
+
 export interface ParsedCitizenIdQr {
   readonly identityNumber: string;
   readonly fullName: string;
