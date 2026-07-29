@@ -1,5 +1,40 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] Đợt 2A-3: cán bộ ưu tiên khi tranh chấp, mở claim hồ sơ `NEEDS_SUPPLEMENT` cũ
+
+- **Quyết định (người dùng chọn "Chặn — cán bộ ưu tiên"):** Khi hồ sơ đã có cán bộ cầm
+  (`claimed_by` khác rỗng), **mọi đường ghi công khai của người dân bị chặn**. Cài ở
+  `isEditable()` (`route-context.ts`) — chốt duy nhất mà cả bảy route
+  `/api/public/submissions/current/*` đều đi qua, nên không route nào có thể quên; thêm
+  `isHeldByOfficer()` để route `submit` trả đúng lý do ("cán bộ đang xử lý") thay vì thông báo sai
+  "bản kê khai đã được gửi".
+- **Lỗi thật đã đóng:** `repository.submit()` đặt `claimed_by = null, claimed_by_display_name =
+  null, claimed_at = null` mỗi lần người dân gửi lại, trong khi luồng "yêu cầu bổ sung" cũ (bỏ ở
+  2A-1) **giữ nguyên** `claimed_by` khi chuyển sang `NEEDS_SUPPLEMENT`. Nghĩa là một lần bấm "Bổ
+  sung hồ sơ" của người dân **âm thầm cướp hồ sơ khỏi tay cán bộ đang xử lý** — và không có cơ chế
+  nào chặn, vì `version` vẫn khớp nên optimistic concurrency không coi đó là xung đột. Khóa phiên
+  bản chỉ bắt được va chạm **đồng thời**, không bắt được "hai bên đều hợp lệ nhưng một bên xóa
+  quyền của bên kia".
+- **`mayClaim` thêm `NEEDS_SUPPLEMENT`:** bắt buộc phải đi kèm, không phải tính năng rời. Sau khi
+  chặn người dân gửi lại, hồ sơ `NEEDS_SUPPLEMENT` cũ sẽ **kẹt vĩnh viễn**: cán bộ không claim được
+  (`mayClaim` cũ từ chối), không sửa được (`mayStaffEdit` đòi `UNDER_REVIEW`), và đường thoát duy
+  nhất trước đây — người dân gửi lại — vừa bị đóng. Cho claim đưa chúng về đúng luồng mới: Tiếp
+  nhận → sửa trực tiếp ở Bàn làm việc → Hoàn thành xử lý. Không mở thêm lối vào nào: route CLAIM
+  vẫn trả 403 `Hồ sơ đang do cán bộ khác nhận xử lý` nếu người khác đang giữ, admin vẫn phải dùng
+  FORCE_CLAIM.
+- **Giao diện phải khớp máy chủ, không được đoán:** `GET /api/public/submissions/current` trả thêm
+  `hasAssignedOfficer` (**chỉ boolean**, không kèm tên/email cán bộ — giữ đúng cam kết không lộ
+  email công vụ ra cổng công khai, xem `assigned-officer.ts`) để `/tra-cuu` ẩn nút "Bổ sung hồ sơ"
+  thay vì để người dân bấm rồi nhận lỗi. Hàng chờ cán bộ bỏ bản sao luật
+  (`status === "SUBMITTED" || status === "RESUBMITTED"`) và gọi thẳng `mayClaim` — ô đếm mang nhãn
+  "Chờ tiếp nhận" nên phải khớp đúng định nghĩa của máy chủ.
+- **Đánh đổi:** cán bộ đang làm luồng nhập hộ (`/ke-khai-ho`) cũng bị chặn nếu hồ sơ do cán bộ khác
+  giữ — đúng ý đồ (không ai cướp hồ sơ của ai), nhưng là thay đổi hành vi so với trước; muốn lấy hồ
+  sơ thì dùng Chuyển giao hoặc FORCE_CLAIM. Người dân sau khi cán bộ đã nhận hồ sơ **không còn tự
+  sửa được nữa** — đây chính là mô hình đã chốt ở 2A-1 (cán bộ sửa trực tiếp, không bắt dân gửi
+  lại), không phải hồi quy.
+- **Không có migration.** Thuần code.
+
 ## [2026-07-29] Đợt 2A-2: một ô ghi chú nội bộ, tách khỏi PATCH chính
 
 - **Quyết định:** Thêm đúng một trường ghi chú nội bộ tự do (`internal_notes`, tối đa 4000 ký tự)

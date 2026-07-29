@@ -46,8 +46,22 @@ export function isClaimedBy(record: SubmissionRecord, email: string): boolean {
   return record.claimedBy.trim().toLowerCase() === email.trim().toLowerCase();
 }
 
+/**
+ * Trạng thái nào còn nhận xử lý được.
+ *
+ * **[2026-07-29] Đợt 2A-3 — thêm `NEEDS_SUPPLEMENT`.** Luồng "yêu cầu bổ sung" đã bỏ ở 2A-1, nên
+ * không hồ sơ mới nào vào được trạng thái này nữa; nhưng hồ sơ **cũ** đang nằm đó thì trước bản
+ * sửa này bị kẹt vĩnh viễn: cán bộ không claim được (hàm này từ chối), không sửa được
+ * (`mayStaffEdit` đòi `UNDER_REVIEW`), và đường thoát duy nhất — người dân bấm gửi lại — vừa bị
+ * chặn ở `isEditable` cùng đợt. Cho claim là cách đưa chúng về đúng luồng mới: nhận xử lý → sửa
+ * trực tiếp ở Bàn làm việc → Hoàn thành xử lý.
+ *
+ * Hồ sơ `NEEDS_SUPPLEMENT` cũ thường vẫn còn `claimed_by` của cán bộ đã yêu cầu bổ sung; route
+ * CLAIM đã chặn sẵn người khác cướp hồ sơ (403 `Hồ sơ đang do cán bộ khác nhận xử lý`) và quản
+ * trị viên vẫn dùng được FORCE_CLAIM, nên mở trạng thái này không mở thêm lối vào nào.
+ */
 export function mayClaim(status: PublicStatus): boolean {
-  return status === "SUBMITTED" || status === "RESUBMITTED";
+  return status === "SUBMITTED" || status === "RESUBMITTED" || status === "NEEDS_SUPPLEMENT";
 }
 
 export function mayForceClaim(roles: readonly string[]): boolean {

@@ -20,6 +20,7 @@ interface LookupData {
     uploadedAt: string;
   }>;
   checklist: Array<{ code: string; label: string; complete: boolean; missing: string }>;
+  hasAssignedOfficer: boolean;
   supplementRequest: null | {
     message: string;
     requestedByDisplayName: string;
@@ -133,7 +134,10 @@ export function PublicLookup() {
     );
   }
 
-  const editable = data.status === "DRAFT" || data.status === "NEEDS_SUPPLEMENT";
+  // Phải khớp `isEditable` phía máy chủ (route-context.ts): cán bộ đang giữ hồ sơ thì người dân
+  // không gửi lại được nữa, nên không hiện nút để rồi bấm vào lại báo lỗi (2026-07-29, Đợt 2A-3).
+  const editable =
+    !data.hasAssignedOfficer && (data.status === "DRAFT" || data.status === "NEEDS_SUPPLEMENT");
   return (
     <div className="space-y-5">
       <section className="pc-card">
@@ -154,6 +158,11 @@ export function PublicLookup() {
           <button className="pc-button mt-4" type="button" onClick={continueSubmission}>
             {data.status === "DRAFT" ? "Tiếp tục bản nháp" : "Bổ sung hồ sơ"}
           </button>
+        ) : null}
+        {data.hasAssignedOfficer ? (
+          <p className="mt-4 text-sm" style={{ color: "var(--muted)" }}>
+            Cán bộ phường đang xử lý hồ sơ này. Cán bộ sẽ liên hệ với bạn nếu cần thêm thông tin.
+          </p>
         ) : null}
       </section>
 

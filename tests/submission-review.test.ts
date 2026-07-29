@@ -57,9 +57,10 @@ describe("submission review helpers", () => {
     expect(mayReject(current, "other@example.com")).toBe(false);
   });
 
-  it("allows claims only for submitted, resubmitted or currently reviewed records", () => {
+  it("allows claims for submitted, resubmitted and legacy needs-supplement records", () => {
     expect(mayClaim("SUBMITTED")).toBe(true);
     expect(mayClaim("RESUBMITTED")).toBe(true);
+    expect(mayClaim("NEEDS_SUPPLEMENT")).toBe(true);
     expect(mayClaim("UNDER_REVIEW")).toBe(false);
     expect(mayClaim("ACCEPTED")).toBe(false);
   });

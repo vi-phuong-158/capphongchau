@@ -36,12 +36,16 @@ function makeRecord(claimedBy: string, status: PublicStatus = "UNDER_REVIEW"): S
 }
 
 describe("Submission claim permissions and status rules", () => {
-  it("C1: mayClaim returns true ONLY for SUBMITTED and RESUBMITTED", () => {
+  it("C1: mayClaim returns true ONLY for SUBMITTED, RESUBMITTED and NEEDS_SUPPLEMENT", () => {
     expect(mayClaim("SUBMITTED")).toBe(true);
     expect(mayClaim("RESUBMITTED")).toBe(true);
+    // Hồ sơ cũ của luồng yêu cầu bổ sung đã bỏ — phải tiếp nhận được, nếu không sẽ kẹt vĩnh viễn
+    // vì người dân cũng đã bị chặn gửi lại (2026-07-29, Đợt 2A-3).
+    expect(mayClaim("NEEDS_SUPPLEMENT")).toBe(true);
     expect(mayClaim("UNDER_REVIEW")).toBe(false);
     expect(mayClaim("ACCEPTED")).toBe(false);
     expect(mayClaim("REJECTED")).toBe(false);
+    expect(mayClaim("DRAFT")).toBe(false);
   });
 
   it("C2: mayForceClaim returns true ONLY for WARD_ADMIN or SYSTEM_ADMIN", () => {

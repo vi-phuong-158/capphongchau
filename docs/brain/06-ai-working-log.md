@@ -2717,3 +2717,62 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `/api/submissions/[submissionId]/internal-notes`. `next-env.d.ts` bị build tự đổi lại đã revert,
   không đưa vào commit.
 - **Chưa merge, chưa push, chưa deploy.**
+
+## [2026-07-29] Đợt 2A-3 — cán bộ ưu tiên: chặn dân gửi lại khi hồ sơ đang có người xử lý
+
+- **Agent:** Claude Code
+- **Bối cảnh:** Người dùng đã chọn "Chặn — cán bộ ưu tiên" từ vòng rà soát kế hoạch. Đây là rủi ro
+  còn treo được ghi rõ ở cuối entry 2A-1: `repository.submit()` xóa sạch `claimed_by`/
+  `claimed_by_display_name`/`claimed_at` mỗi lần người dân gửi lại, trong khi luồng "yêu cầu bổ
+  sung" cũ **giữ nguyên** `claimed_by` khi chuyển hồ sơ sang `NEEDS_SUPPLEMENT`. Hệ quả: một lần
+  bấm "Bổ sung hồ sơ" của người dân âm thầm cướp hồ sơ khỏi tay cán bộ đang xử lý, và **không có
+  gì chặn** — `version` vẫn khớp nên khóa phiên bản không coi đó là xung đột (nó chỉ bắt va chạm
+  đồng thời, không bắt "hai bên đều hợp lệ nhưng một bên xóa quyền bên kia").
+- **Thay đổi:**
+  1. **`route-context.ts`:** thêm `isHeldByOfficer(record)` (`claimed_by` khác rỗng sau `trim`) và
+     cho `isEditable()` trả `false` khi có cán bộ đang giữ. Đặt ở đây vì đó là chốt DUY NHẤT mà cả
+     bảy route `/api/public/submissions/current/*` (+ `staff/assisted-submissions`) đều đi qua —
+     không route nào có thể quên. `DRAFT` không bị ảnh hưởng: `mayClaim` không cho nhận hồ sơ nháp
+     nên `claimed_by` luôn rỗng ở trạng thái đó.
+  2. **`submit/route.ts` (công khai):** kiểm `isHeldByOfficer` **trước** `isEditable` để trả đúng
+     lý do ("Hồ sơ đang được cán bộ phường xử lý…") thay vì thông báo sai "Bản kê khai này đã được
+     gửi", và chặn **trước** bước Turnstile để không đốt lượt xác minh của người dân. `PATCH
+     /current` không phải sửa — thông báo sẵn có đã đúng nghĩa.
+  3. **`review.ts` — `mayClaim` thêm `NEEDS_SUPPLEMENT`:** bắt buộc đi kèm, không phải tính năng
+     rời. Sau khi chặn người dân gửi lại, hồ sơ `NEEDS_SUPPLEMENT` cũ sẽ kẹt vĩnh viễn (không
+     claim được, không sửa được vì `mayStaffEdit` đòi `UNDER_REVIEW`, đường thoát duy nhất vừa bị
+     đóng). Không mở thêm lối vào: route CLAIM vẫn trả 403 nếu người khác đang giữ.
+  4. **`GET /api/public/submissions/current`:** trả thêm `hasAssignedOfficer` — **chỉ boolean**,
+     không kèm tên/email cán bộ (giữ cam kết không lộ email công vụ ra cổng công khai). Dùng
+     `publicHasAssignedOfficer` sẵn có, không viết luật mới.
+  5. **`/tra-cuu` (`public-lookup.tsx`):** ẩn nút "Bổ sung hồ sơ" và hiện câu giải thích khi cán bộ
+     đang giữ — không để người dân bấm vào thứ máy chủ chắc chắn từ chối.
+  6. **`submissions-queue.tsx`:** ô đếm "Chờ tiếp nhận" bỏ bản sao luật
+     (`status === "SUBMITTED" || status === "RESUBMITTED"`) và gọi thẳng `mayClaim` — nhãn ô đếm
+     phải khớp đúng định nghĩa "tiếp nhận được" của máy chủ. Nhãn badge `NEEDS_SUPPLEMENT` thêm
+     "(hồ sơ cũ)" để cán bộ hiểu vì sao trạng thái này còn tồn tại mà vẫn tiếp nhận được.
+- **File đã sửa:**
+  - `src/modules/public-intake/route-context.ts`
+  - `src/app/api/public/submissions/current/submit/route.ts`
+  - `src/app/api/public/submissions/current/route.ts`
+  - `src/modules/submissions/review.ts`
+  - `src/app/tra-cuu/public-lookup.tsx`
+  - `src/components/submissions-queue.tsx`
+  - `tests/submission-claim.test.ts`, `tests/submission-review.test.ts` (tiêu đề test cũ ghi
+    "ONLY for SUBMITTED and RESUBMITTED" đã sai sau thay đổi — sửa tiêu đề và thêm khẳng định)
+- **Test mới:**
+  - `tests/public-resubmit-blocked-when-claimed.test.ts` — 5 ca ở tầng hàm thuần: hồ sơ
+    `NEEDS_SUPPLEMENT` còn cán bộ giữ thì khóa; không ai giữ thì vẫn mở; `DRAFT` không bị ảnh
+    hưởng; `claimed_by` toàn khoảng trắng tính là chưa ai giữ; các trạng thái đã gửi vẫn khóa
+    (không nới lỏng luật cũ).
+  - `tests/public-submit-officer-priority-route.test.ts` — 2 ca ở tầng HTTP thật (KHÔNG mock
+    `isEditable`): chặn trả 409 `INVALID_STATE`, không gọi `submit`, **không gọi Turnstile**, và
+    thông báo không chứa email cán bộ; hồ sơ không ai giữ vẫn gửi lại được bình thường.
+- **Chưa làm (đợt sau):** 2B (server-prime, lazy ảnh, single-file query, lazy AI panel), 2C (cán bộ
+  tự tải ảnh giấy tờ bổ sung).
+- **Migration:** không có (thuần code).
+- **Kiểm tra:** baseline (đầu ra 2A-2, commit `5c1df6d`) — typecheck 0 lỗi, lint 0 lỗi/5 warning
+  có sẵn, `npx vitest run` 672 pass/10 skip. Sau khi sửa — typecheck 0 lỗi, lint 0 lỗi/5 warning
+  (không đổi), `npx vitest run` **679 pass/10 skip** (672 + 7 test mới, không test cũ nào fail hay
+  mới skip), `npm run build` đạt. `next-env.d.ts` do build tự đổi đã revert, không đưa vào commit.
+- **Chưa merge, chưa push, chưa deploy.**

@@ -11,6 +11,7 @@ import {
 } from "@/modules/public-intake/repository";
 import {
   isEditable,
+  isHeldByOfficer,
   publicError,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
@@ -100,6 +101,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
   }
 
+  // Tách khỏi `isEditable` để người dân nhận đúng lý do: hồ sơ đang có cán bộ xử lý thì bấm gửi
+  // lại không phải "đã gửi rồi" mà là "đừng gửi nữa, cán bộ đang làm" (2026-07-29, Đợt 2A-3).
+  if (isHeldByOfficer(record)) {
+    return publicError(
+      "INVALID_STATE",
+      "Hồ sơ đang được cán bộ phường xử lý nên không gửi lại được. Cán bộ sẽ liên hệ nếu cần " +
+        "thêm thông tin.",
+      requestId,
+    );
+  }
   if (!isEditable(record)) {
     return publicError("INVALID_STATE", "Bản kê khai này đã được gửi.", requestId);
   }

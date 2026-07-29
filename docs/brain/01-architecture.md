@@ -208,12 +208,23 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 ├── POST .../uploads/metrics → số đo cho lượt HỎNG (lượt hỏng không có complete để bám vào);
 │   luôn trả 204, vẫn đòi phiên + CSRF
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
+    ├── isHeldByOfficer(record) → 409 INVALID_STATE NGAY, TRƯỚC Turnstile (2026-07-29, Đợt 2A-3)
     ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
     │   (code + fieldPath, trả trong error.details.issues)
     ├── citizenIdsForLookup — CHỈ băm CCCD khớp 12 số; không bao giờ băm chuỗi rỗng
     └── PublicIntakeRepository.submit
+        ├── ⚠️ XÓA claimed_by/claimed_by_display_name/claimed_at mỗi lần gửi lại. Đây là lý do
+        │   isEditable phải chặn khi có cán bộ đang giữ: version vẫn khớp nên optimistic
+        │   concurrency KHÔNG coi đó là xung đột, hồ sơ bị cướp khỏi cán bộ mà không ai biết.
         └── transaction: public_submissions + normalized children
             + public_status_events + audit_logs + public_lookup_index + request_log
+
+src/modules/public-intake/route-context.ts — CHỐT CHẶN DUY NHẤT của mọi route công khai
+├── resolvePublicRequest — phiên từ cookie đã ký (không bao giờ nhận submission_id từ URL/body)
+├── isHeldByOfficer(record) — claimed_by khác rỗng sau trim (2026-07-29, Đợt 2A-3)
+└── isEditable(record) — (DRAFT | NEEDS_SUPPLEMENT) VÀ không có cán bộ đang giữ
+    ⚠️ Cả 7 route /api/public/submissions/current/* + staff/assisted-submissions đều đi qua đây;
+    sửa hàm này là sửa toàn bộ bề mặt ghi công khai cùng lúc — cả theo hướng tốt lẫn hướng xấu.
 
 src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-07-28)
 ├── requireActiveUser(ASSISTED_INTAKE_ROLES) TRƯỚC, rồi mới đọc kill switch (thứ tự cố ý — giữ
@@ -244,7 +255,9 @@ src/app/submissions/page.tsx / [submissionId]
     │   │   `and ($force = true or claimed_by is null or claimed_by = '' or claimed_by = $actor)`
     │   │   — không phải kiểu SELECT-rồi-UPDATE bị cấm ở review; version conflict + claim conflict
     │   │   phân biệt được bằng SubmissionAlreadyClaimedError → 409 ALREADY_CLAIMED
-    │   ├── mayClaim (review.ts) — CHỈ SUBMITTED/RESUBMITTED (đã bỏ UNDER_REVIEW so với thiết kế cũ)
+    │   ├── mayClaim (review.ts) — SUBMITTED/RESUBMITTED/NEEDS_SUPPLEMENT (đã bỏ UNDER_REVIEW so
+    │   │   với thiết kế cũ; NEEDS_SUPPLEMENT thêm ở Đợt 2A-3 để hồ sơ cũ của luồng "yêu cầu bổ
+    │   │   sung" đã bỏ không kẹt vĩnh viễn sau khi chặn người dân gửi lại)
     │   ├── mayForceClaim/mayRelease/mayTransfer — WARD_ADMIN/SYSTEM_ADMIN mới force được
     │   ├── nếu claim lần đầu (working_payload_json is null) → khởi tạo
     │   │   working_payload_json = coalesce(citizen_payload_json, draft_json), ghi history WORKING
@@ -456,8 +469,12 @@ GET /api/health/google
 GET /api/security/csrf
 POST/GET/PATCH /api/users
 POST /api/public/submissions
-GET/PATCH /api/public/submissions/current
-POST /api/public/submissions/current/submit
+GET/PATCH /api/public/submissions/current              (GET trả thêm `hasAssignedOfficer` — CHỈ
+                                                        boolean, không kèm tên/email cán bộ;
+                                                        2026-07-29, Đợt 2A-3)
+POST /api/public/submissions/current/submit           (2026-07-29, Đợt 2A-3 — 409 INVALID_STATE
+                                                        khi hồ sơ đang có cán bộ giữ: gửi lại sẽ
+                                                        xóa mất claim của cán bộ)
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
 POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — số đo lượt hỏng,

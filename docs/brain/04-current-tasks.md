@@ -24,8 +24,12 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   **Chưa chạy migration** `202607290005_submission_internal_notes.sql` trên Preview/Production —
   bắt buộc chạy trước khi deploy, xác nhận bằng
   `npx tsx scripts/preflight-public-intake-v2-migrations.ts`.
-- **2A-3 — CHƯA LÀM:** chặn người dân gửi lại khi cán bộ đang giữ hồ sơ (race condition), cho
-  claim được hồ sơ cũ `NEEDS_SUPPLEMENT`/`RESUBMITTED`.
+- **2A-3 — ĐÃ LÀM (code, chưa merge/push/deploy):** cán bộ ưu tiên — `isEditable()` chặn mọi đường
+  ghi công khai của người dân khi hồ sơ đã có cán bộ cầm (đóng lỗi "người dân gửi lại thì
+  `repository.submit()` xóa sạch `claimed_by`", mà khóa phiên bản không bắt được vì version vẫn
+  khớp). `mayClaim` mở thêm `NEEDS_SUPPLEMENT` để hồ sơ cũ không kẹt vĩnh viễn sau khi chặn.
+  `GET /current` trả thêm cờ boolean `hasAssignedOfficer` cho `/tra-cuu` ẩn nút "Bổ sung hồ sơ".
+  Không migration.
 - **2B — CHƯA LÀM:** server-priming, lazy-load ảnh trong split-screen viewer, single-file query
   (`findActiveFile`), lazy-load AI panel.
 - **2C — CHƯA LÀM (tính năng mới, người dùng yêu cầu thêm):** cán bộ tự tải ảnh giấy tờ

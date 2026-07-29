@@ -145,7 +145,32 @@ export async function resolvePublicRequest(
   return { record, requestId };
 }
 
-/** Sau khi gửi, bản khai bị khóa; chỉ mở lại khi cán bộ yêu cầu bổ sung (PLAN_NL §4.2). */
+/**
+ * Có cán bộ đang cầm hồ sơ này hay không.
+ *
+ * `claimed_by` được giữ nguyên qua nhiều trạng thái (xem `commitStaffAction`: cột chỉ bị xóa khi
+ * RELEASE hoặc khi người dân gửi lại), nên đây là câu trả lời đúng cho "hồ sơ có đang thuộc về ai
+ * không", độc lập với trạng thái.
+ */
+export function isHeldByOfficer(record: SubmissionRecord): boolean {
+  return record.claimedBy.trim().length > 0;
+}
+
+/**
+ * Sau khi gửi, bản khai bị khóa; chỉ mở lại khi cán bộ yêu cầu bổ sung (PLAN_NL §4.2).
+ *
+ * **[2026-07-29] Đợt 2A-3 — cán bộ ưu tiên.** Thêm điều kiện "chưa có cán bộ nào cầm hồ sơ".
+ * Trước đó, hồ sơ `NEEDS_SUPPLEMENT` vẫn giữ nguyên `claimed_by` của cán bộ đã yêu cầu bổ sung
+ * (luồng cũ, đã bỏ ở 2A-1), mà `repository.submit()` lại **xóa sạch** `claimed_by`/`claimed_at`
+ * khi người dân gửi lại. Nghĩa là một lần bấm "Bổ sung hồ sơ" của người dân âm thầm cướp hồ sơ
+ * khỏi tay cán bộ đang xử lý, không có xung đột phiên bản nào để chặn (version vẫn khớp). Từ đây
+ * người dân bị chặn ở TẤT CẢ đường ghi công khai — hàm này là chốt duy nhất cho cả bảy route
+ * `/api/public/submissions/current/*` nên không route nào có thể quên.
+ *
+ * `DRAFT` không bao giờ bị ảnh hưởng: `mayClaim` không cho nhận hồ sơ nháp nên `claimed_by` luôn
+ * rỗng ở trạng thái đó.
+ */
 export function isEditable(record: SubmissionRecord): boolean {
+  if (isHeldByOfficer(record)) return false;
   return record.status === "DRAFT" || record.status === "NEEDS_SUPPLEMENT";
 }
