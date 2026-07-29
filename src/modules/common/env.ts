@@ -10,6 +10,9 @@ const serverEnvironmentBaseSchema = z.object({
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().min(1),
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: z.string().min(1),
   SUPABASE_DATABASE_URL: z.string().min(1),
+  // Supavisor transaction pooler: giới hạn nhỏ theo từng Vercel runtime instance.
+  // Không tăng vượt 3 khi chưa có benchmark Preview và theo dõi quota Supabase.
+  SUPABASE_POOL_MAX: z.coerce.number().int().min(1).max(3).default(1),
   GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1).optional(),
   SYSTEM_ADMIN_EMAIL: z.email(),
   DATA_HASH_PEPPER: z.string().min(32),
@@ -73,6 +76,7 @@ const googleStorageEnvironmentSchema = serverEnvironmentBaseSchema.pick({
 
 const supabaseEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   SUPABASE_DATABASE_URL: true,
+  SUPABASE_POOL_MAX: true,
 });
 
 const legacyGoogleSheetsEnvironmentSchema = serverEnvironmentBaseSchema

@@ -1,5 +1,13 @@
 # Performance baseline — Phase 1 queue pagination/search
 
+## Phase 4 — pool Supabase và region (2026-07-29)
+
+- Branch: `codex/phase4-pool-region`; base: `d6cb796`.
+- Baseline code: Supavisor dùng `prepare: false`, SSL, `idle_timeout=20`, `connect_timeout=10` và hard-code `max: 1`; `vercel.json` chưa khai báo `regions`.
+- Thay đổi code: `SUPABASE_POOL_MAX` chỉ nhận 1–3, default 1; `vercel.json` khóa `sin1`. Không migration, không thay dữ liệu hoặc quyền API.
+- Benchmark Preview: **BLOCKED** cho đến khi deployment Ready và có session cán bộ Preview riêng cùng dữ liệu synthetic. Runner bắt buộc warm-up 10, đo 40 lượt/route với 4 worker; report chỉ có P50/P95, error rate, HTTP status, Server-Timing allowlist và region label.
+- Tiêu chí chọn pool: chỉ chọn 2/3 nếu P95 cải thiện ≥10% so với 1, error rate 0, không timeout/deadlock/too-many-connections và peak connection <70% quota Supabase. Nếu không đạt, giữ 1. Không suy diễn hay rollout Production từ kết quả này.
+
 ## Phase 2 — mở chi tiết và preview theo yêu cầu (2026-07-29)
 
 - Branch: `codex/phase2-detail-lazy-preview`; base: `c17254c`.

@@ -1,5 +1,10 @@
 # Kiến trúc hệ thống
 
+> Cập nhật Phase 4 (2026-07-29): Vercel Function được cấu hình `regions: ["sin1"]`; kết nối
+> Supavisor vẫn `prepare: false`, SSL và singleton, còn `max` lấy từ biến server-only
+> `SUPABASE_POOL_MAX` (1–3, mặc định 1) tại lúc runtime instance tạo client. Đổi pool phải qua
+> deployment Preview riêng và benchmark A/B; biến `VERCEL_REGION` không phải bằng chứng vị trí runtime.
+
 > Bổ sung PR #8 (2026-07-29): trong `UNDER_REVIEW`, mọi sửa PL3 đi qua
 > `WorkingPayloadEditor`/`PUT /working-payload`. Server so sánh payload ứng viên với payload hiệu lực:
 > sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý do và thành

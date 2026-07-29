@@ -1,5 +1,25 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-29 — Phase 4 pool Supabase/region
+
+```text
+vercel.json
+└── regions: [sin1] → Vercel Function Preview/Production theo cấu hình deployment
+
+src/modules/common/env.ts
+└── SUPABASE_POOL_MAX: 1 | 2 | 3 (default 1), server-only
+    └── loadSupabaseEnvironment
+        └── src/modules/supabase/database.ts
+            └── supabaseDatabaseOptions → postgres(..., { prepare: false, max, SSL, timeouts })
+
+scripts/benchmark-staff-preview.ts
+└── explicit Preview session + synthetic IDs/queries (không in giá trị)
+    └── safe Server-Timing + region label → P50/P95/error-rate report không PII
+```
+
+Pool chỉ đổi khi runtime instance mới được tạo. Kết quả benchmark không được dùng để suy diễn
+Production; quota Supabase và Vercel deployment metadata là nguồn xác minh vận hành.
+
 ## Cập nhật Code Graph 2026-07-29 — Phase 2 mở chi tiết/lazy preview
 
 ```text

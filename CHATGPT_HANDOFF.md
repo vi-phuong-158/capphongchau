@@ -1,5 +1,51 @@
 # CHATGPT HANDOFF REPORT
 
+## Phase 4 performance report — Supavisor pool and Vercel region (2026-07-29)
+
+### Report metadata and scope
+
+- Repository: `D:\\04. Github\\capphongchau-acceptance-visibility`
+- Branch/base: `codex/phase4-pool-region` from `d6cb796`.
+- Commit created: `perf(infra): configure preview pool experiments` (final commit ID is reported with delivery).
+- Status: `READY_FOR_DEPLOY_REVIEW`; Preview benchmark has not run and Phase 4 is not PASS.
+- Source plan: `docs/PERFORMANCE_REVIEW_AND_IMPLEMENTATION_PLAN_CAPPHONGCHAU.md` §6 Phase 4 and the approved Phase 4 plan.
+- In scope: server-only pool allowlist, Vercel region configuration, PII-safe Preview benchmark runner, tests and documentation.
+- Out of scope: migrations, data writes/seeding, authorization/API business changes, `.env.local` Production, Vercel environment changes, deployment, merge and Production.
+
+### Baseline, implementation and verification
+
+| Check | Before | Final |
+| --- | --- | --- |
+| `npm.cmd test` | 669 pass, 10 skip | 675 pass, 10 skip |
+| `npm.cmd run typecheck` | pass | pass |
+| `npm.cmd run lint -- --quiet` | pass | pass |
+| `npm.cmd run build -- --webpack` | previously pass | pass |
+| Preview benchmark | no authenticated session | not run; runner fail-safe requires explicit environment |
+
+- `SUPABASE_POOL_MAX` is parsed only on the server, accepts integers 1–3 and defaults to 1. `supabaseDatabaseOptions` preserves `prepare: false`, SSL and existing timeouts while passing that validated max to `postgres`.
+- `vercel.json` now declares `regions: ["sin1"]`. Runtime confirmation remains a deployment-time check of Vercel metadata/`x-vercel-id`; the declarative `VERCEL_REGION` variable is not treated as proof.
+- `scripts/benchmark-staff-preview.ts` requires an explicitly supplied HTTPS Preview URL, session cookie and synthetic route inputs. It does not load `.env.local`, write data, print supplied values, raw headers, response bodies, URLs, queries or IDs. Output is restricted to route labels, status counts, duration P50/P95, allowlisted Server-Timing durations and a region label.
+- Fail-safe command without any benchmark environment exited as expected with only `Thiếu cấu hình PERF_BENCHMARK_BASE_URL.`; it made no request.
+
+### Files and acceptance
+
+| Area | Files/symbols | Result |
+| --- | --- | --- |
+| Pool configuration | `env.ts`, `database.ts`, `.env.example`; `SUPABASE_POOL_MAX`, `supabaseDatabaseOptions` | PASS locally |
+| Region | `vercel.json` | PASS static contract; requires Preview deployment verification |
+| Measurement | `staff-preview-benchmark.ts`, `benchmark-staff-preview.ts` | PASS unit/fail-safe; real A/B blocked |
+| Documentation | AGENTS, architecture, brain, baseline | Updated |
+
+| Criterion | Status | Evidence / remaining action |
+| --- | --- | --- |
+| Pool bounded to 1–3/default 1 | PASS | environment and database-option tests |
+| Existing Supavisor safeguards preserved | PASS | option test + typecheck/build |
+| Region configured as `sin1` | PASS in source | deploy Preview then inspect runtime metadata |
+| A/B 1/2/3 with P50/P95, quota and zero errors | BLOCKED | needs Ready Preview, synthetic data and dedicated staff session |
+| No Production action | PASS | no Vercel/Supabase mutation performed |
+
+Rollback: set Preview `SUPABASE_POOL_MAX=1` and redeploy; revert the region config only if Vercel rejects it or benchmark evidence requires it. No migration or data rollback exists. Do not increase Production pool or call Phase 4 PASS without the documented Preview evidence.
+
 ## Phase 2 performance report — detail server-prime/lazy preview (2026-07-29)
 
 ### Report metadata

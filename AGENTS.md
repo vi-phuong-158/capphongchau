@@ -2,6 +2,11 @@
 
 ## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
 
+## Bổ sung Phase 4 hiệu năng pool/region (2026-07-29)
+
+- `SUPABASE_POOL_MAX` là cấu hình server-only của Supavisor theo từng Vercel runtime instance, chỉ nhận `1`–`3` và mặc định `1`. Không tăng Production dựa trên cảm nhận; phải benchmark A/B Preview cùng tải, kiểm connection quota/timeout và giữ giá trị `1` nếu không cải thiện P95 có ý nghĩa.
+- `vercel.json` khóa Function ở `sin1`; `VERCEL_REGION` chỉ là giá trị khai báo, không thay cho xác minh deployment settings và `x-vercel-id`. Công cụ benchmark không được in cookie, URL/query, ID hồ sơ/tệp, response body, header thô hoặc PII.
+
 ## Bổ sung Phase 2 hiệu năng chi tiết hồ sơ (2026-07-29)
 
 - Chi tiết cán bộ phải được server-prime sau `requireActiveUser`; client không được tự gọi lại GET detail ở lần mount đầu. GET detail vẫn giữ cho refresh có chủ đích.

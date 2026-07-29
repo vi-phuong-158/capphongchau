@@ -2589,6 +2589,14 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
 - **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
 - **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.
+## [2026-07-29] Phase 4 — pool Supabase và region Preview
+
+- **Agent:** Codex.
+- **Thay đổi:** Thay hard-code pool `max: 1` bằng `SUPABASE_POOL_MAX` server-only, allowlist 1–3/default 1; giữ `prepare: false`, SSL, timeout và singleton client. `vercel.json` đặt `regions: ["sin1"]`.
+- **Đo lường:** Thêm `scripts/benchmark-staff-preview.ts` và module tổng hợp P50/P95/error-rate. Script chỉ nhận session/ID/query qua environment phiên chạy, không đọc `.env.local` và không in chúng; chỉ xuất route label, status, duration, timing allowlist và region label.
+- **Kiểm tra local:** typecheck, lint và focused tests được chạy trước khi benchmark thật. Không migration, không seed dữ liệu, không thay Vercel environment hoặc deploy Production.
+- **Còn lại:** Cần Preview Ready, session cán bộ benchmark riêng, dữ liệu synthetic và dashboard quota để A/B pool 1/2/3. Chưa kết luận Phase 4 PASS.
+
 ## [2026-07-29] Phase 2 — server-prime chi tiết, lazy preview và lazy AI
 
 - **Agent:** Codex.

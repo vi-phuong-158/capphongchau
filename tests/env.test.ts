@@ -40,6 +40,7 @@ describe("cấu hình môi trường server", () => {
       APP_BASE_URL: "http://localhost:3000",
       MAX_UPLOAD_MB: 30,
       VERCEL_REGION: "sin1",
+      SUPABASE_POOL_MAX: 1,
     });
   });
 
@@ -75,10 +76,24 @@ describe("cấu hình môi trường server", () => {
     expect(loadSupabaseEnvironment(validEnvironment)).toEqual({
       SUPABASE_DATABASE_URL:
         "postgresql://postgres.example:secret@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres",
+      SUPABASE_POOL_MAX: 1,
     });
     expect(loadLegacyGoogleSheetsEnvironment(validEnvironment)).toMatchObject({
       GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
     });
+  });
+
+  it("chỉ nhận pool Supavisor 1–3 và mặc định an toàn là 1", () => {
+    expect(loadSupabaseEnvironment(validEnvironment).SUPABASE_POOL_MAX).toBe(1);
+    expect(
+      loadSupabaseEnvironment({ ...validEnvironment, SUPABASE_POOL_MAX: "3" }).SUPABASE_POOL_MAX,
+    ).toBe(3);
+
+    for (const value of ["0", "4", "1.5", "invalid"]) {
+      expect(() =>
+        loadSupabaseEnvironment({ ...validEnvironment, SUPABASE_POOL_MAX: value }),
+      ).toThrow(EnvironmentValidationError);
+    }
   });
   it("cổng công khai cần secret phiên, pepper, giới hạn upload và cấu hình lớp biên", () => {
     expect(loadPublicIntakeEnvironment(validEnvironment)).toMatchObject({
