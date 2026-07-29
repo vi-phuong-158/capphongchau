@@ -18,7 +18,7 @@
 - Detail GET retains its contract for deliberate refresh, detail/preview successful responses expose safe duration-only `Server-Timing` values.
 - `DocumentViewer` has no image `src` until “Xem ảnh”; AI panel mounts only after “Mở đối chiếu AI”.
 - Repository `findActiveFile(submissionId, fileId)` scopes preview to a single `UPLOADED` file; the preview route no longer reads the whole submission/file list before Drive.
-- No migration, data change, Production deployment, or Phase 3 work.
+- No migration, data change, Production release, or Phase 3 work. A CLI-created Production deployment (`dpl_GcJUg5DUcwrsWJ8LnxriMT9qQ6Xr`) was removed while still `Initializing` (0 ms build), before it became Ready.
 
 ### Security/data impact
 
@@ -36,7 +36,7 @@
 | `npm.cmd run lint -- --quiet` | pass |
 | `npm.cmd run build -- --webpack` | pass |
 | Default Turbopack build | blocked by pre-existing worktree `node_modules` symlink restriction; webpack validates the same source. |
-| Local Vercel Preview deploy | two CLI attempts timed out; no new deployment created. |
+| Vercel deployment state | Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` is building; the unintended initializing Production deployment was removed before Ready. |
 
 New tests cover shared detail loading/audit, missing-record no-audit, initial SSR/no mount fetch, deferred AI/image source, scoped active-file query and timing contract.
 
@@ -47,7 +47,7 @@ New tests cover shared detail loading/audit, missing-record no-audit, initial SS
 | No initial client detail fetch | PASS | server-prime + structural test |
 | No preview before explicit click | PASS | `previewFileId` gate + test |
 | One active file scoped before Drive | PASS | repository/route test |
-| Preview deployment and authenticated E2E P50/P95 | BLOCKED | Resolve Vercel CLI deployment or deploy pushed branch; supply approved Preview test session. |
+| Preview deployment and authenticated E2E P50/P95 | BLOCKED | Wait for the existing Preview build to become Ready, then use an approved Preview test session. |
 
 Rollback is code-only: revert this Phase 2 commit. No database rollback/backfill is required. Do not mark Phase 2 PASS until Preview E2E verifies role, phone masking, cross-submission 404, image/AI laziness, `Server-Timing`, and P95 metadata ≤ 1.5 s (or documents the cause).
 

@@ -2592,6 +2592,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 ## [2026-07-29] Phase 2 — server-prime chi tiết, lazy preview và lazy AI
 
 - **Agent:** Codex.
+- **Deploy safety:** Push nhánh `codex/phase2-detail-lazy-preview`; Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` đang build. Một deployment Production do CLI tạo nhầm (`dpl_GcJUg5DUcwrsWJ8LnxriMT9qQ6Xr`) đã bị xóa khi còn `Initializing` (0 ms build), trước `Ready`; không có release Production.
 - **Thay đổi:** `page.tsx` kiểm quyền và nạp `initialSubmission` từ service server dùng chung; `SubmissionDetail` khởi tạo state từ prop, không fetch detail lúc mount. GET detail được giữ để refresh có chủ đích và thêm `Server-Timing` an toàn.
 - **Preview ảnh:** `DocumentViewer` chỉ đặt ảnh sau nút “Xem ảnh”. Preview route dùng `findActiveFile(submissionId, fileId)` để xác minh đúng file `UPLOADED` thuộc hồ sơ trước Drive; không còn đọc toàn hồ sơ/danh sách file; audit chỉ sau đọc Drive thành công.
 - **AI:** `AiDraftPanel` chỉ mount sau hành động mở phần “Đối chiếu AI”.
