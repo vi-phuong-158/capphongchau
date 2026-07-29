@@ -15,6 +15,10 @@ import { effectivePayload } from "@/modules/public-intake/payload-layers";
 import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { getDatabase } from "@/modules/supabase/database";
 import {
+  chunkOfficialAcceptanceFiles,
+  settleOfficialAcceptanceMoveChunk,
+} from "./acceptance-file-move";
+import {
   canStartOfficialAcceptance,
   formatOfficialCaseId,
   vietnamBusinessYear,
@@ -113,6 +117,12 @@ async function getLatestSaga(sql: Sql, submissionId: string): Promise<SagaRow | 
  * khỏi transaction Database để phòng tránh deadlock trong môi trường connection pool max: 1.
  */
 export async function runOfficialAcceptance(input: AcceptanceInput): Promise<AcceptanceResult> {
+  if (!input.record.driveFolderId) {
+    throw new AcceptanceNotAllowedError(
+      "Bản kê khai chưa có thư mục ảnh sẵn sàng để tiếp nhận chính thức.",
+    );
+  }
+
   const database = getDatabase();
   const repository = getPublicIntakeRepository();
   const storage = getPublicIntakeStorage();
@@ -309,7 +319,7 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
     }
   }
 
-  // BƯỚC FILES_MOVED: Di chuyển file trên Drive (NGOÀI DB Transaction per file)
+  // BƯỚC FILES_MOVED: Di chuyển file trên Drive (ngoài DB transaction, tối đa 2 file/nhóm)
   if (currentSaga.step === "CASE_FOLDER_READY") {
     try {
       const activeFiles = await repository.listFiles(input.record.submissionId);
@@ -328,64 +338,82 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
       );
 
       const movedMap: Record<string, string> = { ...(currentSaga.moved_files || {}) };
+      const pendingFiles = activeFiles
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => !movedMap[file.fileId]);
 
-      for (let index = 0; index < activeFiles.length; index += 1) {
-        const file = activeFiles[index];
-        if (movedMap[file.fileId]) continue;
+      for (const chunk of chunkOfficialAcceptanceFiles(pendingFiles)) {
+        const settled = await settleOfficialAcceptanceMoveChunk(chunk, async ({ file, index }) => {
+          const metadata = await drive.files.get({ fileId: file.driveFileId, fields: "id,parents" });
+          const currentParents = metadata.data.parents || [];
+          const needsMove = !currentParents.includes(currentSaga.originals_folder_id);
+          const newName = originalFileNames[index];
 
-        const metadata = await drive.files.get({
-          fileId: file.driveFileId,
-          fields: "id,parents",
+          if (needsMove || newName) {
+            const removeParents = currentParents.join(",");
+            await drive.files.update({
+              fileId: file.driveFileId,
+              addParents: needsMove ? currentSaga.originals_folder_id : undefined,
+              removeParents: needsMove ? removeParents || undefined : undefined,
+              requestBody: newName ? { name: newName } : undefined,
+              fields: "id,parents,name",
+            });
+          }
         });
 
-        const currentParents = metadata.data.parents || [];
-        const needsMove = !currentParents.includes(currentSaga.originals_folder_id);
-        const newName = originalFileNames[index];
-
-        if (needsMove || newName) {
-          const removeParents = currentParents.join(",");
-          await drive.files.update({
-            fileId: file.driveFileId,
-            addParents: needsMove ? currentSaga.originals_folder_id : undefined,
-            removeParents: needsMove ? removeParents || undefined : undefined,
-            requestBody: newName ? { name: newName } : undefined,
-            fields: "id,parents,name",
+        if (settled.succeeded.length > 0) {
+          const completedMoves = settled.succeeded.map(({ file }) => ({
+            fileId: file.fileId,
+            driveFileId: file.driveFileId,
+          }));
+          currentSaga = await database.begin(async (transaction) => {
+            await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+            const reCheck = await getLatestSaga(transaction, input.record.submissionId);
+            if (reCheck && (STEP_ORDER[reCheck.step] ?? 0) > STEP_ORDER.CASE_FOLDER_READY) {
+              return reCheck;
+            }
+            const nextMovedMap = { ...(reCheck?.moved_files || {}) };
+            for (const completedMove of completedMoves) {
+              nextMovedMap[completedMove.fileId] = completedMove.driveFileId;
+            }
+            const updated = await transaction<SagaRow[]>`
+              update public.public_acceptance_sagas
+              set moved_files = ${JSON.stringify(nextMovedMap)}::jsonb, updated_at = now()
+              where submission_id = ${input.record.submissionId}
+              returning submission_id, idempotency_key, step, official_case_id, case_folder_id,
+                originals_folder_id, moved_files, last_error, actor_email
+            `;
+            return mapSagaRow(updated[0]);
           });
+          Object.assign(movedMap, currentSaga.moved_files || {});
         }
 
-        movedMap[file.fileId] = file.driveFileId;
-
-        // Lưu checkpoint sau từng file
-        await database.unsafe(
-          `update public.public_acceptance_sagas
-           set moved_files = $2::jsonb, updated_at = now()
-           where submission_id = $1`,
-          [input.record.submissionId, JSON.stringify(movedMap)],
-        );
+        if (settled.failure !== null) throw settled.failure;
+        if ((STEP_ORDER[currentSaga.step] ?? 0) > STEP_ORDER.CASE_FOLDER_READY) break;
       }
 
-      currentSaga = await database.begin(async (transaction) => {
-        await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
-
-        const reCheck = await getLatestSaga(transaction, input.record.submissionId);
-        if (reCheck && (STEP_ORDER[reCheck.step] ?? 0) > STEP_ORDER.CASE_FOLDER_READY) {
-          return reCheck;
-        }
-
-        const updated = await transaction<SagaRow[]>`
-          update public.public_acceptance_sagas
-          set step = 'FILES_MOVED', updated_at = now()
-          where submission_id = ${input.record.submissionId}
-          returning submission_id, idempotency_key, step, official_case_id, case_folder_id,
-            originals_folder_id, moved_files, last_error, actor_email
-        `;
-        await transaction`
-          update public.public_submissions
-          set accept_step = 'FILES_MOVED', updated_at = now()
-          where submission_id = ${input.record.submissionId}
-        `;
-        return mapSagaRow(updated[0]);
-      });
+      if (currentSaga.step === "CASE_FOLDER_READY") {
+        currentSaga = await database.begin(async (transaction) => {
+          await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+          const reCheck = await getLatestSaga(transaction, input.record.submissionId);
+          if (reCheck && (STEP_ORDER[reCheck.step] ?? 0) > STEP_ORDER.CASE_FOLDER_READY) {
+            return reCheck;
+          }
+          const updated = await transaction<SagaRow[]>`
+            update public.public_acceptance_sagas
+            set step = 'FILES_MOVED', updated_at = now()
+            where submission_id = ${input.record.submissionId}
+            returning submission_id, idempotency_key, step, official_case_id, case_folder_id,
+              originals_folder_id, moved_files, last_error, actor_email
+          `;
+          await transaction`
+            update public.public_submissions
+            set accept_step = 'FILES_MOVED', updated_at = now()
+            where submission_id = ${input.record.submissionId}
+          `;
+          return mapSagaRow(updated[0]);
+        });
+      }
     } catch (error) {
       throw new AcceptanceRetryableError(
         `Lỗi di chuyển tệp hồ sơ: ${error instanceof Error ? error.message : "Thất bại"}`,

@@ -1,5 +1,12 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] Phase 4: pool Supavisor nhỏ, A/B Preview và region cấu hình rõ ràng
+
+- **Quyết định:** bỏ hard-code `max: 1` bằng `SUPABASE_POOL_MAX` server-only, allowlist 1–3 và default 1. Mỗi deployment/instance tạo singleton client một lần nên pool không được đổi động trong process.
+- **Lý do:** tăng pool theo từng lambda có thể nhân số kết nối toàn hệ thống. Chỉ chọn 2 hoặc 3 khi cùng workload Preview cho P95 tốt hơn ít nhất 10%, không lỗi/timeout/deadlock và peak connection dưới 70% quota Supabase; ngoài ra giữ 1.
+- **Runner rehearsal:** benchmark không có route bỏ audit vì sẽ làm sai contract đọc nhạy cảm. Mỗi request SSR detail, API detail hoặc preview thành công vẫn append audit; runner bắt buộc HTTPS Vercel Preview rehearsal/synthetic, exact expected host và literal `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY` trước khi đọc/gửi cookie. Một lượt đầy đủ (10 warm-up + 40 đo) có thể thêm tối đa 150 audit rows từ ba route này; chuẩn bị reset/dọn dữ liệu rehearsal sau đo, không chạy Production.
+- **Region/đo lường:** đặt `regions: ["sin1"]` trong `vercel.json`; xác minh qua deployment settings và nhãn region của `x-vercel-id`, không tin riêng biến môi trường. Benchmark chỉ tổng hợp duration/status/metric allowlist, không log session, URL/query, ID hoặc PII.
+
 ## [2026-07-29] PR #8: server là nguồn chuyển trạng thái định danh
 
 - **Quyết định:** Tab Chủ sử dụng của `WorkingPayloadEditor` là luồng xác nhận trong
@@ -1681,3 +1688,65 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
   thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
   `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.
+
+## [2026-07-29] Phase 5A — Chuyển Drive theo nhóm hai file, checkpoint một lần mỗi nhóm
+
+- **Quyết định:** ở bước `FILES_MOVED`, giữ nguyên thứ tự `activeFiles` và giới hạn cứng mỗi nhóm
+  ở hai file. Trong một nhóm, `files.get` và (khi cần) `files.update` chạy song song; sau khi cả
+  nhóm settled, file thành công được ghi vào `moved_files` trong **một** transaction ngắn có advisory
+  lock. Một file lỗi không làm mất checkpoint peer thành công; saga trả retryable và retry cùng key
+  bỏ qua file đã checkpoint.
+- **Lý do:** giảm checkpoint từ 10 xuống 5 cho 10 ảnh mà không thay API, `ACCEPTING`, deterministic
+  ID hay transaction ghi dữ liệu chính thức.
+- **Giới hạn:** concurrency luôn 2, không migration, worker/background task hay resume đa phiên.
+  Phase 5B/work-unit chỉ được lập riêng nếu benchmark sau 5A không đạt mục tiêu; key ở tab không là
+  cam kết resume phiên mới.
+## [2026-07-29] Phase 2 dùng SSR initial detail, lazy preview và lazy AI
+
+- **Quyết định:** Trang chi tiết cán bộ tự kiểm quyền rồi gọi `loadStaffSubmissionDetail` ở Server Component; `SubmissionDetail` nhận `initialSubmission` và không fetch detail khi mount. GET detail giữ nguyên contract để refresh sau mutation/direct access.
+- **Ảnh:** `DocumentViewer` không đặt `img.src` cho đến khi cán bộ bấm “Xem ảnh”; mỗi preview lookup dùng `findActiveFile(submissionId, fileId)` thay vì đọc toàn hồ sơ/danh sách file. File sai scope hoặc không còn `UPLOADED` trả 404 an toàn.
+- **AI:** Chỉ mount `AiDraftPanel` khi mở phần “Đối chiếu AI”, nên không tạo request AI trong initial load.
+- **Đo lường:** Response thành công phát `Server-Timing` chỉ gồm duration `detail_*` hoặc `preview_*`; không chứa PII, Drive ID/link, query hay token.
+- **Đánh đổi:** Không có nút “Xem tất cả” trong Phase 2; cán bộ mở từng ảnh để tránh tải/audit hàng loạt. Không có migration, rollback là revert code.
+
+## [2026-07-29] Phase 3 — Tạo Drive folder ở upload đầu tiên bằng lease
+
+- **Quyết định:** thêm migration additive `202607290005_lazy_drive_folder_creation.sql`; cho phép
+  `drive_folder_id` NULL và điều phối qua `PENDING/CREATING/READY/FAILED`, lease 60 giây, số lần thử.
+- **Luồng:** khi `LAZY_DRIVE_FOLDER_CREATION_ENABLED=true`, CREATE chỉ ghi PostgreSQL transaction
+  hiện hữu và trả receipt/session. Upload initiate hợp lệ mới gọi `ensureSubmissionFolderReady`.
+  Request thắng lease commit DB trước khi gọi Drive, list-before-create rồi checkpoint `READY`;
+  request thua lease nhận 503 có `Retry-After`. Complete/delete/acceptance fail closed nếu thiếu folder.
+- **An toàn và rollback:** cờ mặc định `false`, nên Production tiếp tục eager cho tới khi có Preview
+  E2E/orphan evidence. Không lưu thông báo lỗi Drive, ID hay link; tắt cờ không cần rollback schema.
+
+## [2026-07-29] Phase 3 — Lease token đọc dạng text, không đi qua `Date`
+
+- **Bối cảnh:** vòng review PR #10 phát hiện lease token bị cắt độ chính xác. `now()` của PostgreSQL
+  chính xác tới micro-giây; driver `postgres` parse `timestamptz` thành `Date` của JS vốn chỉ tới
+  mili-giây. Mệnh đề fencing `drive_folder_lease_until = $token::timestamptz` vì thế khớp 0 dòng và
+  checkpoint `READY` không bao giờ ghi được — mọi lần lazy tạo folder đều kẹt `CREATING` rồi 503.
+- **Quyết định:** mọi truy vấn đọc cột này phải cast `::text`; kiểu dòng khai báo `string | null`;
+  field trong snapshot tên là `leaseToken`, không phải `leaseUntil`. Đây là **token đối sánh**, không
+  phải mốc thời gian để hiển thị hay tính toán — không được đưa qua `Date` ở bất kỳ đâu.
+- **Bổ sung sau rehearsal PostgreSQL:** cả **tham số checkpoint** cũng phải giữ text đến khi PostgreSQL
+  tự parse: `drive_folder_lease_until = ($leaseToken::text)::timestamptz` trong cả nhánh `READY` và
+  `FAILED`. Chỉ cast cột trả về là chưa đủ vì driver `postgres` vẫn có thể ép interpolation trực tiếp
+  `$leaseToken::timestamptz` sang `Date` mili-giây trước khi server so sánh.
+- **Bằng chứng:** rehearsal tách biệt xác nhận token cố định
+  `2026-07-29 16:15:36.185035+00` checkpoint được đúng một dòng ở cả hai nhánh; token lệch đúng một
+  micro-giây không checkpoint; worker lease cũ không ghi đè được lease mới; hai initiate đồng thời chỉ
+  tạo một folder Drive (mock). Điều này là điều kiện `READY_FOR_PREVIEW_REHEARSAL`, chưa phải bằng
+  chứng bật cờ hay deploy Production.
+- **Đã cân nhắc:** thêm cột `drive_folder_lease_token uuid` riêng do app sinh. Bền hơn về nguyên tắc
+  nhưng cần sửa migration và thêm cột chỉ để giải một vấn đề đã đóng bằng `::text`. Chọn phương án
+  nhỏ hơn; nếu sau này lease cần thêm ngữ nghĩa (chủ sở hữu, thế hệ) thì chuyển sang cột uuid.
+- **Kèm theo:** trần `MAX_SUBMISSION_FOLDER_ATTEMPTS = 10` chặn retry vô hạn khi Drive lỗi kéo dài;
+  hồ sơ chạm trần cần can thiệp thủ công (chưa có runbook). `Retry-After` 3 giây thay vì 1 để không
+  dồn request lên pool `max: 1`.
+- **Đánh đổi còn mở:** nếu một lần gọi Drive vượt 60 giây lease, worker thứ hai có thể tạo thư mục
+  `{submissionId}` trùng; `list-before-create` thu hẹp chứ không đóng hẳn cửa sổ này. Chấp nhận vì
+  tạo folder thường dưới vài giây.
+- **Điều kiện bắt buộc:** file `tests/staging-rehearsal-acceptance-saga.integration.test.ts` phải
+  chạy với database rehearsal thật trước khi bật cờ ở bất kỳ môi trường nào. Không unit test nào
+  chạm tới đường lease thật — toàn bộ đều mock repository.

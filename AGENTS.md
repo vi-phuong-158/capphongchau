@@ -2,6 +2,17 @@
 
 ## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
 
+## Bổ sung Phase 4 hiệu năng pool/region (2026-07-29)
+
+- `SUPABASE_POOL_MAX` là cấu hình server-only của Supavisor theo từng Vercel runtime instance, chỉ nhận `1`–`3` và mặc định `1`. Không tăng Production dựa trên cảm nhận; phải benchmark A/B Preview cùng tải, kiểm connection quota/timeout và giữ giá trị `1` nếu không cải thiện P95 có ý nghĩa.
+- `vercel.json` khóa Function ở `sin1`; `VERCEL_REGION` chỉ là giá trị khai báo, không thay cho xác minh deployment settings và `x-vercel-id`. Công cụ benchmark không được in cookie, URL/query, ID hồ sơ/tệp, response body, header thô hoặc PII. Runner hiệu năng cán bộ chỉ được chạy với Vercel Preview rehearsal/synthetic đã kiểm tra exact host và xác nhận `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`; không có audit-bypass: page detail, API detail và preview thành công vẫn append audit, nên phải dự trù dọn/reset audit rehearsal sau khi đo.
+
+## Bổ sung Phase 2 hiệu năng chi tiết hồ sơ (2026-07-29)
+
+- Chi tiết cán bộ phải được server-prime sau `requireActiveUser`; client không được tự gọi lại GET detail ở lần mount đầu. GET detail vẫn giữ cho refresh có chủ đích.
+- Ảnh chỉ được đặt `src` sau thao tác xem rõ ràng. Preview route phải dùng lookup đúng một file active thuộc submission; không đọc toàn hồ sơ/danh sách file, không trả Drive ID/link, và chỉ audit sau khi đọc preview thành công.
+- AI draft không được fetch lúc mở hồ sơ; chỉ mount khi cán bộ mở phần đối chiếu. Server-Timing chỉ được chứa duration an toàn, không chứa PII hoặc định danh Drive.
+
 - Trong `UNDER_REVIEW`, `WorkingPayloadEditor` là nơi duy nhất sửa PL3; nút hành động chỉ mở tab
   Chủ sử dụng. `PUT /working-payload` phải so sánh payload hiệu lực ở server: sửa họ tên/CCCD/ngày
   sinh/giới tính sau `QR_CONFIRMED` cần lý do và server chuyển sang `QR_OVERRIDE_PENDING_REVIEW`;
@@ -130,6 +141,16 @@ CSDL-DAT-DAI-PHONG-CHAU-THU-NGHIEM/
   không đi qua body của Vercel Function.
 - Browser kiểm tra JPEG, PNG, WebP, HEIC/HEIF; giới hạn 30 MB/file. HEIC/HEIF được chuyển sang JPEG tại thiết bị khi cần.
 - Backend tạo resumable upload session; browser upload trực tiếp Drive và hiển thị tiến độ/retry.
+- Phase 3 dùng `LAZY_DRIVE_FOLDER_CREATION_ENABLED` (mặc định `false`) để trì hoãn tạo
+  `01_INBOX/{submissionId}/originals` tới request upload hợp lệ đầu tiên. Khi bật, CREATE vẫn ghi
+  `public_submissions` + `request_log` + audit trong một transaction nhưng không gọi Drive.
+  `submission-folder.ts` dùng lease PostgreSQL 60 giây, commit trước khi gọi Drive và
+  list-before-create để retry sau crash không tạo cây thư mục thứ hai. Request thua lease trả
+  `503 SERVICE_UNAVAILABLE` kèm `Retry-After`; không lưu nội dung lỗi Drive. Quá 10 lần thử thì
+  ngừng gọi Drive, cần can thiệp thủ công đặt lại `drive_folder_attempts`.
+  Token fencing của lease (`drive_folder_lease_until`) **luôn đọc bằng `::text`** — `timestamptz`
+  chính xác tới micro-giây còn `Date` của JS chỉ tới mili-giây, đưa qua `Date` là mệnh đề đối sánh
+  khớp 0 dòng và hồ sơ kẹt `CREATING` vĩnh viễn.
 - Không ghi URL upload session, link Drive, token, QR raw hoặc CCCD đầy đủ vào log.
 - Xác minh file sau upload theo thư mục cha, metadata, dung lượng và checksum trước khi cập nhật trạng thái.
 - Lưu `file_id` nội bộ bất biến, tách khỏi `drive_file_id` để chuẩn bị cho migration sang Shared Drive về sau.
@@ -161,6 +182,10 @@ Tạo các bảng sau (tên vật lý dùng `snake_case` trong migration SQL):
   hiển thị và tìm kiếm hàng chờ. `GET /api/submissions` phải lọc/tìm/phân trang keyset trong
   PostgreSQL theo `(updated_at, submission_id)`, không đọc toàn bảng hoặc toàn bộ `draft_json` vào
   Node để chia trang.
+- `PUBLIC_SUBMISSIONS.drive_folder_id` cho phép `NULL` trong giai đoạn lazy; các cột
+  `drive_folder_state`, `drive_folder_lease_until`, `drive_folder_attempts` điều phối đúng một
+  request tạo thư mục. `uploads/complete`, delete và official acceptance phải từ chối rõ khi folder
+  chưa `READY`.
 - Khu vực tra cứu/đối chiếu bổ sung các bảng append-only: `PUBLIC_STATUS_EVENTS`,
   `PUBLIC_SUPPLEMENT_REQUESTS`, `PUBLIC_SUPPLEMENT_ITEMS`, `EXISTING_CERTIFICATES`,
   `EXISTING_CERTIFICATE_OWNERS`, `PUBLIC_EXISTING_RECORD_LINKS`, `EXISTING_IMPORT_RUNS` và
@@ -319,6 +344,12 @@ Khi `completionChecks` còn lỗi `BLOCKING`, route trả HTTP 400 kèm `error.d
 `code`, `label`, `message` an toàn để cán bộ biết chính xác mục cần hoàn thiện; không đưa PII,
 Drive ID/link, token hoặc metadata tệp vào chi tiết lỗi.
 
+Ở checkpoint `FILES_MOVED`, saga tiếp nhận chỉ được chạy Drive theo nhóm cố định tối đa **2** file,
+giữ thứ tự `activeFiles`; mỗi nhóm `files.get`/`files.update` song song rồi ghi chung một checkpoint
+`moved_files` trong transaction ngắn + advisory lock. Nếu một file lỗi, file thành công cùng nhóm
+phải được checkpoint trước khi trả lỗi retryable để retry cùng idempotency key bỏ qua chúng. Không
+thêm work-unit/background resume hay biến concurrency nếu chưa có quyết định Phase 5B riêng.
+
 `POST /api/public/certificate-lookup` nhận một trong hai phương thức: QR CCCD hiện có hoặc số
 phát hành GCN + ngày cấp. Với GCN, chuẩn hóa bỏ khoảng trắng/dấu gạch và không phân biệt hoa/thường;
 đối chiếu cả `public_certificates` đang active, `certificates` chính thức và bản cuối `VERIFIED` của
@@ -358,6 +389,7 @@ SYSTEM_ADMIN_EMAIL=anmphongandn@gmail.com
 DATA_HASH_PEPPER=
 MAX_UPLOAD_MB=30
 VERCEL_REGION=sin1
+LAZY_DRIVE_FOLDER_CREATION_ENABLED=false
 AI_EXTRACTION_ENABLED=false
 AI_WORKER_API_KEY=
 ```

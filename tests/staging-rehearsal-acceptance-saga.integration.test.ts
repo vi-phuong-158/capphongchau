@@ -47,6 +47,8 @@ const drive = vi.hoisted(() => {
   const nodes = new Map<string, Node>();
   let seq = 0;
   const callsByFile = new Map<string, number>();
+  let activeUpdates = 0;
+  let peakConcurrentUpdates = 0;
 
   const state = {
     /** Ném lỗi mạng giả khi `drive.files.update` được gọi cho đúng fileId này. */
@@ -55,6 +57,8 @@ const drive = vi.hoisted(() => {
       nodes.clear();
       seq = 0;
       callsByFile.clear();
+      activeUpdates = 0;
+      peakConcurrentUpdates = 0;
       state.failOnFileId = null;
     },
     seedFile(id: string, parentId: string) {
@@ -65,6 +69,9 @@ const drive = vi.hoisted(() => {
     },
     updateCallsFor(id: string): number {
       return callsByFile.get(id) ?? 0;
+    },
+    peakConcurrentUpdates(): number {
+      return peakConcurrentUpdates;
     },
   };
 
@@ -114,15 +121,22 @@ const drive = vi.hoisted(() => {
       removeParents?: string;
     }) => {
       callsByFile.set(fileId, (callsByFile.get(fileId) ?? 0) + 1);
-      if (state.failOnFileId === fileId) {
-        throw new Error("fake drive: mô phỏng mất mạng giữa chừng khi di chuyển file");
+      activeUpdates += 1;
+      peakConcurrentUpdates = Math.max(peakConcurrentUpdates, activeUpdates);
+      try {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (state.failOnFileId === fileId) {
+          throw new Error("fake drive: mô phỏng mất mạng giữa chừng khi di chuyển file");
+        }
+        const node = nodes.get(fileId);
+        if (!node) throw new Error(`fake drive: không tìm thấy file ${fileId}`);
+        const removeSet = new Set((removeParents ?? "").split(",").filter(Boolean));
+        node.parents = node.parents.filter((parentId) => !removeSet.has(parentId));
+        if (addParents) node.parents.push(addParents);
+        return { data: { id: node.id, parents: [...node.parents] } };
+      } finally {
+        activeUpdates -= 1;
       }
-      const node = nodes.get(fileId);
-      if (!node) throw new Error(`fake drive: không tìm thấy file ${fileId}`);
-      const removeSet = new Set((removeParents ?? "").split(",").filter(Boolean));
-      node.parents = node.parents.filter((parentId) => !removeSet.has(parentId));
-      if (addParents) node.parents.push(addParents);
-      return { data: { id: node.id, parents: [...node.parents] } };
     },
     delete: async () => ({ data: {} }),
   };
@@ -158,6 +172,7 @@ import {
   SubmissionIdempotencyConflictError,
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
+import { ensureSubmissionFolderReady } from "@/modules/public-intake/submission-folder";
 import { newTimelineEvent } from "@/modules/public-intake/workflow";
 
 const TEST_DB_URL = process.env.ACCEPTANCE_SAGA_TEST_DATABASE_URL;
@@ -229,7 +244,24 @@ async function bootstrapDatabase(sql: Sql): Promise<void> {
       where table_schema = 'public' and table_name = 'public_acceptance_sagas'
     ) as exists
   `;
-  if (alreadyApplied[0]?.exists) return;
+  if (alreadyApplied[0]?.exists) {
+    const phase3Applied = await sql<{ exists: boolean }[]>`
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'public_submissions'
+          and column_name = 'drive_folder_state'
+      ) as exists
+    `;
+    if (!phase3Applied[0]?.exists) {
+      const phase3Migration = readFileSync(
+        join(REPO_ROOT, "supabase", "migrations", "202607290005_lazy_drive_folder_creation.sql"),
+        "utf8",
+      );
+      await sql.unsafe(phase3Migration);
+    }
+    return;
+  }
 
   for (const relativePath of MIGRATION_FILES) {
     const sqlText = readFileSync(join(REPO_ROOT, relativePath), "utf8");
@@ -279,8 +311,9 @@ describe.skipIf(!hasTestDb)(
       await truncateAppTables(bootstrapSql);
     });
 
-    /** Mỗi hồ sơ có 3 file (2 CCCD + 1 GCN) sẵn sàng để saga di chuyển. */
-    async function seedSubmission(draftOverrides: Record<string, unknown> = {}) {
+    /** Mỗi hồ sơ có 2 CCCD, 1+ GCN sẵn sàng để saga di chuyển. */
+    async function seedSubmission(draftOverrides: Record<string, unknown> = {}, fileCount = 3) {
+      if (fileCount < 3) throw new Error("Fixture tiếp nhận cần tối thiểu 2 CCCD và 1 GCN.");
       const submissionId = `sub-${randomUUID()}`;
       const receiptCode = `PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`;
       const draft = {
@@ -347,7 +380,12 @@ describe.skipIf(!hasTestDb)(
         )
       `;
 
-      const fileSpecs = [
+      const fileSpecs: Array<{
+        fileId: string;
+        driveFileId: string;
+        documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
+        ownerId: string;
+      }> = [
         {
           fileId: `file-${randomUUID()}`,
           driveFileId: `drive-front-${randomUUID()}`,
@@ -366,7 +404,15 @@ describe.skipIf(!hasTestDb)(
           documentType: "CERTIFICATE",
           ownerId: "",
         },
-      ] as const;
+      ];
+      for (let index = 3; index < fileCount; index += 1) {
+        fileSpecs.push({
+          fileId: `file-${randomUUID()}`,
+          driveFileId: `drive-cert-${randomUUID()}`,
+          documentType: "CERTIFICATE",
+          ownerId: "",
+        });
+      }
 
       for (const file of fileSpecs) {
         await bootstrapSql`
@@ -396,6 +442,137 @@ describe.skipIf(!hasTestDb)(
         requestId: `req-${randomUUID()}`,
       };
     }
+
+    it("Phase 3: lease token text giữ nguyên micro-giây cho READY/FAILED và fencing", async () => {
+      const repository = getPublicIntakeRepository();
+      const fixedLeaseToken = "2026-07-29 16:15:36.185035+00";
+      const seedLease = async (leaseToken: string) => {
+        const submissionId = `lazy-token-${randomUUID()}`;
+        await bootstrapSql`
+            insert into public.public_submissions (
+              submission_id, receipt_code, status, phone, access_code_hash, consent_version,
+              drive_folder_id, drive_folder_state, drive_folder_lease_until, draft_json
+            ) values (
+              ${submissionId}, ${`PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`},
+              'DRAFT', '0912345678', 'hash', 'v1', null, 'CREATING',
+              (${leaseToken}::text)::timestamptz, '{}'::jsonb
+            )
+          `;
+        const snapshot = await repository.getSubmissionFolderSnapshot(submissionId);
+        expect(snapshot?.leaseToken).toBe(leaseToken);
+        return submissionId;
+      };
+
+      // `timestamptz` chính xác tới micro-giây. Bound parameter phải đi qua `text` trước khi
+      // PostgreSQL parse; nếu driver ép thành `Date`, .185035 thành .185 và fencing khớp 0 dòng.
+      const readySubmissionId = await seedLease(fixedLeaseToken);
+      const ready = await repository.markSubmissionFolderReady(
+        readySubmissionId,
+        "lazy-token-folder",
+        fixedLeaseToken,
+      );
+      expect(ready).not.toBeNull();
+      expect(ready).toMatchObject({ state: "READY", driveFolderId: "lazy-token-folder" });
+
+      const failedSubmissionId = await seedLease(fixedLeaseToken);
+      await repository.markSubmissionFolderFailed(failedSubmissionId, fixedLeaseToken);
+      const failed = await repository.getSubmissionFolderSnapshot(failedSubmissionId);
+      expect(failed).toMatchObject({ state: "FAILED", driveFolderId: null, leaseToken: "" });
+      const [{ failedCount }] = await bootstrapSql<{ failedCount: number }[]>`
+          select count(*)::integer as "failedCount"
+          from public.public_submissions
+          where submission_id = ${failedSubmissionId} and drive_folder_state = 'FAILED'
+        `;
+      expect(failedCount).toBe(1);
+
+      const wrongTokenSubmissionId = await seedLease(fixedLeaseToken);
+      const wrongToken = "2026-07-29 16:15:36.185036+00";
+      await expect(
+        repository.markSubmissionFolderReady(
+          wrongTokenSubmissionId,
+          "must-not-checkpoint",
+          wrongToken,
+        ),
+      ).resolves.toBeNull();
+      await repository.markSubmissionFolderFailed(wrongTokenSubmissionId, wrongToken);
+      await expect(
+        repository.getSubmissionFolderSnapshot(wrongTokenSubmissionId),
+      ).resolves.toMatchObject({
+        state: "CREATING",
+        driveFolderId: null,
+        leaseToken: fixedLeaseToken,
+      });
+
+      const staleLeaseToken = "2000-07-29 16:15:36.185035+00";
+      const staleSubmissionId = await seedLease(staleLeaseToken);
+      const newLease = await repository.tryAcquireSubmissionFolderLease(staleSubmissionId, 60);
+      expect(newLease?.leaseToken).not.toBe(staleLeaseToken);
+      await expect(
+        repository.markSubmissionFolderReady(
+          staleSubmissionId,
+          "stale-worker-folder",
+          staleLeaseToken,
+        ),
+      ).resolves.toBeNull();
+      await expect(
+        repository.getSubmissionFolderSnapshot(staleSubmissionId),
+      ).resolves.toMatchObject({
+        state: "CREATING",
+        driveFolderId: null,
+        leaseToken: newLease?.leaseToken,
+      });
+    }, 20_000);
+
+    it("Phase 3: hai request đồng thời chỉ một request thắng lease PostgreSQL và tạo folder", async () => {
+      const submissionId = `lazy-${randomUUID()}`;
+      await bootstrapSql`
+          insert into public.public_submissions (
+            submission_id, receipt_code, status, phone, access_code_hash, consent_version,
+            drive_folder_id, drive_folder_state, draft_json
+          ) values (
+            ${submissionId}, ${`PC-KK-2026-${randomUUID().slice(0, 8).toUpperCase()}`},
+            'DRAFT', '0912345678', 'hash', 'v1', null, 'PENDING', '{}'::jsonb
+          )
+        `;
+
+      const repository = getPublicIntakeRepository();
+      let driveCalls = 0;
+      const dependencies = {
+        repository,
+        storage: {
+          ensureSubmissionFolder: async () => {
+            driveCalls += 1;
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+            return "lazy-originals-folder";
+          },
+        },
+      };
+      const record = { submissionId, driveFolderId: null };
+
+      const results = await Promise.allSettled([
+        ensureSubmissionFolderReady(record, dependencies),
+        ensureSubmissionFolderReady(record, dependencies),
+      ]);
+
+      // Với pool một connection, request thứ hai có thể quan sát READY sau checkpoint thay vì
+      // nhận 503. Dù lịch chạy nào, chỉ request thắng lease mới được gọi Drive/tạo folder.
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+      expect(
+        results.map((result) => (result.status === "fulfilled" ? result.value : null)),
+      ).toEqual(["lazy-originals-folder", "lazy-originals-folder"]);
+      expect(driveCalls).toBe(1);
+      await expect(ensureSubmissionFolderReady(record, dependencies)).resolves.toBe(
+        "lazy-originals-folder",
+      );
+      expect(driveCalls).toBe(1);
+
+      const checkpoint = await repository.getSubmissionFolderSnapshot(submissionId);
+      expect(checkpoint).toMatchObject({
+        state: "READY",
+        driveFolderId: "lazy-originals-folder",
+        attempts: 1,
+      });
+    }, 20_000);
 
     it(
       "Kịch bản 1: ngắt giữa chừng bước FILES_MOVED (di chuyển được 1/3 file) → retry cùng " +
@@ -450,6 +627,39 @@ describe.skipIf(!hasTestDb)(
         expect(filesRows).toHaveLength(3);
         const reservationRows = await bootstrapSql`select * from public.id_reservations`;
         expect(reservationRows).toHaveLength(1);
+      },
+      30_000,
+    );
+
+    it(
+      "Phase 5A: mười file hoàn tất theo năm nhóm, Drive peak không vượt 2 và dữ liệu chính thức không trùng",
+      async () => {
+        const { record, fileSpecs } = await seedSubmission({}, 10);
+        const result = await runOfficialAcceptance({
+          ...baseInput(record),
+          idempotencyKey: `key-${randomUUID()}`,
+          mutationHash: "phase-5a-ten-files",
+        });
+        expect(result.status).toBe("ACCEPTED");
+        expect(drive.state.peakConcurrentUpdates()).toBe(2);
+        expect(drive.state.peakConcurrentUpdates()).toBeLessThanOrEqual(2);
+
+        const [saga] = await bootstrapSql<
+          { moved_files: Record<string, string> | string; step: string }[]
+        >`select moved_files, step from public.public_acceptance_sagas where submission_id = ${record.submissionId}`;
+        const movedFiles =
+          typeof saga.moved_files === "string"
+            ? (JSON.parse(saga.moved_files) as Record<string, string>)
+            : saga.moved_files;
+        // Five durable checkpoint transactions are exercised by five chunks; the helper unit test
+        // asserts exact grouping because schema deliberately stores only the final map, not history.
+        expect(Object.keys(movedFiles)).toHaveLength(10);
+        expect(saga.step).toBe("COMPLETED");
+        const officialFiles = await bootstrapSql`
+          select file_id from public.files where case_id = ${result.officialCaseId}
+        `;
+        expect(officialFiles).toHaveLength(10);
+        for (const file of fileSpecs) expect(drive.state.updateCallsFor(file.driveFileId)).toBe(1);
       },
       30_000,
     );

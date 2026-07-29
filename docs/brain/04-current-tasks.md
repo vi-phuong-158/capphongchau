@@ -9,6 +9,15 @@
 
 ---
 
+## [2026-07-29] Phase 4 pool Supabase và region — code sẵn sàng, chờ Preview benchmark
+
+- Code có `SUPABASE_POOL_MAX` 1–3 (default 1), `vercel.json` khóa `sin1` và benchmark runner không xuất dữ liệu nhạy cảm.
+- Trước khi chạy runner: dùng database synthetic/rehearsal, đặt `PERF_BENCHMARK_BASE_URL` là HTTPS root origin Preview, `PERF_BENCHMARK_EXPECTED_HOST` khớp chính xác và `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY`; không dùng alias Production. Queue dùng `q`; đo `detail_page` SSR thực tế và `detail_api` diagnostic riêng. Detail/page/preview thành công append audit (tối đa 150 dòng/lượt đầy đủ), nên phải có kế hoạch dọn/reset audit rehearsal.
+- **Không được** đặt pool lớn hơn 1 hoặc kết luận PASS trước khi có Preview deployment Ready, session cán bộ benchmark riêng, dữ liệu tổng hợp và số connection quota từ Supabase dashboard.
+- Chạy lần lượt 1/2/3 với warm-up 10, đo 40 lượt/route, 4 worker; chọn giá trị cao hơn chỉ khi P95 tốt hơn ≥10%, error rate 0 và peak connection <70% quota. Không thao tác Production trong phase này.
+
+---
+
 ## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
 
 - `GET /api/submissions` đã chuyển lọc/tìm/phân trang sang
@@ -445,6 +454,10 @@ Theo thứ tự mốc trong `PLAN.md`:
 
 ## Đã hoàn thành gần đây
 
+- [2026-07-29] Phase 3 lazy Drive folder đã thi công trên
+  `codex/phase3-lazy-drive-folder`: migration `202607290005`, flag mặc định tắt, lease/checkpoint
+  ngoài Drive transaction, list-before-create và guard complete/delete/acceptance. Chưa deploy,
+  chưa áp migration/bật flag; cần Preview rehearsal trước khi kết luận PASS.
 - [2026-07-22] Phần code của lớp biên: chốt chặn `ORIGIN_SHARED_SECRET` chống gọi thẳng
   `*.vercel.app`, Turnstile fail-closed ở `create`/`submit`, token đã dùng chỉ mở đường replay
   idempotency. 82 test xanh. Phần cấu hình Cloudflare/Vercel còn chờ chủ dự án.
@@ -465,3 +478,7 @@ Theo thứ tự mốc trong `PLAN.md`:
 - [2026-07-21] Khởi tạo bộ não dự án AI dùng chung: `CLAUDE.md`, `docs/brain/00-06` (merge với `AGENTS.md` hiện có, không ghi đè).
 
 - [2026-07-23] PR #1: code sửa import ngày sinh, backfill append-only, staff action atomic và reset idempotent đã hoàn tất; còn dry-run/backup/apply Google Sheet và xác nhận Preview.
+# Phase 2 hiệu năng chi tiết hồ sơ — đã thi công, chờ nghiệm thu Preview
+
+- Không có migration. Cần kiểm tra server-prime detail, ảnh/AI lazy, `findActiveFile` scope, audit và `Server-Timing` trên Preview bằng session cán bộ hợp lệ.
+- Chỉ đánh dấu PASS khi P95 mở metadata/preview được ghi bằng evidence; không deploy Production trong đợt này.

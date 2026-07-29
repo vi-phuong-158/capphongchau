@@ -1,5 +1,16 @@
 # 06 — AI Working Log
 
+## [2026-07-29] Bổ sung nút cài PWA trên trang chủ
+
+- **Agent:** Codex.
+- **Thay đổi:** Thêm `PwaInstallButton` ở thẻ “Dành cho công dân – Kê khai trực tuyến”. Component client
+  bắt `beforeinstallprompt` và chỉ gọi `prompt()` sau khi người dùng bấm nút; xử lý `appinstalled`, trạng thái
+  `display-mode: standalone` và `navigator.standalone` an toàn kiểu TypeScript. iPhone/iPad có modal hướng dẫn
+  qua Safari; Android không có native prompt có hướng dẫn Chrome dự phòng; desktop chỉ hiện nút khi browser thực
+  sự phát native prompt.
+- **Kiểm thử:** Tách hàm nhận diện thiết bị/trạng thái PWA vào `src/lib/pwa-install.ts` và thêm unit test; không
+  sửa service worker online-only, manifest, API, database, quy trình kê khai hoặc thêm dependency.
+
 ## [2026-07-29] Hoàn thiện PR #8 — PL3 là luồng xác nhận định danh chính thức
 
 - Đưa xác nhận thủ công vào tab Chủ sử dụng của `WorkingPayloadEditor`; khi `UNDER_REVIEW`, nút
@@ -2589,3 +2600,93 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
 - **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
 - **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.
+
+## [2026-07-29] Phase 5A — tối ưu tiếp nhận chính thức theo nhóm 2 file
+
+- **Agent:** Codex.
+- **Thay đổi:** thêm `acceptance-file-move.ts`; saga chia file chưa checkpoint thành nhóm tối đa 2,
+  chạy Drive song song rồi checkpoint `moved_files` một lần bằng transaction ngắn + advisory lock.
+  Lỗi nhóm vẫn checkpoint peer thành công trước `AcceptanceRetryableError`; retry cùng key bỏ qua
+  peer đó. API accept không đổi.
+- **UI/Test:** hiển thị “Đang chuyển ảnh và ghi dữ liệu hồ sơ. Vui lòng không đóng trang.”; unit
+  kiểm chunk/order/trần 2/nhóm lỗi/10 file = 5 nhóm. Rehearsal integration đo peak Drive và 10 file,
+  chỉ chạy khi có `ACCEPTANCE_SAGA_TEST_DATABASE_URL` riêng.
+- **Giới hạn:** không migration, env, deploy/merge Production hay Phase 5B; chưa có benchmark Preview
+  10 file vì chưa deploy Preview.
+## [2026-07-29] Phase 4 — pool Supabase và region Preview
+
+- **Agent:** Codex.
+- **Thay đổi:** Thay hard-code pool `max: 1` bằng `SUPABASE_POOL_MAX` server-only, allowlist 1–3/default 1; giữ `prepare: false`, SSL, timeout và singleton client. `vercel.json` đặt `regions: ["sin1"]`.
+- **Đo lường:** Thêm `scripts/benchmark-staff-preview.ts` và module tổng hợp P50/P95/error-rate. Script chỉ nhận session/ID/query qua environment phiên chạy, không đọc `.env.local` và không in chúng; chỉ xuất route label, status, duration, timing allowlist và region label.
+- **Kiểm tra local:** typecheck, lint và focused tests được chạy trước khi benchmark thật. Không migration, không seed dữ liệu, không thay Vercel environment hoặc deploy Production.
+- **Còn lại:** Cần Preview Ready, session cán bộ benchmark riêng, dữ liệu synthetic và dashboard quota để A/B pool 1/2/3. Chưa kết luận Phase 4 PASS.
+
+## [2026-07-29] Phase 2 — server-prime chi tiết, lazy preview và lazy AI
+
+- **Agent:** Codex.
+- **Deploy safety:** Push nhánh `codex/phase2-detail-lazy-preview`; Preview `dpl_6TsEG6rLbPfoVQjei3ycp15qdrVN` đang build. Một deployment Production do CLI tạo nhầm (`dpl_GcJUg5DUcwrsWJ8LnxriMT9qQ6Xr`) đã bị xóa khi còn `Initializing` (0 ms build), trước `Ready`; không có release Production.
+- **Thay đổi:** `page.tsx` kiểm quyền và nạp `initialSubmission` từ service server dùng chung; `SubmissionDetail` khởi tạo state từ prop, không fetch detail lúc mount. GET detail được giữ để refresh có chủ đích và thêm `Server-Timing` an toàn.
+- **Preview ảnh:** `DocumentViewer` chỉ đặt ảnh sau nút “Xem ảnh”. Preview route dùng `findActiveFile(submissionId, fileId)` để xác minh đúng file `UPLOADED` thuộc hồ sơ trước Drive; không còn đọc toàn hồ sơ/danh sách file; audit chỉ sau đọc Drive thành công.
+- **AI:** `AiDraftPanel` chỉ mount sau hành động mở phần “Đối chiếu AI”.
+- **Kiểm tra local:** typecheck, lint, 679 test pass/10 skip và webpack production build pass. Next/Turbopack build mặc định tại worktree bị lỗi symlink `node_modules` có sẵn; webpack không bị ảnh hưởng.
+- **Preview/E2E:** Chưa có P50/P95 authenticated vì không có session cán bộ Preview. Hai lần deploy local bằng Vercel CLI đều timeout không phát sinh deployment mới; không deploy Production.
+
+## [2026-07-29] Sửa review PR #9 — benchmark hiệu năng rehearsal đúng tuyến và đúng đích
+
+- **Agent:** Codex.
+- **Thay đổi:** `buildStaffBenchmarkRequests` dùng `q` (không còn `query`) cho ba tìm kiếm queue; tách `detail_page` (`/submissions/:id`, SSR thực tế) khỏi `detail_api` diagnostic; preview giữ riêng. `validateStaffBenchmarkTarget` yêu cầu HTTPS root origin, exact expected host, Vercel Preview và xác nhận `REHEARSAL_ONLY`; chặn Production alias, credential, port, path, query và hash trước khi đọc cookie.
+- **Audit/scope:** Không thêm audit bypass. Detail page, API detail và preview thành công vẫn append audit theo contract; một lượt đầy đủ 10 warm-up + 40 đo có thể thêm tối đa 150 audit rows. Chỉ chạy dữ liệu synthetic/rehearsal và dọn/reset audit sau đo.
+- **Tài liệu:** đồng bộ AGENTS, Code Graph, decision/task/baseline hiệu năng để không mô tả sai là “không ghi database”. Không đổi runtime API, role, schema hay migration.
+- **Kiểm tra ban đầu:** baseline 5 file/13 test PASS; focused runner test sau sửa 6/6 PASS. Chưa chạy authenticated Preview vì không có cookie/session rehearsal được cấp; không deploy/merge Production.
+## [2026-07-29] Codex — triển khai Phase 3 lazy Drive folder trên branch riêng
+
+- Base `origin/main` sau PR #9: `8942d3c`; branch `codex/phase3-lazy-drive-folder`.
+- Baseline trước sửa: typecheck, lint, 78 test files/680 tests và webpack build 23/23 đều PASS.
+- Thêm migration `202607290005`, feature flag mặc định tắt, repository lease/checkpoint và
+  `submission-folder.ts`; CREATE lazy không gọi Drive, initiate bảo đảm folder trước resumable
+  session, complete/delete/official acceptance guard folder nullable.
+- Drive call cho folder riêng chạy ngoài database transaction và list-before-create để phục hồi
+  crash; `01_INBOX` dùng chung vẫn giữ advisory lock. Lỗi Drive chỉ chuyển state `FAILED`.
+- Bổ sung test feature flag/create, lease/READY/busy/recovery/failure và mở rộng preflight để kiểm
+  migration mới. Chưa áp migration, chưa deploy Preview/Production và chưa bật cờ ở môi trường nào.
+
+## [2026-07-29] Claude Code — sửa review PR #10 (lease token Phase 3)
+
+- **Agent:** Claude Code.
+- **Base:** `dfb6cae` (head PR #10, branch `codex/phase3-lazy-drive-folder`); branch làm việc `claude/pr-review-cjlypf`.
+- **Baseline trước sửa:** typecheck PASS, lint PASS, `npm test` 79 file/688 test PASS + 12 skip, webpack build 23/23 PASS.
+- **Thay đổi (blocking):** token lease của `submission-folder` từng đi qua `Date` của JS nên bị cắt
+  từ micro-giây xuống mili-giây; mệnh đề `drive_folder_lease_until = $token::timestamptz` vì thế
+  khớp 0 dòng và checkpoint `READY` không bao giờ ghi được — mọi lần lazy tạo folder đều kẹt
+  `CREATING` rồi trả 503 vĩnh viễn. Nay đọc cột bằng `::text`, đổi tên field thành `leaseToken` để
+  không ai vô tình ép sang `Date`.
+- **Thay đổi (phụ):** thêm trần `MAX_SUBMISSION_FOLDER_ATTEMPTS = 10` chặn retry vô hạn khi Drive
+  lỗi kéo dài; `Retry-After` từ 1s lên 3s; tách `listOrCreateOnDrive` bỏ ~30 dòng trùng giữa hai
+  helper folder; sửa comment `ensureSubmissionFolder` vốn nói sai rằng không còn transaction nào mở
+  khi gọi Drive (nhánh `01_INBOX` cache miss vẫn giữ advisory lock); ghi rõ index lease chỉ dùng cho
+  vận hành, không truy vấn ứng dụng nào đọc.
+- **File đã sửa:** `src/modules/public-intake/repository.ts`, `submission-folder.ts`, `storage.ts`,
+  `supabase/migrations/202607290005_lazy_drive_folder_creation.sql`,
+  `tests/submission-folder.test.ts`, `tests/staging-rehearsal-acceptance-saga.integration.test.ts`.
+- **Kiểm tra:** typecheck PASS; lint PASS; `npm test` 79 file/689 test PASS + 13 skip; webpack build
+  23/23 PASS; `git diff --check` PASS.
+- **Còn lại:** test round-trip lease token nằm trong file integration, vẫn tự skip khi không có
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL`. **Bắt buộc chạy file này với database rehearsal thật trước
+  khi bật `LAZY_DRIVE_FOLDER_CREATION_ENABLED` ở Preview** — không unit test nào chạm tới lỗi trên.
+
+## [2026-07-29] Codex — đóng lỗi precision bind parameter Phase 3 trên rehearsal
+
+- **Phát hiện:** bản sửa PR #10 đã đọc `drive_folder_lease_until` bằng `::text`, nhưng hai checkpoint
+  vẫn bind token theo `${leaseToken}::timestamptz`. PostgreSQL rehearsal chứng minh driver làm tròn
+  `2026-07-29 16:15:36.185035+00` thành `.185+00` trước khi so sánh, khiến `READY`/`FAILED` khớp 0 dòng.
+- **Sửa tối thiểu:** trong `markSubmissionFolderReady` và `markSubmissionFolderFailed`, dùng
+  `(${leaseToken}::text)::timestamptz`; không đổi schema, lease 60 giây, trần 10, `Retry-After: 3`,
+  feature flag, API, auth/CSRF/Turnstile/consent hay Drive contract.
+- **Rehearsal thật:** migration `202607290005` đã có trên project tách biệt `ddiaaweuqfvutogjckwc`.
+  `tests/staging-rehearsal-acceptance-saga.integration.test.ts` PASS **12/12** với Postgres thật và
+  fake Drive: token `.185035` giữ nguyên; READY và FAILED mỗi nhánh checkpoint đúng 1 row; sai 1
+  micro-giây cập nhật 0 row; lease cũ không ghi đè lease mới; hai request đồng thời chỉ gọi Drive một
+  lần. Không gọi Google Drive thật.
+- **Kiểm tra:** focused folder unit 6/6 PASS; typecheck PASS; lint PASS; full Vitest 79 file/689 test
+  PASS (2 file/13 test skip không có rehearsal URL); webpack build PASS; preflight rehearsal PASS
+  **36/36**. Chưa deploy/merge, flag vẫn `false`; trạng thái chỉ `READY_FOR_PREVIEW_REHEARSAL`.

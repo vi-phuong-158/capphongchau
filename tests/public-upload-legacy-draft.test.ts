@@ -42,6 +42,7 @@ import { POST as initiateUpload } from "@/app/api/public/submissions/current/upl
 
 const malformedRecord = {
   submissionId: "submission-test",
+  driveFolderId: "drive-folder-test",
   status: "DRAFT",
   draft: {},
   fileSummaries: [],

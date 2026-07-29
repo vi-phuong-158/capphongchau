@@ -10,6 +10,9 @@ const serverEnvironmentBaseSchema = z.object({
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().min(1),
   GOOGLE_MY_DRIVE_ROOT_FOLDER_ID: z.string().min(1),
   SUPABASE_DATABASE_URL: z.string().min(1),
+  // Supavisor transaction pooler: giới hạn nhỏ theo từng Vercel runtime instance.
+  // Không tăng vượt 3 khi chưa có benchmark Preview và theo dõi quota Supabase.
+  SUPABASE_POOL_MAX: z.coerce.number().int().min(1).max(3).default(1),
   GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1).optional(),
   SYSTEM_ADMIN_EMAIL: z.email(),
   DATA_HASH_PEPPER: z.string().min(32),
@@ -44,6 +47,17 @@ const serverEnvironmentBaseSchema = z.object({
     .optional()
     .transform((val) => val === "true")
     .default(false),
+  /**
+   * Phase 3: defer creating `01_INBOX/{submissionId}/originals` until the first valid upload.
+   *
+   * Fail closed to the established eager path. Preview must opt in explicitly; Production can
+   * remain on the old behavior while the migration is present.
+   */
+  LAZY_DRIVE_FOLDER_CREATION_ENABLED: z
+    .string()
+    .optional()
+    .transform((val) => val === "true")
+    .default(false),
   AI_EXTRACTION_ENABLED: z
     .string()
     .optional()
@@ -73,6 +87,7 @@ const googleStorageEnvironmentSchema = serverEnvironmentBaseSchema.pick({
 
 const supabaseEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   SUPABASE_DATABASE_URL: true,
+  SUPABASE_POOL_MAX: true,
 });
 
 const legacyGoogleSheetsEnvironmentSchema = serverEnvironmentBaseSchema
@@ -95,6 +110,7 @@ const publicIntakeEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   MAX_DRAFT_JSON_BYTES: true,
   PUBLIC_INTAKE_MODE: true,
   OFFICER_ASSISTED_INTAKE_ENABLED: true,
+  LAZY_DRIVE_FOLDER_CREATION_ENABLED: true,
 });
 
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;

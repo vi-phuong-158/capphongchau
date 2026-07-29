@@ -10,7 +10,7 @@ export type DocumentFile = {
 
 interface DocumentViewerProps {
   submissionId: string;
-  files: DocumentFile[];
+  files: readonly DocumentFile[];
   ownerIds: readonly string[];
 }
 
@@ -35,6 +35,7 @@ export function DocumentViewer(props: DocumentViewerProps) {
 
 function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
@@ -81,7 +82,10 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
     setRotation(0);
   };
 
-  const imageSrc = `/api/submissions/${submissionId}/files/${activeFile.fileId}`;
+  const previewVisible = previewFileId === activeFile.fileId;
+  const imageSrc = previewVisible
+    ? `/api/submissions/${submissionId}/files/${activeFile.fileId}`
+    : null;
 
   return (
     <div className="flex flex-col rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden sticky top-4">
@@ -166,8 +170,9 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
           <button
             type="button"
             onClick={() => setFullscreen(true)}
+            disabled={!previewVisible}
             title="Xem toàn màn hình"
-            className="rounded p-1 text-stone-600 hover:bg-stone-200"
+            className="rounded p-1 text-stone-600 hover:bg-stone-200 disabled:cursor-not-allowed disabled:opacity-30"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -219,17 +224,27 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
             transformOrigin: "center center",
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageSrc}
-            alt={activeLabel}
-            className="max-h-[440px] w-auto max-w-full rounded object-contain shadow-2xl transition-all"
-          />
+          {imageSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageSrc}
+              alt={activeLabel}
+              className="max-h-[440px] w-auto max-w-full rounded object-contain shadow-2xl transition-all"
+            />
+          ) : (
+            <button
+              type="button"
+              className="rounded-lg border border-stone-500 bg-stone-800 px-5 py-3 text-sm font-semibold text-white hover:bg-stone-700"
+              onClick={() => setPreviewFileId(activeFile.fileId)}
+            >
+              Xem ảnh
+            </button>
+          )}
         </div>
       </div>
 
       {/* Fullscreen Lightbox Modal */}
-      {fullscreen && (
+      {fullscreen && imageSrc && (
         <div
           aria-labelledby={lightboxTitleId}
           aria-modal="true"

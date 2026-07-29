@@ -16,24 +16,14 @@ export async function GET(
   context: { params: Promise<{ submissionId: string; fileId: string }> },
 ): Promise<NextResponse> {
   const requestId = randomUUID();
+  const totalStartedAt = performance.now();
   try {
     const user = await requireActiveUser(SUBMISSION_READ_ROLES);
     const { submissionId, fileId } = await context.params;
     const repository = getPublicIntakeRepository();
-    const record = await repository.findById(submissionId);
-    if (!record) {
-      return NextResponse.json(
-        createApiErrorPayload({
-          code: "NOT_FOUND",
-          message: "Không tìm thấy bản kê khai.",
-          requestId,
-        }),
-        { status: 404 },
-      );
-    }
-    const file = (await repository.listFiles(submissionId)).find(
-      (candidate) => candidate.fileId === fileId,
-    );
+    const databaseStartedAt = performance.now();
+    const file = await repository.findActiveFile(submissionId, fileId);
+    const databaseMs = performance.now() - databaseStartedAt;
     if (!file) {
       return NextResponse.json(
         createApiErrorPayload({
@@ -44,11 +34,13 @@ export async function GET(
         { status: 404 },
       );
     }
+    const driveStartedAt = performance.now();
     const preview = await getPublicIntakeStorage().readPreview(file.driveFileId);
+    const driveMs = performance.now() - driveStartedAt;
     await repository.appendAudit({
       actorEmail: user.email,
       action: "SUBMISSION_FILE_PREVIEW_VIEWED",
-      entityId: record.submissionId,
+      entityId: submissionId,
       requestId,
       metadata: { documentType: file.documentType },
     });
@@ -57,6 +49,7 @@ export async function GET(
         "cache-control": "private, no-store",
         "content-type": preview.contentType,
         "x-content-type-options": "nosniff",
+        "server-timing": `preview_db;dur=${databaseMs.toFixed(1)}, preview_drive;dur=${driveMs.toFixed(1)}, preview_total;dur=${(performance.now() - totalStartedAt).toFixed(1)}`,
       },
     });
   } catch (error) {

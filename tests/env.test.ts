@@ -38,9 +38,29 @@ describe("cấu hình môi trường server", () => {
   it("đọc và chuẩn hóa cấu hình hợp lệ", () => {
     expect(loadServerEnvironment(validEnvironment)).toMatchObject({
       APP_BASE_URL: "http://localhost:3000",
+      LAZY_DRIVE_FOLDER_CREATION_ENABLED: false,
       MAX_UPLOAD_MB: 30,
       VERCEL_REGION: "sin1",
+      SUPABASE_POOL_MAX: 1,
     });
+  });
+
+  it("Phase 3 chỉ bật lazy Drive folder bằng literal true và mặc định tắt", () => {
+    expect(loadPublicIntakeEnvironment(validEnvironment).LAZY_DRIVE_FOLDER_CREATION_ENABLED).toBe(
+      false,
+    );
+    expect(
+      loadPublicIntakeEnvironment({
+        ...validEnvironment,
+        LAZY_DRIVE_FOLDER_CREATION_ENABLED: "true",
+      }).LAZY_DRIVE_FOLDER_CREATION_ENABLED,
+    ).toBe(true);
+    expect(
+      loadPublicIntakeEnvironment({
+        ...validEnvironment,
+        LAZY_DRIVE_FOLDER_CREATION_ENABLED: "TRUE",
+      }).LAZY_DRIVE_FOLDER_CREATION_ENABLED,
+    ).toBe(false);
   });
 
   it("chỉ nêu tên biến cấu hình sai, không đưa giá trị secret vào lỗi", () => {
@@ -75,10 +95,24 @@ describe("cấu hình môi trường server", () => {
     expect(loadSupabaseEnvironment(validEnvironment)).toEqual({
       SUPABASE_DATABASE_URL:
         "postgresql://postgres.example:secret@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres",
+      SUPABASE_POOL_MAX: 1,
     });
     expect(loadLegacyGoogleSheetsEnvironment(validEnvironment)).toMatchObject({
       GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
     });
+  });
+
+  it("chỉ nhận pool Supavisor 1–3 và mặc định an toàn là 1", () => {
+    expect(loadSupabaseEnvironment(validEnvironment).SUPABASE_POOL_MAX).toBe(1);
+    expect(
+      loadSupabaseEnvironment({ ...validEnvironment, SUPABASE_POOL_MAX: "3" }).SUPABASE_POOL_MAX,
+    ).toBe(3);
+
+    for (const value of ["0", "4", "1.5", "invalid"]) {
+      expect(() =>
+        loadSupabaseEnvironment({ ...validEnvironment, SUPABASE_POOL_MAX: value }),
+      ).toThrow(EnvironmentValidationError);
+    }
   });
   it("cổng công khai cần secret phiên, pepper, giới hạn upload và cấu hình lớp biên", () => {
     expect(loadPublicIntakeEnvironment(validEnvironment)).toMatchObject({
