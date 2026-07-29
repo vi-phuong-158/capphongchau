@@ -5,6 +5,7 @@ import logoPhongChau from "@/../public/logo-phongchau.png";
 import { signIn } from "@/auth";
 import { appMetadata } from "@/lib/app-metadata";
 import { CertificateLookup } from "@/components/certificate-lookup";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 
 export default function HomePage() {
   return (
@@ -74,6 +75,7 @@ export default function HomePage() {
                 Tra cứu kết quả
               </Link>
             </div>
+            <PwaInstallButton />
           </div>
 
           <div className="text-left">

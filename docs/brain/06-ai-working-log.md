@@ -1,5 +1,16 @@
 # 06 — AI Working Log
 
+## [2026-07-29] Bổ sung nút cài PWA trên trang chủ
+
+- **Agent:** Codex.
+- **Thay đổi:** Thêm `PwaInstallButton` ở thẻ “Dành cho công dân – Kê khai trực tuyến”. Component client
+  bắt `beforeinstallprompt` và chỉ gọi `prompt()` sau khi người dùng bấm nút; xử lý `appinstalled`, trạng thái
+  `display-mode: standalone` và `navigator.standalone` an toàn kiểu TypeScript. iPhone/iPad có modal hướng dẫn
+  qua Safari; Android không có native prompt có hướng dẫn Chrome dự phòng; desktop chỉ hiện nút khi browser thực
+  sự phát native prompt.
+- **Kiểm thử:** Tách hàm nhận diện thiết bị/trạng thái PWA vào `src/lib/pwa-install.ts` và thêm unit test; không
+  sửa service worker online-only, manifest, API, database, quy trình kê khai hoặc thêm dependency.
+
 ## [2026-07-29] Hoàn thiện PR #8 — PL3 là luồng xác nhận định danh chính thức
 
 - Đưa xác nhận thủ công vào tab Chủ sử dụng của `WorkingPayloadEditor`; khi `UNDER_REVIEW`, nút
