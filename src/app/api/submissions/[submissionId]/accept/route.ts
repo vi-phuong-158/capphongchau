@@ -26,7 +26,10 @@ import {
   AcceptanceRetryableError,
   runOfficialAcceptance,
 } from "@/modules/submissions/acceptance-saga";
-import { completionChecks } from "@/modules/submissions/completion-checks";
+import {
+  blockingCompletionIssueDetails,
+  completionChecks,
+} from "@/modules/submissions/completion-checks";
 import { effectivePayload } from "@/modules/public-intake/payload-layers";
 import { publicActorName } from "@/modules/public-intake/workflow";
 import { SUBMISSION_DECISION_ROLES } from "@/modules/submissions/review";
@@ -114,7 +117,7 @@ export async function POST(
     }
 
     const checks = completionChecks(record, effectivePayload(record));
-    const blocking = checks.filter((c) => c.severity === "BLOCKING");
+    const blocking = blockingCompletionIssueDetails(checks);
     if (blocking.length > 0) {
       return NextResponse.json(
         createApiErrorPayload({
@@ -124,6 +127,13 @@ export async function POST(
           details: {
             blockingCount: blocking.length,
             warningCount: checks.length - blocking.length,
+            // Route này chỉ dành cho cán bộ đã qua kiểm tra quyền. Trả về nhãn/lời hướng dẫn
+            // an toàn giúp họ sửa đúng chỗ, nhưng tuyệt đối không đưa PII, token hay Drive ID vào lỗi.
+            issues: blocking.map((check) => ({
+              code: check.code,
+              label: check.label,
+              message: check.message,
+            })),
           },
         }),
         { status: 400, headers: { "cache-control": "no-store" } },

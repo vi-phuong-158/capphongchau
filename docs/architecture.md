@@ -112,8 +112,9 @@ Mỗi API write kiểm tra CSRF và quyền ở server. Turnstile/Cloudflare fai
 
 `/ke-khai-ho` gửi qua route staff riêng, bắt buộc `ASSISTED_INTAKE_ROLES` + staff CSRF và không
 Turnstile. Upload complete replay request log trước validation trạng thái mới; mọi cleanup xác minh
-orphan trước khi xóa. Official acceptance chặn consent/identity chưa xác nhận. Timeline public chỉ
-trả DTO allowlist và sanitize email ở cả write/read.
+orphan trước khi xóa. Official acceptance chặn consent/identity chưa xác nhận; lỗi chặn cho cán bộ
+trả danh sách `code`/`label`/`message` an toàn để chỉ rõ mục cần hoàn thiện, không trả PII. Timeline
+public chỉ trả DTO allowlist và sanitize email ở cả write/read.
 
 ## Migration và cutover
 

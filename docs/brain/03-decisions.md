@@ -7,6 +7,18 @@
 > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
 > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
 
+## [2026-07-29] Hiển thị điều kiện chặn tiếp nhận cho cán bộ
+
+- **Quyết định:** Giữ nguyên toàn bộ `completionChecks` ở server; khi còn lỗi `BLOCKING`, route
+  `POST /api/submissions/:submissionId/accept` trả thêm `error.details.issues[]` gồm `code`,
+  `label`, `message`. Màn hình chi tiết hồ sơ hiển thị danh sách này ngay dưới thông báo lỗi.
+- **Lý do:** Thông báo chung “Hồ sơ chưa đủ điều kiện tiếp nhận chính thức” làm cán bộ không biết
+  trường nào cần hoàn thiện, dù kiểm tra server đã có nhãn và hướng dẫn cụ thể.
+- **Bảo mật:** Chỉ route nội bộ sau `requireActiveUser`/CSRF nhận chi tiết; payload chỉ có mã và câu
+  hướng dẫn cố định, không có CCCD, họ tên, Drive ID/link, token hoặc dữ liệu tệp.
+- **Đánh đổi:** Không tự sửa hoặc nới validation; cán bộ vẫn phải hoàn thiện dữ liệu rồi bấm lại với
+  cùng khóa idempotency trong phiên nếu cần tiếp tục saga.
+
 ## [2026-07-29] Tra cứu bằng số phát hành Giấy chứng nhận, không lộ dữ liệu hồ sơ
 
 - **Quyết định:** Màn hình tra cứu công khai cho chọn QR CCCD hoặc `Số phát hành GCN` + `Ngày cấp

@@ -75,6 +75,30 @@ type EditableOwner = {
   identityOverrideReason: string;
 };
 
+type AcceptanceBlockingIssue = {
+  code: string;
+  label: string;
+  message: string;
+};
+
+function acceptanceBlockingIssues(details: unknown): AcceptanceBlockingIssue[] {
+  if (!details || typeof details !== "object" || !("issues" in details)) return [];
+  const issues = (details as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) return [];
+  return issues.flatMap((issue) => {
+    if (
+      !issue ||
+      typeof issue !== "object" ||
+      typeof (issue as { code?: unknown }).code !== "string" ||
+      typeof (issue as { label?: unknown }).label !== "string" ||
+      typeof (issue as { message?: unknown }).message !== "string"
+    ) {
+      return [];
+    }
+    return [issue as AcceptanceBlockingIssue];
+  });
+}
+
 const EDITABLE_OWNER_FIELDS = [
   "fullName",
   "identityNumber",
@@ -96,6 +120,7 @@ export function SubmissionDetail({
 }) {
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [acceptanceIssues, setAcceptanceIssues] = useState<AcceptanceBlockingIssue[]>([]);
   const [busy, setBusy] = useState(false);
   const [supplementReason, setSupplementReason] = useState("MISSING_INFORMATION");
   const [supplementMessage, setSupplementMessage] = useState("");
@@ -311,6 +336,7 @@ export function SubmissionDetail({
     if (!acceptKeyRef.current) acceptKeyRef.current = crypto.randomUUID();
     setBusy(true);
     setMessage(null);
+    setAcceptanceIssues([]);
     try {
       const token = await csrfToken();
       const response = await fetch(`/api/submissions/${submission.submissionId}/accept`, {
@@ -324,10 +350,17 @@ export function SubmissionDetail({
       });
       const data = (await response.json()) as {
         submission?: { officialCaseId: string; status: string; version: number };
-        error?: { message?: string };
+        error?: { message?: string; details?: unknown };
       };
-      if (!response.ok || !data.submission)
+      if (!response.ok || !data.submission) {
+        const issues = acceptanceBlockingIssues(data.error?.details);
+        setAcceptanceIssues(issues);
+        if (issues.length > 0) {
+          setMessage(data.error?.message ?? "Hồ sơ chưa đủ điều kiện tiếp nhận chính thức.");
+          return;
+        }
         throw new Error(data.error?.message ?? "Không thể tiếp nhận chính thức.");
+      }
       const accepted = data.submission;
       setSubmission((current) => (current ? { ...current, ...accepted } : current));
       acceptKeyRef.current = "";
@@ -485,6 +518,21 @@ export function SubmissionDetail({
           <p aria-live="polite" className="mt-4 rounded-lg bg-stone-100 p-3 text-sm text-stone-700">
             {message}
           </p>
+        ) : null}
+        {acceptanceIssues.length > 0 ? (
+          <section
+            aria-live="polite"
+            className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          >
+            <p className="font-semibold">Các mục cần hoàn thiện trước khi tiếp nhận:</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {acceptanceIssues.map((issue) => (
+                <li key={issue.code}>
+                  <span className="font-medium">{issue.label}:</span> {issue.message}
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
         <dl className="mt-6 grid gap-4 border-y border-stone-200 py-5 sm:grid-cols-3">
           <div>

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { completionChecks } from "@/modules/submissions/completion-checks";
+import {
+  blockingCompletionIssueDetails,
+  completionChecks,
+} from "@/modules/submissions/completion-checks";
 import type { SubmissionRecord } from "@/modules/public-intake/repository";
 import {
   emptyLandUse,
@@ -118,6 +121,19 @@ describe("Completion checks validation rules", () => {
     });
     const checks = completionChecks(rec, draft);
     expect(checks.some((c) => c.code === "CERT_ISSUE_NUMBER_MISSING")).toBe(true);
+  });
+
+  it("CC2a: exposes safe, actionable details for every blocking issue", () => {
+    const rec = makeRecord();
+    const draft = makeDraft({
+      certificate: { issueNumber: "", issueDate: "2020-01-01", registryNumber: "CH001" },
+    });
+
+    expect(blockingCompletionIssueDetails(completionChecks(rec, draft))).toContainEqual({
+      code: "CERT_ISSUE_NUMBER_MISSING",
+      label: "Thiếu số phát hành GCN",
+      message: "Chưa nhập số phát hành Giấy chứng nhận.",
+    });
   });
 
   it("CC3: invalid citizen ID -> BLOCKING issue OWNER_0_ID_INVALID", () => {

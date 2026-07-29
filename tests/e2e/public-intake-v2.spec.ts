@@ -278,6 +278,7 @@ test.describe("E2E-05 — Hàng rào tiếp nhận chính thức", () => {
     await page.getByRole("button", { name: /Tiếp nhận chính thức/i }).click();
 
     await expect(page.getByText(/chưa đủ điều kiện tiếp nhận chính thức/i)).toBeVisible();
+    await expect(page.getByText("Các mục cần hoàn thiện trước khi tiếp nhận:")).toBeVisible();
   });
 });
 

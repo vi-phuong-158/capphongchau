@@ -266,3 +266,25 @@ before an intentional commit.
   long heading and online-only message that no longer exist.
 - **Verification:** `$env:E2E_BASE_URL='http://localhost:3000'; npm.cmd run test:e2e` → 2 passed,
   14 skipped; focused Vitest 86/86, typecheck và `git diff --check` đều pass.
+
+---
+
+## 15. Addendum — Hiển thị rõ điều kiện chặn tiếp nhận (2026-07-29)
+
+- **Task/status:** `READY_FOR_REVIEW` — thay thông báo chung khi tiếp nhận chính thức bị chặn bằng
+  danh sách từng mục cần hoàn thiện. Không migration, deploy, push hoặc thao tác dữ liệu thật.
+- **Files/symbols:** `blockingCompletionIssueDetails()` trong
+  `src/modules/submissions/completion-checks.ts`; route
+  `POST /api/submissions/:submissionId/accept`; component `SubmissionDetail`; test unit completion
+  và assertion E2E hàng rào tiếp nhận; tài liệu `AGENTS.md`, kiến trúc, decision log và working log.
+- **Behavior/API:** Khi còn `BLOCKING`, route vẫn trả HTTP 400 và không mở saga, nhưng bổ sung
+  `error.details.issues[]` chỉ gồm `code`, `label`, `message`. UI kiểm kiểu mảng này, hiện tiêu đề
+  và từng hướng dẫn ngay dưới thông báo; không gắn nhầm hướng dẫn retry mạng cho lỗi dữ liệu.
+- **Security:** Route nội bộ vẫn kiểm authorization + CSRF trước khi trả chi tiết. DTO allowlist
+  không chứa PII, CCCD, token, Drive ID/link, metadata tệp; validation, schema và saga không đổi.
+- **Verification:** focused Vitest 8/8, `npm run typecheck`, ESLint tệp tác động,
+  `npx playwright test --list` (16 test), `npm test` (621 pass/10 skip), `npm run lint`,
+  `npm run build` và `git diff --check` đều pass. E2E thật chưa chạy vì cần credential/phiên preview.
+- **Acceptance:** lỗi BLOCKING vẫn chặn saga; cán bộ thấy từng nhãn/hướng dẫn; không lộ dữ liệu
+  nhạy cảm; không regression typecheck/unit/build. Cần deploy và thử một hồ sơ thiếu dữ liệu để
+  xác nhận bố cục trực quan.

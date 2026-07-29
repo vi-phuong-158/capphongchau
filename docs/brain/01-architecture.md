@@ -242,7 +242,8 @@ src/modules/public-intake/payload-layers.ts (thuần, không I/O)
 
 src/app/api/submissions/[submissionId]/accept/route.ts
 ├── completionChecks (src/modules/submissions/completion-checks.ts) chạy TRƯỚC khi mở saga —
-│   còn BLOCKING → 400 VALIDATION_FAILED, không mở transaction nào (Phase 8)
+│   còn BLOCKING → 400 VALIDATION_FAILED, không mở transaction nào (Phase 8); trả
+│   error.details.issues[] = code/label/message an toàn để màn hình cán bộ chỉ đúng mục cần sửa
 │   ⚠️ TỪ V2 (2026-07-28) ĐÂY LÀ GÁC CỔNG DUY NHẤT cho dữ liệu nghiệp vụ đầy đủ.
 │   Cổng công khai chỉ còn đòi phone + tên chủ + đủ ảnh, nên MỌI trường PL3 mà
 │   validateDraftForSubmit từng chặn đã chuyển hết về đây: vai trò trên GCN, ngày sinh/giới

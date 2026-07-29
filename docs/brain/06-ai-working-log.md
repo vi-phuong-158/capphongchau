@@ -1,5 +1,18 @@
 # 06 — AI Working Log
 
+## [2026-07-29] Làm rõ điều kiện chặn trước tiếp nhận chính thức
+
+- **Agent:** Codex
+- **Thay đổi:** `blockingCompletionIssueDetails()` rút các lỗi `BLOCKING` thành DTO an toàn
+  `code`/`label`/`message`. `POST /api/submissions/:submissionId/accept` trả DTO này tại
+  `error.details.issues`; `SubmissionDetail` hiển thị danh sách “Các mục cần hoàn thiện…” bên dưới
+  thông báo lỗi thay vì chỉ có lỗi tổng quát. Bổ sung unit test DTO và assertion E2E cho nhãn UI.
+- **Bảo mật:** Không nới `completionChecks`, không đổi schema hay saga; chỉ route nội bộ, sau auth
+  và CSRF, nhận chi tiết cố định không chứa PII/Drive ID/token.
+- **Kiểm tra:** focused Vitest 8/8, `npm run typecheck`, ESLint tệp tác động và `git diff --check`
+  đều đạt; full `npm test` 621 pass/10 skip, `npm run lint` và `npm run build` exit 0. Build in ra
+  cảnh báo OOM muộn từ worktree `.claude` không thuộc thay đổi này nhưng lệnh vẫn exit 0.
+
 ## [2026-07-29] Đồng bộ E2E và tài liệu sau khi đổi thứ tự Public Intake wizard
 
 - **Agent:** Codex

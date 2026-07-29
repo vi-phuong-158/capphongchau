@@ -293,6 +293,9 @@ Route bị khóa bằng cờ `OFFICIAL_ACCEPTANCE_ENABLED` (`src/modules/submiss
 mặc định `false`) — độc lập với `REFERENCE_IS_PLACEHOLDER` (cờ đó chỉ nói nhãn danh mục xuất PL3
 đã chốt, không phải đã đủ điều kiện ghi dữ liệu thật). Chỉ đảo `true` sau khi hoàn thành gác cổng
 ở `docs/brain/04-current-tasks.md`.
+Khi `completionChecks` còn lỗi `BLOCKING`, route trả HTTP 400 kèm `error.details.issues[]` chỉ gồm
+`code`, `label`, `message` an toàn để cán bộ biết chính xác mục cần hoàn thiện; không đưa PII,
+Drive ID/link, token hoặc metadata tệp vào chi tiết lỗi.
 
 `POST /api/public/certificate-lookup` nhận một trong hai phương thức: QR CCCD hiện có hoặc số
 phát hành GCN + ngày cấp. Với GCN, chuẩn hóa bỏ khoảng trắng/dấu gạch và không phân biệt hoa/thường;

@@ -31,6 +31,15 @@ export interface CompletionCheck {
   message: string;
 }
 
+/** Chi tiết an toàn để API cán bộ chỉ ra chính xác mục nào đang chặn tiếp nhận. */
+export function blockingCompletionIssueDetails(
+  checks: readonly CompletionCheck[],
+): Array<Pick<CompletionCheck, "code" | "label" | "message">> {
+  return checks
+    .filter((check) => check.severity === "BLOCKING")
+    .map(({ code, label, message }) => ({ code, label, message }));
+}
+
 const OLD_WARD_CODES = new Set(OLD_WARD_OPTIONS.map((option) => option.code));
 const LAND_PURPOSE_CODES = new Set(LAND_PURPOSE_SELECT_OPTIONS.map((option) => option.code));
 const LAND_ORIGIN_CODES = new Set(LAND_ORIGIN_OPTIONS.map((option) => option.code));
