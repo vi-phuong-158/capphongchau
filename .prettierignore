@@ -4,3 +4,9 @@ coverage/
 playwright-report/
 test-results/
 package-lock.json
+
+# Báo cáo bàn giao: nhúng nguyên văn unified diff (§9.1 của
+# AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md). Prettier định dạng lại Markdown sẽ đụng vào nội dung
+# trong code fence và làm sai lệch bằng chứng — thứ duy nhất khiến báo cáo có giá trị.
+CHATGPT_HANDOFF.md
+docs/handoffs/

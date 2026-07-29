@@ -31,6 +31,19 @@ const serverEnvironmentBaseSchema = z.object({
   MAX_DRAFT_JSON_BYTES: z.coerce.number().int().positive().default(45000),
   MIN_DRIVE_FREE_GB: z.coerce.number().int().positive().default(650),
   PUBLIC_INTAKE_MODE: z.enum(["LIVE", "PAUSED"]).default("LIVE"),
+  /**
+   * Kill switch phía máy chủ cho chế độ cán bộ hỗ trợ kê khai (`/ke-khai-ho`).
+   *
+   * Mặc định TẮT khi thiếu biến — một triển khai quên đặt biến này không được vô tình mở một
+   * đường tạo hồ sơ nội bộ. Đây KHÔNG phải hàng rào bảo mật duy nhất: `ASSISTED_INTAKE_ROLES`
+   * vẫn được kiểm sau khi cờ bật, y hệt trước khi có cờ. Cờ chỉ trả lời "tính năng có mở hay
+   * không", vai trò trả lời "ai được dùng nó" — thiếu một trong hai là từ chối.
+   */
+  OFFICER_ASSISTED_INTAKE_ENABLED: z
+    .string()
+    .optional()
+    .transform((val) => val === "true")
+    .default(false),
   AI_EXTRACTION_ENABLED: z
     .string()
     .optional()
@@ -81,6 +94,7 @@ const publicIntakeEnvironmentSchema = serverEnvironmentBaseSchema.pick({
   CONSENT_NOTICE_VERSION: true,
   MAX_DRAFT_JSON_BYTES: true,
   PUBLIC_INTAKE_MODE: true,
+  OFFICER_ASSISTED_INTAKE_ENABLED: true,
 });
 
 export type ServerEnvironment = z.output<typeof serverEnvironmentSchema>;

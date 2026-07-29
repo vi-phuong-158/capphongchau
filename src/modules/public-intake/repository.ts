@@ -8,16 +8,43 @@ import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository"
 import { getDatabase } from "@/modules/supabase/database";
 
 import type { IntakeDraft } from "./types";
+import type { FileNormalizationMetadata, UploadAttemptMetric } from "./upload-metrics";
 import {
   type PublicFileSummary,
   type PublicStatus,
   type PublicTimelineEvent,
+  serializePublicTimelineEvent,
   type SupplementItem,
   type SupplementRequest,
 } from "./workflow";
 
 export { PUBLIC_STATUSES } from "./workflow";
 export type { PublicStatus } from "./workflow";
+
+/**
+ * Nguồn của hồ sơ.
+ *
+ * `OFFICER_ASSISTED` do **máy chủ** gán từ phiên đăng nhập của cán bộ. Client không bao giờ được
+ * gửi giá trị này lên: nhận từ client là để bất kỳ ai cũng gắn nhãn "cán bộ đã nhập hộ" cho hồ sơ
+ * của mình, làm mất luôn ý nghĩa của việc phân biệt nguồn.
+ */
+export const INTAKE_CHANNELS = ["SELF_SERVICE", "OFFICER_ASSISTED"] as const;
+
+/**
+ * Trần số bản ghi số đo tải ảnh cho MỘT hồ sơ.
+ *
+ * Đặt rất cao so với thực tế (một hộ tối đa 2 ảnh CCCD mỗi chủ sử dụng + 10 ảnh GCN, kể cả mạng
+ * rất tệ cũng chỉ vài chục lượt kể cả thử lại). Trần này không nhằm giới hạn người dân mà nhằm
+ * chặn một phiên hợp lệ bơm vô hạn dòng vào bảng qua `/uploads/metrics`.
+ */
+export const MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200;
+export type IntakeChannel = (typeof INTAKE_CHANNELS)[number];
+
+/** Cán bộ ngồi nhập hộ. Mọi trường do máy chủ điền từ phiên đăng nhập. */
+export interface AssistingOfficer {
+  readonly email: string;
+  readonly displayName: string;
+}
 
 export interface SubmissionRecord {
   readonly submissionId: string;
@@ -35,7 +62,19 @@ export interface SubmissionRecord {
   readonly officialCaseId: string;
   readonly acceptStep: string;
   readonly claimedBy: string;
+  /**
+   * Tên cán bộ tại thời điểm nhận xử lý. Rỗng với hồ sơ nhận trước 2026-07-28.
+   *
+   * Lưu tại chỗ thay vì join sang `public.users` mỗi lần đọc: tên hiển thị đổi được, và cán bộ
+   * nghỉ việc thì bản ghi `users` có thể bị vô hiệu hóa — join sẽ làm lịch sử hồ sơ mất dấu
+   * người từng xử lý.
+   */
+  readonly claimedByDisplayName: string;
   readonly claimedAt: string;
+  readonly intakeChannel: IntakeChannel;
+  readonly assistedByEmail: string;
+  readonly assistedByDisplayName: string;
+  readonly assistedAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly draft: IntakeDraft | null;
@@ -61,6 +100,7 @@ export interface SubmissionSummary {
   readonly phone: string;
   readonly version: number;
   readonly claimedBy: string;
+  readonly claimedByDisplayName: string;
   readonly updatedAt: string;
   readonly rowIndex: number;
 }
@@ -131,6 +171,11 @@ interface SubmissionRow {
   readonly drive_folder_id: string;
   readonly accept_step: string | null;
   readonly claimed_by: string | null;
+  readonly claimed_by_display_name: string | null;
+  readonly intake_channel: string | null;
+  readonly assisted_by_email: string | null;
+  readonly assisted_by_display_name: string | null;
+  readonly assisted_at: Date | null;
   readonly claimed_at: Date | null;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -167,7 +212,8 @@ interface FileRow {
 const SUBMISSION_SELECT = `
   submission_id, receipt_code::text, status, phone, version, access_code_hash,
   failed_attempts, locked_until, consent_version, consented_at, retention_until,
-  official_case_id, drive_folder_id, accept_step, claimed_by, claimed_at,
+  official_case_id, drive_folder_id, accept_step, claimed_by, claimed_by_display_name, claimed_at,
+  intake_channel, assisted_by_email, assisted_by_display_name, assisted_at,
   created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
   citizen_payload_json, citizen_payload_version, citizen_payload_at,
   working_payload_json, working_payload_at, working_payload_by,
@@ -230,6 +276,11 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     officialCaseId: row.official_case_id ?? "",
     acceptStep: row.accept_step ?? "",
     claimedBy: row.claimed_by ?? "",
+    claimedByDisplayName: row.claimed_by_display_name ?? "",
+    intakeChannel: row.intake_channel === "OFFICER_ASSISTED" ? "OFFICER_ASSISTED" : "SELF_SERVICE",
+    assistedByEmail: row.assisted_by_email ?? "",
+    assistedByDisplayName: row.assisted_by_display_name ?? "",
+    assistedAt: asIso(row.assisted_at),
     claimedAt: asIso(row.claimed_at),
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
@@ -293,6 +344,9 @@ export class PublicIntakeRepository {
     driveFolderId: string;
     draft: IntakeDraft;
     consentVersion: string;
+    /** Mặc định `SELF_SERVICE`; chỉ route nhân viên đã xác thực mới truyền giá trị khác. */
+    intakeChannel?: IntakeChannel;
+    assistedBy?: AssistingOfficer;
   }): Promise<void> {
     const database = getDatabase();
     await database.begin(async (transaction) => {
@@ -306,13 +360,18 @@ export class PublicIntakeRepository {
         }
         return;
       }
+      const channel: IntakeChannel = input.intakeChannel ?? "SELF_SERVICE";
+      const assisted = channel === "OFFICER_ASSISTED" ? (input.assistedBy ?? null) : null;
       await transaction`
         insert into public.public_submissions (
           submission_id, receipt_code, phone, access_code_hash, consent_version,
-          drive_folder_id, draft_json
+          drive_folder_id, draft_json,
+          intake_channel, assisted_by_email, assisted_by_display_name, assisted_at
         ) values (
           ${input.submissionId}, ${input.receiptCode}, ${input.phone}, ${input.accessCodeHash},
-          ${input.consentVersion}, ${input.driveFolderId}, ${JSON.stringify(input.draft)}::jsonb
+          ${input.consentVersion}, ${input.driveFolderId}, ${JSON.stringify(input.draft)}::jsonb,
+          ${channel}, ${assisted?.email ?? null}, ${assisted?.displayName ?? null},
+          ${assisted ? new Date().toISOString() : null}
         )
       `;
       await transaction`
@@ -324,6 +383,17 @@ export class PublicIntakeRepository {
           now() + interval '24 hours'
         )
       `;
+      await this.insertAudit(transaction, {
+        actorEmail: assisted?.email ?? "PUBLIC",
+        action: assisted ? "ASSISTED_SUBMISSION_CREATED" : "PUBLIC_SUBMISSION_CREATED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          consentAccepted: true,
+          consentVersion: input.consentVersion,
+          intakeChannel: channel,
+        },
+      });
     });
   }
 
@@ -568,6 +638,8 @@ export class PublicIntakeRepository {
     expectedVersion: number;
     status: PublicStatus;
     claimedBy?: string;
+    /** Truyền cùng `claimedBy`. Chuỗi rỗng nghĩa là xóa (RELEASE), `undefined` là giữ nguyên. */
+    claimedByDisplayName?: string;
     claimedAt?: string;
     force?: boolean;
     supplementRequest?: SupplementRequest;
@@ -601,6 +673,7 @@ export class PublicIntakeRepository {
         `update public.public_submissions set
            status = $3, version = version + 1,
            claimed_by = coalesce($4, claimed_by),
+           claimed_by_display_name = coalesce($8, claimed_by_display_name),
            claimed_at = coalesce($5::timestamptz, claimed_at),
            working_payload_json = case
              when working_payload_json is null then coalesce(citizen_payload_json, draft_json)
@@ -626,6 +699,7 @@ export class PublicIntakeRepository {
           input.claimedAt || null,
           input.actorEmail,
           isForce,
+          input.claimedByDisplayName ?? null,
         ],
       );
       if (!rows[0]) {
@@ -683,7 +757,12 @@ export class PublicIntakeRepository {
           (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
         values (
           ${input.idempotencyKey}, ${input.requestId}, 'STAFF_ACTION', ${input.mutationHash},
-          ${JSON.stringify({ status: next.status, version: next.version, claimedBy: next.claimedBy || null })}::jsonb,
+          ${JSON.stringify({
+            status: next.status,
+            version: next.version,
+            claimedBy: next.claimedBy || null,
+            claimedByDisplayName: next.claimedByDisplayName || null,
+          })}::jsonb,
           now() + interval '24 hours'
         )
       `;
@@ -706,6 +785,14 @@ export class PublicIntakeRepository {
     requestId: string;
     idempotencyKey: string;
     mutationHash: string;
+    /**
+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
+     *
+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
+     */
+    pendingIdentityHmacs?: string[];
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -735,7 +822,12 @@ export class PublicIntakeRepository {
       const next = mapSubmission(rows[0]);
 
       if (input.record.status !== "DRAFT") {
-        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+        await this.refreshCanonicalProjection(
+          transaction,
+          input.record.submissionId,
+          input.draft,
+          input.pendingIdentityHmacs,
+        );
       }
 
       await this.insertAudit(transaction, {
@@ -779,6 +871,14 @@ export class PublicIntakeRepository {
       jobId: string;
       appliedFieldPaths: readonly string[];
     };
+    /**
+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
+     *
+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
+     */
+    pendingIdentityHmacs?: string[];
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -827,7 +927,12 @@ export class PublicIntakeRepository {
       `;
 
       if (input.record.status !== "DRAFT") {
-        await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+        await this.refreshCanonicalProjection(
+          transaction,
+          input.record.submissionId,
+          input.draft,
+          input.pendingIdentityHmacs,
+        );
       }
 
       await this.insertAudit(transaction, {
@@ -901,6 +1006,14 @@ export class PublicIntakeRepository {
     requestId: string;
     idempotencyKey: string;
     mutationHash: string;
+    /**
+     * HMAC tra cứu của các CCCD hợp lệ trong `draft`, do route tính (repository không chạm env).
+     *
+     * Cán bộ nhập hộ hoặc sửa giúp CCCD mà người dân để trống ở MỨC A. Không ghi ở đây thì hồ sơ
+     * đó vĩnh viễn nằm ngoài chỉ mục tra cứu và không bao giờ bị phát hiện trùng. Insert dùng
+     * `on conflict do nothing` nên ghi lại nhiều lần là vô hại.
+     */
+    pendingIdentityHmacs?: string[];
   }): Promise<SubmissionRecord> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -941,7 +1054,12 @@ export class PublicIntakeRepository {
       if (!rows[0]) throw new SubmissionVersionConflictError();
       const next = mapSubmission(rows[0]);
 
-      await this.refreshCanonicalProjection(transaction, input.record.submissionId, input.draft);
+      await this.refreshCanonicalProjection(
+          transaction,
+          input.record.submissionId,
+          input.draft,
+          input.pendingIdentityHmacs,
+        );
 
       const counts = await syncOfficialRecord(transaction, {
         caseId: next.officialCaseId,
@@ -1144,12 +1262,13 @@ export class PublicIntakeRepository {
         phone: string;
         version: number;
         claimed_by: string | null;
+        claimed_by_display_name: string | null;
         updated_at: Date;
         legacy_row_index: string | number;
       }[]
     >`
       select submission_id, receipt_code::text, status, phone, version, claimed_by,
-        updated_at, legacy_row_index
+        claimed_by_display_name, updated_at, legacy_row_index
       from public.public_submissions order by legacy_row_index
     `;
     return rows.map((row) => ({
@@ -1159,6 +1278,7 @@ export class PublicIntakeRepository {
       phone: row.phone,
       version: row.version,
       claimedBy: row.claimed_by ?? "",
+      claimedByDisplayName: row.claimed_by_display_name ?? "",
       updatedAt: row.updated_at.toISOString(),
       rowIndex: Number(row.legacy_row_index),
     }));
@@ -1253,14 +1373,16 @@ export class PublicIntakeRepository {
       from public.public_status_events where submission_id = ${submissionId}
       order by occurred_at
     `;
-    return rows.map((row) => ({
-      eventId: row.event_id,
-      eventType: row.event_type,
-      label: row.label,
-      actorDisplayName: row.actor_display_name || "Cán bộ phường",
-      message: row.message,
-      occurredAt: row.occurred_at.toISOString(),
-    }));
+    return rows.map((row) =>
+      serializePublicTimelineEvent({
+        eventId: row.event_id,
+        eventType: row.event_type,
+        label: row.label,
+        actorDisplayName: row.actor_display_name,
+        message: row.message,
+        occurredAt: row.occurred_at.toISOString(),
+      }),
+    );
   }
 
   async createSupplementRequest(input: {
@@ -1389,6 +1511,7 @@ export class PublicIntakeRepository {
     record: SubmissionRecord,
     draft: IntakeDraft,
     status: PublicStatus,
+    expectedVersion: number,
   ): Promise<number> {
     const database = getDatabase();
     const rows = await database<{ version: number }[]>`
@@ -1396,11 +1519,68 @@ export class PublicIntakeRepository {
         draft_json = ${JSON.stringify(draft)}::jsonb,
         phone = ${draft.phone || record.phone}, status = ${status}, version = version + 1,
         updated_at = now()
-      where submission_id = ${record.submissionId} and version = ${record.version}
+      where submission_id = ${record.submissionId} and version = ${expectedVersion}
       returning version
     `;
     if (!rows[0]) throw new SubmissionVersionConflictError();
     return rows[0].version;
+  }
+
+  /**
+   * Drive file này đã được cơ sở dữ liệu nhận vào chưa?
+   *
+   * Dùng để quyết định có được xóa tệp trên Drive khi đường ghi hỏng hay không. Đọc **mọi** trạng
+   * thái, kể cả `REPLACED`/`DELETED`: một tệp đã bị thay vẫn là tệp đã từng được nhận, và xóa nó
+   * khỏi Drive sẽ làm mất bằng chứng của hồ sơ.
+   *
+   * CỐ Ý KHÔNG lọc theo `submission_id`. Câu hỏi cần trả lời trước khi xóa là "có hồ sơ NÀO đang
+   * trỏ vào tệp này không", không phải "hồ sơ đang gọi có trỏ vào nó không". Lọc theo hồ sơ gọi
+   * thì một `driveFileId` do client gửi lên trỏ sang hồ sơ khác sẽ bị coi là mồ côi và bị xóa —
+   * mất bằng chứng của một hộ dân không liên quan. `driveFileId` tại các nhánh dọn dẹp trong
+   * `uploads/complete` là dữ liệu client chưa qua xác minh, nên hàng rào phải nằm ở đây.
+   */
+  async isDriveFileAdopted(driveFileId: string): Promise<boolean> {
+    const database = getDatabase();
+    const rows = await database<{ count: string }[]>`
+      select count(*)::text as count from public.public_files
+      where drive_file_id = ${driveFileId}
+    `;
+    return Number(rows[0]?.count ?? "0") > 0;
+  }
+
+  /**
+   * Ghi một lượt tải vào bảng số đo. Best-effort ở phía gọi — hàm này vẫn ném lỗi để bên gọi tự
+   * quyết định nuốt, chứ không tự nuốt ở đây (nuốt trong repository là cách chắc chắn để một bảng
+   * hỏng nằm im hàng tháng mà không ai biết).
+   *
+   * Trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION` áp ngay trong câu lệnh, không phải một lượt `select`
+   * riêng: `/uploads/metrics` nhận số đo của các lượt HỎNG nên không có gì buộc client phải dừng,
+   * và một phiên hợp lệ có thể bắn bao nhiêu bản ghi tùy ý. Một hộ dân thật tối đa vài chục lượt
+   * kể cả khi mạng rất tệ, nên trần này không chạm dữ liệu thật; nó chỉ chặn việc bơm hàng loạt
+   * dòng rác vào cơ sở dữ liệu.
+   */
+  async appendUploadAttempt(metric: UploadAttemptMetric): Promise<void> {
+    const database = getDatabase();
+    await database`
+      insert into public.public_upload_attempts (
+        attempt_id, submission_id, document_type, outcome, source_size_bytes, upload_size_bytes,
+        prepare_duration_ms, initiate_duration_ms, upload_duration_ms, complete_duration_ms,
+        retry_count, client_platform, effective_connection_type, normalization_version,
+        failure_stage, failure_code
+      )
+      select
+        ${metric.attemptId}, ${metric.submissionId}, ${metric.documentType}, ${metric.outcome},
+        ${metric.sourceSizeBytes}, ${metric.uploadSizeBytes},
+        ${metric.prepareDurationMs}, ${metric.initiateDurationMs},
+        ${metric.uploadDurationMs}, ${metric.completeDurationMs},
+        ${metric.retryCount}, ${metric.clientPlatform}, ${metric.effectiveConnectionType},
+        ${metric.normalizationVersion}, ${metric.failureStage}, ${metric.failureCode}
+      where (
+        select count(*) from public.public_upload_attempts
+        where submission_id = ${metric.submissionId}
+      ) < ${MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION}
+      on conflict (attempt_id) do nothing
+    `;
   }
 
   async appendFile(
@@ -1412,6 +1592,7 @@ export class PublicIntakeRepository {
       requestId: string;
       replaceFileId?: string;
     },
+    normalization?: FileNormalizationMetadata,
   ): Promise<PublicFileSummary> {
     const database = getDatabase();
     return database.begin(async (transaction) => {
@@ -1446,10 +1627,16 @@ export class PublicIntakeRepository {
       const rows = await transaction<FileRow[]>`
         insert into public.public_files (
           file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
-          size_bytes, checksum_sha256, file_name
+          size_bytes, checksum_sha256, file_name,
+          source_size_bytes, source_mime_type, source_width, source_height,
+          upload_width, upload_height, normalization_version
         ) values (
           ${file.fileId}, ${file.submissionId}, ${file.ownerId}, ${file.documentType},
-          ${file.driveFileId}, ${file.mimeType}, ${file.sizeBytes}, ${file.checksum}, ${file.fileName}
+          ${file.driveFileId}, ${file.mimeType}, ${file.sizeBytes}, ${file.checksum}, ${file.fileName},
+          ${normalization?.sourceSizeBytes ?? null}, ${normalization?.sourceMimeType ?? null},
+          ${normalization?.sourceWidth ?? null}, ${normalization?.sourceHeight ?? null},
+          ${normalization?.uploadWidth ?? null}, ${normalization?.uploadHeight ?? null},
+          ${normalization?.normalizationVersion ?? ""}
         ) returning file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
           size_bytes, checksum_sha256, file_name, status, created_at, updated_at
       `;
@@ -1522,7 +1709,8 @@ export class PublicIntakeRepository {
           citizen_payload_json = ${JSON.stringify(input.draft)}::jsonb,
           citizen_payload_version = citizen_payload_version + 1,
           citizen_payload_at = now(),
-          accept_step = null, claimed_by = null, claimed_at = null, updated_at = now()
+          accept_step = null, claimed_by = null, claimed_by_display_name = null,
+          claimed_at = null, updated_at = now()
         where submission_id = ${input.record.submissionId} and version = ${input.record.version}
         returning version, citizen_payload_version
       `;

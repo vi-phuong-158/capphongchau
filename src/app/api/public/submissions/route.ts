@@ -5,61 +5,39 @@ import { NextResponse } from "next/server";
 
 import { loadPublicIntakeEnvironment, type PublicIntakeEnvironment } from "@/modules/common/env";
 import {
-  deriveAccessSecret,
-  deriveCreationFingerprint,
-  deriveReceiptCode,
-  deriveSubmissionId,
   isValidPublicIdempotencyKey,
   publicRequestLogKey,
 } from "@/modules/public-intake/creation-idempotency";
+import {
+  createIntakeSubmission,
+  creationFingerprint,
+  CreationConflictError,
+  StaleChallengeError,
+  type CreationResult,
+} from "@/modules/public-intake/create-submission";
+import { validateCreateSubmissionRequest } from "@/modules/public-intake/create-request";
 import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
-import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { publicError } from "@/modules/public-intake/route-context";
 import {
   createPublicCsrfToken,
   createSessionToken,
-  hashAccessSecret,
   PUBLIC_SESSION_COOKIE,
   SESSION_COOKIE_OPTIONS,
 } from "@/modules/public-intake/session";
-import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import {
   TURNSTILE_HEADER,
   turnstileHostname,
   verifyTurnstileToken,
 } from "@/modules/public-intake/turnstile";
-import { emptyDraft } from "@/modules/public-intake/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
-
-interface CreationResult {
-  readonly submissionId: string;
-  readonly receiptCode: string;
-  readonly accessSecret: string;
-  readonly recovered: boolean;
-}
 
 /** Chặn hai retry chồng nhau trong cùng instance; định danh HMAC vẫn là hàng rào liên-instance. */
 const inFlightCreations = new Map<
   string,
   { readonly mutationHash: string; readonly operation: Promise<CreationResult> }
 >();
-
-class CreationConflictError extends Error {
-  constructor() {
-    super("Idempotency key đã được dùng với số điện thoại khác.");
-    this.name = "CreationConflictError";
-  }
-}
-
-/** Token Turnstile đã dùng nhưng không có bản nháp cũ để trả lại — không được tạo bản mới. */
-class StaleChallengeError extends Error {
-  constructor() {
-    super("Mã xác minh đã được sử dụng.");
-    this.name = "StaleChallengeError";
-  }
-}
 
 /**
  * Tạo bản kê khai nháp. Không cần đăng nhập.
@@ -90,25 +68,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     return publicError("ACCESS_DENIED", "Yêu cầu không hợp lệ.", requestId);
   }
 
-  let body: { phone?: unknown };
+  let body: unknown;
   try {
-    body = (await request.json()) as { phone?: unknown };
+    body = await request.json();
   } catch {
     return publicError("VALIDATION_FAILED", "Nội dung yêu cầu không hợp lệ.", requestId);
   }
 
-  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-  if (!/^0\d{9}$/.test(phone)) {
-    return publicError(
-      "VALIDATION_FAILED",
-      "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.",
-      requestId,
-    );
+  const validated = validateCreateSubmissionRequest(body);
+  if (!validated.ok) {
+    return publicError("VALIDATION_FAILED", validated.message, requestId);
   }
-
-  // Người dân đã xác nhận đồng ý ở bước điều khoản trên giao diện; server ghi phiên bản thông báo
-  // đang hiệu lực (CONSENT_NOTICE_VERSION) làm bằng chứng thay vì bắt client gửi lại — client không
-  // thể tự biết phiên bản do đây là cấu hình phía server.
+  const { phone, consentAccepted } = validated.value;
 
   const rawIdempotencyKey = request.headers.get("idempotency-key");
   if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {
@@ -138,7 +109,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     const idempotencyKey = publicRequestLogKey(rawIdempotencyKey);
-    const mutationHash = deriveCreationFingerprint(
+    const mutationHash = creationFingerprint(
       environment.PUBLIC_ACCESS_CODE_PEPPER,
       phone,
       environment.CONSENT_NOTICE_VERSION,
@@ -149,7 +120,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     const ownsOperation = !activeCreation;
     if (!activeCreation) {
-      const operation = createOrRecoverSubmission({
+      const operation = createIntakeSubmission({
         rawIdempotencyKey,
         idempotencyKey,
         mutationHash,
@@ -158,7 +129,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         sessionSecret: environment.PUBLIC_SESSION_SECRET,
         accessPepper: environment.PUBLIC_ACCESS_CODE_PEPPER,
         replayOnly: turnstile.duplicate,
+        consentAccepted,
         consentVersion: environment.CONSENT_NOTICE_VERSION,
+        // Cổng công khai LUÔN là tự kê khai. Không có đường nào để client tự khai là cán bộ.
+        channel: "SELF_SERVICE",
       });
       activeCreation = { mutationHash, operation };
       inFlightCreations.set(idempotencyKey, activeCreation);
@@ -204,59 +178,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       requestId,
     );
   }
-}
-
-async function createOrRecoverSubmission(input: {
-  rawIdempotencyKey: string;
-  idempotencyKey: string;
-  mutationHash: string;
-  phone: string;
-  requestId: string;
-  sessionSecret: string;
-  accessPepper: string;
-  replayOnly: boolean;
-  consentVersion: string;
-}): Promise<CreationResult> {
-  const repository = getPublicIntakeRepository();
-  const accessSecret = deriveAccessSecret(input.accessPepper, input.rawIdempotencyKey);
-  const previous = await repository.findCreationByIdempotencyKey(input.idempotencyKey);
-
-  if (previous) {
-    if (previous.mutationHash !== input.mutationHash) {
-      throw new CreationConflictError();
-    }
-    return {
-      submissionId: previous.submissionId,
-      receiptCode: previous.receiptCode,
-      accessSecret,
-      recovered: true,
-    };
-  }
-
-  if (input.replayOnly) {
-    throw new StaleChallengeError();
-  }
-
-  const submissionId = deriveSubmissionId(input.sessionSecret, input.rawIdempotencyKey);
-  const receiptCode = deriveReceiptCode(input.sessionSecret, input.rawIdempotencyKey);
-  const driveFolderId = await getPublicIntakeStorage().createSubmissionFolder(submissionId);
-  const draft = emptyDraft(randomUUID(), randomUUID(), randomUUID());
-  draft.phone = input.phone;
-
-  await repository.create({
-    submissionId,
-    receiptCode,
-    accessCodeHash: hashAccessSecret(input.accessPepper, accessSecret),
-    idempotencyKey: input.idempotencyKey,
-    mutationHash: input.mutationHash,
-    requestId: input.requestId,
-    phone: input.phone,
-    driveFolderId,
-    draft,
-    consentVersion: input.consentVersion,
-  });
-
-  return { submissionId, receiptCode, accessSecret, recovered: false };
 }
 
 async function createSuccessResponse(input: {

@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
+import { getUserRepository } from "@/modules/users/supabase-user-repository";
 import { verifyCsrfToken } from "@/modules/auth/csrf";
 import { createApiErrorPayload } from "@/modules/common/api-error";
 import { UserRole } from "@/modules/common/domain";
@@ -162,6 +163,10 @@ export async function POST(
             version,
             claimedBy:
               typeof replay.response.claimedBy === "string" ? replay.response.claimedBy : "",
+            claimedByDisplayName:
+              typeof replay.response.claimedByDisplayName === "string"
+                ? replay.response.claimedByDisplayName
+                : "",
           },
           requestId,
         },
@@ -193,6 +198,7 @@ export async function POST(
         expectedVersion: body.data.version,
         status: "UNDER_REVIEW",
         claimedBy: user.email,
+        claimedByDisplayName: user.displayName,
         claimedAt: new Date().toISOString(),
         force: false,
         actorEmail: user.email,
@@ -201,7 +207,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "UNDER_REVIEW",
           label: "Đang kiểm tra",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -213,6 +219,7 @@ export async function POST(
             status: updated.status,
             version: updated.version,
             claimedBy: updated.claimedBy,
+            claimedByDisplayName: updated.claimedByDisplayName,
           },
           requestId,
         },
@@ -238,6 +245,7 @@ export async function POST(
         expectedVersion: body.data.version,
         status: "UNDER_REVIEW",
         claimedBy: user.email,
+        claimedByDisplayName: user.displayName,
         claimedAt: new Date().toISOString(),
         force: true,
         actorEmail: user.email,
@@ -246,7 +254,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "FORCE_CLAIMED",
           label: "Mở khóa cưỡng chế",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -258,6 +266,7 @@ export async function POST(
             status: updated.status,
             version: updated.version,
             claimedBy: updated.claimedBy,
+            claimedByDisplayName: updated.claimedByDisplayName,
           },
           requestId,
         },
@@ -283,6 +292,7 @@ export async function POST(
         expectedVersion: body.data.version,
         status: "SUBMITTED",
         claimedBy: "",
+        claimedByDisplayName: "",
         claimedAt: "",
         force: true,
         actorEmail: user.email,
@@ -291,7 +301,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "CLAIM_RELEASED",
           label: "Trả lại hàng chờ",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -299,7 +309,12 @@ export async function POST(
       });
       return NextResponse.json(
         {
-          submission: { status: updated.status, version: updated.version, claimedBy: "" },
+          submission: {
+            status: updated.status,
+            version: updated.version,
+            claimedBy: "",
+            claimedByDisplayName: "",
+          },
           requestId,
         },
         { headers: { "cache-control": "no-store" } },
@@ -319,11 +334,24 @@ export async function POST(
           400,
         );
       }
+      // Tên người nhận lấy từ danh bạ trên máy chủ. Client chỉ được gửi email; nhận tên từ
+      // client là để bất kỳ ai cũng gán được một cái tên tùy ý vào dòng thời gian hồ sơ.
+      const recipient = await getUserRepository().findActiveByEmail(body.data.toEmail);
+      if (!recipient) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Người nhận không phải tài khoản đang hoạt động.",
+          requestId,
+          400,
+        );
+      }
+
       const updated = await repository.commitStaffAction({
         record,
         expectedVersion: body.data.version,
         status: "UNDER_REVIEW",
         claimedBy: body.data.toEmail,
+        claimedByDisplayName: recipient.displayName,
         claimedAt: new Date().toISOString(),
         force: true,
         actorEmail: user.email,
@@ -336,7 +364,7 @@ export async function POST(
         timelineEvent: newTimelineEvent({
           eventType: "TRANSFERRED",
           label: "Chuyển giao xử lý",
-          actorDisplayName: user.displayName,
+          actorDisplayName: publicActorName(user.displayName),
         }),
         requestId,
         idempotencyKey: scopedIdempotencyKey,
@@ -348,6 +376,7 @@ export async function POST(
             status: updated.status,
             version: updated.version,
             claimedBy: updated.claimedBy,
+            claimedByDisplayName: updated.claimedByDisplayName,
           },
           requestId,
         },
@@ -420,7 +449,7 @@ export async function POST(
       timelineEvent: newTimelineEvent({
         eventType: status,
         label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",
-        actorDisplayName: user.displayName,
+        actorDisplayName: publicActorName(user.displayName),
         message: body.data.message,
       }),
       requestId,

@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   createUploadSession: vi.fn(),
   discardFile: vi.fn(),
   listFiles: vi.fn(),
+  findStoredMutation: vi.fn(),
+  isDriveFileAdopted: vi.fn(),
+  isFileInFolder: vi.fn(),
   resolvePublicRequest: vi.fn(),
 }));
 
@@ -12,7 +15,11 @@ vi.mock("@/modules/common/env", () => ({
 }));
 
 vi.mock("@/modules/public-intake/repository", () => ({
-  getPublicIntakeRepository: () => ({ listFiles: mocks.listFiles }),
+  getPublicIntakeRepository: () => ({
+    listFiles: mocks.listFiles,
+    findStoredMutation: mocks.findStoredMutation,
+    isDriveFileAdopted: mocks.isDriveFileAdopted,
+  }),
 }));
 
 vi.mock("@/modules/public-intake/route-context", async (importOriginal) => ({
@@ -25,6 +32,7 @@ vi.mock("@/modules/public-intake/storage", () => ({
   getPublicIntakeStorage: () => ({
     createUploadSession: mocks.createUploadSession,
     discardFile: mocks.discardFile,
+    isFileInFolder: mocks.isFileInFolder,
   }),
   UploadVerificationError: class UploadVerificationError extends Error {},
 }));
@@ -75,6 +83,13 @@ describe("public upload với nháp legacy thiếu owners", () => {
     mocks.discardFile.mockResolvedValue(undefined);
     mocks.listFiles.mockReset();
     mocks.listFiles.mockResolvedValue([]);
+    mocks.findStoredMutation.mockReset();
+    mocks.findStoredMutation.mockResolvedValue(null);
+    mocks.isDriveFileAdopted.mockReset();
+    mocks.isDriveFileAdopted.mockResolvedValue(false);
+    mocks.isFileInFolder.mockReset();
+    // Tệp nằm đúng thư mục của hộ dân đang gọi — điều kiện cần để được phép dọn.
+    mocks.isFileInFolder.mockResolvedValue(true);
     mocks.resolvePublicRequest.mockReset();
     mocks.resolvePublicRequest.mockResolvedValue({
       record: malformedRecord,
@@ -99,5 +114,25 @@ describe("public upload với nháp legacy thiếu owners", () => {
     expect(response.status).toBe(409);
     expect(body.error.code).toBe("INVALID_STATE");
     expect(mocks.discardFile).toHaveBeenCalledWith("drive-file-test");
+  });
+
+  it("KHÔNG dọn khi tệp không nằm trong thư mục Drive của hộ dân đang gọi", async () => {
+    // `driveFileId` ở nhánh này là dữ liệu client chưa qua xác minh. Trỏ sang thư mục hộ khác
+    // thì tuyệt đối không được xóa, kể cả khi chưa hồ sơ nào nhận tệp đó.
+    mocks.isFileInFolder.mockResolvedValue(false);
+
+    const response = await completeUpload(completeRequest());
+
+    expect(response.status).toBe(409);
+    expect(mocks.discardFile).not.toHaveBeenCalled();
+  });
+
+  it("KHÔNG dọn khi không hỏi được Drive về thư mục cha", async () => {
+    mocks.isFileInFolder.mockRejectedValue(new Error("drive unreachable"));
+
+    const response = await completeUpload(completeRequest());
+
+    expect(response.status).toBe(409);
+    expect(mocks.discardFile).not.toHaveBeenCalled();
   });
 });

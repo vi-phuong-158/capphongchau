@@ -98,6 +98,11 @@ Tạo nháp và gửi chính thức dùng UUID v4 idempotency key. `PUBLIC_CREAT
 
 Mỗi API write kiểm tra CSRF và quyền ở server. Turnstile/Cloudflare fail-closed cho bề mặt công khai; PII, QR raw, token, Drive ID/link và CCCD đầy đủ không được ghi log.
 
+`/ke-khai-ho` gửi qua route staff riêng, bắt buộc `ASSISTED_INTAKE_ROLES` + staff CSRF và không
+Turnstile. Upload complete replay request log trước validation trạng thái mới; mọi cleanup xác minh
+orphan trước khi xóa. Official acceptance chặn consent/identity chưa xác nhận. Timeline public chỉ
+trả DTO allowlist và sanitize email ở cả write/read.
+
 ## Migration và cutover
 
 1. Tạo project Supabase Singapore; áp dụng toàn bộ SQL migration.

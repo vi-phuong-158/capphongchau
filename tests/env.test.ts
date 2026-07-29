@@ -145,4 +145,26 @@ describe("cấu hình môi trường server", () => {
       }).AI_WORKER_API_KEY,
     ).toHaveLength(32);
   });
+
+  describe("kill switch chế độ cán bộ hỗ trợ kê khai", () => {
+    it("mặc định TẮT khi thiếu biến — thiếu cấu hình không được vô tình mở tính năng", () => {
+      expect(loadServerEnvironment(validEnvironment).OFFICER_ASSISTED_INTAKE_ENABLED).toBe(false);
+      expect(loadPublicIntakeEnvironment(validEnvironment).OFFICER_ASSISTED_INTAKE_ENABLED).toBe(
+        false,
+      );
+    });
+
+    it('chỉ bật khi giá trị đúng bằng chuỗi "true"', () => {
+      for (const value of ["TRUE", "1", "yes", "on", " true", "true "]) {
+        expect(
+          loadServerEnvironment({ ...validEnvironment, OFFICER_ASSISTED_INTAKE_ENABLED: value })
+            .OFFICER_ASSISTED_INTAKE_ENABLED,
+        ).toBe(false);
+      }
+      expect(
+        loadServerEnvironment({ ...validEnvironment, OFFICER_ASSISTED_INTAKE_ENABLED: "true" })
+          .OFFICER_ASSISTED_INTAKE_ENABLED,
+      ).toBe(true);
+    });
+  });
 });

@@ -23,7 +23,9 @@ const proxySource = fileURLToPath(new URL("../src/proxy.ts", import.meta.url));
  */
 function proxyMatcher(): string[] {
   const source = readFileSync(proxySource, "utf8");
-  const declaration = /export const config = \{ matcher: \[([^\]]*)\] \}/.exec(source);
+  // Khớp cả dạng một dòng lẫn dạng nhiều dòng do Prettier xuống hàng khi danh sách dài — nội dung
+  // matcher mới là thứ cần khóa, không phải cách trình bày.
+  const declaration = /export const config = \{\s*matcher:\s*\[([\s\S]*?)\]/.exec(source);
   if (!declaration) {
     throw new Error("Không đọc được matcher trong src/proxy.ts — kiểm tra lại khai báo config.");
   }
@@ -71,5 +73,39 @@ describe("bề mặt công khai", () => {
     expect(isProxied("/ke-khai")).toBe(false);
     expect(isProxied("/api/public/submissions")).toBe(false);
     expect(isProxied("/api/public/submissions/current/submit")).toBe(false);
+  });
+
+  /**
+   * Chế độ cán bộ hỗ trợ kê khai nằm ở `/ke-khai-ho`, chỉ khác `/ke-khai` một gạch nối. Đặt sai
+   * matcher là mở toang đường tạo hồ sơ mang nhãn `OFFICER_ASSISTED` cho bất kỳ ai.
+   */
+  it("proxy Edge chặn chế độ cán bộ hỗ trợ kê khai", () => {
+    expect(isProxied("/ke-khai-ho")).toBe(true);
+    expect(isProxied("/api/staff/assisted-submissions")).toBe(true);
+  });
+
+  it("chặn `/ke-khai-ho` KHÔNG kéo theo `/ke-khai` của người dân", () => {
+    expect(isProxied("/ke-khai")).toBe(false);
+  });
+
+  it("route cán bộ hỗ trợ vẫn tự kiểm quyền, không chỉ dựa vào proxy Edge", () => {
+    // JWT cũ còn hạn sau khi quản trị viên khóa tài khoản, nên Edge thấy "có session" là chưa đủ.
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/app/api/staff/assisted-submissions/route.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(source).toContain("requireActiveUser");
+    expect(source).toContain("verifyCsrfToken");
+  });
+
+  it("client không có đường nào tự khai hồ sơ là do cán bộ nhập hộ", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/app/api/public/submissions/route.ts", import.meta.url)),
+      "utf8",
+    );
+    // Cổng công khai gán cứng SELF_SERVICE và không đọc `channel` từ body.
+    expect(source).toContain('channel: "SELF_SERVICE"');
+    expect(source).not.toContain("body.channel");
+    expect(source).not.toContain("body.assistedBy");
   });
 });

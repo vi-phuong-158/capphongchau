@@ -8,6 +8,106 @@
 
 ---
 
+## [2026-07-29] Review PR #6 vòng hai — đã sửa trong code
+
+Đã sửa 3 phát hiện chính (xóa nhầm tệp Drive của hộ khác; RLS `force` làm telemetry hỏng im lặng;
+409 giả làm người dân kẹt) và 4 phát hiện phụ (trần bảng số đo, so sánh sâu `hasLocalChanges`,
+escape truy vấn Drive, guard môi trường cho script xóa dữ liệu E2E). Test 590 pass/10 skipped.
+Chưa merge, chưa push, chưa deploy, chưa chạy migration.
+
+### Chỉ mục tra cứu CCCD — ĐÃ CHỐT VÀ ĐÃ LÀM
+
+Người dùng chốt ngày 2026-07-29: CCCD vào `public_lookup_index` với `kind = 'PENDING'`, ghi ở cả
+`RESUBMITTED` và ở cả ba đường ghi của cán bộ. Chi tiết và lý do ở `03-decisions.md` cùng ngày.
+Trước đó hồ sơ MỨC A không có CCCD lúc gửi đầu sẽ không bao giờ vào chỉ mục.
+
+## [2026-07-29] Review bắt buộc PR #6 — đã sửa trong code (vòng một)
+
+Đã sửa 2 BLOCKER và 5 HIGH: upload replay, assisted submit, exact version, official gate, atomic
+consent audit, telemetry RLS và timeline privacy; đã thêm CI PR. Chưa merge/deploy/chạy migration.
+E2E assisted phải báo skipped khi thiếu rehearsal credential.
+
+## [2026-07-28] PUBLIC INTAKE V2 — luồng kê khai công khai còn 4 bước
+
+Thi công theo `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md`, trên nhánh
+`claude/land-declaration-process-feedback-126f2e`. **Chưa merge, chưa deploy, chưa chạy migration
+production.**
+
+### Đã xong (7 commit)
+
+| Phase | Nội dung | Commit |
+|---|---|---|
+| 0 | Baseline + test characterization khóa lỗ hổng `completionChecks` | `1cc7d93` |
+| 1 | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức) | `e938bab` |
+| 2 | Wizard 7 bước → 4 bước | `fe3e2e3` |
+| 3 | Chuẩn hóa ảnh trên thiết bị (cờ, mặc định TẮT) | `814eee7` |
+| 4 | Tiến độ tải thật qua XHR + hàng đợi 2 luồng | `bdbf180` |
+| 6 | Màn hình thành công + kê khai hồ sơ tiếp theo | `ee30ee8` |
+| 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
+| 7 | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho` | `7345090` |
+
+| 5 | Số đo tải ảnh, dọn tệp mồ côi an toàn, hai script vận hành | vòng rà soát |
+
+### Vòng rà soát (sau `aa2135e`)
+
+Rà soát toàn bộ diff `79f4ae6..aa2135e` theo 14 điểm, kết quả ở
+`evidence/PUBLIC_INTAKE_V2_DIFF_REVIEW.md`: **1 BLOCKER, 4 HIGH đã sửa**; 5 MEDIUM, 3 LOW ghi lại.
+
+BLOCKER đáng nhớ: nút "Kê khai hồ sơ tiếp theo" gọi endpoint tạo hồ sơ với `phone: ""`, mà endpoint
+bắt buộc `^0\d{9}$` — nút **chưa bao giờ** chạy được. Không test nào bắt vì wizard không có test
+render và E2E chưa chạy lần nào.
+
+### Việc bắt buộc trước khi merge / bật cờ
+
+1. **Chạy bốn migration** `202607280001`–`202607280004` trên preview trước, production sau,
+   **đúng thứ tự và trước khi deploy code**, rồi chạy
+   `npm run preflight:public-intake-v2-migrations` để xác nhận PASS. Toàn bộ additive; rollback là
+   bỏ cột/bỏ bảng. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V2_PREVIEW_MIGRATION_RUNBOOK.md`.
+2. **Chạy `npm run test:e2e:preview`** trên preview thật — chưa chạy lần nào trong phiên thi công
+   vì thiếu Supabase/Drive/tài khoản cán bộ thật. 15 kịch bản đã viết đầy đủ, không còn
+   `test.fixme` không điều kiện. Điều kiện đầy đủ: `evidence/PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`.
+3. **Bật `OFFICER_ASSISTED_INTAKE_ENABLED=true`** trên preview trước khi chạy các kịch bản
+   E2E-06b/E2E-06c — kill switch server-side mặc định TẮT (2026-07-28, vòng rà soát lần hai).
+4. **Kiểm chất lượng ảnh** theo `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` (đã có bảng so
+   sánh nguồn↔sau chuẩn hóa theo từng ảnh) trước khi đặt
+   `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED=true`. Chưa có số đo nào; **không được** tuyên
+   bố tăng tốc.
+5. **Thử luồng thật trên thiết bị di động**: chọn nhiều ảnh GCN, tắt mạng giữa chừng, kiểm tra
+   resume và tiến độ không tụt.
+6. **Xác nhận danh sách vai trò `ASSISTED_INTAKE_ROLES`** (`INTAKE_OFFICER`, `WARD_ADMIN`,
+   `SYSTEM_ADMIN`) đúng nghiệp vụ. `REVIEW_OFFICER` bị loại có chủ đích — không để một người vừa
+   nhập hộ dân vừa thẩm định chính hồ sơ đó.
+7. **Chạy hai test integration còn skip** (`ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run
+   tests/staging-rehearsal-acceptance-saga.integration.test.ts
+   tests/canonical-projection.integration.test.ts`) trên một Postgres thử nghiệm — bảo vệ đúng
+   luồng "official acceptance guard" và "idempotent replay". Danh sách đầy đủ 10 test đang skip:
+   `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
+8. **Sau mỗi đợt E2E, dọn dữ liệu**: `npm run cleanup:e2e-preview-data -- --apply --confirm=...`
+   rồi `npx tsx scripts/audit-orphan-public-files.ts --apply --confirm=...`.
+
+### Cảnh báo cho agent sau
+
+- **KHÔNG nới `completionChecks`.** Từ V2 nó là gác cổng duy nhất cho dữ liệu nghiệp vụ đầy đủ;
+  cổng công khai đã nới hết mức. Xem `03-decisions.md` [2026-07-28] entry đầu tiên.
+- **KHÔNG thêm luật nghiệp vụ trực tiếp vào `wizard.tsx`.** Luật nằm ở `validation.ts`;
+  `public-wizard-validation.ts` chỉ lọc theo bước và ánh xạ tên trường. Trước V2 hai nơi có hai bản
+  regex riêng và đã lệch nhau.
+- **KHÔNG cho client gửi `intake_channel` hay `assistedBy`.** Máy chủ suy ra từ route và phiên.
+- **KHÔNG đổi `.catch(() => true)` trong `discardIfOrphan`** (complete route) thành `false` cho
+  "hợp lý hơn". Hỏi cơ sở dữ liệu không được thì mặc định là **đã nhận**, tức là không xóa: để sót
+  một tệp thừa thì script rà soát dọn được, xóa nhầm tệp đã nhận là mất ảnh giấy tờ vĩnh viễn.
+- **KHÔNG thêm trường tự do vào `clientUploadTelemetrySchema`.** Mọi trường phải là số hoặc danh
+  mục đóng; một ô tự do là chỗ để CCCD hay tên tệp lọt vào bảng số đo, và đã ghi thì không gỡ ra.
+- **KHÔNG ghép tên tệp client gửi lên vào tên tệp trong kho.** Máy chủ tự đặt tên; xem H-01.
+- **KHÔNG dùng cờ `NEXT_PUBLIC_` cho chế độ cán bộ hỗ trợ.** `OFFICER_ASSISTED_INTAKE_ENABLED` là
+  server-side thuần túy, đọc qua `loadPublicIntakeEnvironment()`. Cờ client không phải hàng rào
+  bảo mật.
+- **KHÔNG liệt kê cứng tên bảng con của `public_submissions` trong script dọn dữ liệu.** Có ~16
+  bảng, phần lớn không cascade. `cleanup-e2e-preview-data.ts` dò `information_schema` — giữ
+  nguyên cách đó khi sửa.
+
+---
+
 ## [2026-07-25] TRẠNG THÁI HIỆN TẠI — đã mở tiếp nhận hồ sơ chính thức
 
 **[CẬP NHẬT 2026-07-26]** Hạ tầng Antigravity AI draft GCN đã có trong code nhưng mặc định
@@ -196,12 +296,13 @@ Danh sách đầy đủ kèm ước công ở `PLAN2.md` §2.
    **ĐÃ XONG 2026-07-24**, xem chi tiết ở mục "Hoãn có chủ đích" phía trên và
    `03-decisions.md` [2026-07-24 — Diễn tập staging].
 
-**Đây là điều kiện chặn DUY NHẤT còn lại.** Ba mục dưới đây từng nằm trong danh sách này đã được
-chủ dự án **chấp nhận rủi ro và bỏ qua** ngày 2026-07-24 (không sửa code, không chặn nữa) — xem
-`03-decisions.md` [2026-07-24 — Chấp nhận rủi ro] để biết rủi ro cụ thể còn tồn tại trong hệ thống:
+**Đây là điều kiện chặn DUY NHẤT còn lại.** Ba mục dưới đây từng được chủ dự án chấp nhận rủi ro
+ngày 2026-07-24. Mục consent đã được sửa lại ngày 2026-07-28 theo yêu cầu mới; hai mục còn lại vẫn
+giữ quyết định cũ — xem `03-decisions.md` để biết phạm vi:
 
-- ~~Thông báo bảo vệ dữ liệu vẫn là placeholder, server ghi `consentVersion` không xác minh người
-  dân thật sự đã đọc/tick~~ (`submissions/route.ts`).
+- ✅ **Đã sửa 2026-07-28:** public và assisted create bắt buộc `consent.accepted === true`, server
+  validate trước create, lưu server consent version và assisted audit metadata. Thông báo bảo vệ
+  dữ liệu vẫn cần chốt nguyên văn trước vận hành thật.
 - ~~Lớp biên: `PUBLIC_INTAKE_SKIP_EDGE_GUARD_UNSAFE` bật trên production; chưa có domain thật sau
   Cloudflare~~ — chấp nhận chạy trên `*.vercel.app`, bù bằng Turnstile (vẫn bật) + công tắc khẩn
   `PUBLIC_INTAKE_MODE=PAUSED`.

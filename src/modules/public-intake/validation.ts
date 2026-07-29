@@ -1,11 +1,18 @@
-import { CERTIFICATE_ROLE_CODES, CHANGE_REASON_CODES, OLD_WARD_OPTIONS } from "./reference";
-import type { IntakeDraft } from "./types";
+import {
+  CERTIFICATE_ROLE_CODES,
+  CHANGE_REASON_CODES,
+  LAND_PURPOSE_GHI_THEO_BIA,
+  OLD_WARD_OPTIONS,
+} from "./reference";
+import type { IntakeDraft, Owner } from "./types";
 import {
   MAX_LAND_USES_PER_PARCEL,
   isOrganisationOwner,
   requiresCitizenId,
   OWNER_TYPES,
 } from "./types";
+import { parseVietnameseDecimal } from "./vietnamese-number";
+import type { PublicFileSummary } from "./workflow";
 
 const OLD_WARD_CODES: readonly string[] = OLD_WARD_OPTIONS.map((option) => option.code);
 
@@ -138,17 +145,20 @@ export const draftSchema = z
   })
   .strict();
 
-/** Lỗi trả về chỉ nêu tên trường, không lặp lại giá trị người dân nhập (tránh lộ PII qua log). */
-export function validateDraftForSave(draft: IntakeDraft): string | null {
+/**
+ * Chỉ kiểm **hình dạng** dữ liệu: schema và giới hạn mảng. Không kiểm nội dung nghiệp vụ.
+ *
+ * Tách riêng khỏi `validateDraftForSave` để `validateCitizenSubmitDraft` báo được lỗi theo từng
+ * trường: gộp chung thì số điện thoại sai chỉ trả một câu "Cấu trúc dữ liệu không hợp lệ" không
+ * kèm `fieldPath`, và client không biết phải đưa con trỏ về ô nào.
+ */
+export function validateDraftStructure(draft: IntakeDraft): string | null {
   try {
     draftSchema.parse(draft);
   } catch {
     return "Cấu trúc dữ liệu không hợp lệ hoặc chứa các trường không cho phép.";
   }
 
-  if (draft.phone && !isValidPhone(draft.phone)) {
-    return "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.";
-  }
   const metadata: unknown = draft.certificateFileMetadata;
   if (metadata !== undefined) {
     if (!Array.isArray(metadata) || metadata.length > MAX_CERTIFICATE_FILES) {
@@ -175,6 +185,338 @@ export function validateDraftForSave(draft: IntakeDraft): string | null {
   }
   return null;
 }
+
+/** Lỗi trả về chỉ nêu tên trường, không lặp lại giá trị người dân nhập (tránh lộ PII qua log). */
+export function validateDraftForSave(draft: IntakeDraft): string | null {
+  const structureError = validateDraftStructure(draft);
+  if (structureError) return structureError;
+
+  if (draft.phone && !isValidPhone(draft.phone)) {
+    return "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.";
+  }
+  return null;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Public Intake V2 — ba tầng kiểm tra, ba mục đích khác nhau
+ *
+ *   validateDraftForSave()      — cấu trúc; dùng ở PATCH lưu nháp.
+ *   validateCitizenSubmitDraft() — MỨC A: đủ để **người dân bấm gửi**.
+ *   completionChecks()          — MỨC C: đủ để **cán bộ tiếp nhận chính thức**.
+ *
+ * Mục A của kế hoạch V2: cổng công khai là nơi thu nhận tài liệu ban đầu, không phải màn hình
+ * hoàn thiện PL3. Người dân chỉ bắt buộc số điện thoại, đồng ý, tên chủ sử dụng và đủ ảnh. Mọi
+ * trường PL3 khác là **tùy chọn** — nhưng nếu đã nhập thì phải đúng định dạng, không được biến
+ * thành dữ liệu sai im lặng.
+ *
+ * `validateDraftForSubmit()` (mức cũ, đòi đủ PL3) vẫn còn để cán bộ/công cụ nội bộ dùng khi cần
+ * kiểm một bản kê khai đã hoàn thiện, và để hồ sơ cũ so sánh được.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface CitizenSubmitIssue {
+  readonly code: string;
+  /** Đường dẫn tới trường sai, ví dụ `owners.0.identityNumber` — để client focus đúng ô. */
+  readonly fieldPath: string;
+  readonly message: string;
+  readonly severity: "BLOCKING";
+}
+
+function issue(code: string, fieldPath: string, message: string): CitizenSubmitIssue {
+  return { code, fieldPath, message, severity: "BLOCKING" };
+}
+
+/** Giới hạn độ dài các ô tự do người dân nhập — chặn rác, không chặn dữ liệu thật. */
+export const MAX_PURPOSE_FREE_TEXT_LENGTH = 120;
+export const MAX_PARCEL_REFERENCE_LENGTH = 40;
+const MAX_FREE_TEXT_LENGTH = 500;
+
+/**
+ * Ký hiệu loại đất người dân ghi theo bìa GCN (`LUC`, `LUK`, `BHK`, "màu", "vườn"…).
+ *
+ * Chỉ trim + viết hoa **mã ngắn thuần chữ cái** (≤ 5 ký tự): "luc" → "LUC". Chuỗi tiếng Việt như
+ * "đất vườn" giữ nguyên — viết hoa cả câu là bóp méo thứ người dân ghi trên bìa, mà cán bộ mới là
+ * người chuẩn hóa ở `working_payload`.
+ */
+export function normalizeLandPurposeFreeText(input: string): string {
+  const text = input.trim().slice(0, MAX_PURPOSE_FREE_TEXT_LENGTH);
+  return /^[a-zA-Z]{1,5}$/.test(text) ? text.toUpperCase() : text;
+}
+
+function checkOptionalOwner(owner: Owner, index: number, issues: CitizenSubmitIssue[]): void {
+  const path = `owners.${index}`;
+  const identityNumber = owner.identityNumber.trim();
+
+  if (identityNumber) {
+    const pattern = isOrganisationOwner(owner.ownerType)
+      ? ORGANISATION_ID_PATTERN
+      : CITIZEN_ID_PATTERN;
+    if (!pattern.test(identityNumber)) {
+      issues.push(
+        issue(
+          "OWNER_ID_INVALID",
+          `${path}.identityNumber`,
+          isOrganisationOwner(owner.ownerType)
+            ? "Mã số thuế gồm 10 chữ số (hoặc 10 chữ số kèm 3 số đơn vị trực thuộc). Không rõ thì để trống."
+            : "Số định danh gồm đúng 12 chữ số. Không rõ thì để trống, cán bộ sẽ đọc trên ảnh CCCD.",
+        ),
+      );
+    }
+  }
+
+  if (owner.dateOfBirth.trim() && !isValidDate(owner.dateOfBirth.trim())) {
+    issues.push(
+      issue("OWNER_DOB_INVALID", `${path}.dateOfBirth`, "Ngày sinh không hợp lệ. Có thể để trống."),
+    );
+  }
+
+  if (owner.roleOnCertificate.trim() && !CERTIFICATE_ROLE_CODES.includes(owner.roleOnCertificate)) {
+    issues.push(
+      issue(
+        "OWNER_ROLE_INVALID",
+        `${path}.roleOnCertificate`,
+        "Vai trò trên Giấy chứng nhận không thuộc danh mục cho phép.",
+      ),
+    );
+  }
+
+  if (owner.changeReason.trim() && !CHANGE_REASON_CODES.includes(owner.changeReason)) {
+    issues.push(
+      issue(
+        "OWNER_CHANGE_REASON_INVALID",
+        `${path}.changeReason`,
+        "Lý do thay đổi không thuộc danh mục cho phép.",
+      ),
+    );
+  }
+
+  const currentUserCitizenId = owner.currentUserCitizenId.trim();
+  if (currentUserCitizenId && !CITIZEN_ID_PATTERN.test(currentUserCitizenId)) {
+    issues.push(
+      issue(
+        "OWNER_CURRENT_USER_ID_INVALID",
+        `${path}.currentUserCitizenId`,
+        "Số định danh của người sử dụng hiện tại gồm đúng 12 chữ số. Không rõ thì để trống.",
+      ),
+    );
+  }
+
+  for (const [field, value] of [
+    ["residenceAddress", owner.residenceAddress],
+    ["currentUserName", owner.currentUserName],
+    ["currentUserAddress", owner.currentUserAddress],
+    ["fullName", owner.fullName],
+  ] as const) {
+    if (value.length > MAX_FREE_TEXT_LENGTH) {
+      issues.push(
+        issue("FIELD_TOO_LONG", `${path}.${field}`, "Nội dung quá dài, rút ngắn giúp cán bộ đọc."),
+      );
+    }
+  }
+}
+
+/**
+ * MỨC A — điều kiện tối thiểu để người dân gửi hồ sơ.
+ *
+ * Trả danh sách lỗi có cấu trúc (không phải một chuỗi) để client focus đúng ô sai và hiển thị lỗi
+ * tại chỗ thay vì một toast chung chung.
+ */
+export function validateCitizenSubmitDraft(draft: IntakeDraft): CitizenSubmitIssue[] {
+  const structureError = validateDraftStructure(draft);
+  if (structureError) {
+    return [issue("DRAFT_STRUCTURE_INVALID", "", structureError)];
+  }
+
+  const issues: CitizenSubmitIssue[] = [];
+
+  if (!isValidPhone(draft.phone)) {
+    issues.push(
+      issue("PHONE_INVALID", "phone", "Nhập số điện thoại gồm 10 chữ số, bắt đầu bằng 0."),
+    );
+  }
+
+  if (!draft.consentAccepted) {
+    issues.push(
+      issue("CONSENT_REQUIRED", "consentAccepted", "Cần đồng ý cho phép xử lý dữ liệu để gửi."),
+    );
+  }
+
+  if (draft.owners.length === 0) {
+    issues.push(issue("OWNER_REQUIRED", "owners", "Cần ít nhất một chủ sử dụng."));
+  }
+
+  draft.owners.forEach((owner, index) => {
+    if (!owner.fullName.trim()) {
+      issues.push(
+        issue(
+          "OWNER_NAME_REQUIRED",
+          `owners.${index}.fullName`,
+          "Nhập tên chủ sử dụng ghi trên Giấy chứng nhận.",
+        ),
+      );
+    }
+    checkOptionalOwner(owner, index, issues);
+  });
+
+  // Giấy chứng nhận: cả ba trường đều tùy chọn ở mức A, chỉ kiểm khi đã nhập.
+  if (draft.certificate.issueDate.trim() && !isValidDate(draft.certificate.issueDate.trim())) {
+    issues.push(
+      issue(
+        "CERTIFICATE_ISSUE_DATE_INVALID",
+        "certificate.issueDate",
+        "Ngày cấp không hợp lệ. Không đọc được trên bìa thì để trống.",
+      ),
+    );
+  }
+
+  draft.parcels.forEach((parcel, index) => {
+    const path = `parcels.${index}`;
+
+    if (parcel.oldWard.trim() && !OLD_WARD_CODES.includes(parcel.oldWard)) {
+      issues.push(
+        issue(
+          "PARCEL_OLD_WARD_INVALID",
+          `${path}.oldWard`,
+          "Đơn vị hành chính cũ không thuộc danh mục cho phép.",
+        ),
+      );
+    }
+
+    const parcelArea = parcel.area.trim() ? parseVietnameseDecimal(parcel.area) : null;
+    if (parcel.area.trim() && (parcelArea === null || parcelArea <= 0)) {
+      issues.push(
+        issue(
+          "PARCEL_AREA_INVALID",
+          `${path}.area`,
+          "Diện tích phải là số lớn hơn 0 (ví dụ 220 hoặc 220,5). Không rõ thì để trống.",
+        ),
+      );
+    }
+
+    for (const [field, value] of [
+      ["mapSheetNumber", parcel.mapSheetNumber],
+      ["parcelNumber", parcel.parcelNumber],
+      ["parcelIdCode", parcel.parcelIdCode],
+    ] as const) {
+      if (value.trim().length > MAX_PARCEL_REFERENCE_LENGTH) {
+        issues.push(issue("FIELD_TOO_LONG", `${path}.${field}`, "Nội dung quá dài."));
+      }
+    }
+
+    if (parcel.landUses.length > MAX_LAND_USES_PER_PARCEL) {
+      issues.push(
+        issue(
+          "PARCEL_LAND_USES_EXCEEDED",
+          `${path}.landUses`,
+          `Mỗi thửa chỉ ghi tối đa ${MAX_LAND_USES_PER_PARCEL} dòng mục đích sử dụng.`,
+        ),
+      );
+    }
+
+    parcel.landUses.forEach((landUse, useIndex) => {
+      const usePath = `${path}.landUses.${useIndex}`;
+      if (landUse.purposeFreeText.length > MAX_PURPOSE_FREE_TEXT_LENGTH) {
+        issues.push(
+          issue(
+            "LAND_USE_FREE_TEXT_TOO_LONG",
+            `${usePath}.purposeFreeText`,
+            `Ký hiệu loại đất tối đa ${MAX_PURPOSE_FREE_TEXT_LENGTH} ký tự.`,
+          ),
+        );
+      }
+      const useArea = landUse.area.trim() ? parseVietnameseDecimal(landUse.area) : null;
+      if (landUse.area.trim() && (useArea === null || useArea <= 0)) {
+        issues.push(
+          issue(
+            "LAND_USE_AREA_INVALID",
+            `${usePath}.area`,
+            "Diện tích theo mục đích phải là số lớn hơn 0. Không rõ thì để trống.",
+          ),
+        );
+      }
+    });
+
+    // Chỉ so tổng khi cả diện tích thửa lẫn diện tích mục đích đều có — thiếu một bên thì không
+    // có gì để so, và ở mức A cả hai đều được phép trống.
+    const declared = parcel.landUses
+      .map((landUse) => parseVietnameseDecimal(landUse.area))
+      .filter((value): value is number => value !== null && value > 0);
+    if (declared.length > 0 && parcelArea !== null && parcelArea > 0) {
+      const total = declared.reduce((sum, value) => sum + value, 0);
+      if (total - parcelArea > LAND_USE_AREA_TOLERANCE_M2) {
+        issues.push(
+          issue(
+            "LAND_USE_AREA_EXCEEDS_PARCEL",
+            `${path}.landUses`,
+            "Tổng diện tích theo mục đích sử dụng vượt quá diện tích thửa.",
+          ),
+        );
+      }
+    }
+  });
+
+  return issues;
+}
+
+/**
+ * MỨC A phần tài liệu — kiểm trên **file máy chủ đã xác minh**, không tin trạng thái client.
+ *
+ * Chỉ tính file `UPLOADED`: `REPLACED`/`DELETED` không còn là bằng chứng gì.
+ */
+export function validateCitizenRequiredFiles(
+  draft: IntakeDraft,
+  files: readonly Pick<PublicFileSummary, "ownerId" | "documentType" | "status">[],
+): CitizenSubmitIssue[] {
+  const issues: CitizenSubmitIssue[] = [];
+  const uploaded = files.filter((file) => file.status === "UPLOADED");
+
+  draft.owners.forEach((owner, index) => {
+    if (!requiresCitizenId(owner.ownerType) || owner.hasDistinctCurrentUser) return;
+    const has = (documentType: string): boolean =>
+      uploaded.some((file) => file.ownerId === owner.id && file.documentType === documentType);
+
+    if (!has("CITIZEN_ID_FRONT")) {
+      issues.push(
+        issue(
+          "CITIZEN_ID_FRONT_REQUIRED",
+          `files.owners.${index}.CITIZEN_ID_FRONT`,
+          "Chưa có ảnh CCCD mặt trước.",
+        ),
+      );
+    }
+    if (!has("CITIZEN_ID_BACK")) {
+      issues.push(
+        issue(
+          "CITIZEN_ID_BACK_REQUIRED",
+          `files.owners.${index}.CITIZEN_ID_BACK`,
+          "Chưa có ảnh CCCD mặt sau.",
+        ),
+      );
+    }
+  });
+
+  if (!uploaded.some((file) => file.documentType === "CERTIFICATE")) {
+    issues.push(
+      issue(
+        "CERTIFICATE_IMAGE_REQUIRED",
+        "files.certificate",
+        "Chưa có ảnh Giấy chứng nhận. Cần ít nhất một ảnh.",
+      ),
+    );
+  }
+
+  return issues;
+}
+
+/** Chỉ owner cá nhân có CCCD **hợp lệ** mới sinh HMAC tra cứu — không băm chuỗi rỗng. */
+export function citizenIdsForLookup(draft: IntakeDraft): string[] {
+  return draft.owners
+    .filter((owner) => requiresCitizenId(owner.ownerType) && !owner.hasDistinctCurrentUser)
+    .map((owner) => owner.identityNumber.trim())
+    .filter((value) => CITIZEN_ID_PATTERN.test(value));
+}
+
+/** Ký hiệu loại đất người dân ghi tự do được lưu vào `purposeFreeText` với mã "ghi theo bìa". */
+export const CITIZEN_RAW_LAND_PURPOSE_CODE = LAND_PURPOSE_GHI_THEO_BIA;
 
 export function validateDraftForSubmit(draft: IntakeDraft): string | null {
   const saveError = validateDraftForSave(draft);

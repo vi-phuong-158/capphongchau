@@ -194,8 +194,32 @@ export function maskCertificateNumber(value: string): string {
   return `${"•".repeat(Math.min(8, compact.length - 4))}${compact.slice(-4)}`;
 }
 
+/**
+ * Tên người thực hiện ghi vào dòng thời gian mà **người dân đọc được**.
+ *
+ * `display_name` là ô nhập tự do của quản trị viên và hay bị điền bằng chính email công vụ. Dòng
+ * thời gian đi thẳng ra `/tra-cuu`, nên tên hình dạng email phải lùi về nhãn chung thay vì phát
+ * tán một địa chỉ thư thật ra ngoài. Xem thêm `publicAssignedOfficer`.
+ */
 export function publicActorName(displayName: string): string {
-  return displayName.trim() || "Cán bộ phường";
+  const name = displayName.trim();
+  return name && !/\S+@\S+/.test(name) ? name : "Cán bộ phường";
+}
+
+function sanitizePublicTimelineText(value: string): string {
+  return value.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[đã ẩn]").trim();
+}
+
+/** DTO allowlist cho timeline công khai; sanitize lại dữ liệu lịch sử trước khi trả ra ngoài. */
+export function serializePublicTimelineEvent(input: PublicTimelineEvent): PublicTimelineEvent {
+  return {
+    eventId: input.eventId,
+    eventType: input.eventType,
+    label: sanitizePublicTimelineText(input.label),
+    actorDisplayName: publicActorName(input.actorDisplayName),
+    message: sanitizePublicTimelineText(input.message),
+    occurredAt: input.occurredAt,
+  };
 }
 
 export function newTimelineEvent(input: {

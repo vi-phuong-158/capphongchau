@@ -16,10 +16,13 @@
     "repair:public-submissions": "tsx scripts/repair-public-submissions.ts",
     "normalize:legacy-public-drafts": "tsx scripts/normalize-legacy-public-drafts.ts",
     "seed:admin-users": "tsx scripts/add-system-admins.ts",
+    "cleanup:e2e-preview-data": "tsx scripts/cleanup-e2e-preview-data.ts",
+    "preflight:public-intake-v2-migrations": "tsx scripts/preflight-public-intake-v2-migrations.ts",
     "test": "vitest run",
     "test:python": "python -m unittest discover -s tests -p \"test_*.py\"",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:preview": "playwright test tests/e2e/public-intake-v2.spec.ts"
   },
   "dependencies": {
     "@next/env": "^16.2.10",

@@ -3,8 +3,8 @@
 > Dành riêng cho **Codex**. Claude Code dùng `CLAUDE.md`.
 >
 > **BẮT BUỘC: đọc `docs/brain/` trước khi code**, đặc biệt **Code Graph** trong
-> `docs/brain/01-architecture.md` (bản đồ module — "đụng vào X ảnh hưởng đâu"; dự án hiện
-> chưa có mã nguồn nên Code Graph còn trống, agent khởi tạo code phải điền lại). File
+> `docs/brain/01-architecture.md` (bản đồ module — "đụng vào X ảnh hưởng đâu"; Code Graph đã có
+> nội dung đầy đủ và phải được cập nhật cùng lúc với mọi thay đổi kiến trúc). File
 > `AGENTS.md` này vẫn là nguồn chi tiết nhất về mô hình dữ liệu, API và bảo mật —
 > `docs/brain/` là bản tóm tắt/tổng hợp để đọc nhanh, không thay thế. Sau khi sửa code, bắt
 > buộc thêm entry vào `docs/brain/06-ai-working-log.md`; nếu đổi kiến trúc/API/schema, cập
@@ -156,11 +156,18 @@ Không xóa bảng/cột hoặc dữ liệu đã dùng. Nếu thay đổi schema
 - `ID_RESERVATIONS` append-only. Số thứ tự nguyên tử cấp theo năm qua `CASE_COUNTERS` (PostgreSQL `ON CONFLICT (year) DO UPDATE SET last_sequence = case_counters.last_sequence + 1 RETURNING last_sequence`), đảm bảo không trùng số khi retry hoặc xử lý song song. (Mô tả cũ về `updatedRange` thuộc thời Google Sheets — đã thay bằng counter PostgreSQL trong Supabase).
 - Mọi API ghi yêu cầu `idempotency_key` và `request_id`. `REQUEST_LOG` lưu key, kết quả đã cache và timestamp tối thiểu 24 giờ để trả đúng kết quả cho request lặp.
 - Riêng `POST /api/public/submissions`, trình duyệt gửi UUID v4 trong header `idempotency-key`.
+  Body bắt buộc có `phone` hợp lệ và `consent.accepted === true`; server phải kiểm tra consent
+  trước Turnstile/Drive/database, tự gán `CONSENT_NOTICE_VERSION` đang hiệu lực và chỉ sau đó mới
+  truyền literal `consentAccepted: true` vào service tạo hồ sơ. Route cán bộ hỗ trợ áp dụng cùng
+  contract, đồng thời ghi kênh, danh tính cán bộ, thời điểm và metadata consent vào audit.
   Server namespace key bằng `PUBLIC_CREATE:`, dùng HMAC để suy ra ổn định `submission_id`, mã tiếp
   nhận và mã bí mật, nhưng `REQUEST_LOG` tuyệt đối không lưu mã bí mật rõ. Dòng
   `PUBLIC_SUBMISSIONS` và dòng `REQUEST_LOG` phải được ghi trong cùng một PostgreSQL transaction để retry
   sau khi mất response không tạo nháp mới.
 - Bản ghi chỉnh sửa có `version`; PATCH yêu cầu version hiện tại và update nguyên tử bằng `WHERE version = expectedVersion`, không khớp trả `409 VERSION_CONFLICT`.
+- Sau CREATE, client lấy draft/`version` từ `GET /api/public/submissions/current`, đồng bộ các ID do
+  server sinh nhưng không được ghi đè phone, consent hoặc dữ liệu người dùng vừa nhập; mọi PATCH
+  tiếp theo phải gửi lại server version gần nhất và cập nhật version từ response.
 - `CLAIM`, `REQUEST_SUPPLEMENT` và `REJECT` phải ghi transition, yêu cầu bổ sung (nếu có), audit, timeline và `REQUEST_LOG` trong cùng một PostgreSQL transaction. Lặp cùng key/payload trả lại kết quả đã cache; dùng lại key cho payload khác trả `409 IDEMPOTENCY_CONFLICT`.
 - Đặt lại mã bí mật phải sinh ổn định theo idempotency key, không lưu mã rõ trong `REQUEST_LOG`, và chỉ cập nhật cột truy cập (`access_code_hash`, sai/khóa, `updated_at`, `access_version`) — không ghi đè `draft_json` hay tăng `version` nghiệp vụ.
 - Import GCN cũ chỉ khớp/lưu HMAC CCCD; ngày sinh không là điều kiện hợp lệ và không được chép vào `EXISTING_*`. Backfill dùng append-only, dòng cuối cùng theo `existing_record_id` là trạng thái hiệu lực.
@@ -244,6 +251,7 @@ POST /api/public/submissions/current/no-action
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
 POST /api/public/submissions/current/submit
+POST /api/staff/assisted-submissions/current/submit
 GET /api/submissions
 GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action

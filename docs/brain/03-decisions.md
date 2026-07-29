@@ -7,6 +7,263 @@
 > Trạng thái hiện hành: Supabase PostgreSQL đã là kho runtime sau cutover 2026-07-24; các entry
 > cũ mô tả Google Sheets runtime/cửa sổ chờ cutover là lịch sử, không phải hướng dẫn triển khai mới.
 
+## [2026-07-29] Review PR #6 vòng hai — ba quyết định về an toàn dữ liệu
+
+**1. Câu hỏi trước khi xóa tệp Drive là "có AI đang trỏ vào nó không", không phải "hồ sơ đang gọi
+có trỏ vào nó không".**
+`isDriveFileAdopted` trước đây lọc `submission_id = <hồ sơ đang gọi>`. Phần lớn nhánh gọi
+`discardIfOrphan` truyền thẳng `body.driveFileId` — dữ liệu client chưa qua `verifyUploadedFile`.
+Một ID trỏ sang hồ sơ khác khi đó thỏa "chưa ai nhận" và bị xóa: mất bằng chứng của một hộ dân
+không liên quan. Nay truy vấn hỏi toàn bảng, **và** `discardIfOrphan` chỉ xóa khi Drive xác nhận
+tệp nằm trong `record.driveFolderId`. Hai điều kiện thu phạm vi xóa về đúng những gì hộ dân đang
+gọi tự tải lên. Đánh đổi: thêm một lần gọi Drive trên đường lỗi (hiếm) — chấp nhận được, vì hướng
+sai còn lại là mất dữ liệu vĩnh viễn. Khai thác thực tế trước đây khó vì Drive ID không bao giờ
+được trả ra cổng công khai và không đoán được; sửa vì hàng rào không nên chỉ dựa vào điều đó.
+
+**2. Không dùng `force row level security` cho bảng số đo.**
+`force` áp RLS lên cả chủ sở hữu bảng; bảng không có policy nào nên với role không mang BYPASSRLS
+thì mọi insert trả 0 dòng. Cả hai chỗ gọi `appendUploadAttempt` đều nuốt lỗi có chủ đích (số đo
+không được làm hỏng một lượt tải đã thành công), nên hỏng kiểu đó **không phát ra tín hiệu nào** —
+đúng cái bảng dùng để nghiệm thu ngưỡng hiệu năng và để mở cờ chuẩn hóa ảnh. Dùng `enable` +
+`revoke` như 8 bảng còn lại: đúng mô hình đe dọa (chặn anon/authenticated) và không lệch mẫu. Kèm
+theo, nuốt lỗi giờ đi qua `reportUploadMetricFailure` — ghi log **một lần** mỗi tiến trình và chỉ
+ghi mã lỗi Postgres, không ghi `error.message` (thông báo Postgres có thể nhắc lại giá trị dòng
+vừa insert).
+
+**3. PATCH nháp: giữ kiểm version tuyệt đối ở máy chủ, thêm tự phục hồi ở client.**
+Kiểm khớp tuyệt đối là đúng và được giữ nguyên. Nhưng nguyên nhân 409 thường gặp nhất không phải
+hai thiết bị cùng sửa mà là một PATCH đã ghi xong rồi response rơi mất trên mạng yếu — lần thử lại
+gửi version cũ và bị từ chối, người dân kẹt kèm thông báo sai sự thật ("đang mở ở thiết bị khác").
+Client lấy lại snapshot rồi thử lại — nhưng **chỉ khi phân biệt được** đó là lần ghi của chính
+mình bị mất response, chứ không phải thiết bị khác đã sửa. Căn cứ là `hasLocalChanges` của snapshot
+vừa lấy về (so sánh sâu bản gộp local-đè-server với chính bản server):
+
+- `false` → gộp xong không khác gì server → server **đã có** đúng thứ ta định ghi → chỉ mất
+  response → thử lại vô hại;
+- `true` → server đang giữ nội dung ta chưa từng thấy → không phân biệt được → coi như xung đột
+  thật, **không** thử lại, để 409 nổi lên và người dân đọc đúng thông báo.
+
+Bản sửa đầu tiên của vòng này **thiếu điều kiện đó** và luôn thử lại: vì lần thử lại dùng version
+vừa fetch nên nó LUÔN thành công, kể cả khi 409 đến từ một thiết bị khác — tức là ghi đè mất dữ
+liệu của thiết bị kia trong im lặng. Ghi lại đây vì đó đúng là loại lỗi mà "tự phục hồi cho tiện"
+hay tạo ra.
+
+Điều kiện bắt buộc đi kèm: payload gửi đi và payload đem so sánh phải là **cùng một object** (đã
+qua `withCertificateMetadata`). So bản chưa gắn metadata với snapshot đã có sẽ luôn ra "khác nhau"
+và nhánh tự phục hồi không bao giờ chạy.
+
+Hạn chế còn lại, chấp nhận có ý thức: sau khi báo xung đột, `adoptServerDraft` đã cập nhật
+`serverVersion`, nên nếu người dân bấm lưu lần nữa thì lần đó **sẽ** ghi đè. Đây là hành động có ý
+thức sau khi đã được cảnh báo, khác hẳn với ghi đè tự động. Muốn chặn hẳn thì phải có giao diện
+hợp nhất thay đổi — ngoài phạm vi vòng này.
+
+Không chọn phương án idempotency key cho PATCH vì `request_log.kind` có CHECK constraint, thêm kind
+mới là phải thêm migration — chi phí lớn hơn giá trị ở bước này.
+
+**4. CCCD vào chỉ mục tra cứu với `kind = 'PENDING'`, bất kể ai gõ vào ô đó và ở lần gửi nào.**
+Từ V2, CCCD là **tùy chọn** với người dân. Trước quyết định này, `pendingIdentityHmacs` chỉ được
+ghi ở `submit` khi `status === "SUBMITTED"`, nên hai nhóm nằm ngoài chỉ mục vĩnh viễn: người dân
+điền CCCD ở lần **gửi bổ sung**, và cán bộ điền hộ lúc hoàn thiện/tiếp nhận. Đó đúng là hai nhóm
+mà V2 sinh ra nhiều nhất, nên phát hiện trùng hồ sơ gần như không còn tác dụng với luồng mới.
+
+Chốt: ghi ở cả `SUBMITTED` lẫn `RESUBMITTED`, và ghi ở cả ba đường của cán bộ
+(`commitStaffDraftEdit`, `commitWorkingPayload`, `commitOfficialAmendment`). Dùng `kind = 'PENDING'`
+y như người dân tự khai — chỉ mục trả lời "có hồ sơ nào đang gắn với CCCD này", không phải "ai đã
+gõ số đó vào". Không thêm `kind` mới vì sẽ phải đổi CHECK constraint trên `public_lookup_index` và
+rà lại mọi chỗ đọc, đổi lấy một thông tin chưa ai cần. Insert đã có `on conflict do nothing` nên
+ghi lặp là vô hại.
+
+Phân lớp giữ nguyên: **repository không bao giờ đọc biến môi trường**. Route tính HMAC từ
+`DATA_HASH_PEPPER` rồi truyền xuống, đúng như `submit` đã làm từ trước. Có test khẳng định
+`repository.ts` không chứa `DATA_HASH_PEPPER` lẫn `identityHmac(`.
+
+## [2026-07-29] Đóng 2 BLOCKER và 5 HIGH của review PR #6
+
+- Upload complete tra `REQUEST_LOG` trước validation lượt mới; replay trả summary cũ và cleanup
+  luôn xác minh `isDriveFileAdopted` trước khi xóa.
+- Assisted submit có endpoint staff riêng: allowlist vai trò + staff auth + CSRF, không Turnstile;
+  self-service giữ public session + public CSRF + Turnstile.
+- PATCH dùng exact version ở route và SQL CAS. Official acceptance chặn consent thiếu, identity
+  chưa xác nhận và `QR_OVERRIDE_PENDING_REVIEW`; không backfill consent.
+- Consent audit create cùng transaction với submission/request log. Timeline public sanitize lúc
+  ghi và qua serializer allowlist lúc đọc.
+- Migration `202607290001` force RLS, revoke `anon`/`authenticated` cho telemetry, không policy.
+
+## [2026-07-28] Consent create phải được khai báo trong request và xác minh phía server
+
+- **Quyết định:** Cả `POST /api/public/submissions` và
+  `POST /api/staff/assisted-submissions` bắt buộc body có `consent.accepted === true`. Server kiểm
+  tra trước khi tạo submission, tự gán `CONSENT_NOTICE_VERSION`, rồi truyền literal
+  `consentAccepted: true` vào service dùng chung. Assisted flow còn lưu danh tính/thời điểm cán bộ
+  và audit metadata consent. Quyết định này **thay thế riêng phần chấp nhận rủi ro consent** ngày
+  2026-07-24; hai rủi ro edge guard và tra cứu tổ chức trong entry cũ vẫn giữ nguyên.
+- **Lý do:** Trạng thái checkbox UI không phải hàng rào server. Việc service tự đặt consent true
+  cho request chỉ có phone vừa tạo bằng chứng sai, vừa khiến `adoptServerDraft()` có thể ghi đè
+  state local. Contract rõ ràng cho phép route từ chối request thiếu consent trước Drive/database.
+- **Đồng bộ draft:** Sau CREATE, client hợp nhất snapshot server theo vị trí để nhận owner/parcel/
+  land-use ID do server sinh, nhưng giữ phone, consent và dữ liệu vừa nhập. Server version từ GET
+  trở thành version cho PATCH kế tiếp; recovery không trộn draft local rỗng.
+- **Kiểm tra bắt buộc:** Request public/assisted thiếu consent bị 400 và không tạo/audit; helper
+  adoption phải khóa ID, dữ liệu local và version; rehearsal tối thiểu phải gửi thành công.
+
+## [2026-07-28] Public Intake V2 — tách điều kiện gửi của người dân khỏi điều kiện tiếp nhận chính thức
+
+- **Quyết định:** Cổng công khai chỉ còn bắt buộc **số điện thoại + đồng ý + tên chủ sử dụng + ảnh
+  CCCD hai mặt + ít nhất một ảnh GCN**. Toàn bộ dữ liệu PL3 còn lại thành **tùy chọn**: trống thì
+  qua, đã nhập thì phải đúng định dạng. Ba tầng kiểm tra có tên rõ ràng:
+  - `validateDraftStructure` — chỉ hình dạng, dùng ở PATCH lưu nháp;
+  - `validateCitizenSubmitDraft` — MỨC A, điều kiện để **người dân bấm gửi**;
+  - `completionChecks` — MỨC C, điều kiện để **cán bộ tiếp nhận chính thức**.
+- **Lý do:** Cán bộ trực tiếp đi thu hồ sơ báo lại rằng bảy bước với hàng chục ô bắt buộc theo PL3
+  khiến hộ dân bỏ dở giữa chừng. Mục tiêu thật của cổng công khai là **thu được CCCD + ảnh GCN +
+  tên chủ đang sử dụng**; phần còn lại cán bộ đọc trên chính ảnh đó và hoàn thiện ở
+  `working_payload`.
+- **Đánh đổi và rủi ro đã xử lý:** Nới MỨC A mà giữ nguyên MỨC C sẽ để hồ sơ chỉ có tên + ảnh đi
+  thẳng vào hồ sơ chính thức. Trước V2 `completionChecks` **yếu hơn hẳn** cổng công khai — không
+  chặn `oldWard` trống, thiếu vai trò trên GCN, thiếu ngày sinh/giới tính/địa chỉ, thiếu địa chỉ
+  trên GCN, thiếu nguồn gốc/hình thức/thời hạn, và thiếu toàn bộ ảnh chỉ là WARNING. Hiện trạng đó
+  được khóa lại bằng test trước khi sửa (`tests/public-intake-v2-characterization.test.ts`, commit
+  `1cc7d93`) rồi đảo ngược **trong cùng release**. Ai định nới `completionChecks` về sau phải đọc
+  lại đoạn này trước.
+- **Hai lỗi phát hiện khi tách, đã sửa cùng lúc:**
+  - Route submit tạo HMAC tra cứu cho **mọi** owner cá nhân, kể cả khi CCCD rỗng. Vô hại khi CCCD
+    còn bắt buộc, nhưng khi cho phép để trống thì mọi hồ sơ không nhập CCCD dùng chung một khóa
+    tra cứu. `citizenIdsForLookup` chỉ băm chuỗi khớp 12 số.
+  - Diện tích kiểu Việt (`29,16`) bị `Number()` trả `NaN` ở máy chủ trong khi client dùng
+    `parseVietnameseDecimal` và chấp nhận — hồ sơ hợp lệ bị từ chối với thông báo khó hiểu. Cả hai
+    tầng nay dùng chung `parseVietnameseDecimal`.
+- **Người quyết định:** Chủ dự án (đầu bài `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md` §2.1),
+  thi công bởi Claude Opus 5.
+
+## [2026-07-28] Ký hiệu loại đất: một ô chữ tự do thay cho danh mục 45 mục đích
+
+- **Quyết định:** Bước thửa đất của cổng công khai chỉ còn **một ô** "Ký hiệu loại đất ghi trên
+  GCN". Chuỗi người dân gõ lưu nguyên vào `purposeFreeText` kèm `purposeCode = GHI_THEO_BIA`. Bỏ
+  khỏi cổng công khai: ô chọn 45 mục đích, nguồn gốc, hình thức, thời hạn.
+- **Lý do:** GCN đất nông nghiệp chỉ in **ký hiệu** (`LUC`, `LUK`, `BHK`) hoặc chữ dân dã ("màu",
+  "vườn"), không in tên pháp lý. Bắt hộ dân tự tra ra "đất chuyên trồng lúa" là bắt họ làm việc của
+  cán bộ, và kết quả hay gặp là chọn bừa một mã sai — dữ liệu sai im lặng còn tệ hơn ô trống.
+- **Đánh đổi:** Mô hình dữ liệu **không đổi** — `landUses` vẫn là mảng, PL3 export vẫn chạy như cũ,
+  cán bộ vẫn tách được nhiều mục đích ở `working_payload`. Chuẩn hóa chỉ trim + viết hoa **mã ngắn
+  thuần chữ cái ≤ 5 ký tự**; chuỗi tiếng Việt giữ nguyên vì viết hoa cả câu là bóp méo thứ người
+  dân ghi trên bìa. Xóa hết chữ thì `purposeCode` về rỗng — giữ mã "ghi theo bìa" mà không có nội
+  dung là tạo dữ liệu giả. `completionChecks` chặn `CAN_DOI_CHIEU` và chặn `GHI_THEO_BIA` không có
+  chữ, nên cán bộ vẫn buộc phải chốt loại đất trước khi tiếp nhận chính thức.
+
+## [2026-07-28] Bỏ bước tài sản và bước loại đất khỏi cổng công khai, GIỮ NGUYÊN schema
+
+- **Quyết định:** `STEPS` từ 7 xuống 4. Bước "Tài sản" và bước "Loại đất" biến mất khỏi giao diện
+  công khai. **Không** xóa `Asset`, không đổi bảng, không migration phá dữ liệu. `draft.assets`
+  round-trip nguyên vẹn; nháp cũ có tài sản không bị mất khi lưu lại.
+- **Lý do:** Tài sản gắn liền với đất không phải mục tiêu của đợt cao điểm 180 ngày; các tổ chức
+  tín dụng sẽ cần nhưng bổ sung sau. Ẩn khỏi giao diện là thay đổi một chiều, rẻ và đảo ngược được;
+  xóa schema thì không.
+- **Đánh đổi:** Không dùng feature flag giữ hai luồng UI song song như kế hoạch gợi ý — hai luồng
+  là hai thứ phải bảo trì và test. Cần khôi phục thì thêm lại khối JSX, dữ liệu vẫn còn nguyên.
+
+## [2026-07-28] Bỏ cổng nhập lại mã bí mật trước khi tải ảnh GCN
+
+- **Quyết định:** Không còn bắt người dân gõ lại 4 ký tự cuối của mã bí mật trước khi tải ảnh Giấy
+  chứng nhận.
+- **Lý do:** Ảnh GCN chuyển lên **bước 2**, nên cổng đó rơi vào ngay đầu luồng và chặn đúng công
+  đoạn quan trọng nhất. Phiên công khai đang hợp lệ đã là bằng chứng truy cập; bắt xác nhận lại chỉ
+  để tải ảnh là rào cản không đổi lấy được gì về bảo mật.
+- **Đánh đổi:** Mất một nhắc nhở "hãy lưu mã bí mật". Bù lại: thẻ mã bí mật vẫn hiển thị nổi bật
+  suốt luồng, và màn hình thành công mới hiển thị mã tiếp nhận cỡ lớn kèm nút sao chép. Bản thân mã
+  bí mật vẫn giữ nguyên vai trò khôi phục/tra cứu, không nới lỏng chỗ nào khác.
+
+## [2026-07-28] Chuẩn hóa ảnh trên thiết bị — mặc định TẮT cho tới khi có số đo thật
+
+- **Quyết định:** Thêm `image-normalization.client.ts` (CCCD 2400px, GCN 3000px, JPEG q0.88) sau cờ
+  `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED`, **mặc định `false`**.
+- **Lý do bật:** Góp ý số một của cán bộ là "up ảnh lâu quá". Điện thoại chụp 12–50MP, ba ảnh GCN
+  là 30–60 MiB qua 4G; cùng tờ giấy ở cạnh dài 3000px chỉ còn vài MiB mà chữ vẫn đọc được.
+- **Lý do mặc định tắt:** Phiên thi công không có Google Drive thật, Supabase thật và thiết bị 4G
+  nên **không đo được** thời gian truyền, và unit test **không chứng minh được** chữ trên GCN còn
+  đọc được. Theo §0.2 mục 12 của đầu bài, không tuyên bố tăng tốc khi chưa có số đo trước/sau. Bộ
+  kiểm chất lượng bắt buộc trước khi bật nằm ở `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md`.
+- **Hai điểm dễ hỏng đã xử lý:** `imageOrientation: "from-image"` khi giải mã — thiếu nó thì ảnh
+  chụp dọc mang cờ EXIF xoay sẽ ra ảnh nằm ngang sau khi vẽ lại canvas, cán bộ phải tự xoay từng
+  tờ. Và tên tệp tải lên đặt lại thành `cccd.jpg`/`gcn.jpg` — máy chủ ghép tên client gửi lên vào
+  tên tệp trong Drive, mà tên do máy ảnh hoặc người dân đặt hay mang số CCCD và tên người.
+- **Đánh đổi thuật ngữ:** Thư mục Drive vẫn tên `01_INBOX/{id}/originals`. Sau khi bật cờ, tệp
+  trong đó là **bản tiếp nhận vận hành**, không còn chắc chắn là byte gốc từ máy ảnh. Không đổi tên
+  thư mục vì sẽ phá đường dẫn hiện hữu và các bước FILES_MOVED của saga.
+
+## [2026-07-28] Tiến độ tải lên đi qua XMLHttpRequest, và chỉ được tăng
+
+- **Quyết định:** Tách `ResumablePutTransport`. PUT dữ liệu đi qua XHR để có `upload.onprogress`;
+  initiate, hỏi tiến độ và complete vẫn dùng `fetch`. Tiến độ báo ra ngoài **đơn điệu tăng**.
+- **Lý do:** `fetch` không có sự kiện tiến độ tải lên — với ảnh 12 MiB trên 4G, người dân nhìn "0%"
+  suốt nửa phút rồi thẳng lên 100%, không phân biệt được "đang chạy chậm" với "đã treo".
+- **Vì sao phải đơn điệu tăng:** Sau một lần đứt mạng, Google có thể báo đã nhận **ít hơn** số byte
+  XHR vừa đếm — byte rời thiết bị không có nghĩa là đã tới nơi. Thanh phần trăm tụt lại bị người
+  dân đọc là "hỏng, phải làm lại" rồi bấm hủy. Cùng lý do, transport `fetch` **không** báo 100% khi
+  request kết thúc: một phản hồi 308 "mới nhận 400/1000" sẽ hiện 100% rồi tụt về 40%.
+- **Đánh đổi:** Thêm một lớp trừu tượng. Bù lại test dùng transport giả, không cần mạng, và hợp
+  đồng resumable (Content-Range, 308, resume từ offset) được khóa lại bằng test.
+
+## [2026-07-28] Hàng đợi tải ảnh: hai luồng, và một ảnh hỏng không kéo theo ảnh nào
+
+- **Quyết định:** Ảnh GCN tải tối đa **2 luồng** song song, hạ về 1 khi `saveData` hoặc mạng 2g.
+  Mỗi ảnh là một việc độc lập có phần trăm, nút hủy và thông báo lỗi riêng.
+- **Lý do:** Trước V2 vòng lặp tuần tự và `break` ngay khi một ảnh hỏng — chọn 3 ảnh mà ảnh thứ 2
+  lỗi là mất luôn ảnh thứ 3 dù nó chưa hề được thử. Nhưng bắn cả 3 cùng lúc cũng sai: các luồng
+  giành băng thông của nhau nên không ảnh nào xong sớm, và ba bitmap lớn cùng lúc đủ để trình duyệt
+  kill tab trên máy yếu.
+- **Đánh đổi:** `navigator.connection` không có trên Safari nên **không** được phụ thuộc vào nó —
+  thiếu thông tin thì dùng mặc định 2. Chuẩn hóa ảnh chạy trong từng việc chứ không dựng sẵn cả
+  loạt, đúng vì lý do bộ nhớ ở trên.
+- **Hệ quả:** `busy` thôi làm cờ "đóng băng cả màn hình" cho luồng tải ảnh. Người dân điền được các
+  ô khác và chọn thêm ảnh trong lúc ảnh đang lên. `busy` chỉ còn cho thao tác ngắn thật sự khóa màn
+  hình: tạo bản kê khai, lưu nháp, xóa ảnh.
+
+## [2026-07-28] Lưu TÊN cán bộ tại thời điểm nhận, không join sang `public.users`
+
+- **Quyết định:** Thêm cột `public_submissions.claimed_by_display_name`, ghi lúc
+  CLAIM/FORCE_CLAIM/TRANSFER, xóa lúc RELEASE và lúc người dân gửi lại hồ sơ.
+- **Lý do không join:** Tên hiển thị đổi được (đổi họ tên, sửa chính tả) — dòng thời gian phải ghi
+  tên **lúc đó**, giống mọi bản ghi hành chính khác. Và cán bộ nghỉ việc thì bản ghi `users` có thể
+  bị vô hiệu hóa, join sẽ trả rỗng và lịch sử hồ sơ mất dấu người từng xử lý.
+- **TRANSFER tra tên người nhận từ danh bạ máy chủ**, không nhận tên từ client — nhận từ client là
+  để bất kỳ ai cũng gán được một cái tên tùy ý vào dòng thời gian hồ sơ.
+- **Cổng công khai CHỈ trả `displayName`, không bao giờ trả email.** Email công vụ đưa ra ngoài là
+  địa chỉ thật có thể bị thu thập để gửi thư rác hoặc lừa đảo nhân danh phường. Hồ sơ cũ chưa có
+  tên trả `null` kèm cờ `hasAssignedOfficer` để giao diện hiển thị "Đã phân công cán bộ".
+- **Đánh đổi:** Một cột trùng lặp dữ liệu với `users.display_name`. Chấp nhận, vì đây là bản ghi
+  lịch sử chứ không phải tham chiếu.
+
+## [2026-07-28] Chế độ cán bộ hỗ trợ kê khai dùng lại NGUYÊN wizard công khai
+
+- **Quyết định:** `/ke-khai-ho` render chính `IntakeWizard` với prop `assisted`. Không app native,
+  không bản wizard song song. Máy chủ gắn `intake_channel = OFFICER_ASSISTED` cùng email/tên/thời
+  điểm lấy từ phiên đăng nhập.
+- **Lý do:** Góp ý "Làm phần mềm được ko để anh em đi làm cho dân". Hai bản mã cho cùng một biểu
+  mẫu là hai bản sẽ lệch nhau ngay ở lần sửa đầu tiên — và bản cán bộ ít người dùng hơn nên sẽ là
+  bản mục ruỗng trước.
+- **Bất biến bảo mật:** Client **không** gửi được `channel` hay `assistedBy`. Cổng công khai gán
+  cứng `SELF_SERVICE` và không đọc hai trường đó từ body. Ràng buộc CHECK ở tầng cơ sở dữ liệu bắt
+  buộc `OFFICER_ASSISTED` phải có đủ email, tên và thời điểm — thiếu nó thì một lỗi lập trình có
+  thể ghi nhãn mà bỏ trống người thực hiện, và hồ sơ đó vĩnh viễn không truy được về ai.
+- **Vì sao không Turnstile ở route cán bộ:** đã có phiên đăng nhập và CSRF, hai thứ đó mạnh hơn hẳn
+  một bài kiểm tra bot. Bắt cán bộ giải captcha ở mỗi hộ dân là phí thời gian tại cơ sở.
+- **Ba lớp chặn, không lớp nào đủ một mình:** proxy Edge (`/ke-khai-ho/:path*`,
+  `/api/staff/:path*`) → `requireActiveUser` tại trang → `requireActiveUser` + CSRF tại route. JWT
+  cũ còn hạn sau khi quản trị viên khóa tài khoản, nên Edge thấy "có session" là chưa đủ.
+- **Đánh đổi:** `/ke-khai-ho` chỉ khác `/ke-khai` một gạch nối; đặt sai matcher là mở toang đường
+  tạo hồ sơ mang nhãn cán bộ. `tests/public-surface-guard.test.ts` khóa cả hai chiều.
+
+## [2026-07-28] Lưu nháp một lần cho mỗi lô thay đổi (`flushDraft` single-flight)
+
+- **Quyết định:** Bản nháp có cờ "bẩn"; `flushDraft()` bỏ qua hoàn toàn nếu nháp không đổi từ lần
+  lưu trước, và gộp các lời gọi chồng nhau vào cùng một request đang bay.
+- **Lý do:** Trước V2 mỗi lần tải ảnh CCCD đều PATCH nháp trước — chọn mặt trước rồi mặt sau là hai
+  lần ghi, dù giữa hai lần đó người dân không sửa gì. Trên mạng yếu đó là hai vòng round-trip thừa
+  ngay trước công đoạn chậm nhất.
+- **Đánh đổi đã xử lý:** Cờ chỉ hạ khi máy chủ đã nhận — hạ khi lưu hỏng là mất dữ liệu im lặng ở
+  lần sau. Thứ tự và nhãn ảnh GCN cũng đánh dấu bẩn, vì chúng nằm trong
+  `draft.certificateFileMetadata`.
+
 ## [2026-07-25] Khoảng trống version migration `202607250001` và `202607250006`
 
 - **Quyết định:** Nhánh `feat/antigravity-assisted-review` cấp version `202607250002` đến
@@ -1143,3 +1400,105 @@ Ghi lại để agent không tự ý triển khai sớm, nhưng biết kiến tr
 - **Đánh đổi:** <cái gì bị đánh đổi>
 - **Người quyết định:** <user / Claude / Codex>
 ```
+
+## [2026-07-28] Quyền lập hồ sơ hộ dân hẹp hơn quyền đọc hàng đợi
+
+`ASSISTED_INTAKE_ROLES` = `INTAKE_OFFICER`, `WARD_ADMIN`, `SYSTEM_ADMIN` — **không** dùng lại
+`SUBMISSION_READ_ROLES`.
+
+Quyền đọc hàng đợi và quyền tạo dữ liệu mới mang dấu vết "cán bộ đã nhập hộ" là hai chuyện khác
+nhau: hồ sơ do cán bộ nhập được coi là đáng tin hơn hồ sơ hộ dân tự khai, nên quyền tạo nó phải
+hẹp hơn quyền xem.
+
+`REVIEW_OFFICER` bị loại có chủ đích. Vai trò đó thẩm định hồ sơ; cho cùng một người vừa nhập vừa
+duyệt là bỏ mất chốt kiểm tra chéo duy nhất trong quy trình.
+
+Giả định: `INTAKE_OFFICER` là cán bộ tiếp nhận tại bộ phận một cửa. Mã nguồn không mô tả nghiệp vụ
+chi tiết hơn; nếu phường chốt khác, sửa đúng hằng số đó — trang và API đọc từ một chỗ.
+
+## [2026-07-28] Tên tệp trong kho do máy chủ đặt, không nhận từ client
+
+`uploads/initiate` trước đây ghép `body.fileName` vào tên tệp trên Drive và `public_files.file_name`.
+Tên do máy ảnh sinh hay do người dân đặt thường mang số CCCD, họ tên, ngày giờ.
+
+Trình duyệt của app đã gửi tên trung tính từ Phase 3, nhưng đó là biện pháp phía client. Ranh giới
+tin cậy nằm ở route: ai gọi thẳng endpoint bằng `curl` cũng gửi được tên tùy ý. Nay máy chủ tự đặt
+`{documentType}-{timestamp}-{8 ký tự ngẫu nhiên}.{đuôi theo mimeType đã kiểm}`; chỉ phần mở rộng
+đã qua `canonicalImageMimeType` mới được dùng lại. Tên chính thức lúc tiếp nhận
+(`buildOriginalFileNames`) không đổi.
+
+## [2026-07-28] Dọn tệp mồ côi nghiêng về giữ lại, không nghiêng về xóa
+
+`discardIfOrphan` trong complete route hỏi `repository.isDriveFileAdopted` trước khi xóa, và
+`.catch(() => true)` — hỏi không được thì mặc định coi như **đã nhận**, tức là không xóa.
+
+Đánh đổi không đối xứng: để sót một tệp thừa thì `scripts/audit-orphan-public-files.ts` dọn được và
+chỉ mất ít dung lượng; xóa nhầm một tệp cơ sở dữ liệu đã nhận là hồ sơ trỏ vào Drive ID không còn
+tồn tại, ảnh giấy tờ mất vĩnh viễn, và không ai phát hiện cho tới lúc cán bộ mở ra đối chiếu.
+
+`isDriveFileAdopted` đọc mọi trạng thái kể cả `REPLACED`/`DELETED`: tệp đã bị thay vẫn là tệp từng
+được nhận.
+
+## [2026-07-28] Bảng số đo tải ảnh không có ô văn bản tự do nào
+
+`public.public_upload_attempts` chỉ chứa số, enum và `submission_id`. Không có cột nào có thể chứa
+tên tệp, CCCD, họ tên, điện thoại, user agent thô, Drive ID, URL upload hay IP — và
+`clientUploadTelemetrySchema` là `strict()` với mọi trường thuộc danh mục đóng.
+
+Lý do là hình dạng của rủi ro chứ không phải mức độ: một ô tự do trong bảng thống kê là chỗ dữ liệu
+cá nhân lọt vào mà không ai nghĩ tới lúc rà soát, và một khi đã ghi thì không gỡ ra được.
+`classifyPlatform` quy user agent về đúng bốn nhãn ngay tại chỗ, không bao giờ lưu chuỗi gốc — user
+agent đầy đủ là dấu vân tay nhận dạng được thiết bị.
+
+Số đo là best-effort ở cả hai đường ghi: metric hỏng không được làm hỏng lượt tải ảnh.
+`uploadSizeBytes` cố ý lấy từ Drive đã xác minh, không tin số client gửi.
+
+## [2026-07-28] Chế độ cán bộ hỗ trợ không có feature flag
+
+Cờ phía client không bao giờ là hàng rào bảo mật — ai cũng đặt được biến trong bundle đã tải về.
+Hàng rào thật là ba lớp máy chủ: proxy Edge, `requireActiveUser(ASSISTED_INTAKE_ROLES)` ở trang và
+ở API, cộng CSRF. Thêm một cờ server chỉ tạo ảo giác về lớp bảo vệ thứ tư mà không thêm gì thật;
+muốn tắt chế độ này thì thu hồi vai trò.
+
+## [2026-07-28] Kill switch server-side cho chế độ cán bộ hỗ trợ, tách khỏi ASSISTED_INTAKE_ROLES
+
+`OFFICER_ASSISTED_INTAKE_ENABLED` (mặc định `false`) là lớp thứ hai, độc lập với
+`ASSISTED_INTAKE_ROLES`. Vai trò trả lời "ai được dùng"; cờ trả lời "tính năng có mở hay không" —
+cả hai đều bắt buộc, kiểm theo đúng thứ tự vai trò trước rồi mới tới cờ (giữ nguyên 401/403 khi
+người không đủ quyền gọi vào lúc cờ đang tắt, thay vì lộ ra một 503 không phân biệt được).
+
+Đọc ở `loadPublicIntakeEnvironment()` (transform chuỗi `"true"` → `true`, mọi giá trị khác kể cả
+thiếu biến → `false`), dùng ở cả `route.ts` (503 SERVICE_UNAVAILABLE khi tắt) và `page.tsx` (màn
+hình "Chế độ chưa được bật"). Đây là cờ **server-side thuần túy** — không có biến `NEXT_PUBLIC_`
+tương ứng, vì cờ client không bao giờ là hàng rào bảo mật (ai cũng đọc được bundle đã tải về).
+
+## [2026-07-28] `receiptCode` không dùng được làm nhãn cho dữ liệu test — dùng số điện thoại
+
+`deriveReceiptCode` sinh mã bằng HMAC từ `PUBLIC_SESSION_SECRET` + idempotency key ngẫu nhiên;
+client không đặt được tiền tố. `scripts/cleanup-e2e-preview-data.ts` và tài liệu E2E vì vậy dùng
+một số điện thoại dựng cố định (`E2E_TEST_PHONE`, mặc định `0912345678`) làm nhãn nhận diện dữ
+liệu test thay cho "receipt prefix" — cùng mục đích, khác cơ chế.
+
+## [2026-07-28] Script dọn dữ liệu E2E dò bảng con động, không liệt kê cứng tên bảng
+
+`public_submissions` có khoảng 16 bảng con tham chiếu `submission_id`, phần lớn không có
+`on delete cascade`. `cleanup-e2e-preview-data.ts` dò `information_schema.columns` để tìm mọi bảng
+có cột `submission_id` rồi xóa theo kiểu thử-và-thử-lại (bảng nào xóa được thì xóa, còn vướng thì
+để lại lượt sau) thay vì liệt kê cứng tên bảng — một migration sau này thêm bảng con mới sẽ tự
+được script nhận ra, không cần sửa script.
+
+## [2026-07-28] Đăng nhập E2E bằng mã hóa JWT trực tiếp, không tự động hóa Google OAuth
+
+`tests/e2e/auth-helpers.ts` dùng `@auth/core/jwt`.`encode()` với `AUTH_SECRET` thật của preview để
+tạo thẳng cookie phiên hợp lệ, thay vì Playwright tự động hóa màn hình chọn tài khoản Google (thuộc
+domain `accounts.google.com`, ngoài tầm kiểm soát của test, và không nên lưu mật khẩu tài khoản
+test thật trong CI). Cookie vẫn đi qua `requireActiveUser` thật ở server — không phải mock, không
+làm yếu điều đang được kiểm.
+
+## [2026-07-28] Logic tính toán của 2 script Phase 5 tách sang module thuần, test được không cần DB
+
+`report-upload-performance.ts` → `upload-performance-stats.ts` (percentile, gộp nhóm, tỷ lệ nén).
+`audit-orphan-public-files.ts` → `orphan-audit-support.ts` (phân tích tham số dòng lệnh, token xác
+nhận). Không có Postgres/Drive thật trong môi trường CI hiện tại; tách phần thuần ra là cách duy
+nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nhóm, tính tỷ lệ nén trên mẫu thiếu số
+đo) mà không cần hạ tầng đó. Phần chạm DB/Drive trong hai script gốc không đổi hành vi.

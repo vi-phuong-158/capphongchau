@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
 
 type Summary = {
   submissionId: string;
@@ -11,6 +12,7 @@ type Summary = {
   issueNumber: string;
   ownerName: string;
   claimedBy: string | null;
+  claimedByDisplayName?: string | null;
   updatedAt: string;
 };
 
@@ -144,7 +146,12 @@ export function SubmissionsQueue() {
                   <td className="p-3">{item.issueNumber || "Chưa khai"}</td>
                   <td className="p-3">{item.phone}</td>
                   <td className="p-3">{labels[item.status] ?? item.status}</td>
-                  <td className="p-3">{item.claimedBy ?? "Chưa nhận"}</td>
+                  <td className="p-3">
+                    {assignedOfficerLabel({
+                      claimedBy: item.claimedBy ?? "",
+                      claimedByDisplayName: item.claimedByDisplayName ?? "",
+                    })}
+                  </td>
                   <td className="p-3">
                     <Link
                       className="font-semibold text-emerald-800 underline"

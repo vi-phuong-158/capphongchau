@@ -12,7 +12,8 @@ import {
   SubmissionVersionConflictError,
 } from "@/modules/public-intake/repository";
 import type { IntakeDraft } from "@/modules/public-intake/types";
-import { draftSchema } from "@/modules/public-intake/validation";
+import { citizenIdsForLookup, draftSchema } from "@/modules/public-intake/validation";
+import { identityHmac } from "@/modules/public-intake/workflow";
 import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
@@ -125,15 +126,21 @@ export async function PUT(
       );
     }
 
+    const workingDraft = body.data.payload as unknown as IntakeDraft;
     const updated = await repository.commitWorkingPayload({
       record,
       expectedVersion: body.data.expectedVersion,
-      draft: body.data.payload as unknown as IntakeDraft,
+      draft: workingDraft,
       actorEmail: user.email,
       changeNote: body.data.changeNote,
       requestId,
       idempotencyKey: scopedIdempotencyKey,
       mutationHash,
+      // Cán bộ có thể điền CCCD mà người dân để trống ở MỨC A; ghi chỉ mục tra cứu ngay để hồ sơ
+      // đó không nằm ngoài phát hiện trùng (quyết định 2026-07-29, kind = 'PENDING').
+      pendingIdentityHmacs: citizenIdsForLookup(workingDraft).map((identityNumber) =>
+        identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
+      ),
     });
 
     return NextResponse.json(

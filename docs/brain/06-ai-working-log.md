@@ -4,6 +4,127 @@
 > trạng thái đúng hiện nay là: Supabase PostgreSQL đã cutover làm kho runtime; Google Sheets chỉ còn
 > read-only/legacy ETL. Đọc các entry mới nhất ở đầu file để lấy trạng thái hiện hành.
 
+## [2026-07-29] Review PR #6 vòng hai — sửa 3 phát hiện chính + 4 phát hiện phụ
+
+- **Agent:** Claude Code.
+- **Baseline:** branch `claude/land-declaration-process-feedback-126f2e`, HEAD `45b7fc9`;
+  typecheck pass, lint 0 error/5 warning có sẵn, test 570 pass/10 skipped, build pass.
+- **Thay đổi:**
+  - `isDriveFileAdopted` bỏ lọc `submission_id` (hỏi toàn bảng), và `discardIfOrphan` thêm điều
+    kiện tệp phải nằm đúng thư mục Drive của hồ sơ đang gọi (`storage.isFileInFolder`);
+  - migration `202607290001` bỏ `force row level security` (lệch mẫu 8 bảng còn lại, và có thể
+    làm mọi insert số đo thất bại trong im lặng); hai chỗ nuốt lỗi đổi sang
+    `reportUploadMetricFailure` — log một lần mỗi tiến trình, chỉ ghi mã lỗi Postgres;
+  - `saveDraft` trong wizard tự lấy lại snapshot và thử lại khi PATCH trả 409, **chỉ khi**
+    `hasLocalChanges === false` (server đã có đúng nội dung định ghi). Bản sửa đầu thiếu điều kiện
+    này nên xung đột thật bị ghi đè im lặng — phát hiện ở vòng phản hồi của người dùng;
+    `adoptServerDraft` trả `{draft, version, hasLocalChanges}` thay vì boolean;
+  - `appendUploadAttempt` có trần `MAX_UPLOAD_ATTEMPTS_PER_SUBMISSION = 200`;
+  - `hasLocalChanges` so sánh sâu thay cho `JSON.stringify` (nhạy thứ tự khóa);
+  - `listFolderFileIds` escape `folderId` bằng `escapeQueryValue` có sẵn;
+  - `cleanup-e2e-preview-data.ts` từ chối chạy khi `NODE_ENV=production` hoặc `APP_BASE_URL`
+    không giống môi trường thử, trừ khi có cờ `--i-know-this-is-not-preview`.
+- **File đã sửa:** `src/modules/public-intake/{repository,storage,upload-metrics,draft-adoption}.ts`,
+  `src/app/api/public/submissions/current/uploads/{complete,metrics}/route.ts`,
+  `src/app/ke-khai/wizard.tsx`, `supabase/migrations/202607290001_public_upload_attempts_rls.sql`,
+  `scripts/cleanup-e2e-preview-data.ts`, `tests/pr6-review-round-two.test.ts` (mới),
+  `tests/public-upload-{complete-route,legacy-draft}.test.ts`.
+- **Lý do:** xem `docs/brain/03-decisions.md` cùng ngày — trọng tâm là hai chỗ có thể **mất dữ
+  liệu** (xóa nhầm tệp Drive của hộ khác; telemetry hỏng im lặng) và một chỗ làm người dân **kẹt
+  giữa chừng** (409 giả trên mạng yếu).
+- **Kiểm tra:** typecheck pass; lint 0 error/5 warning có sẵn; test 590 pass/10 skipped
+  (+20 test so với baseline); build pass. Test đặc tả cũ được **siết chặt** theo bất biến mới, không
+  nới lỏng: `tests/public-upload-complete-route.test.ts` giờ khẳng định truy vấn adopt KHÔNG chứa
+  `submission_id`.
+  - sau khi người dùng chốt: CCCD vào `public_lookup_index` với `kind = 'PENDING'` — ghi ở cả
+    `RESUBMITTED` (bỏ điều kiện `status === "SUBMITTED"`) và ở cả ba đường ghi của cán bộ
+    (`commitStaffDraftEdit`, `commitWorkingPayload`, `commitOfficialAmendment`); route tính HMAC,
+    repository vẫn không đọc biến môi trường.
+- **File đã sửa (bổ sung cho phần chỉ mục):** `src/app/api/public/submissions/current/submit/route.ts`,
+  `src/app/api/staff/assisted-submissions/current/submit/route.ts`,
+  `src/app/api/submissions/[submissionId]/{route,working-payload/route,ai-draft/apply/route}.ts`,
+  `tests/working-payload.test.ts`.
+  - vá lỗ hổng nghiệm thu: `preflight-public-intake-v2-migrations.ts` trước đó **bỏ qua hoàn
+    toàn** migration `202607290001` nhưng vẫn in "Schema sẵn sàng. Có thể deploy code." khi 20
+    kiểm tra kia đạt. Thêm 2 kiểm tra `relrowsecurity`/`relforcerowsecurity` và in host DB đang
+    kết nối (chỉ host, không in chuỗi kết nối vì chứa mật khẩu).
+- **Kết quả chạy thật (2026-07-29, DB `aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres`):**
+  21/22 — bốn migration `202607280001`–`04` ĐÃ chạy; `202607290001` CHƯA chạy
+  (`relrowsecurity=false`). Quan trọng: `relforcerowsecurity=false` chứng minh bản cũ có `force`
+  chưa từng được áp ở đâu, nên bản sửa tại chỗ là hợp lệ và **không cần migration bù**.
+- **Không làm:** merge, deploy, chạy migration.
+
+## [2026-07-29] Sửa bắt buộc 2 BLOCKER + 5 HIGH của review PR #6
+
+- **Agent:** Codex.
+- **Baseline:** branch `claude/land-declaration-process-feedback-126f2e`, HEAD `48f232d`; giữ nguyên
+  file untracked `evidence/BUG_OWNER_ID_RACE_HANDOFF.md`.
+- **Sửa:** deletion-safe upload replay; assisted submit không Turnstile; exact version CAS;
+  official consent/identity gate; consent audit atomic; telemetry RLS; timeline privacy; CI PR.
+- **Test:** focused 53/53; final unit 570 pass/10 skipped; lint 0 error/5 warning có sẵn;
+  typecheck/build/diff checks pass. Assisted E2E được gọi nhưng Playwright báo 1 skipped do thiếu
+  rehearsal credential; không ghi nhận là pass.
+- **Không làm:** merge, deploy hoặc chạy migration.
+
+## [2026-07-28] Public Intake V2 — rút luồng kê khai công khai còn 4 bước
+
+- **Agent:** Claude Opus 5
+- **Đầu bài:** `CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2.md` (chủ dự án soạn từ góp ý của cán bộ
+  trực tiếp đi thu hồ sơ). Nhánh `claude/land-declaration-process-feedback-126f2e`, base
+  `79f4ae6`.
+- **Thay đổi (7 commit, mỗi phase một commit):**
+  1. `1cc7d93` — baseline + test characterization. Ghi lại **bằng chứng lỗ hổng**:
+     `completionChecks` yếu hơn hẳn `validateDraftForSubmit`.
+  2. `e938bab` — tách `validateCitizenSubmitDraft` (MỨC A) khỏi `completionChecks` (MỨC C); siết
+     `completionChecks` thành gác cổng đầy đủ; bỏ HMAC chuỗi rỗng; dùng `parseVietnameseDecimal` ở
+     cả hai tầng.
+  3. `fe3e2e3` — wizard 7 bước → 4; bỏ bước tài sản và bước loại đất; ảnh GCN lên bước 2; ô ký
+     hiệu loại đất tự do; nhãn tổ dân phố + "Chưa xác định"; lỗi thiếu ảnh báo tại đúng khối;
+     `flushDraft` single-flight.
+  4. `814eee7` — chuẩn hóa ảnh trên thiết bị sau cờ, **mặc định tắt**.
+  5. `bdbf180` — transport XHR có tiến độ thật, hàng đợi 2 luồng, bỏ `busy` khỏi luồng tải ảnh.
+  6. `ee30ee8` — màn hình thành công giữa màn hình + "Kê khai hồ sơ tiếp theo".
+  7. `ea3f716` — lưu và hiển thị tên cán bộ tiếp nhận.
+  8. `7345090` — chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho`.
+- **File chính đã sửa/thêm:**
+  - `src/app/ke-khai/wizard.tsx` (7 bước → 4, nhận prop `assisted`)
+  - `src/modules/public-intake/validation.ts` (`validateDraftStructure`,
+    `validateCitizenSubmitDraft`, `validateCitizenRequiredFiles`, `citizenIdsForLookup`,
+    `normalizeLandPurposeFreeText`)
+  - `src/modules/submissions/completion-checks.ts` (viết lại thành gác cổng đầy đủ)
+  - `src/modules/public-intake/public-wizard-validation.ts` (mới)
+  - `src/modules/public-intake/image-normalization.client.ts` (mới)
+  - `src/modules/public-intake/upload-queue.ts`, `upload-transport.ts`,
+    `xhr-upload-transport.client.ts` (mới)
+  - `src/modules/public-intake/create-submission.ts` (mới, dùng chung hai route tạo hồ sơ)
+  - `src/modules/submissions/assigned-officer.ts` (mới)
+  - `src/app/ke-khai-ho/page.tsx` + `assisted-wizard.tsx` (mới)
+  - `src/app/api/staff/assisted-submissions/route.ts` (mới)
+  - `src/proxy.ts` (matcher thêm `/ke-khai-ho`, `/api/staff`)
+  - Migration `202607280001_assigned_officer_display_name.sql`,
+    `202607280002_officer_assisted_intake.sql` — **cả hai additive, CHƯA CHẠY production**
+- **Lý do:** Cán bộ đi thu hồ sơ báo bảy bước với hàng chục ô bắt buộc theo PL3 khiến hộ dân bỏ dở;
+  ảnh tải quá lâu; thiếu ảnh không báo rõ; kê xong không biết đã gửi chưa; không biết ai đang xử
+  lý; không có công cụ cho cán bộ nhập hộ. Chi tiết từng quyết định ở `03-decisions.md` (chín entry
+  ngày 2026-07-28).
+- **Kiểm tra:**
+  - `npm run lint` — 0 error, 5 warning **có từ trước** (không phát sinh warning mới).
+  - `npm run typecheck` — sạch.
+  - `npm test` — 464 pass, 10 skipped (baseline 266 → +198).
+  - `npm run build` — pass; `/ke-khai`, `/ke-khai-ho`, `/api/staff/assisted-submissions` đều build.
+  - Dựng dev server, mở `/ke-khai`: hiển thị đúng 4 bước, không lỗi console.
+- **CHƯA KIỂM ĐƯỢC — ghi rõ để agent sau không tưởng đã xong:**
+  - `npm run test:e2e` chưa chạy: Playwright cần dev server + Supabase/Google credential thật.
+  - Không có số đo tốc độ tải thật (thiếu Drive/Supabase thật và thiết bị 4G) → **không có tuyên bố
+    hiệu năng nào**; cờ chuẩn hóa ảnh để `false`.
+  - Các bước sau bước 1 của wizard chưa thao tác được trên trình duyệt vì tạo hồ sơ cần Supabase
+    thật.
+  - Chưa kiểm chất lượng ảnh sau chuẩn hóa (chữ còn đọc được, QR còn quét được) — checklist bắt
+    buộc ở `evidence/PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md`.
+- **Phase CHƯA làm trong đợt này:** Phase 5 của đầu bài (bảng metric `public_upload_attempts`,
+  orphan cleanup an toàn ở complete route, script audit/report). Không chặn các phase khác; là
+  hạ tầng để lấy số đo hiệu năng sau khi deploy preview.
+
 ## [2026-07-25] Đồng bộ tài liệu sau cutover Supabase
 
 - **Agent:** Codex
@@ -2027,3 +2148,159 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Lý do:** Review commit migration Supabase phát hiện toàn bộ đường cache JSON (từ PR #2) đã thành
   code chết — Postgres có index thật nên không cần cache tĩnh song song nữa.
 - **Kiểm tra:** `python -m unittest discover` 3/3, `npx vitest run` 180/180, `npx tsc --noEmit` sạch.
+
+## [2026-07-28] Rà soát diff V2, siết quyền hỗ trợ kê khai và hoàn thành Phase 5
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - Rà soát toàn bộ diff `79f4ae6..aa2135e` theo 14 điểm. **1 BLOCKER + 4 HIGH đã sửa**:
+    - **BLOCKER** — nút "Kê khai hồ sơ tiếp theo" POST endpoint tạo hồ sơ với `phone: ""` trong khi
+      endpoint bắt buộc `^0\d{9}$`; nút chưa bao giờ chạy được. Chuyển thành thao tác thuần cục bộ
+      (dọn PII, đóng phiên cũ, quay về bước 1) + danh sách mã đã gửi trong ca (chỉ trong bộ nhớ).
+    - **H-01** — máy chủ ghép tên tệp client gửi vào tên tệp Drive và `public_files.file_name`. Nay
+      máy chủ tự đặt tên hoàn toàn; chỉ đuôi mở rộng lấy từ mimeType đã kiểm.
+    - **H-02** — `/ke-khai-ho` dùng chung `SUBMISSION_READ_ROLES`. Tạo `ASSISTED_INTAKE_ROLES`
+      (`INTAKE_OFFICER`, `WARD_ADMIN`, `SYSTEM_ADMIN`); loại `REVIEW_OFFICER` để không ai vừa nhập
+      vừa duyệt.
+    - **H-03** — ghi cơ sở dữ liệu hỏng để lại tệp mồ côi trên Drive. Thêm
+      `repository.isDriveFileAdopted` + `discardIfOrphan` fail-safe nghiêng về **giữ lại**.
+    - **H-04** — `users.display_name` là ô nhập tự do, có thể là email; cổng công khai trả nguyên
+      văn. Nay cả `publicAssignedOfficer` lẫn `publicActorName` từ chối chuỗi hình dạng địa chỉ thư.
+  - **Phase 5** (trước đó bỏ trống): bảng `public_upload_attempts` + 7 cột metadata chuẩn hóa trên
+    `public_files`; module `upload-metrics.ts` (Zod strict, danh mục đóng, kẹp giá trị);
+    telemetry ở complete route và endpoint `uploads/metrics` cho lượt hỏng — cả hai best-effort;
+    `scripts/audit-orphan-public-files.ts` (mặc định khô, token xác nhận gắn với đúng tập tệp) và
+    `scripts/report-upload-performance.ts` (P50/P95, không PII).
+  - Viết bảy kịch bản E2E §17.3 (`tests/e2e/public-intake-v2.spec.ts`) — trước đó chỉ có smoke test.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`, `src/app/api/public/submissions/current/uploads/{initiate,complete}/route.ts`,
+  `src/app/api/public/submissions/current/uploads/metrics/route.ts` (mới),
+  `src/app/api/staff/assisted-submissions/route.ts`, `src/app/ke-khai-ho/page.tsx`,
+  `src/modules/submissions/{review,assigned-officer}.ts`, `src/modules/public-intake/{workflow,repository,storage,upload-metrics}.ts`,
+  4 migration `202607280003`/`202607280004`, 2 script, 4 file test mới, 6 file evidence, `docs/brain/*`.
+- **Lý do:** Yêu cầu rà soát an toàn trước khi phát hành và hoàn thiện phần Phase 5 còn nợ. Ba
+  trong năm lỗi HIGH đều cùng một dạng: tin biện pháp phía client thay cho kiểm soát ở máy chủ.
+- **Kiểm tra:** `npm run lint` 0 lỗi (5 cảnh báo có sẵn); `npm run typecheck` sạch; `npm test`
+  **516 passed, 10 skipped** (trước vòng này 464); `npm run build` đạt, có `/api/public/submissions/current/uploads/metrics`;
+  `npx playwright test --list` liệt kê 12 test/2 file. **`npm run test:e2e` vẫn CHƯA chạy** (thiếu
+  credential) — điều kiện đầy đủ ở `evidence/PUBLIC_INTAKE_V2_E2E_CHECKLIST.md`. Bốn migration
+  **chưa chạy ở bất kỳ môi trường nào**.
+
+## [2026-07-28] Chuẩn bị và kiểm thử môi trường preview cho Public Intake V2
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - **Kill switch server-side** `OFFICER_ASSISTED_INTAKE_ENABLED` (mặc định `false`), độc lập với
+    `ASSISTED_INTAKE_ROLES`, kiểm sau vai trò ở cả route và page; UI "Chế độ chưa được bật" khi tắt.
+    7 test mới (`tests/assisted-submissions-route.test.ts` mock đầy đủ requireActiveUser/csrf/env,
+    kiểm bốn tổ hợp cờ×vai trò thật; `tests/env.test.ts` kiểm parsing; `tests/officer-assisted-intake.test.ts`
+    kiểm thứ tự vai trò-trước-cờ trong mã nguồn).
+  - **Kiểm 10 test bị skip** — cả 10 nằm trong 2 file `*.integration.test.ts` gác bởi
+    `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, bảo vệ `runOfficialAcceptance` (không thuộc phạm vi thi
+    công V2 trực tiếp). Đối chiếu với 10 luồng bắt buộc: chỉ "official acceptance guard" và
+    "idempotent replay" nằm trong 10 test này; 8 luồng còn lại đã chạy pass ở tầng vitest từ trước.
+    Tài liệu đầy đủ: `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
+  - **Migration preflight**: `scripts/preflight-public-intake-v2-migrations.ts` (17 kiểm tra schema
+    qua `information_schema`/`pg_constraint`/`pg_indexes`, thoát mã khác 0 nếu có FAIL) +
+    `evidence/PUBLIC_INTAKE_V2_PREVIEW_MIGRATION_RUNBOOK.md` (backup, thứ tự, kiểm sau mỗi
+    migration, dấu hiệu rollback, gate deploy code).
+  - **E2E preview thật**: bỏ 3 `test.fixme(true, ...)` không điều kiện còn lại (dùng fixture PNG
+    1×1 không PII ở `tests/fixtures/` cho ảnh, `page.route()` mô phỏng đứt mạng thay vì tắt mạng
+    thiết bị); thêm 3 kịch bản mới E2E-08 (kê khai tiếp — phép thử trực tiếp của BLOCKER đã sửa ở
+    vòng trước), E2E-09 (orphan cleanup, chạy `audit-orphan-public-files.ts` thật), E2E-10
+    (idempotent replay qua network interception, không tự tay gọi API để không phải tự giải
+    Turnstile). `tests/e2e/auth-helpers.ts` mã hóa cookie phiên bằng `@auth/core/jwt`.`encode()` +
+    `AUTH_SECRET` thật — không tự động hóa Google OAuth, không mock `requireActiveUser`.
+    `playwright.config.ts` thêm chế độ `E2E_BASE_URL` trỏ preview thật, bỏ qua `webServer` cục bộ.
+    `npm run test:e2e:preview` mới. `scripts/cleanup-e2e-preview-data.ts` dọn dữ liệu bằng nhãn số
+    điện thoại (mã tiếp nhận do server sinh bằng HMAC, không đặt tiền tố được), dò bảng con động.
+  - **Chất lượng ảnh**: `PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` thêm hướng dẫn dựng fixture không
+    PII (không thêm dependency `sharp`/`canvas`) và bảng so sánh nguồn↔sau chuẩn hóa theo từng ảnh.
+  - **Xác nhận 2 script Phase 5**: tách logic thuần sang `upload-performance-stats.ts` và
+    `orphan-audit-support.ts` (module mới, không chạm DB/Drive) vì import thẳng script gốc vào
+    test sẽ kích hoạt `process.exit()` ở cuối file — nguy hiểm cho tiến trình vitest. 38 test mới
+    khóa percentile, gộp nhóm, tỷ lệ nén, phân tích tham số dòng lệnh, token xác nhận. Cả hai script
+    vẫn thoát mã 1 với thông báo rõ khi thiếu `SUPABASE_DATABASE_URL` — xác nhận bằng chạy trực tiếp.
+- **File đã sửa:** `src/modules/common/env.ts`, `src/app/api/staff/assisted-submissions/route.ts`,
+  `src/app/ke-khai-ho/page.tsx`, `.env.example`, `playwright.config.ts`, `package.json`,
+  `scripts/{report-upload-performance,audit-orphan-public-files}.ts` (refactor), 2 module mới
+  (`upload-performance-stats.ts`, `orphan-audit-support.ts`), 2 script mới
+  (`preflight-public-intake-v2-migrations.ts`, `cleanup-e2e-preview-data.ts`), `tests/e2e/*` (viết
+  lại + `auth-helpers.ts` mới), `tests/fixtures/*.png` (mới), 8 file test mới/sửa, 3 file evidence
+  mới, `docs/brain/*`.
+- **Lý do:** Chuẩn bị và kiểm thử môi trường preview theo yêu cầu, không deploy production, không
+  chạy migration production.
+- **Kiểm tra:** `npm run lint` 0 lỗi (5 cảnh báo có sẵn); `npm run typecheck` sạch; `npm test`
+  **552 passed, 10 skipped** (đầu phiên này: 516); `npm run build` exit 0, `✓ Compiled successfully`;
+  `npx playwright test --list` → 15 test/2 file, không lỗi parse. Hai script Phase 5 chạy trực tiếp
+  không có `SUPABASE_DATABASE_URL` → thoát mã 1 với thông báo rõ (đúng kỳ vọng, không phải lỗi).
+  **`npm run test:e2e:preview` và migration production/preview đều CHƯA chạy** trong phiên này —
+  không có credential thật.
+
+## [2026-07-28] Sửa race đồng bộ `ownerId` trước upload CCCD ở Public Intake V2
+
+- **Agent:** Codex
+- **Thay đổi:** Ở `IntakeWizard.goNext`, chỉ hiển thị phần đã tạo hồ sơ (`receipt`) sau khi
+  `adoptServerDraft()` tải xong draft có ID chủ sử dụng do máy chủ sinh. `readCitizenIdQr()` coi
+  lỗi mở bitmap là QR không đọc được (`null`) thay vì đẩy lỗi kỹ thuật vào wizard; người dân vẫn
+  nhận thông báo nhập tay. E2E chờ phản hồi complete và trạng thái UI của ảnh CCCD trước khi đi
+  tiếp.
+- **Lý do:** Trước đó receipt render trước khi client thay ID tạm bằng ID server, nên upload CCCD
+  có thể gửi ownerId không tồn tại và bị từ chối. QR thất bại không được chặn lưu nháp hoặc upload.
+- **File đã sửa:** `src/app/ke-khai/wizard.tsx`,
+  `src/modules/public-intake/citizen-id-qr.client.ts`,
+  `tests/e2e/public-intake-v2.spec.ts`, `docs/brain/06-ai-working-log.md`.
+- **Kiểm tra:** `npm.cmd run typecheck` đạt; `npm.cmd run test` đạt 552 passed, 10 skipped;
+  `npm.cmd run lint` không có error (5 warning có sẵn); `git diff --check` đạt. E2E-01 trên
+  rehearsal đã không còn alert ownerId không hợp lệ, nhưng còn 2/3 kịch bản fail do wizard không
+  chuyển sang bước 2 sau hai ảnh CCCD và timeout upload GCN. Chưa commit, chưa deploy, chưa chạy
+  migration.
+
+## [2026-07-28] Hoàn tất điều tra E2E Public Intake sau bàn giao
+
+- **Agent:** Codex
+- **Nguyên nhân:** Khi tách service `createIntakeSubmission`, draft mới không còn được đặt
+  `consentAccepted = true`. Sau đó wizard gọi `adoptServerDraft()` để lấy owner ID do server sinh,
+  ghi đè lựa chọn đồng ý của người dùng bằng giá trị mặc định `false`; bước 1 bị validator chặn
+  nhưng lỗi không có ô hiển thị tương ứng.
+- **Sửa:** Khôi phục `draft.consentAccepted = true` trong service tạo hồ sơ; thêm regression
+  assertion vào `tests/public-submission-create.test.ts`. Cập nhật selector E2E theo nhãn UI hiện
+  hành (`Ảnh N/M`, `Gửi bản kê khai`, `Mã tiếp nhận` exact), không đổi API/schema/migration.
+- **Kiểm tra:** `npm.cmd run test` 552 passed, 10 skipped; `npm.cmd run typecheck` đạt;
+  `npm.cmd run lint` đạt với 5 warning có sẵn; `npm.cmd run build` đạt; `git diff --check` đạt.
+  Rehearsal E2E-01 (3/3), E2E-02 và E2E-03 đều pass. Chưa commit, chưa deploy, chưa chạy
+  migration.
+
+## [2026-07-28] Siết contract consent và hợp nhất draft theo server version
+
+- **Agent:** Codex
+- **Review:** Public/assisted create chỉ parse phone; server không kiểm consent và service tự đặt
+  `consentAccepted = true`. Assisted flow có consent version + assistedBy nhưng chưa có tín hiệu
+  consent được validate từ request. `adoptServerDraft()` thay toàn bộ local draft và bỏ qua
+  `version` dù GET `/current` đã trả trường này.
+- **Sửa:** Thêm contract dùng chung bắt buộc `consent.accepted === true`; validate trước
+  Turnstile/Drive/database; service chỉ nhận literal consent đã validate. Assisted audit ghi
+  consentAccepted/version/channel. Thêm `draft-adoption.ts` để giữ phone, consent và trường local,
+  đồng bộ owner/parcel/land-use ID server; wizard lưu server version, gửi version ở PATCH và cập
+  nhật từ response.
+- **Test:** 18/18 test tập trung pass, gồm public/assisted thiếu consent và ba test adoption.
+  Rehearsal submit tối thiểu pass đến `KÊ KHAI THÀNH CÔNG`. Bộ typecheck/lint/unit/build đầy đủ
+  được chạy lại trước commit. Không migration, cleanup, deploy hoặc push.
+
+## [2026-07-29] Xác minh clean checkout và khóa adoption edge cases
+
+- **Agent:** Codex
+- **Baseline:** Nhánh `claude/land-declaration-process-feedback-126f2e`, HEAD `a378fa6`; working
+  tree ban đầu chỉ có `playwright.config.ts` đã sửa và
+  `evidence/BUG_OWNER_ID_RACE_HANDOFF.md` untracked.
+- **Clean verification:** Worktree sibling tách biệt tại đúng `a378fa6`; `npm ci`, typecheck,
+  lint, 557 unit pass/10 skipped và build đều đạt. Rehearsal thật không được cấp credential vào
+  worktree sạch vì không sao chép `.env.local`.
+- **Đối chứng E2E:** Cùng server/credential, test tối thiểu dùng `127.0.0.1` timeout sau 90 giây
+  tại upload; đổi duy nhất browser URL sang `localhost` pass 1/1 trong 36,3 giây. Vì vậy commit
+  `d83a23f` giữ cả origin `localhost` và timeout 90 giây; hunk được stage bằng `git add -p`.
+- **Test bổ sung:** `adoptServerDraftSnapshot()` nay khóa nhiều owner, nhiều parcel, nhiều
+  land-use, giữ local fields, đồng bộ toàn bộ server ID/version và recovery dùng nguyên snapshot.
+  Route-level test xác nhận PATCH version quá cũ trả `409 VERSION_CONFLICT` và không gọi
+  `saveDraft`.
+- **Kết quả HEAD mới:** focused 19/19; typecheck đạt; lint 0 error/5 warning có sẵn; unit 558
+  pass/10 skipped; build đạt. Không push, merge, deploy, migration hoặc cleanup dữ liệu.

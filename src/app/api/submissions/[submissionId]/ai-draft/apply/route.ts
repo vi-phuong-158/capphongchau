@@ -9,6 +9,8 @@ import { createApiErrorPayload } from "@/modules/common/api-error";
 import { applyClearAiFields } from "@/modules/ai-extraction/draft";
 import { getAiExtractionRepository } from "@/modules/ai-extraction/repository";
 import { loadServerEnvironment } from "@/modules/common/env";
+import { citizenIdsForLookup } from "@/modules/public-intake/validation";
+import { identityHmac } from "@/modules/public-intake/workflow";
 import {
   getPublicIntakeRepository,
   SubmissionIdempotencyConflictError,
@@ -164,6 +166,11 @@ export async function POST(
       requestId,
       idempotencyKey: scopedKey,
       mutationHash,
+      // Cán bộ có thể điền CCCD mà người dân để trống ở MỨC A; ghi chỉ mục tra cứu ngay để hồ sơ
+      // đó không nằm ngoài phát hiện trùng (quyết định 2026-07-29, kind = 'PENDING').
+      pendingIdentityHmacs: citizenIdsForLookup(applied.draft).map((identityNumber) =>
+        identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
+      ),
       aiApplication: {
         resultId: resolved.draft.resultId,
         jobId: resolved.draft.jobId,

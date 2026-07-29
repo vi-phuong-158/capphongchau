@@ -14,6 +14,29 @@ export const SUBMISSION_DECISION_ROLES = [
   UserRole.SYSTEM_ADMIN,
 ] as const;
 
+/**
+ * Ai được **lập hồ sơ hộ người dân** ở `/ke-khai-ho`.
+ *
+ * Không dùng chung `SUBMISSION_READ_ROLES`: đó là quyền *đọc* hàng đợi hồ sơ, còn đây là quyền
+ * *tạo dữ liệu mới* mang dấu vết "cán bộ đã nhập hộ" — một hồ sơ do cán bộ nhập được coi là đáng
+ * tin hơn hồ sơ hộ dân tự khai, nên quyền tạo nó phải hẹp hơn quyền xem.
+ *
+ * Cụ thể `REVIEW_OFFICER` bị loại: vai trò đó *thẩm định* hồ sơ. Cho cùng một người vừa nhập vừa
+ * duyệt là bỏ mất chốt kiểm tra chéo duy nhất trong quy trình. `POPULATION_MATCH_OFFICER`,
+ * `REPORT_VIEWER`, `AUDITOR` không nằm trong danh sách đọc từ đầu và cũng không thuộc nghiệp vụ
+ * tiếp nhận.
+ *
+ * **Giả định** (mã nguồn không mô tả nghiệp vụ chi tiết hơn): `INTAKE_OFFICER` là cán bộ tiếp
+ * nhận tại bộ phận một cửa, tức đúng nhóm "anh em đi làm cho dân" trong góp ý. Hai vai trò quản
+ * trị giữ lại để phường không bị khóa cứng khi cần xử lý ngoại lệ. Nếu nghiệp vụ chốt khác, sửa
+ * đúng hằng số này — cả trang lẫn API đều đọc từ đây, không có bản sao thứ hai.
+ */
+export const ASSISTED_INTAKE_ROLES = [
+  UserRole.INTAKE_OFFICER,
+  UserRole.WARD_ADMIN,
+  UserRole.SYSTEM_ADMIN,
+] as const;
+
 export function maskPhone(phone: string): string {
   if (phone.length < 5) return "••••";
   return `${phone.slice(0, 2)}••••${phone.slice(-2)}`;

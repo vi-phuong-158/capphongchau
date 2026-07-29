@@ -34,6 +34,8 @@ vi.mock("@/modules/auth/csrf", () => ({
 vi.mock("@/modules/common/env", () => ({
   loadServerEnvironment: vi.fn().mockReturnValue({
     AUTH_SECRET: "mock-secret-at-least-32-chars-long-security",
+    // Route ghi chỉ mục tra cứu khi cán bộ điền CCCD người dân để trống ở MỨC A, nên cần pepper.
+    DATA_HASH_PEPPER: "mock-pepper-at-least-32-chars-long-value",
   }),
 }));
 
@@ -97,6 +99,11 @@ function makeRecord(claimedBy: string, status: PublicStatus = "UNDER_REVIEW"): S
     officialCaseId: "",
     acceptStep: "",
     claimedBy,
+    claimedByDisplayName: claimedBy ? "Cán bộ Test" : "",
+    intakeChannel: "SELF_SERVICE" as const,
+    assistedByEmail: "",
+    assistedByDisplayName: "",
+    assistedAt: "",
     claimedAt: claimedBy ? new Date().toISOString() : "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -145,6 +152,19 @@ describe("PUT /api/submissions/:id/working-payload route tests", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.submission.version).toBe(2);
+
+    /*
+     * Cán bộ sửa `working_payload` là một trong những đường mà CCCD có thể xuất hiện LẦN ĐẦU: ở
+     * MỨC A người dân được phép để trống ô đó. Không ghi chỉ mục ở đây thì hồ sơ vĩnh viễn nằm
+     * ngoài phát hiện trùng (quyết định 2026-07-29).
+     */
+    const committed = mockCommitWorkingPayload.mock.calls[0][0] as {
+      pendingIdentityHmacs?: string[];
+    };
+    expect(committed.pendingIdentityHmacs).toHaveLength(1);
+    expect(committed.pendingIdentityHmacs?.[0]).toMatch(/^[0-9a-f]{64}$/);
+    // Chỉ mục lưu HMAC, không bao giờ lưu CCCD thô.
+    expect(committed.pendingIdentityHmacs?.[0]).not.toContain("025080001234");
   });
 
   it("W2: not claimed by user -> 403 ACCESS_DENIED", async () => {

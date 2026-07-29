@@ -28,6 +28,7 @@ import {
 } from "@/modules/submissions/acceptance-saga";
 import { completionChecks } from "@/modules/submissions/completion-checks";
 import { effectivePayload } from "@/modules/public-intake/payload-layers";
+import { publicActorName } from "@/modules/public-intake/workflow";
 import { SUBMISSION_DECISION_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
@@ -164,7 +165,7 @@ export async function POST(
       record,
       expectedVersion: body.data.version,
       actorEmail: user.email,
-      actorDisplayName: user.displayName,
+      actorDisplayName: publicActorName(user.displayName),
       isAdministrator,
       requestId,
       idempotencyKey,

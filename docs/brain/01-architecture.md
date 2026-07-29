@@ -1,5 +1,32 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-29 — review PR #6
+
+```text
+POST /api/public/submissions/current/uploads/complete
+├── findStoredMutation(PUBLIC_UPLOAD_COMPLETE) trước validation upload/replace
+├── replay → trả nguyên fileId/sizeBytes đã commit
+└── mọi lỗi cleanup → discardIfOrphan → isDriveFileAdopted → StorageRepository.discardFile
+
+POST /api/staff/assisted-submissions/current/submit
+├── requireActiveUser(ASSISTED_INTAKE_ROLES) + staff CSRF
+├── public session ký chỉ định vị submission OFFICER_ASSISTED
+└── validateCitizenSubmitDraft/files → repository.submit transaction; không Turnstile
+
+PATCH /api/public/submissions/current
+└── body.version === record.version → saveDraft(expectedVersion) → SQL WHERE version = expected
+
+completionChecks
+└── consentAccepted + identity confirmed; QR_OVERRIDE_PENDING_REVIEW là BLOCKING
+
+PublicIntakeRepository
+├── create transaction: submission + request_log + consent audit
+└── listTimeline → serializePublicTimelineEvent allowlist + sanitize legacy
+
+202607290001_public_upload_attempts_rls.sql
+└── ENABLE/FORCE RLS + REVOKE anon/authenticated; không public policy
+```
+
 ## Stack hiện tại
 
 | Layer            | Công nghệ                                                                   |
@@ -86,14 +113,75 @@ src/app/api/users/route.ts
 └── SupabaseUserRepository.mutate
     └── transaction: users + audit_logs + request_log
 
-src/app/ke-khai/wizard.tsx
+src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-28): 4 BƯỚC, không còn 7
+│   STEPS = Người kê khai và CCCD | Ảnh GCN | Thông tin thửa đất | Kiểm tra và gửi
+│   Nhận prop `assisted?: { officerName }` — /ke-khai-ho dùng lại NGUYÊN component này,
+│   không có bản wizard song song nào.
+├── src/modules/public-intake/public-wizard-validation.ts (thuần, test được ở Node)
+│   └── validatePublicWizardStep → GỌI validateCitizenSubmitDraft (cùng hàm với máy chủ)
+│       rồi lọc theo bước + ánh xạ fieldPath → khóa ô nhập.
+│       ⚠️ TRƯỚC V2 `validate()` trong wizard chép lại luật bằng regex riêng — hai bản lệch nhau.
+│       Sửa luật nghiệp vụ thì sửa validation.ts, KHÔNG sửa lại ở wizard.
+├── src/modules/public-intake/image-normalization.client.ts (cờ
+│   NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED, mặc định FALSE)
+│   └── normalizeIntakeImage → CCCD 2400px / GCN 3000px, JPEG q0.88, không phóng to,
+│       imageOrientation:"from-image" (thiếu là ảnh dọc bị xoay ngang), mọi lỗi → trả tệp nguồn
+├── src/modules/public-intake/upload-queue.ts (thuần)
+│   └── runWithConcurrency — GCN tối đa 2 luồng, 1 khi saveData/2g; một ảnh hỏng KHÔNG
+│       hủy ảnh khác (trước V2 vòng lặp `break` làm mất cả các ảnh chưa thử)
+├── src/modules/public-intake/upload-transport.ts + xhr-upload-transport.client.ts
+│   └── ResumablePutTransport — PUT dữ liệu qua XHR để có upload.onprogress;
+│       initiate / hỏi tiến độ / complete VẪN dùng fetch.
+│       resumable-upload.ts giữ tiến độ ĐƠN ĐIỆU TĂNG (Google có thể báo nhận ít hơn số byte
+│       XHR đã đếm; thanh phần trăm tụt bị người dân đọc là "hỏng").
 ├── POST /api/public/submissions (PUBLIC_CREATE idempotency)
-├── PATCH /api/public/submissions/current (version)
-├── initiate/complete upload → Google Drive + public_files
+│   └── src/modules/public-intake/create-submission.ts — DÙNG CHUNG với route cán bộ;
+│       body bắt buộc `phone` + `consent.accepted === true`; route validate trước Turnstile/Drive,
+│       server tự gán consent version; `channel` là tham số BẮT BUỘC, cổng công khai gán cứng
+│       "SELF_SERVICE"
+├── GET /api/public/submissions/current → draft + server version
+│   └── draft-adoption.ts giữ dữ liệu local, thay owner/parcel/land-use ID bằng ID server sau
+│       CREATE; recovery dùng nguyên draft server
+├── PATCH /api/public/submissions/current (version) — qua flushDraft() single-flight + cờ dirty;
+│   client gửi version gần nhất và cập nhật version từ response
+├── POST .../uploads/initiate → phiên resumable Drive
+│   ⚠️ tên tệp trong kho do MÁY CHỦ đặt, KHÔNG ghép body.fileName (tên máy ảnh hay mang CCCD,
+│   họ tên); chỉ đuôi mở rộng lấy từ mimeType đã qua canonicalImageMimeType
+├── POST .../uploads/complete → verifyUploadedFile → appendFile + số đo
+│   ├── src/modules/public-intake/upload-metrics.ts (thuần) — Zod strict, danh mục ĐÓNG,
+│   │   kẹp giá trị; KHÔNG có ô văn bản tự do nào để CCCD/tên tệp lọt vào
+│   ├── appendUploadAttempt(...).catch(() => undefined) — metric hỏng KHÔNG phá lượt tải
+│   └── discardIfOrphan → isDriveFileAdopted(...).catch(() => true)
+│       ⚠️ hỏi DB không được thì mặc định ĐÃ NHẬN, tức là KHÔNG xóa. Sót tệp thừa thì
+│       scripts/audit-orphan-public-files.ts dọn được; xóa nhầm là mất ảnh vĩnh viễn.
+├── POST .../uploads/metrics → số đo cho lượt HỎNG (lượt hỏng không có complete để bám vào);
+│   luôn trả 204, vẫn đòi phiên + CSRF
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
+    ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
+    │   (code + fieldPath, trả trong error.details.issues)
+    ├── citizenIdsForLookup — CHỈ băm CCCD khớp 12 số; không bao giờ băm chuỗi rỗng
     └── PublicIntakeRepository.submit
         └── transaction: public_submissions + normalized children
             + public_status_events + audit_logs + public_lookup_index + request_log
+
+src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-07-28)
+├── requireActiveUser(ASSISTED_INTAKE_ROLES) TRƯỚC, rồi mới đọc kill switch (thứ tự cố ý — giữ
+│   401/403 đúng cho người không đủ quyền, không lộ ra một 503 chung chung)
+│   ⚠️ ASSISTED_INTAKE_ROLES ⊊ SUBMISSION_READ_ROLES — REVIEW_OFFICER bị loại để không ai
+│   vừa nhập hộ dân vừa thẩm định chính hồ sơ đó. Trang và API đọc CÙNG một hằng số.
+├── environment.OFFICER_ASSISTED_INTAKE_ENABLED (mặc định FALSE) — kill switch server-side,
+│   ĐỘC LẬP với vai trò. Tắt → trang hiện "Chế độ chưa được bật", API trả 503
+│   SERVICE_UNAVAILABLE. KHÔNG có biến NEXT_PUBLIC_ tương ứng — cờ client không phải hàng rào.
+├── assisted-wizard.tsx → <IntakeWizard assisted={{ officerName }} />
+└── POST /api/staff/assisted-submissions
+    ├── requireActiveUser + kill switch (cùng thứ tự trang) + verifyCsrfToken, KHÔNG Turnstile
+    ├── body bắt buộc `phone` + `consent.accepted === true`; thiếu consent trả 400 trước create/audit
+    ├── createIntakeSubmission({ channel: "OFFICER_ASSISTED", assistedBy: từ phiên })
+    │   ⚠️ client KHÔNG gửi được channel/assistedBy — nhận từ client là để ai cũng gắn nhãn
+    │   "cán bộ đã nhập hộ" cho hồ sơ của mình
+    ├── lưu consent version + assistedBy/assistedAt; audit ASSISTED_SUBMISSION_CREATED kèm metadata
+    │   consentAccepted/consentVersion/intakeChannel
+    └── đặt CÙNG cookie phiên công khai → wizard/upload/submit dùng lại y nguyên
 
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
@@ -141,6 +229,13 @@ src/modules/public-intake/payload-layers.ts (thuần, không I/O)
 src/app/api/submissions/[submissionId]/accept/route.ts
 ├── completionChecks (src/modules/submissions/completion-checks.ts) chạy TRƯỚC khi mở saga —
 │   còn BLOCKING → 400 VALIDATION_FAILED, không mở transaction nào (Phase 8)
+│   ⚠️ TỪ V2 (2026-07-28) ĐÂY LÀ GÁC CỔNG DUY NHẤT cho dữ liệu nghiệp vụ đầy đủ.
+│   Cổng công khai chỉ còn đòi phone + tên chủ + đủ ảnh, nên MỌI trường PL3 mà
+│   validateDraftForSubmit từng chặn đã chuyển hết về đây: vai trò trên GCN, ngày sinh/giới
+│   tính/địa chỉ, định danh tổ chức, nhóm người sử dụng hiện tại, địa chỉ trên GCN, oldWard
+│   TRỐNG (trước chỉ chặn khi sai danh mục), land use rỗng, nguồn gốc/hình thức/thời hạn,
+│   tổng diện tích. Ảnh chuyển từ WARNING sang BLOCKING.
+│   NỚI completionChecks = mở đường cho hồ sơ chỉ có tên + ảnh đi thẳng vào hồ sơ chính thức.
 └── runOfficialAcceptance (src/modules/submissions/acceptance-saga.ts)
     ⚠️ OFFICIAL_ACCEPTANCE_ENABLED = true NGAY TỪ ĐIỂM GỐC của nhánh này (b8e67a2, trước Phase 1) —
     saga dưới đây đã LIVE suốt Phase 2-14 và hai vòng vá lỗi, không phải trạng thái "chưa bật".
@@ -216,6 +311,11 @@ Migration SQL tạo các nhóm bảng:
 - `existing_certificates`, owners/link/import/index append-only.
 - `cases`, `certificates`, `owners`, `files`, QR scans và bảng tương thích nâng cấp.
 - `export_jobs`.
+- `public_upload_attempts` (2026-07-28, Phase 5) — số đo mỗi lượt tải ảnh. **KHÔNG chứa PII**:
+  không tên tệp, CCCD, họ tên, điện thoại, user agent thô, Drive ID, URL upload hay IP. Chỉ số,
+  enum và `submission_id` (`on delete cascade`). Retention 90 ngày, chưa có job tự xóa.
+  7 cột metadata chuẩn hóa (`source_*`, `upload_*`, `normalization_version`) nằm ngay trên
+  `public_files`, không phải bảng riêng.
 - `public_submission_payload_history` (2026-07-25) — layer `CITIZEN`/`WORKING`/`OFFICIAL`, unique
   `(submission_id, layer, payload_version)`. 6+3 cột `citizen_payload_*`/`working_payload_*`/
   `official_payload_*` nằm ngay trên `public_submissions`, không phải bảng riêng.
@@ -269,6 +369,8 @@ GET/PATCH /api/public/submissions/current
 POST /api/public/submissions/current/submit
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
+POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — số đo lượt hỏng,
+                                                        best-effort, luôn 204)
 GET /api/submissions
 GET /api/submissions/:submissionId
 PATCH /api/submissions/:submissionId

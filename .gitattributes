@@ -3,6 +3,14 @@
 # `npm run format:check` (Prettier mặc định endOfLine=lf) đỏ sau mỗi lần checkout/merge.
 * text=auto eol=lf
 
+# Báo cáo bàn giao nhúng nguyên văn unified diff (§9.1 của
+# AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md yêu cầu diff dưới 150 KB phải nhúng đủ). Dòng context của
+# một dòng trống trong diff là đúng một dấu cách, nên `git diff --check` trong CI báo "trailing
+# whitespace" cho chính nội dung phải giữ nguyên byte. Tắt kiểm khoảng trắng cho riêng các file báo
+# cáo — cắt khoảng trắng đi là làm hỏng diff, mà bỏ diff đi là vi phạm quy trình bàn giao.
+CHATGPT_HANDOFF.md -whitespace
+docs/handoffs/** -whitespace
+
 # Nguồn nghiệp vụ và ảnh: nhị phân, tuyệt đối không chuẩn hóa nội dung.
 *.pdf binary
 *.docx binary
