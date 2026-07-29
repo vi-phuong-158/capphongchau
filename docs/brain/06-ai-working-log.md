@@ -2589,3 +2589,71 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Preview:** Deployment Ready `dpl_2bPH2zEneNfy48QE1CRZdmpVXN3o`, URL `https://capphongchau-c1dsyba2h-vi-phuong-158s-projects.vercel.app`, không Production.
 - **API timing:** Thêm `Server-Timing: auth, queue_db, total` cho `GET /api/submissions` khi thành công; unauthenticated request trả 401.
 - **Blocker:** Chưa chạy được E2E authenticated queue benchmark/P50/P95/cursor/phone masking vì Preview auth credentials bị Vercel redacted; chưa kết luận Phase 1 PASS.
+
+## [2026-07-29] Đợt 2A-1 — dọn giao diện duyệt hồ sơ, bỏ luồng yêu cầu bổ sung, gộp một đường ghi
+
+- **Agent:** Claude Code (nhánh `claude/redesign-document-review-screen-tfuvov`).
+- **Bối cảnh:** Thi công Đợt 2A-1 của kế hoạch "Thiết kế lại màn hình cán bộ duyệt hồ sơ" đã được
+  người dùng chốt sau khi review (giữ nút Từ chối; ghi chú nội bộ để 2A-2; chặn race gửi lại và
+  gom nút phụ vào "Thao tác khác" — xem hội thoại). Chỉ làm 2A-1 (dọn nút + gộp đường ghi), chưa
+  làm 2A-2/2A-3/2B/2C.
+- **Thay đổi:**
+  1. **Chặn `REQUEST_SUPPLEMENT` ở server** (`POST /api/submissions/:id/action`): action này giờ
+     trả 400 ngay từ đầu hàm, trước mọi truy vấn DB/audit. Dọn hết logic dựng `supplementRequest`,
+     `mayRequestSupplement`, `SUPPLEMENT_REASON_CODES` items trong nhánh REJECT (REJECT vẫn giữ
+     nguyên hành vi).
+  2. **Đóng nhánh `STAFF_DRAFT_EDIT` trong `PATCH /api/submissions/:id`**: trước đây route có 3
+     nhánh (manualIdentityConfirmation / OFFICIAL_AMENDMENT / STAFF_DRAFT_EDIT mặc định). Nhánh
+     STAFF_DRAFT_EDIT ghi vào `draft_json` qua `commitStaffDraftEdit`, trong khi
+     `WorkingPayloadEditor` ghi vào `working_payload_json` qua `PUT .../working-payload`, và
+     `effectivePayload()` luôn ưu tiên `working_payload_json` nếu có — nghĩa là một lần lưu qua
+     nhánh cũ **bị bàn làm việc che khuất hoàn toàn** ở lần tải hồ sơ kế tiếp (cán bộ tưởng đã lưu
+     nhưng dữ liệu hiển thị vẫn là bản cũ). Route giờ chỉ nhận `manualIdentityConfirmation` và
+     `amendmentReason` (điều chỉnh hồ sơ đã `ACCEPTED`); mọi request không kèm hai điều kiện đó bị
+     trả 400 kèm hướng dẫn dùng Bàn làm việc. `commitStaffDraftEdit` trong repository **không bị
+     xóa** (vẫn được `tests/staging-rehearsal-acceptance-saga.integration.test.ts` gọi trực tiếp,
+     test đó cần `ACCEPTANCE_SAGA_TEST_DATABASE_URL` và đang skip) — chỉ đóng đường gọi từ route.
+  3. **UI `submission-detail.tsx`:**
+     - Bỏ hẳn nút "Yêu cầu bổ sung" và toàn bộ state liên quan (`supplementReason`,
+       `supplementMessage`, `supplementKind`, `supplementTarget`, `supplementDocument`,
+       `supplementInstruction`).
+     - Gộp modal "Chỉnh sửa"/"Điều chỉnh chính thức" thành **một** modal (chỉ còn chế độ điều
+       chỉnh chính thức — chế độ "EDIT" thường trước đó không có nút nào gọi tới, nay xoá hẳn code
+       chết đó); bỏ state `amendMode` vì luôn là điều chỉnh chính thức.
+     - Đổi tên nút để hết trùng nghĩa: "Nhận xử lý" → **"Tiếp nhận"** (điều kiện hiện gắn đúng vào
+       `mayClaim(status)` thay vì `status !== "UNDER_REVIEW"`); "Tiếp nhận chính thức" →
+       **"Hoàn thành xử lý"** ("Tiếp tục tiếp nhận" khi đang `ACCEPTING` → "Tiếp tục hoàn thành").
+     - Rút gọn nhãn trạng thái hiển thị còn 3 nhóm nghiệp vụ theo `STATUS_DISPLAY`: `SUBMITTED` /
+       `RESUBMITTED` / `NEEDS_SUPPLEMENT` → "Chờ tiếp nhận"; `UNDER_REVIEW` / `ACCEPTING` → "Đang
+       xử lý"; `ACCEPTED` → "Đã hoàn thành". `REJECTED`/`DRAFT`/`EXPIRED` giữ nhãn riêng (trạng
+       thái ngoại lệ, không phải luồng chính).
+     - Gom "Điều chỉnh chính thức" vào `<details>` "⋯ Thao tác khác" (chỉ hiện khi `ACCEPTED`).
+     - Thêm cảnh báo `beforeunload` khi `workingPayload.isDirty` còn thay đổi chưa lưu (§3.2).
+  4. **`submission-claim-banner.tsx`:** bỏ nút "Nhận xử lý" (trùng nút "Tiếp nhận" ở toolbar
+     chính); gom Trả lại hàng chờ / Chuyển giao / Mở khóa cưỡng chế vào `<details>` "⋯ Thao tác
+     khác" (chỉ hiện khi hồ sơ đã có người claim và người xem là chính chủ hoặc quản trị viên).
+     Bỏ prop `status` (không còn dùng).
+  5. Dọn import không dùng phát sinh từ các thay đổi trên (`assignedOfficerAccount`,
+     `mayRequestSupplement`, `SupplementRequest`).
+- **File đã sửa:**
+  - `src/app/api/submissions/[submissionId]/action/route.ts`
+  - `src/app/api/submissions/[submissionId]/route.ts`
+  - `src/components/submission-detail.tsx`
+  - `src/components/admin/submission-claim-banner.tsx`
+- **Test mới:**
+  - `tests/submission-action-request-supplement-disabled.test.ts` — REQUEST_SUPPLEMENT trả 400
+    ngay, không chạm `findStoredMutation`/`findById`/`commitStaffAction`.
+  - `tests/submission-patch-staff-edit-closed.test.ts` — (a) PATCH sửa GCN khi `UNDER_REVIEW`
+    không kèm `amendmentReason` bị từ chối 400 kèm hướng dẫn dùng Bàn làm việc; (b) PATCH kèm
+    `amendmentReason` hợp lệ trên hồ sơ `ACCEPTED` vẫn gọi `commitOfficialAmendment` thành công.
+- **Chưa làm (nằm ở đợt sau, đã báo người dùng):** ô ghi chú nội bộ + migration (2A-2); chặn dân
+  gửi lại khi cán bộ đang giữ hồ sơ + cho tiếp nhận hồ sơ cũ `NEEDS_SUPPLEMENT` (2A-3); server-prime
+  + chuyển audit + lazy ảnh (2B); cán bộ tự tải ảnh bổ sung (2C).
+- **Migration:** không có (đợt này thuần code, không đổi schema).
+- **Kiểm tra:** baseline trước khi sửa — `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/10 warning
+  có sẵn, `npm test` 664 pass/10 skip. Sau khi sửa — `npm run typecheck` 0 lỗi, `npm run lint`
+  0 lỗi/5 warning (giảm 5 warning cũ vì đã dọn theo đường đi, không cố ý săn warning), `npm test`
+  667 pass/10 skip (bằng baseline + 3 test mới), `npm run build` (Next.js 16.2.10, Turbopack) đạt,
+  không tự sinh `next-env.d.ts` vào commit (đã revert file này vì build tự đổi
+  `.next/dev/types` → `.next/types`, không liên quan task).
+- **Chưa merge, chưa push, chưa deploy.**

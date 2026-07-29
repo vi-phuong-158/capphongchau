@@ -5,8 +5,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
 import type { IntakeDraft } from "@/modules/public-intake/types";
+import type { PublicStatus } from "@/modules/public-intake/repository";
 import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
-import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
+import { isOwnerIdentityQrConfirmed, mayClaim } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
 import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
 import {
@@ -15,10 +16,7 @@ import {
 } from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 import { DocumentViewer } from "@/components/admin/document-viewer";
-import {
-  assignedOfficerAccount,
-  assignedOfficerLabel,
-} from "@/modules/submissions/assigned-officer";
+import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
 
 type Submission = {
   submissionId: string;
@@ -44,16 +42,31 @@ type Submission = {
   }[];
 };
 
-const labels: Record<string, string> = {
-  SUBMITTED: "Chờ tiếp nhận",
-  UNDER_REVIEW: "Đang xử lý",
-  NEEDS_SUPPLEMENT: "Cần bổ sung",
-  RESUBMITTED: "Đã gửi lại",
-  REJECTED: "Từ chối",
-  ACCEPTING: "Đang tiếp nhận",
-  ACCEPTED: "Đã tiếp nhận",
-  DRAFT: "Nháp",
-  EXPIRED: "Hết hạn",
+/**
+ * Giao diện cán bộ chỉ hiển thị đúng ba trạng thái nghiệp vụ: Chờ tiếp nhận, Đang xử lý,
+ * Đã hoàn thành. Hồ sơ cũ ở trạng thái bổ sung/gửi lại được ánh xạ an toàn về "Chờ tiếp nhận" —
+ * không phát sinh luồng yêu cầu bổ sung mới, backend vẫn giữ nguyên các trạng thái kỹ thuật.
+ * Từ chối/Nháp/Hết hạn là trạng thái ngoại lệ, giữ nhãn riêng để cán bộ nhận biết đúng.
+ */
+const STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
+  SUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  RESUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  NEEDS_SUPPLEMENT: {
+    label: "Chờ tiếp nhận",
+    color: "bg-amber-100 text-amber-900 border-amber-300",
+  },
+  UNDER_REVIEW: { label: "Đang xử lý", color: "bg-sky-100 text-sky-900 border-sky-300" },
+  ACCEPTING: {
+    label: "Đang xử lý",
+    color: "bg-sky-100 text-sky-900 border-sky-300 animate-pulse",
+  },
+  ACCEPTED: {
+    label: "Đã hoàn thành",
+    color: "bg-emerald-100 text-emerald-900 border-emerald-300",
+  },
+  REJECTED: { label: "Từ chối", color: "bg-rose-100 text-rose-900 border-rose-300" },
+  DRAFT: { label: "Nháp", color: "bg-stone-100 text-stone-700 border-stone-300" },
+  EXPIRED: { label: "Hết hạn", color: "bg-stone-100 text-stone-600 border-stone-300" },
 };
 
 async function csrfToken() {
@@ -129,19 +142,10 @@ export function SubmissionDetail({
   const [message, setMessage] = useState<string | null>(null);
   const [acceptanceIssues, setAcceptanceIssues] = useState<AcceptanceBlockingIssue[]>([]);
   const [busy, setBusy] = useState(false);
-  const [supplementReason, setSupplementReason] = useState("MISSING_INFORMATION");
-  const [supplementMessage, setSupplementMessage] = useState("");
-  const [supplementKind, setSupplementKind] = useState<"FIELD" | "FILE">("FIELD");
-  const [supplementTarget, setSupplementTarget] = useState("");
-  const [supplementDocument, setSupplementDocument] = useState<
-    "" | "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE"
-  >("");
-  const [supplementInstruction, setSupplementInstruction] = useState("");
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [newAccessSecret, setNewAccessSecret] = useState("");
+  /** Modal "Điều chỉnh chính thức" — chỉ mở được khi hồ sơ đã `ACCEPTED`, luôn bắt buộc lý do. */
   const [editOpen, setEditOpen] = useState(false);
-  /** Bật khi mở chế độ điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức — buộc nhập lý do trước khi lưu. */
-  const [amendMode, setAmendMode] = useState(false);
   const [amendmentReason, setAmendmentReason] = useState("");
   const [editCertificate, setEditCertificate] = useState({
     issueNumber: "",
@@ -165,9 +169,17 @@ export function SubmissionDetail({
       .then(setSubmission)
       .catch(() => setMessage("Không thể tải hồ sơ."));
   }, [submissionId]);
-  function openEdit(mode: "EDIT" | "AMEND" = "EDIT") {
+  /** Cảnh báo rời trang khi bàn làm việc còn thay đổi chưa lưu (§3.2). */
+  useEffect(() => {
+    if (!workingPayload.isDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [workingPayload.isDirty]);
+  function openAmendModal() {
     if (!submission?.draft) return;
-    setAmendMode(mode === "AMEND");
     setAmendmentReason("");
     setEditCertificate({ ...submission.draft.certificate });
     setEditOwners(
@@ -215,7 +227,7 @@ export function SubmissionDetail({
       setMessage("Không có thay đổi nào để lưu.");
       return;
     }
-    if (amendMode && amendmentReason.trim().length < 10) {
+    if (amendmentReason.trim().length < 10) {
       setMessage("Điều chỉnh hồ sơ đã tiếp nhận phải có lý do ít nhất 10 ký tự.");
       return;
     }
@@ -234,7 +246,7 @@ export function SubmissionDetail({
           version: submission.version,
           ...(Object.keys(certificatePatch).length ? { certificate: certificatePatch } : {}),
           ...(ownersPatch.length ? { owners: ownersPatch } : {}),
-          ...(amendMode ? { amendmentReason: amendmentReason.trim() } : {}),
+          amendmentReason: amendmentReason.trim(),
         }),
       });
       const data = (await response.json()) as {
@@ -246,11 +258,7 @@ export function SubmissionDetail({
       const refreshed = await loadSubmission(submission.submissionId);
       setSubmission(refreshed);
       setEditOpen(false);
-      setMessage(
-        amendMode
-          ? "Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới."
-          : "Đã lưu thông tin chỉnh sửa.",
-      );
+      setMessage("Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể lưu thay đổi.");
     } finally {
@@ -292,7 +300,7 @@ export function SubmissionDetail({
       setBusy(false);
     }
   }
-  async function action(action: "CLAIM" | "REQUEST_SUPPLEMENT" | "REJECT") {
+  async function action(action: "CLAIM" | "REJECT") {
     if (!submission) return;
     setBusy(true);
     setMessage(null);
@@ -305,31 +313,7 @@ export function SubmissionDetail({
           "x-csrf-token": token,
           "idempotency-key": crypto.randomUUID(),
         },
-        body: JSON.stringify({
-          action,
-          version: submission.version,
-          ...(action === "REQUEST_SUPPLEMENT"
-            ? {
-                reasonCode: supplementReason || "MISSING_INFORMATION",
-                message: supplementMessage.trim() || "Yêu cầu bổ sung thông tin hồ sơ",
-                items: [
-                  {
-                    itemType: supplementKind || "FIELD",
-                    targetEntityType: "SUBMISSION",
-                    targetEntityId: "",
-                    fieldPath:
-                      supplementKind === "FIELD" ? supplementTarget.trim() || "certificate" : "",
-                    documentType:
-                      supplementKind === "FILE" ? supplementDocument || "CERTIFICATE" : "",
-                    instruction:
-                      supplementInstruction.trim() ||
-                      supplementMessage.trim() ||
-                      "Vui lòng kiểm tra và bổ sung hồ sơ theo hướng dẫn.",
-                  },
-                ],
-              }
-            : {}),
-        }),
+        body: JSON.stringify({ action, version: submission.version }),
       });
       const data = (await response.json()) as {
         submission?: {
@@ -354,13 +338,7 @@ export function SubmissionDetail({
             }
           : current,
       );
-      setMessage(
-        action === "CLAIM"
-          ? "Đã nhận xử lý hồ sơ."
-          : action === "REJECT"
-            ? "Đã từ chối hồ sơ."
-            : "Đã chuyển sang trạng thái cần bổ sung.",
-      );
+      setMessage(action === "CLAIM" ? "Đã tiếp nhận hồ sơ." : "Đã từ chối hồ sơ.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ.");
     } finally {
@@ -466,28 +444,8 @@ export function SubmissionDetail({
       </main>
     );
   const draft = submission.draft;
-  const statusLabels: Record<string, { label: string; color: string }> = {
-    SUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
-    UNDER_REVIEW: { label: "Đang xử lý", color: "bg-sky-100 text-sky-900 border-sky-300" },
-    NEEDS_SUPPLEMENT: {
-      label: "Cần bổ sung",
-      color: "bg-orange-100 text-orange-900 border-orange-300",
-    },
-    RESUBMITTED: { label: "Đã gửi lại", color: "bg-blue-100 text-blue-900 border-blue-300" },
-    REJECTED: { label: "Từ chối", color: "bg-rose-100 text-rose-900 border-rose-300" },
-    ACCEPTING: {
-      label: "Đang tiếp nhận",
-      color: "bg-emerald-100 text-emerald-900 border-emerald-300 animate-pulse",
-    },
-    ACCEPTED: {
-      label: "Đã tiếp nhận",
-      color: "bg-emerald-100 text-emerald-900 border-emerald-300",
-    },
-    DRAFT: { label: "Nháp", color: "bg-stone-100 text-stone-700 border-stone-300" },
-    EXPIRED: { label: "Hết hạn", color: "bg-stone-100 text-stone-600 border-stone-300" },
-  };
-  const statusBadge = statusLabels[submission.status] || {
-    label: labels[submission.status] ?? submission.status,
+  const statusBadge = STATUS_DISPLAY[submission.status] ?? {
+    label: submission.status,
     color: "bg-stone-100 text-stone-700 border-stone-300",
   };
 
@@ -509,7 +467,6 @@ export function SubmissionDetail({
         <SubmissionClaimBanner
           submissionId={submission.submissionId}
           version={submission.version}
-          status={submission.status}
           claimedBy={submission.claimedBy || ""}
           claimedAt={submission.claimedAt || undefined}
           currentUserEmail={currentUserEmail}
@@ -549,9 +506,21 @@ export function SubmissionDetail({
             </p>
           </div>
 
-          {/* Action Toolbar */}
+          {/* Action Toolbar — chỉ còn đúng bốn thao tác nghiệp vụ: Tiếp nhận, Lưu (trong Bàn làm
+              việc bên dưới), Hoàn thành xử lý, Từ chối. Thao tác quản trị ngoại lệ (trả lại hàng
+              chờ, chuyển giao, mở khóa cưỡng chế, điều chỉnh chính thức) nằm trong "Thao tác khác". */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Primary Workflow Action: Official Acceptance */}
+            {mayClaim(submission.status as PublicStatus) && (
+              <button
+                className="rounded-lg border border-emerald-700 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                disabled={busy}
+                onClick={() => action("CLAIM")}
+                type="button"
+              >
+                Tiếp nhận
+              </button>
+            )}
+
             <button
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50 transition"
               disabled={
@@ -565,7 +534,7 @@ export function SubmissionDetail({
                 submission.officialCaseId
                   ? `Đã có mã hồ sơ chính thức ${submission.officialCaseId}`
                   : submission.status === "ACCEPTING"
-                    ? "Lần tiếp nhận trước đang dở — bấm để chạy tiếp từ bước dở dang"
+                    ? "Lần hoàn thành trước đang dở — bấm để chạy tiếp từ bước dở dang"
                     : "Sinh mã hồ sơ, chuyển ảnh sang 02_CASES và ghi dữ liệu chính thức"
               }
               type="button"
@@ -578,65 +547,9 @@ export function SubmissionDetail({
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              {submission.status === "ACCEPTING" ? "Tiếp tục tiếp nhận" : "Tiếp nhận chính thức"}
+              {submission.status === "ACCEPTING" ? "Tiếp tục hoàn thành" : "Hoàn thành xử lý"}
             </button>
 
-            {/* Secondary Actions */}
-            {submission.status !== "UNDER_REVIEW" && (
-              <button
-                className="rounded-lg border border-stone-300 bg-stone-50 px-3.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50"
-                disabled={busy}
-                onClick={() => action("CLAIM")}
-                type="button"
-              >
-                Nhận xử lý
-              </button>
-            )}
-            <button
-              className="rounded-lg border border-sky-700 bg-sky-50 px-3.5 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW" || !workingPayload.draft}
-              onClick={() => {
-                setWorkingPayloadTab("owners");
-                document
-                  .getElementById("working-payload-editor")
-                  ?.scrollIntoView({ behavior: "smooth" });
-              }}
-              type="button"
-            >
-              Mở tab Chủ sử dụng
-            </button>
-            {submission.status === "ACCEPTED" && (
-              <button
-                className="rounded-lg border border-orange-700 bg-orange-50 px-3.5 py-2 text-xs font-semibold text-orange-800 hover:bg-orange-100 disabled:opacity-50"
-                disabled={busy || !submission.draft}
-                onClick={() => openEdit("AMEND")}
-                title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
-                type="button"
-              >
-                Điều chỉnh chính thức
-              </button>
-            )}
-
-            {/* Exceptions */}
-            <button
-              className="rounded-lg border border-amber-700 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW"}
-              onClick={() => {
-                setSupplementMessage("");
-                setSupplementInstruction("");
-                const promptMsg = window.prompt(
-                  "Nhập nội dung thông báo yêu cầu bổ sung gửi người dân:",
-                );
-                if (promptMsg && promptMsg.trim()) {
-                  setSupplementMessage(promptMsg.trim());
-                  setSupplementInstruction(promptMsg.trim());
-                  void action("REQUEST_SUPPLEMENT");
-                }
-              }}
-              type="button"
-            >
-              Yêu cầu bổ sung
-            </button>
             <button
               className="rounded-lg border border-rose-700 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-50"
               disabled={busy || submission.status !== "UNDER_REVIEW"}
@@ -651,6 +564,39 @@ export function SubmissionDetail({
             >
               Từ chối
             </button>
+
+            <button
+              className="rounded-lg border border-sky-700 bg-sky-50 px-3.5 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
+              disabled={busy || submission.status !== "UNDER_REVIEW" || !workingPayload.draft}
+              onClick={() => {
+                setWorkingPayloadTab("owners");
+                document
+                  .getElementById("working-payload-editor")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+              type="button"
+            >
+              Mở tab Chủ sử dụng
+            </button>
+
+            {submission.status === "ACCEPTED" && (
+              <details className="ml-1">
+                <summary className="cursor-pointer list-none rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-100">
+                  ⋯ Thao tác khác
+                </summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    className="rounded-lg border border-orange-700 bg-orange-50 px-3.5 py-2 text-xs font-semibold text-orange-800 hover:bg-orange-100 disabled:opacity-50"
+                    disabled={busy || !submission.draft}
+                    onClick={openAmendModal}
+                    title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
+                    type="button"
+                  >
+                    Điều chỉnh chính thức
+                  </button>
+                </div>
+              </details>
+            )}
           </div>
         </div>
 
@@ -854,9 +800,7 @@ export function SubmissionDetail({
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10">
           <div className="w-full max-w-2xl rounded-xl bg-white p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
-              <h2 className="text-xl font-bold">
-                {amendMode ? "Điều chỉnh hồ sơ chính thức" : "Chỉnh sửa thông tin hồ sơ"}
-              </h2>
+              <h2 className="text-xl font-bold">Điều chỉnh hồ sơ chính thức</h2>
               <button
                 className="text-sm font-semibold text-stone-500"
                 onClick={() => setEditOpen(false)}
@@ -865,38 +809,30 @@ export function SubmissionDetail({
                 Đóng
               </button>
             </div>
-            {amendMode ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-orange-300 bg-orange-50 p-4">
-                <p className="text-sm text-orange-900">
-                  Hồ sơ đã tiếp nhận chính thức
-                  {submission.officialCaseId ? ` (${submission.officialCaseId})` : ""}. Lưu thay đổi
-                  sẽ <strong>ghi lại luôn dữ liệu chính thức</strong> — giấy chứng nhận, chủ sử
-                  dụng, thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive giữ
-                  nguyên.
-                </p>
-                <label className="block">
-                  <span className="pc-field-label">
-                    Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)
-                  </span>
-                  <textarea
-                    className="pc-input"
-                    onChange={(event) => setAmendmentReason(event.target.value)}
-                    placeholder="Ví dụ: Đối chiếu lại bìa gốc, số vào sổ ghi nhầm CS00123 thành CS00132."
-                    rows={3}
-                    value={amendmentReason}
-                  />
-                </label>
-                <p className="text-xs text-orange-800">
-                  Lý do được ghi vào nhật ký kiểm toán cùng danh sách trường đã đổi. Đây là dấu vết
-                  duy nhất giải thích vì sao dữ liệu chính thức khác lúc tiếp nhận.
-                </p>
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-stone-600">
-                Chỉ sửa lỗi gõ nhỏ giúp người dân. Nếu cần người dân nộp lại giấy tờ, dùng nút “Yêu
-                cầu bổ sung”.
+            <div className="mt-3 space-y-3 rounded-lg border border-orange-300 bg-orange-50 p-4">
+              <p className="text-sm text-orange-900">
+                Hồ sơ đã tiếp nhận chính thức
+                {submission.officialCaseId ? ` (${submission.officialCaseId})` : ""}. Lưu thay đổi
+                sẽ <strong>ghi lại luôn dữ liệu chính thức</strong> — giấy chứng nhận, chủ sử dụng,
+                thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive giữ nguyên.
               </p>
-            )}
+              <label className="block">
+                <span className="pc-field-label">
+                  Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)
+                </span>
+                <textarea
+                  className="pc-input"
+                  onChange={(event) => setAmendmentReason(event.target.value)}
+                  placeholder="Ví dụ: Đối chiếu lại bìa gốc, số vào sổ ghi nhầm CS00123 thành CS00132."
+                  rows={3}
+                  value={amendmentReason}
+                />
+              </label>
+              <p className="text-xs text-orange-800">
+                Lý do được ghi vào nhật ký kiểm toán cùng danh sách trường đã đổi. Đây là dấu vết
+                duy nhất giải thích vì sao dữ liệu chính thức khác lúc tiếp nhận.
+              </p>
+            </div>
             <section className="mt-5">
               <h3 className="font-semibold">Giấy chứng nhận</h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -1053,16 +989,12 @@ export function SubmissionDetail({
                 Hủy
               </button>
               <button
-                className={
-                  amendMode
-                    ? "rounded-lg bg-orange-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
-                    : "rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
-                }
-                disabled={busy || (amendMode && amendmentReason.trim().length < 10)}
+                className="rounded-lg bg-orange-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+                disabled={busy || amendmentReason.trim().length < 10}
                 onClick={() => void saveEdit()}
                 type="button"
               >
-                {amendMode ? "Lưu điều chỉnh chính thức" : "Lưu thay đổi"}
+                Lưu điều chỉnh chính thức
               </button>
             </div>
           </div>

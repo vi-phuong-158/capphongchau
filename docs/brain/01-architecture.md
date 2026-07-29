@@ -457,12 +457,21 @@ POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — 
                                                         best-effort, luôn 204)
 GET /api/submissions
 GET /api/submissions/:submissionId
-PATCH /api/submissions/:submissionId                         (sửa hẹp; `manualIdentityConfirmation`
-                                                        xác nhận CCCD thủ công vào working payload)
+PATCH /api/submissions/:submissionId                         (2026-07-29, Đợt 2A-1 — chỉ còn hai
+                                                        nhánh: `manualIdentityConfirmation` xác
+                                                        nhận CCCD thủ công vào working payload, và
+                                                        `amendmentReason` điều chỉnh hồ sơ đã
+                                                        `ACCEPTED`. Nhánh `STAFF_DRAFT_EDIT` sửa
+                                                        GCN/chủ sử dụng khi `UNDER_REVIEW` đã ĐÓNG
+                                                        — dùng PUT .../working-payload, tránh ghi
+                                                        vào `draft_json` bị `working_payload_json`
+                                                        che khuất)
 PUT /api/submissions/:submissionId/working-payload   (2026-07-25, Phase 6 — sửa đầy đủ bản làm
                                                         việc: thửa đất, mục đích sử dụng)
-POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/
-                                                        REQUEST_SUPPLEMENT/REJECT)
+POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/REJECT.
+                                                        `REQUEST_SUPPLEMENT` đã bị chặn server-side
+                                                        2026-07-29, Đợt 2A-1 — luồng mới không còn
+                                                        yêu cầu bổ sung, cán bộ sửa trực tiếp)
 POST /api/submissions/:submissionId/accept             (chạy completionChecks trước khi mở saga)
 POST /api/submissions/:submissionId/reset-access-secret
 POST /api/exports

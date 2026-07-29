@@ -1,5 +1,41 @@
 # 03 — Technical Decisions
 
+## [2026-07-29] Đợt 2A-1: bỏ luồng yêu cầu bổ sung, gộp về một đường ghi PL3
+
+- **Quyết định:** Chốt sau góp ý người dùng — coi mỗi hồ sơ là một bản nộp hoàn chỉnh; cán bộ đối
+  chiếu, chỉnh sửa trực tiếp, lưu và hoàn thành, không còn luồng "yêu cầu bổ sung"/"gửi lại". Chỉ
+  làm Đợt 2A-1 (dọn nút + gộp đường ghi); chưa cho tiếp nhận hồ sơ cũ `NEEDS_SUPPLEMENT` (2A-3),
+  chưa thêm ghi chú nội bộ (2A-2). Giữ nút **Từ chối** theo yêu cầu người dùng (hồ sơ trùng/nộp sai
+  nhiều lần vẫn cần một lối thoát ngoài "hoàn thành").
+- **API:** `POST /api/submissions/:id/action` chặn `action: "REQUEST_SUPPLEMENT"` ngay đầu hàm,
+  trả `400 VALIDATION_FAILED` trước khi chạm CSDL/audit/idempotency. Không xóa enum trạng thái
+  `NEEDS_SUPPLEMENT` khỏi `PUBLIC_STATUSES` (workflow.ts) — hồ sơ lịch sử vẫn đọc được, chỉ không
+  còn đường tạo mới.
+- **`PATCH /api/submissions/:id` đóng nhánh `STAFF_DRAFT_EDIT`:** trước đây route có 3 nhánh
+  (`manualIdentityConfirmation` / `OFFICIAL_AMENDMENT` / `STAFF_DRAFT_EDIT` mặc định khi
+  `UNDER_REVIEW` không kèm `amendmentReason`). Nhánh `STAFF_DRAFT_EDIT` ghi vào `draft_json` qua
+  `commitStaffDraftEdit`, trong khi `WorkingPayloadEditor` ghi vào `working_payload_json` qua
+  `PUT .../working-payload`, và `effectivePayload()` (payload-layers.ts) luôn ưu tiên
+  `working_payload_json` nếu tồn tại — nghĩa là một lần lưu qua modal "Chỉnh sửa" cũ **bị bàn làm
+  việc che khuất hoàn toàn** ở lần tải hồ sơ kế tiếp: cán bộ tưởng đã lưu nhưng dữ liệu hiển thị
+  vẫn là bản cũ. Route giờ chỉ nhận hai nhánh còn lại; mọi request rơi vào trường hợp cũ nhận
+  `400` kèm hướng dẫn dùng Bàn làm việc. `commitStaffDraftEdit` **không bị xóa khỏi repository**
+  (vẫn được `tests/staging-rehearsal-acceptance-saga.integration.test.ts` gọi trực tiếp — test
+  đó cần `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, đang skip) — chỉ đóng đường gọi từ route.
+- **UI:** Modal "Chỉnh sửa"/"Điều chỉnh chính thức" gộp còn một (chế độ điều chỉnh chính thức —
+  chế độ "sửa thường" trước đó không có nút nào gọi tới trong UI hiện tại, xác nhận bằng grep
+  trước khi xóa). Đổi tên cho hết trùng nghĩa: "Nhận xử lý" → **Tiếp nhận**; "Tiếp nhận chính
+  thức" → **Hoàn thành xử lý** (đúng góp ý §11.2 gốc: không để hai nút gần nghĩa). Trạng thái hiển
+  thị rút về 3 nhóm nghiệp vụ (`SUBMITTED`/`RESUBMITTED`/`NEEDS_SUPPLEMENT` → "Chờ tiếp nhận";
+  `UNDER_REVIEW`/`ACCEPTING` → "Đang xử lý"; `ACCEPTED` → "Đã hoàn thành"); `REJECTED`/`DRAFT`/
+  `EXPIRED` giữ nhãn riêng vì là trạng thái ngoại lệ, không thuộc luồng chính.
+- **Thao tác quản trị (Release/Transfer/ForceClaim/Amend):** gom vào `<details>` "Thao tác khác"
+  ở cả `SubmissionClaimBanner` và `SubmissionDetail`, đóng mặc định — theo yêu cầu người dùng giữ
+  cả 4 nút này (không bỏ, vì hồ sơ sẽ kẹt vĩnh viễn nếu cán bộ giữ nó nghỉ việc, và sai sót sau khi
+  hoàn thành sẽ không sửa được nếu bỏ Điều chỉnh chính thức).
+- **Đánh đổi/rủi ro còn lại:** Chưa chặn được race "cán bộ đang xử lý mà dân bấm gửi lại xóa mất
+  claim" (2A-3, chưa làm). Chưa có ô ghi chú nội bộ (2A-2, chưa làm).
+
 ## [2026-07-29] PR #8: server là nguồn chuyển trạng thái định danh
 
 - **Quyết định:** Tab Chủ sử dụng của `WorkingPayloadEditor` là luồng xác nhận trong
