@@ -2392,3 +2392,42 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   production build đạt; ESLint các file chức năng PL3 đạt; `git diff --check` đạt. Lint toàn
   repository vẫn thất bại vì quét mã build sinh tự động trong `.claude/worktrees/**/.next`
   (cùng nguyên nhân đã có ở baseline), không có lỗi từ file chức năng của hạng mục.
+
+## [2026-07-29] Vá 5 phát hiện review PR #7 (bàn biên tập PL3)
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  1. `working-payload-editor.tsx` — mọi đường ghi trên một dòng chủ sử dụng nay đi qua
+     `migrateLegacyOrganisationOwner()`. Trước đó ô H/K (người đại diện) ghi thẳng vào
+     `fullName`/`identityNumber`, nên sửa dòng tổ chức lưu trước migration 202607290002 theo thứ tự
+     H trước F sẽ **ghi đè mất tên/mã số tổ chức**. Đổi pháp nhân (`updateOwnerType`) cố ý KHÔNG
+     di trú: chuyển tổ chức → cá nhân nghĩa là `fullName` vốn là tên người.
+  2. `pl3-export.ts` — thay `joined()` (bỏ trùng bằng `Set` + bỏ ô rỗng, độc lập từng cột) bằng
+     `assetColumn()` giữ đúng số phần tử và thứ tự cho cả 9 cột AO–AW, ô rỗng ghi `-`. Thửa có
+     nhiều tài sản sinh warning. Trước đó hai tài sản trùng diện tích làm cột AS còn 1 giá trị
+     trong khi AO có 2 → không ghép lại được giá trị nào thuộc tài sản nào.
+  3. `working-payload-audit.ts` + `repository.ts` — `changedFieldCount` đếm **trước** khi cắt
+     `changedFieldPaths`, thêm cờ `changedFieldPathsTruncated`. Trước đó count lấy `.length` của
+     mảng đã cắt nên tối đa luôn là 250.
+  4. `working-payload-editor.tsx` + `types.ts` — xóa thửa gọi `detachAssetsFromMissingParcels()`
+     để gỡ `parcelId` mồ côi. Trước đó `draftSchema` từ chối payload và cán bộ chỉ nhận một lỗi
+     cấu trúc chung không chỉ ra ô nào.
+  5. `eslint.config.mjs` — ignore `**/.next/**` và `.claude/**`. Ignore cũ `.next/**` chỉ khớp gốc
+     repo nên ESLint quét bản build trong worktree agent và **chết vì hết heap**, không phải chỉ
+     "fail": lint gate coi như không tồn tại.
+  6. `pl3-export.ts` — `buildSubmissionRows` dedupe `warnings` trước khi trả. `buildRow` chạy mỗi
+     cặp (thửa × chủ) nên cảnh báo thuộc về *thửa* bị lặp đúng bằng số đồng sở hữu; hồ sơ 3 đồng
+     sở hữu ra 3 dòng cảnh báo giống hệt. Sửa ở đây thay vì đẩy riêng cảnh báo tài sản ra ngoài vì
+     nó dọn luôn cả cảnh báo `field19` và `landUseCells` vốn đã trùng từ PR #7.
+- **File đã sửa:** `eslint.config.mjs`, `src/components/admin/working-payload-editor.tsx`,
+  `src/modules/public-intake/{pl3-export,repository,types,working-payload-audit}.ts`,
+  `tests/{full-pl3-editor,pl3-export}.test.ts`.
+- **Lý do:** Kết quả review PR #7. Mục 1/4 là lỗi mất hoặc chặn dữ liệu của cán bộ; mục 2 là lỗi
+  trung thực dữ liệu khi xuất PL3; mục 3 làm audit báo sai; mục 5 chặn CI.
+- **Không làm (cần quyết định nghiệp vụ, không phải code):** ô lý do ghi đè là free text và đi vào
+  audit metadata — va chạm quy tắc cứng số 6 (PII trong log); 4 cột `*_override*` trên
+  `public_submissions` được ghi nhưng không có nơi nào đọc; `checkAssets` chặn cứng tài sản legacy
+  thiếu `parcelId` trong khi `pl3-export` lại khoan dung.
+- **Kiểm tra:** `npm test` 637 pass/10 skip (baseline 631, +6 test hồi quy mới);
+  `npm run typecheck` đạt; `npm run build` đạt; `npm run lint` **0 error**/5 warning có sẵn
+  (baseline: OOM crash); `git diff --check` đạt.

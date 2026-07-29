@@ -1058,12 +1058,15 @@ export class PublicIntakeRepository {
               appliedFieldPaths: input.aiApplication.appliedFieldPaths.join(","),
               changeNote: input.changeNote || "",
               changedFieldPaths: auditSummary.changedFieldPaths.join(","),
+              changedFieldCount: auditSummary.changedFieldCount,
+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
               automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
             }
           : {
               changeNote: input.changeNote || "",
               changedFieldPaths: auditSummary.changedFieldPaths.join(","),
-              changedFieldCount: auditSummary.changedFieldPaths.length,
+              changedFieldCount: auditSummary.changedFieldCount,
+              changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
               automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
             },
       });
@@ -1207,7 +1210,8 @@ export class PublicIntakeRepository {
           officialCaseId: next.officialCaseId,
           amendmentReason: input.amendmentReason,
           changedFieldPaths: auditSummary.changedFieldPaths.join(","),
-          changedFieldCount: auditSummary.changedFieldPaths.length,
+          changedFieldCount: auditSummary.changedFieldCount,
+          changedFieldPathsTruncated: auditSummary.changedFieldPathsTruncated,
           automaticOverrideReasons: JSON.stringify(auditSummary.automaticOverrideReasons),
           ownerCount: counts.ownerCount,
           parcelCount: counts.parcelCount,

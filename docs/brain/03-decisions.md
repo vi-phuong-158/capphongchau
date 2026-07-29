@@ -1563,3 +1563,36 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
   hướng dẫn cố định, không có CCCD, họ tên, Drive ID/link, token hoặc dữ liệu tệp.
 - **Đánh đổi:** Không tự sửa hoặc nới validation; cán bộ vẫn phải hoàn thiện dữ liệu rồi bấm lại với
   cùng khóa idempotency trong phiên nếu cần tiếp tục saga.
+
+## [2026-07-29] Gộp nhiều tài sản trên cùng thửa vào AO–AW: giữ vị trí, không bỏ trùng
+
+- **Quyết định:** `assetColumn()` trong `pl3-export.ts` gộp N tài sản của một thửa bằng `"; "` với
+  ràng buộc **mọi cột trong 9 cột AO–AW phải có cùng số phần tử theo cùng thứ tự**; ô rỗng ghi
+  `ASSET_EMPTY_PLACEHOLDER = "-"`. Thửa có >1 tài sản sinh warning ra sheet "Canh bao".
+- **Lý do:** PL3 chỉ có một bộ 9 cột cho mỗi thửa nên gộp là bắt buộc. Nhưng bản gộp đầu tiên
+  (`joined()`, PR #7) bỏ trùng bằng `Set` và bỏ ô rỗng **độc lập từng cột**, nên hai tài sản cùng
+  `constructionArea = "100"` cho ra AO hai phần tử và AS một phần tử — người đọc PL3 không còn ghép
+  lại được giá trị nào thuộc tài sản nào. Mất tương ứng nguy hiểm hơn ô trùng lặp nhìn thừa.
+- **Đánh đổi:** Ô xuất dài hơn và có ký tự giữ chỗ `-` trông lạ với người quen đọc bảng. Chấp nhận:
+  một tài sản (trường hợp áp đảo) vẫn xuất giá trị trần, không có ký tự giữ chỗ nào.
+- **Chưa quyết:** PL3 không có cách biểu diễn nhiều tài sản đúng chuẩn. Nếu nghiệp vụ yêu cầu mỗi
+  tài sản một dòng, phải đổi mô hình dòng (thửa × chủ) thành (thửa × chủ × tài sản) — ngoài phạm vi.
+
+## [2026-07-29] ESLint bỏ qua `**/.next/**` và `.claude/**`
+
+- **Quyết định:** Đổi ignore từ `.next/**` sang `**/.next/**`, thêm `.claude/**`.
+- **Lý do:** `.next/**` chỉ khớp bản build ở gốc repo. Worktree agent dưới `.claude/worktrees/*/`
+  có `.next/` riêng, và ESLint quét chúng thì **hết heap và chết** — không phải fail có thông báo.
+  Lint gate coi như không tồn tại trong suốt thời gian đó.
+- **Đánh đổi:** Không có. `.claude/` đã nằm trong `.gitignore`, không phải mã nguồn của dự án.
+
+## [2026-07-29] CHƯA quyết: lý do ghi đè là free text và đi vào audit metadata
+
+- **Hiện trạng:** `summarizeWorkingPayloadChanges()` đóng gói `reason` do cán bộ tự gõ vào
+  `automaticOverrideReasons` rồi `JSON.stringify` vào `audit_logs.metadata`. Docstring của module
+  khẳng định audit không chứa PII vì chỉ ghi đường dẫn trường — điều đó đúng với `changedFieldPaths`
+  nhưng **không đúng với ô lý do**, vốn có thể chứa họ tên hoặc CCCD.
+- **Va chạm:** Quy tắc cứng số 6 trong `CLAUDE.md` (không ghi PII vào log).
+- **Cần chốt một trong hai:** (a) quét `reason` bằng `CITIZEN_ID_PATTERN` và từ chối fail-closed như
+  đường AI extraction đang làm; hoặc (b) chấp nhận đây là kênh PII có kiểm soát, ghi rõ ở đây và sửa
+  docstring cho khỏi sai. Không được để nguyên trạng thái "tài liệu nói một đằng, code làm một nẻo".

@@ -285,6 +285,45 @@ export function emptyAsset(id: string, parcelId = ""): Asset {
   };
 }
 
+/**
+ * Dòng tổ chức lưu trước migration 202607290002 giữ tên và mã số tổ chức trong `fullName`/
+ * `identityNumber`. Bàn biên tập đầy đủ dùng đúng hai ô đó cho **người đại diện** (cột H/K), nên
+ * dữ liệu cũ phải được chuyển sang `organisationName`/`organisationIdentityNumber` (cột F/G)
+ * trước lần sửa đầu tiên — bỏ bước này thì cán bộ gõ tên người đại diện vào ô H sẽ ghi đè mất tên
+ * tổ chức, không có cảnh báo và không khôi phục được.
+ *
+ * Hàm này idempotent: dòng đã có F/G, hoặc dòng cá nhân, đều trả về nguyên trạng.
+ */
+export function migrateLegacyOrganisationOwner(owner: Owner): Owner {
+  if (!isOrganisationOwner(owner.ownerType)) return owner;
+  if (owner.organisationName?.trim() || owner.organisationIdentityNumber?.trim()) return owner;
+  return {
+    ...owner,
+    organisationName: owner.fullName,
+    organisationIdentityNumber: owner.identityNumber,
+    fullName: "",
+    identityNumber: "",
+  };
+}
+
+/**
+ * Gỡ `parcelId` của tài sản trỏ tới thửa không còn tồn tại.
+ *
+ * `draftSchema` từ chối payload có `asset.parcelId` mồ côi, và lỗi đó tới cán bộ dưới dạng lỗi cấu
+ * trúc chung không chỉ ra được ô nào — nên xóa thửa mà không gỡ tham chiếu sẽ làm nút Lưu hỏng
+ * theo cách không giải thích được. Để rỗng thì lưu được, còn `completionChecks` vẫn chặn lúc tiếp
+ * nhận kèm thông báo đúng chỗ.
+ */
+export function detachAssetsFromMissingParcels(
+  assets: readonly Asset[],
+  parcels: readonly Parcel[],
+): Asset[] {
+  const parcelIds = new Set(parcels.map((parcel) => parcel.id));
+  return assets.map((asset) =>
+    asset.parcelId && !parcelIds.has(asset.parcelId) ? { ...asset, parcelId: "" } : asset,
+  );
+}
+
 export function emptyDraft(ownerId: string, parcelId: string, landUseId: string): IntakeDraft {
   return {
     certificate: { issueNumber: "", issueDate: "", registryNumber: "" },

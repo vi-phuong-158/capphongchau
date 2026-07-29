@@ -4,11 +4,17 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { draftSchema, validateWorkingPayloadForSave } from "@/modules/public-intake/validation";
-import { summarizeWorkingPayloadChanges } from "@/modules/public-intake/working-payload-audit";
 import {
+  MAX_AUDIT_FIELD_PATHS,
+  summarizeWorkingPayloadChanges,
+} from "@/modules/public-intake/working-payload-audit";
+import {
+  detachAssetsFromMissingParcels,
   emptyAsset,
   emptyDraft,
   emptyOwner,
+  emptyParcel,
+  migrateLegacyOrganisationOwner,
   type IntakeDraft,
 } from "@/modules/public-intake/types";
 
@@ -85,6 +91,64 @@ describe("full PL3 working payload", () => {
     expect(summary.automaticOverrideReasons).toHaveLength(3);
   });
 
+  it("changedFieldCount đếm trước khi cắt bớt, kèm cờ truncated", () => {
+    const previous = fullDraft();
+    const next = structuredClone(previous);
+    // Nhiều trường hơn hạn mức audit để buộc nhánh cắt bớt chạy.
+    next.parcels = Array.from({ length: MAX_AUDIT_FIELD_PATHS + 20 }, (_, index) => ({
+      ...emptyParcel(`parcel-extra-${index}`, `land-use-extra-${index}`),
+      parcelNumber: String(index),
+    }));
+
+    const summary = summarizeWorkingPayloadChanges(previous, next);
+    expect(summary.changedFieldPaths).toHaveLength(MAX_AUDIT_FIELD_PATHS);
+    expect(summary.changedFieldCount).toBeGreaterThan(MAX_AUDIT_FIELD_PATHS);
+    expect(summary.changedFieldPathsTruncated).toBe(true);
+  });
+
+  it("dòng tổ chức cũ được di trú F/G trước khi sửa, không mất tên tổ chức", () => {
+    // Bản ghi lưu trước migration 202607290002: tên tổ chức nằm trong fullName.
+    const legacy = {
+      ...emptyOwner("owner-legacy"),
+      ownerType: "TO_CHUC" as const,
+      fullName: "Công ty Phong Châu",
+      identityNumber: "0100109106",
+    };
+
+    const migrated = migrateLegacyOrganisationOwner(legacy);
+    expect(migrated.organisationName).toBe("Công ty Phong Châu");
+    expect(migrated.organisationIdentityNumber).toBe("0100109106");
+    // Ô H/K được giải phóng cho người đại diện, tên tổ chức không bị ghi đè.
+    expect(migrated.fullName).toBe("");
+    expect(migrated.identityNumber).toBe("");
+
+    // Idempotent: chạy lại trên dòng đã di trú không làm mất F/G.
+    expect(migrateLegacyOrganisationOwner(migrated)).toEqual(migrated);
+    // Dòng cá nhân không bị đụng tới.
+    const person = { ...emptyOwner("owner-person"), fullName: "Trần Thị B" };
+    expect(migrateLegacyOrganisationOwner(person)).toEqual(person);
+  });
+
+  it("xóa thửa thì gỡ tham chiếu tài sản để payload vẫn lưu được", () => {
+    const draft = fullDraft();
+    draft.assets.push({ ...emptyAsset("asset-2", "parcel-2"), assetType: "CONG_TRINH" });
+    draft.parcels.push(emptyParcel("parcel-2", "land-use-2"));
+    expect(draftSchema.safeParse(draft).success).toBe(true);
+
+    const remaining = draft.parcels.filter((parcel) => parcel.id !== "parcel-2");
+    const orphaned = { ...draft, parcels: remaining };
+    expect(draftSchema.safeParse(orphaned).success).toBe(false);
+
+    const reconciled = {
+      ...draft,
+      parcels: remaining,
+      assets: detachAssetsFromMissingParcels(draft.assets, remaining),
+    };
+    expect(draftSchema.safeParse(reconciled).success).toBe(true);
+    expect(reconciled.assets[0].parcelId).toBe("parcel-1");
+    expect(reconciled.assets[1].parcelId).toBe("");
+  });
+
   it("migration bổ sung đầy đủ cột normalized cho owner/parcel/asset và payload chính thức", () => {
     const migration = fs.readFileSync(
       path.join(process.cwd(), "supabase/migrations/202607290002_full_pl3_editor.sql"),
@@ -126,6 +190,10 @@ describe("full PL3 working payload", () => {
       "+ Thêm tài sản",
       "AO — Loại tài sản gắn liền với đất",
       "AW — Cấp hạng",
+      // Hai đường dẫn ghi phải đi qua helper thuần, nếu không dòng tổ chức cũ mất tên tổ chức và
+      // xóa thửa làm hỏng nút Lưu. Không có hạ tầng test React nên chốt bằng nối dây.
+      "migrateLegacyOrganisationOwner(owners[index])",
+      "detachAssetsFromMissingParcels(draft.assets, parcels)",
     ]) {
       expect(editor).toContain(text);
     }

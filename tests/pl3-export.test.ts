@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSET_EMPTY_PLACEHOLDER,
   buildPl3Content,
   buildSubmissionRows,
   formatExportDate,
@@ -608,6 +609,90 @@ describe("buildSubmissionRows — nổ dòng và ánh xạ nhãn", () => {
     );
     expect(built.rows[0][COL.landType1]).toBe("");
     expect(built.warnings.some((w) => w.includes("đối chiếu"))).toBe(true);
+  });
+
+  it("nhiều tài sản cùng thửa: 9 cột AO–AW giữ đúng số phần tử và đúng thứ tự", () => {
+    const target = parcel({ id: "par_multi" });
+    // Hai tài sản trùng diện tích xây dựng và trùng ô rỗng — đúng các trường hợp mà bỏ trùng hoặc
+    // bỏ ô rỗng sẽ làm cột này còn 1 giá trị trong khi cột kia còn 2.
+    const first = {
+      ...emptyAsset("asset_a", target.id),
+      assetType: "NHA_O",
+      constructionArea: "100",
+      floorArea: "180",
+      grade: "Cấp II",
+    };
+    const second = {
+      ...emptyAsset("asset_b", target.id),
+      assetType: "CONG_TRINH",
+      constructionArea: "100",
+      floorArea: "",
+      grade: "",
+    };
+
+    const built = buildSubmissionRows(
+      record("ACCEPTED", draft({ parcels: [target], assets: [first, second] })),
+    );
+    const [row] = built.rows;
+
+    expect(row[COL.assetType]).toBe("Nhà ở; Công trình xây dựng khác");
+    // Trùng giá trị KHÔNG bị gộp lại thành một phần tử.
+    expect(row[COL.constructionArea]).toBe("100; 100");
+    // Ô rỗng giữ chỗ nên vị trí thứ 2 vẫn là của asset_b.
+    expect(row[COL.floorArea]).toBe(`180; ${ASSET_EMPTY_PLACEHOLDER}`);
+    expect(row[COL.grade]).toBe(`Cấp II; ${ASSET_EMPTY_PLACEHOLDER}`);
+
+    // Bất biến thật sự cần giữ: mọi cột tài sản có cùng số phần tử để ghép lại được.
+    const assetColumns = [
+      COL.assetType,
+      COL.mixedUseBuilding,
+      COL.apartmentBuilding,
+      COL.apartmentNumber,
+      COL.constructionArea,
+      COL.floorArea,
+      COL.ownershipForm,
+      COL.ownershipTerm,
+      COL.grade,
+    ].map((index) => row[index].split("; ").length);
+    expect(new Set(assetColumns)).toEqual(new Set([2]));
+
+    expect(built.warnings.some((warning) => warning.includes("2 tài sản"))).toBe(true);
+  });
+
+  it("cảnh báo của một thửa không lặp theo số đồng sở hữu", () => {
+    const target = parcel({ id: "par_shared" });
+    const assets = [
+      { ...emptyAsset("asset_x", target.id), assetType: "NHA_O" },
+      { ...emptyAsset("asset_y", target.id), assetType: "CONG_TRINH" },
+    ];
+    const owners = [
+      owner({ id: "own_a", fullName: "Nguyễn Văn A" }),
+      owner({ id: "own_b", fullName: "Trần Thị B" }),
+      owner({ id: "own_c", fullName: "Lê Văn C" }),
+    ];
+
+    const built = buildSubmissionRows(
+      record("ACCEPTED", draft({ owners, parcels: [target], assets })),
+    );
+    // 3 chủ × 1 thửa = 3 dòng, nhưng cảnh báo về thửa chỉ được nói một lần.
+    expect(built.rows).toHaveLength(3);
+    expect(built.warnings.filter((warning) => warning.includes("2 tài sản"))).toHaveLength(1);
+    expect(new Set(built.warnings).size).toBe(built.warnings.length);
+  });
+
+  it("một tài sản trên thửa: không chèn ký tự giữ chỗ", () => {
+    const target = parcel({ id: "par_single" });
+    const [row] = buildSubmissionRows(
+      record(
+        "ACCEPTED",
+        draft({
+          parcels: [target],
+          assets: [{ ...emptyAsset("asset_only", target.id), assetType: "NHA_O" }],
+        }),
+      ),
+    ).rows;
+    expect(row[COL.assetType]).toBe("Nhà ở");
+    expect(row[COL.floorArea]).toBe("");
   });
 
   it("thiếu thửa hoặc chủ sử dụng: không sinh dòng, có cảnh báo", () => {

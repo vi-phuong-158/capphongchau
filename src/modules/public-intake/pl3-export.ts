@@ -33,6 +33,7 @@ import type { SubmissionRecord } from "./repository";
 import {
   isOrganisationOwner,
   OWNER_TYPE_LABELS,
+  type Asset,
   type LandUse,
   type Owner,
   type Parcel,
@@ -244,31 +245,52 @@ function landUseCells(parcel: Parcel, context: string, warnings: string[]): stri
   return cells;
 }
 
-function joined(values: readonly string[]): string {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join("; ");
+/** Ô trống của một tài sản khi thửa có nhiều tài sản — giữ chỗ để 9 cột không lệch nhau. */
+export const ASSET_EMPTY_PLACEHOLDER = "-";
+
+/**
+ * Một cột tài sản của thửa.
+ *
+ * PL3 chỉ có MỘT bộ 9 cột cho mỗi thửa, nên nhiều tài sản trên cùng thửa buộc phải gộp. Gộp thì
+ * bắt buộc mọi cột phải có **cùng số phần tử theo cùng thứ tự**: bỏ trùng hay bỏ ô rỗng sẽ làm
+ * cột này còn 1 giá trị trong khi cột kia còn 2, và người đọc PL3 không còn ghép lại được giá trị
+ * nào thuộc tài sản nào.
+ */
+function assetColumn(assets: readonly Asset[], pick: (asset: Asset) => string): string {
+  if (assets.length === 0) return "";
+  if (assets.length === 1) return pick(assets[0]).trim();
+  return assets.map((asset) => pick(asset).trim() || ASSET_EMPTY_PLACEHOLDER).join("; ");
 }
 
 /** Cột AO–AW. Tài sản legacy chưa có `parcelId` được giữ cho mọi thửa để không mất dữ liệu. */
-function assetCells(record: SubmissionRecord, parcel: Parcel, warnings: string[]): string[] {
+function assetCells(
+  record: SubmissionRecord,
+  parcel: Parcel,
+  context: string,
+  warnings: string[],
+): string[] {
   const assets = (record.draft?.assets ?? []).filter(
     (asset) => !asset.parcelId || asset.parcelId === parcel.id,
   );
+  if (assets.length > 1) {
+    warnings.push(
+      `${context}: thửa có ${assets.length} tài sản nhưng PL3 chỉ có một bộ cột AO–AW; các giá trị được gộp bằng "; " theo đúng thứ tự tài sản, ô trống ghi "${ASSET_EMPTY_PLACEHOLDER}".`,
+    );
+  }
   return [
-    joined(
-      assets.map((asset) =>
-        asset.assetType.trim()
-          ? labelOf(ASSET_TYPE_OPTIONS, asset.assetType, "Tài sản", warnings)
-          : "",
-      ),
+    assetColumn(assets, (asset) =>
+      asset.assetType.trim()
+        ? labelOf(ASSET_TYPE_OPTIONS, asset.assetType, "Tài sản", warnings)
+        : "",
     ),
-    joined(assets.map((asset) => asset.mixedUseBuildingName ?? "")),
-    joined(assets.map((asset) => asset.apartmentBuildingName ?? "")),
-    joined(assets.map((asset) => asset.apartmentNumber ?? "")),
-    joined(assets.map((asset) => asset.constructionArea ?? "")),
-    joined(assets.map((asset) => asset.floorArea ?? "")),
-    joined(assets.map((asset) => asset.ownershipForm ?? "")),
-    joined(assets.map((asset) => asset.ownershipTerm ?? "")),
-    joined(assets.map((asset) => asset.grade ?? "")),
+    assetColumn(assets, (asset) => asset.mixedUseBuildingName ?? ""),
+    assetColumn(assets, (asset) => asset.apartmentBuildingName ?? ""),
+    assetColumn(assets, (asset) => asset.apartmentNumber ?? ""),
+    assetColumn(assets, (asset) => asset.constructionArea ?? ""),
+    assetColumn(assets, (asset) => asset.floorArea ?? ""),
+    assetColumn(assets, (asset) => asset.ownershipForm ?? ""),
+    assetColumn(assets, (asset) => asset.ownershipTerm ?? ""),
+    assetColumn(assets, (asset) => asset.grade ?? ""),
   ];
 }
 
@@ -337,7 +359,7 @@ function buildRow(
     parcel.addressOnCertificate.trim(), // 23 địa chỉ thửa
     parcel.area.trim(), // 24 diện tích thửa
     ...landUseCells(parcel, parcelContext, warnings), // 25–39
-    ...assetCells(record, parcel, warnings), // AO–AW / trường 40–48
+    ...assetCells(record, parcel, parcelContext, warnings), // AO–AW / trường 40–48
     record.draft?.scannedFileNamesOverride?.trim() ||
       scannedFileNames(certificate.issueNumber, record.fileSummaries), // AX / trường 49
   ];
@@ -367,7 +389,10 @@ export function buildSubmissionRows(record: SubmissionRecord): Pl3BuildResult {
       rows.push(row);
     });
   });
-  return { rows, warnings };
+  // `buildRow` chạy mỗi cặp (thửa × chủ), nên cảnh báo thuộc về *thửa* — mã lạ, ghi đè trường
+  // tự động, thừa mục đích sử dụng, nhiều tài sản — bị lặp đúng bằng số đồng sở hữu. Chuỗi trùng
+  // khít nhau không mang thêm thông tin gì; giữ thứ tự xuất hiện đầu tiên.
+  return { rows, warnings: Array.from(new Set(warnings)) };
 }
 
 export interface Pl3ExportContent {

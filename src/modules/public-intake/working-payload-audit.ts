@@ -1,7 +1,16 @@
 import type { IntakeDraft } from "./types";
 
+/**
+ * Audit không cần liệt kê hết đường dẫn khi cán bộ sửa cả hồ sơ, nhưng *số lượng* thì phải đúng —
+ * đó là con số duy nhất cho biết một lần lưu chạm vào bao nhiêu trường.
+ */
+export const MAX_AUDIT_FIELD_PATHS = 250;
+
 export interface WorkingPayloadAuditSummary {
   readonly changedFieldPaths: readonly string[];
+  /** Tổng số trường đã đổi, đếm TRƯỚC khi cắt bớt `changedFieldPaths`. */
+  readonly changedFieldCount: number;
+  readonly changedFieldPathsTruncated: boolean;
   readonly automaticOverrideReasons: readonly {
     fieldPath: string;
     reason: string;
@@ -76,7 +85,9 @@ export function summarizeWorkingPayloadChanges(
   });
 
   return {
-    changedFieldPaths: changedFieldPaths.slice(0, 250),
+    changedFieldPaths: changedFieldPaths.slice(0, MAX_AUDIT_FIELD_PATHS),
+    changedFieldCount: changedFieldPaths.length,
+    changedFieldPathsTruncated: changedFieldPaths.length > MAX_AUDIT_FIELD_PATHS,
     automaticOverrideReasons,
   };
 }

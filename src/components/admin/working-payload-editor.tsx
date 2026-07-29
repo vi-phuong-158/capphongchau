@@ -9,9 +9,11 @@ import {
   WARD_ADMIN_CODE,
 } from "@/modules/public-intake/reference";
 import {
+  detachAssetsFromMissingParcels,
   emptyAsset,
   emptyOwner,
   isOrganisationOwner,
+  migrateLegacyOrganisationOwner,
   OWNER_TYPE_LABELS,
   OWNER_TYPES,
   type Asset,
@@ -110,38 +112,33 @@ export function WorkingPayloadEditor({
 }: WorkingPayloadEditorProps) {
   const [changeNote, setChangeNote] = useState("");
 
+  /**
+   * Mọi thao tác sửa trên một dòng tổ chức cũ phải di trú F/G trước — xem
+   * `migrateLegacyOrganisationOwner`.
+   */
   const updateOwner = <TField extends keyof Owner>(
     index: number,
     field: TField,
     value: Owner[TField],
   ) => {
     const owners = [...draft.owners];
-    owners[index] = { ...owners[index], [field]: value };
+    owners[index] = { ...migrateLegacyOrganisationOwner(owners[index]), [field]: value };
     onChange({ ...draft, owners });
   };
 
-  const updateOrganisation = (
-    index: number,
-    field: "organisationName" | "organisationIdentityNumber",
-    value: string,
-  ) => {
+  /**
+   * Đổi pháp nhân KHÔNG di trú: chuyển một dòng tổ chức cũ về cá nhân nghĩa là cán bộ khẳng định
+   * `fullName` vốn là tên người, nên phải giữ nguyên tại chỗ thay vì đẩy sang ô tên tổ chức.
+   */
+  const updateOwnerType = (index: number, ownerType: Owner["ownerType"]) => {
     const owners = [...draft.owners];
-    const current = owners[index];
-    const legacy = !current.organisationName?.trim() && !current.organisationIdentityNumber?.trim();
-    owners[index] = {
-      ...current,
-      organisationName:
-        field === "organisationName"
-          ? value
-          : current.organisationName || (legacy ? current.fullName : ""),
-      organisationIdentityNumber:
-        field === "organisationIdentityNumber"
-          ? value
-          : current.organisationIdentityNumber || (legacy ? current.identityNumber : ""),
-      fullName: legacy ? "" : current.fullName,
-      identityNumber: legacy ? "" : current.identityNumber,
-    };
+    owners[index] = { ...owners[index], ownerType };
     onChange({ ...draft, owners });
+  };
+
+  /** Xóa thửa phải gỡ tham chiếu tài sản — xem `detachAssetsFromMissingParcels`. */
+  const updateParcels = (parcels: Parcel[]) => {
+    onChange({ ...draft, parcels, assets: detachAssetsFromMissingParcels(draft.assets, parcels) });
   };
 
   const updateAsset = <TField extends keyof Asset>(
@@ -331,7 +328,7 @@ export function WorkingPayloadEditor({
                       disabled={readOnly}
                       value={owner.ownerType}
                       onChange={(event) =>
-                        updateOwner(index, "ownerType", event.target.value as Owner["ownerType"])
+                        updateOwnerType(index, event.target.value as Owner["ownerType"])
                       }
                       className={inputClass}
                     >
@@ -359,7 +356,7 @@ export function WorkingPayloadEditor({
                             owner.organisationName || (legacyOrganisation ? owner.fullName : "")
                           }
                           onChange={(event) =>
-                            updateOrganisation(index, "organisationName", event.target.value)
+                            updateOwner(index, "organisationName", event.target.value)
                           }
                           className={inputClass}
                         />
@@ -372,11 +369,7 @@ export function WorkingPayloadEditor({
                             (legacyOrganisation ? owner.identityNumber : "")
                           }
                           onChange={(event) =>
-                            updateOrganisation(
-                              index,
-                              "organisationIdentityNumber",
-                              event.target.value,
-                            )
+                            updateOwner(index, "organisationIdentityNumber", event.target.value)
                           }
                           className={inputClass}
                         />
@@ -505,7 +498,7 @@ export function WorkingPayloadEditor({
       <EditableParcelTable
         parcels={draft.parcels}
         readOnly={readOnly}
-        onChange={(parcels: Parcel[]) => onChange({ ...draft, parcels })}
+        onChange={updateParcels}
       />
 
       <Section
