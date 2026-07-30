@@ -1,570 +1,497 @@
 # CHATGPT HANDOFF REPORT
 
+> Báo cáo này **thay thế** báo cáo Đợt 2B. Nội dung 2B được giữ nguyên ở
+> `docs/brain/06-ai-working-log.md` và ở commit `6942381`/`7bb4341` — không mất gì.
+
 ## 1. Report metadata
 
 - Project: `land-ocr-180` (capphongchau) — thu thập và kiểm tra hồ sơ đất đai Phường Phong Châu
 - Repository path: `/home/user/capphongchau`
 - Generated at: 2026-07-30
 - Agent: Claude Code
-- Task: **Đợt 2B** của kế hoạch redesign màn duyệt hồ sơ — bốn hạng mục hiệu năng: (a) server-priming
-  trang `/submissions/[submissionId]`, (b) truy vấn một tệp `findActiveFile`, (c) tải ảnh theo yêu
-  cầu trong split-screen viewer, (d) lazy-load panel AI. Người dùng yêu cầu: *"commit xong tiếp tục
-  thực hiện 2B"*.
-- Status: `READY_FOR_COMMIT` (đã commit local `7bb4341`; **chưa push, chưa merge, chưa deploy**)
-- Source plan: hội thoại với người dùng; phạm vi 2B đã được ghi thành văn từ Đợt 2A trong
-  `docs/brain/04-current-tasks.md`: *"2B — CHƯA LÀM: server-priming, lazy-load ảnh trong
-  split-screen viewer, single-file query (`findActiveFile`), lazy-load AI panel."*
-- Source acceptance criteria: mục 13 dưới đây. Không có tài liệu AC riêng cho 2B; tiêu chí suy ra từ
-  phạm vi bốn hạng mục trên **cộng thêm** hai ràng buộc bắt buộc do chính thay đổi sinh ra: giữ
-  audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` và giữ `no-store` khi PII chuyển vào HTML.
+- Task: hai việc trong một phiên, hai commit riêng:
+  - **(A)** Test cho hai điểm Đợt 2B sửa mà không test nào khóa được (`src/proxy.ts` header
+    `no-store`; nhánh `notFound()` của `/submissions/[submissionId]/page.tsx`).
+  - **(B) Đợt 2C** — cán bộ tự tải ảnh giấy tờ cá nhân/GCN bổ sung khi hồ sơ nộp thiếu.
+  Người dùng yêu cầu: *"Làm 2 test đó rồi sang 2C"*.
+- Nhánh: `claude/redesign-document-review-screen-tfuvov`
+- Baseline khi bắt đầu: `6942381`
+- HEAD khi kết thúc: `af4b9e1`
+- Status: `READY_FOR_REVIEW` — đã commit local; **chưa push, chưa merge, chưa deploy**
+- Migration: **KHÔNG CÓ**
+- Source plan: phạm vi 2C đã được ghi thành văn từ Đợt 2B trong `docs/brain/04-current-tasks.md`:
+  *"2C — CHƯA LÀM (tính năng mới, người dùng yêu cầu thêm): cán bộ tự tải ảnh giấy tờ cá nhân/GCN
+  bổ sung khi hồ sơ nộp thiếu — cần endpoint mới vì API upload hiện tại của người dân bị khóa theo
+  session cookie + trạng thái hồ sơ, cán bộ không dùng lại được trực tiếp."*
 - Source security constraints: `CLAUDE.md` (không lộ PII/token trong log, không hardcode secret,
-  không đổi stack, không thêm tính năng ngoài scope), `docs/brain/02-coding-rules.md`, và cam kết
-  không lộ email công vụ cán bộ ra cổng công khai (`src/modules/submissions/assigned-officer.ts`).
+  không đổi stack, không thêm tính năng ngoài scope), `docs/brain/02-coding-rules.md`.
 
 ## 2. Git identity
 
-- Current branch: `claude/redesign-document-review-screen-tfuvov`
-- Remote: `origin` → `https://github.com/vi-phuong-158/capphongchau` (remote đang ở `c17254c`)
-- Base commit before work: `2d67eb2` (đầu ra Đợt 2A-3)
-- Head commit after work: `7bb4341`
-- Commit created: **1** — `7bb4341` *perf(submissions): Đợt 2B - nạp sẵn màn duyệt trên server, tải
-  ảnh/AI theo yêu cầu*
-- Working tree state: sạch (`git status --short` không ra dòng nào)
-- User changes detected before work: không có; cây làm việc sạch tại `2d67eb2` khi bắt đầu
-- User changes preserved: có — không ghi đè, không revert bất kỳ thay đổi nào của người dùng.
-  `next-env.d.ts` do `npm run build` tự sinh lại đã được revert, không đưa vào commit.
-
 ### Git status
 
-```text
-(rỗng — cây làm việc sạch sau commit 7bb4341)
+Sạch tại thời điểm viết báo cáo (trước khi commit chính file này):
+
+```
+(không có thay đổi chưa commit)
 ```
 
-### Diff statistics
+`next-env.d.ts` bị `npm run build` sửa đã được `git checkout` trả về nguyên trạng — **không** commit
+vào đợt này.
 
-```text
- docs/brain/01-architecture.md                      |  46 ++++++
- docs/brain/03-decisions.md                         |  41 ++++++
- docs/brain/04-current-tasks.md                     |  14 +-
- docs/brain/06-ai-working-log.md                    |  72 ++++++++++
- .../submissions/current/files/[fileId]/route.ts    |   4 +-
- .../[submissionId]/files/[fileId]/route.ts         |   4 +-
- src/app/api/submissions/[submissionId]/route.ts    |  51 +------
- src/app/submissions/[submissionId]/page.tsx        |  37 ++++-
- src/components/admin/ai-draft-panel.tsx            | 114 ++++++++++++---
- src/components/admin/document-viewer.tsx           | 151 ++++++++++++++++----
- src/components/submission-detail.tsx               |  50 +++----
- src/modules/public-intake/repository.ts            |  19 +++
- src/modules/submissions/detail-view.ts             | 102 +++++++++++++
- src/proxy.ts                                       |  11 +-
- tests/citizen-submit-validation.test.ts            |   1 +
- tests/completion-checks.test.ts                    |   1 +
- tests/exports-route.test.ts                        |   1 +
- tests/manual-identity-confirmation-route.test.ts   |   1 +
- tests/payload-layers.test.ts                       |   1 +
- tests/pl3-export-large-certificate.test.ts         |   1 +
- tests/pl3-export.test.ts                           |   1 +
- tests/submission-acceptance.test.ts                |   1 +
- tests/submission-claim.test.ts                     |   1 +
- tests/submission-detail-view.test.ts               | 158 +++++++++++++++++++++
- tests/submission-file-single-query.test.ts         | 109 ++++++++++++++
- tests/submission-patch-staff-edit-closed.test.ts   |   1 +
- tests/submission-review.test.ts                    |   1 +
- tests/working-payload.test.ts                      |   1 +
- 28 files changed, 870 insertions(+), 125 deletions(-)
+### Commits
+
+```
+af4b9e1 feat(submissions): Đợt 2C - cán bộ tự tải ảnh giấy tờ bổ sung vào hồ sơ
+b548c7d test(submissions): khóa header no-store của proxy và nhánh notFound của trang duyệt
+6942381 docs: cập nhật CHATGPT_HANDOFF.md cho Đợt 2B          ← baseline
+7bb4341 perf(submissions): Đợt 2B - nạp sẵn màn duyệt trên server, tải ảnh/AI theo yêu cầu
+```
+
+### Diff statistics (`6942381..af4b9e1`)
+
+```
+ AGENTS.md                                          |   2 +
+ docs/brain/01-architecture.md                      |  37 ++-
+ docs/brain/03-decisions.md                         |  39 +++
+ docs/brain/04-current-tasks.md                     |  13 +-
+ docs/brain/06-ai-working-log.md                    |  46 ++++
+ .../submissions/current/uploads/complete/route.ts  |  36 +--
+ .../submissions/current/uploads/initiate/route.ts  |   8 +-
+ .../[submissionId]/uploads/complete/route.ts       | 266 ++++++++++++++++++++
+ .../[submissionId]/uploads/initiate/route.ts       | 247 ++++++++++++++++++
+ src/components/admin/officer-file-upload.tsx       | 278 +++++++++++++++++++++
+ src/components/submission-detail.tsx               |  21 ++
+ src/modules/public-intake/repository.ts            |   8 +-
+ src/modules/public-intake/upload-commit.ts         |  54 ++++
+ tests/officer-file-upload.test.ts                  | 258 +++++++++++++++++++
+ tests/proxy-no-store.test.ts                       |  71 +++++
+ tests/public-upload-complete-route.test.ts         |  19 +-
+ tests/submission-detail-page.test.ts               | 127 ++++++++++
+ tests/upload-metrics.test.ts                       |  22 +-
+ 18 files changed, 1523 insertions(+), 52 deletions(-)
 ```
 
 ### Name status
 
-```text
-M	docs/brain/01-architecture.md
-M	docs/brain/03-decisions.md
-M	docs/brain/04-current-tasks.md
-M	docs/brain/06-ai-working-log.md
-M	src/app/api/public/submissions/current/files/[fileId]/route.ts
-M	src/app/api/submissions/[submissionId]/files/[fileId]/route.ts
-M	src/app/api/submissions/[submissionId]/route.ts
-M	src/app/submissions/[submissionId]/page.tsx
-M	src/components/admin/ai-draft-panel.tsx
-M	src/components/admin/document-viewer.tsx
-M	src/components/submission-detail.tsx
-M	src/modules/public-intake/repository.ts
-A	src/modules/submissions/detail-view.ts
-M	src/proxy.ts
-M	tests/citizen-submit-validation.test.ts
-M	tests/completion-checks.test.ts
-M	tests/exports-route.test.ts
-M	tests/manual-identity-confirmation-route.test.ts
-M	tests/payload-layers.test.ts
-M	tests/pl3-export-large-certificate.test.ts
-M	tests/pl3-export.test.ts
-M	tests/submission-acceptance.test.ts
-M	tests/submission-claim.test.ts
-A	tests/submission-detail-view.test.ts
-A	tests/submission-file-single-query.test.ts
-M	tests/submission-patch-staff-edit-closed.test.ts
-M	tests/submission-review.test.ts
-M	tests/working-payload.test.ts
+```
+A  src/app/api/submissions/[submissionId]/uploads/initiate/route.ts
+A  src/app/api/submissions/[submissionId]/uploads/complete/route.ts
+A  src/modules/public-intake/upload-commit.ts
+A  src/components/admin/officer-file-upload.tsx
+A  tests/officer-file-upload.test.ts
+A  tests/proxy-no-store.test.ts
+A  tests/submission-detail-page.test.ts
+M  src/modules/public-intake/repository.ts
+M  src/components/submission-detail.tsx
+M  src/app/api/public/submissions/current/uploads/initiate/route.ts
+M  src/app/api/public/submissions/current/uploads/complete/route.ts
+M  tests/public-upload-complete-route.test.ts
+M  tests/upload-metrics.test.ts
+M  AGENTS.md
+M  docs/brain/01-architecture.md
+M  docs/brain/03-decisions.md
+M  docs/brain/04-current-tasks.md
+M  docs/brain/06-ai-working-log.md
 ```
 
 ## 3. Executive summary
 
-**Vấn đề cần giải quyết.** Màn duyệt hồ sơ của cán bộ có bốn nguồn chậm đã được ghi thành văn từ Đợt
-2A nhưng chưa xử lý:
+**(A) `b548c7d` — test cho hai điểm không có test của Đợt 2B.** Không sửa một dòng source nào.
 
-1. Trang là server component rỗng, `SubmissionDetail` tự gọi `GET /api/submissions/:id` **sau khi
-   hydrate** — cán bộ phải chờ chuỗi HTML → tải JS → hydrate → fetch → mới thấy dữ liệu, kèm một lần
-   xác thực và một lần đọc hồ sơ trùng lặp.
-2. Route phục vụ ảnh gọi `listFiles(submissionId)` rồi `.find(...)`: kéo **toàn bộ** ảnh của hồ sơ về
-   chỉ để lấy một tệp.
-3. Ảnh giấy tờ trả `cache-control: private, no-store` (đúng — là PII), nên mỗi lần thẻ `<img>` mount
-   lại là **một lần tải lại từ Drive kèm một dòng audit**. Khung toàn màn hình render thêm một
-   `<img>` cùng `src`, nên **mở toàn màn hình tải đúng ảnh đó hai lần**; chuyển qua lại giữa các tab
-   ảnh cũng tải lại từ đầu.
-4. Panel AI fetch ngay khi render **và** fetch lại mỗi lần `version` đổi — mỗi lần lưu bàn làm việc
-   hay lưu ghi chú nội bộ cũng kéo theo một lần tải kết quả AI, dù phần lớn hồ sơ không có kết quả AI
-   nào và panel render ra rỗng (`return null`).
+1. `src/proxy.ts` gắn `cache-control: private, no-store` vì trang duyệt hồ sơ giờ nạp sẵn PII vào
+   HTML. `tests/public-surface-guard.test.ts` chỉ soi `matcher`, nên gỡ dòng header đi thì test vẫn
+   xanh trong khi HTML chứa số điện thoại/CCCD/địa chỉ được phép nằm lại trong cache trung gian.
+2. `page.tsx` phân biệt `loadSubmissionDetail` trả `null` (hồ sơ không tồn tại → `notFound()`) với
+   việc nó **ném lỗi** (sự cố tạm → vẫn render, `initialSubmission={null}` để client tự fetch). Hai
+   nhánh cách nhau đúng một dòng sửa; đảo chúng thì cán bộ thấy "không tìm thấy hồ sơ" khi cơ sở dữ
+   liệu chỉ chớp tắt một nhịp, mà typecheck và lint đều không kêu.
 
-**Phương án đã thực hiện.** Nạp sẵn hồ sơ trên server qua hàm dùng chung
-`loadSubmissionDetail()`; thêm `findActiveFile()` truy vấn một ảnh; viewer fetch ảnh thành blob một
-lần/ảnh rồi dùng chung object URL cho cả hai khung; panel AI thành accordion thu gọn chỉ gọi API khi
-mở. Hai ràng buộc bắt buộc phát sinh từ chính thay đổi (1) đã được xử lý có chủ đích: audit
-`SUBMISSION_SENSITIVE_DETAIL_VIEWED` đặt **trong** hàm dùng chung để không mất dấu vết, và
-`src/proxy.ts` gắn `cache-control: private, no-store` cho toàn bộ matcher cán bộ vì PII giờ nằm
-trong chính tài liệu HTML.
+**(B) `af4b9e1` — Đợt 2C.** Cán bộ tự tải ảnh giấy tờ bổ sung.
 
-**Kết quả.** Typecheck 0 lỗi, lint 0 lỗi/5 warning có sẵn, test **687 pass/10 skip** (679 + 8 test
-mới), build đạt. Không migration.
+Dự đoán trong `04-current-tasks.md` là đúng: **không dùng lại được** đường của hộ dân.
+`resolvePublicRequest` xác thực bằng cookie phiên kê khai ẩn danh, và `isEditable(record)` đòi
+`DRAFT`/`NEEDS_SUPPLEMENT` **và** chưa ai nhận xử lý. Đúng lúc cán bộ cần thêm ảnh thì cả hai điều
+kiện đều sai: hồ sơ đang `UNDER_REVIEW` và do chính họ giữ. Nới `isEditable` để chứa trường hợp này
+là mở lại đường ghi cho hộ dân trong khi cán bộ đang làm — đúng thứ Đợt 2A-3 vừa đóng.
 
-**Nội dung chưa hoàn thành.** (a) **Chưa có số đo P50/P95 trên Preview** — không tuyên bố đạt mục
-tiêu hiệu năng nào. (b) Phần client (lazy ảnh, accordion) **không có test tự động**: repo chưa có hạ
-tầng test component React (không có `@testing-library/*` hay jsdom/happy-dom) và thêm vào là đổi
-stack, ngoài phạm vi task. (c) Đợt 2C chưa làm.
+Cửa vào của đường mới là `mayStaffEdit` — **đang giữ hồ sơ và hồ sơ `UNDER_REVIEW`** — cùng chốt với
+`PATCH /api/submissions/:id` và Bàn làm việc PL3. Không mở khái niệm quyền mới.
 
-**Đã phát hiện và sửa một báo cáo sai của chính mình.** Báo cáo Đợt 2A-2 và 2A-3 ghi "typecheck 0
-lỗi" là **sai**: `npm run typecheck` dùng `tsconfig.typecheck.json` (có `tests/`, khác
-`tsconfig.json` vốn loại `tests`), và tại `2d67eb2` có **12 lỗi** do fixture test thiếu
-`internalNotes` sau khi 2A-2 thêm trường bắt buộc này vào `SubmissionRecord`. Vitest không typecheck
-nên test vẫn xanh và lỗi bị lọt. Đã sửa cả 12.
-
-**Trạng thái đề xuất.** `READY_FOR_COMMIT` — chờ người dùng quyết định push/PR.
+**Phát hiện ngoài dự kiến:** một test đang **xanh sai** từ trước, chưa bao giờ kiểm đúng thứ nó nói.
+Chi tiết ở §11.
 
 ## 4. Baseline before changes
 
-Baseline đo tại `2d67eb2` (trước mọi thay đổi của đợt này).
+Chạy tại `6942381` **trước** khi sửa gì:
 
-| Check             | Command            | Result                                    | Evidence                                                                 |
-| ----------------- | ------------------ | ----------------------------------------- | ------------------------------------------------------------------------ |
-| Unit tests        | `npx vitest run`   | **679 pass / 10 skip**, 78 file pass/2 skip | Chạy tại `2d67eb2`                                                       |
-| Integration tests | —                  | Không có bộ riêng                         | Test tích hợp nằm chung trong `tests/` (mock repository/storage)          |
-| E2E tests         | `npm run test:e2e` | **KHÔNG CHẠY**                            | Cần Preview URL + credential rehearsal; không có trong môi trường này    |
-| Build             | `npm run build`    | Đạt                                       | Turbopack build                                                          |
-| Lint              | `npm run lint`     | **0 lỗi / 5 warning có sẵn**              | `scripts/add-system-admins.ts` (2), `tests/staging-rehearsal-scenarios.test.ts` (3) |
-| Typecheck         | `npm run typecheck`| **12 LỖI CÓ SẴN**                         | Xem bảng dưới — hồi quy từ 2A-2, đã bị báo cáo sai là "0 lỗi"            |
+| Lệnh                | Kết quả baseline                                |
+| ------------------- | ----------------------------------------------- |
+| `npm run typecheck` | 0 lỗi                                           |
+| `npm run lint`      | 0 lỗi, **5 warning có sẵn**                     |
+| `npx vitest run`    | **687 pass / 10 skip** (82 file pass, 2 skip)   |
+| `npm run build`     | đạt                                             |
 
-**12 lỗi typecheck đã tồn tại từ trước** (không phải do đợt này sinh ra) — tất cả cùng một nguyên
-nhân: fixture `SubmissionRecord` trong test thiếu trường bắt buộc `internalNotes` mà Đợt 2A-2 đã
-thêm:
-
-```text
-tests/citizen-submit-validation.test.ts(103,10)        TS2352
-tests/completion-checks.test.ts(79,3)                  TS2741
-tests/exports-route.test.ts(113,3)                     TS2322
-tests/manual-identity-confirmation-route.test.ts(73,3) TS2741
-tests/payload-layers.test.ts(42,3)                     TS2322
-tests/pl3-export-large-certificate.test.ts(54,3)       TS2741
-tests/pl3-export.test.ts(110,3)                        TS2741
-tests/submission-acceptance.test.ts(12,3)              TS2322
-tests/submission-claim.test.ts(7,3)                    TS2741
-tests/submission-patch-staff-edit-closed.test.ts(77,3) TS2322
-tests/submission-review.test.ts(16,3)                  TS2322
-tests/working-payload.test.ts(86,3)                    TS2741
-```
-
-Đợt này **đã sửa hết 12 lỗi baseline đó**, nên bảng mục 12 ghi 0 lỗi. Không trộn lẫn: 2 lỗi typecheck
-do đợt này sinh ra trong lúc làm (`readonly` array truyền vào `DocumentFile[]`, `IntakeChannel` import
-sai module) cũng đã sửa trước khi commit.
+5 warning lint có từ trước (2 ở `scripts/add-system-admins.ts`, 3 ở
+`tests/staging-rehearsal-scenarios.test.ts`), không do đợt này và không sửa (ngoài phạm vi).
 
 ## 5. Scope
 
 ### In scope
 
-- Server-priming trang `/submissions/[submissionId]` + module dùng chung
-  `src/modules/submissions/detail-view.ts`.
-- `PublicIntakeRepository.findActiveFile()` và áp dụng vào 2 route phục vụ ảnh.
-- Tải ảnh theo yêu cầu + giữ blob trong bộ nhớ trang ở `document-viewer.tsx`.
-- Panel AI thành accordion lazy ở `ai-draft-panel.tsx`.
-- `cache-control: private, no-store` cho matcher cán bộ trong `src/proxy.ts` — **bắt buộc đi kèm**
-  server-priming, không phải hạng mục rời (xem mục 10 → Sensitive data).
-- Sửa 12 lỗi typecheck baseline (fixture test thiếu `internalNotes`).
-- Cập nhật `docs/brain/01-architecture.md` (Code Graph), `03-decisions.md`, `04-current-tasks.md`,
-  `06-ai-working-log.md`.
+- Test cho `src/proxy.ts` (header `no-store`) và cho nhánh `notFound()` của
+  `/submissions/[submissionId]/page.tsx`.
+- Đợt 2C: hai endpoint tải ảnh cho cán bộ, ô tải ảnh trên màn duyệt, và test.
+- Tách trần số ảnh/dung lượng và `discardIfOrphan` sang module dùng chung.
+- Cập nhật `docs/brain/{01,03,04,06}` và `AGENTS.md`.
 
-### Out of scope
+### Out of scope — cố tình KHÔNG làm
 
-- Không đổi stack, không thêm dependency nào (kể cả hạ tầng test component React).
-- Không đổi nghiệp vụ, phân quyền, schema, hay hợp đồng API (trừ việc `GET /api/submissions/:id` giờ
-  dựng phản hồi từ hàm dùng chung — **trường và giá trị giữ nguyên**).
-- Không migration.
-- Không nới `cache-control` của ảnh giấy tờ — `private, no-store` giữ nguyên.
-- Không làm Đợt 2C (cán bộ tự tải ảnh bổ sung).
-- Không chạy migration `202607290005_submission_internal_notes.sql` (còn nợ từ 2A-2).
-- Không push, không merge, không deploy.
+- **`DELETE` ảnh cho cán bộ.** Chưa có, nên gỡ hẳn một ảnh sai vẫn phải thay bằng ảnh khác. Không
+  tự thêm: xóa bằng chứng khỏi hồ sơ là một quyết định nghiệp vụ riêng.
+- **Mở tải ảnh cho hồ sơ đã `ACCEPTED`.** Đường đó là `mayAmendOfficialRecord`, đòi
+  `amendmentReason`.
+- **Nới `API_ERROR_CODES`.** Xem §10.
+- **Chuẩn hóa/nén ảnh ở client** như luồng hộ dân. Xem §6 quyết định #8.
+- **`@testing-library/react` + jsdom.** Thêm devDependency chưa được duyệt, nên `OfficerFileUpload`
+  và phần lazy ảnh/accordion của 2B vẫn không có test render.
+- 5 warning lint có sẵn.
 
 ### Deviations from approved plan
 
-- **Thêm ngoài bốn hạng mục đã nêu: header `no-store` trong `src/proxy.ts`.** Lý do: server-priming
-  chuyển PII của hộ dân từ phản hồi JSON (đã có `no-store`) vào **chính tài liệu HTML**. Làm (a) mà
-  không làm việc này là tự tạo lỗ hổng cache. Tác động: 5 nhóm đường dẫn cán bộ trong matcher đều
-  nhận thêm header; tất cả đều là bề mặt cần đăng nhập và không có trang nào trong đó nên được cache.
-- **Thêm ngoài phạm vi: sửa 12 lỗi typecheck baseline.** Lý do: đây là hồi quy của chính tôi từ 2A-2
-  và đã bị tôi báo cáo sai là "0 lỗi"; để lại thì mọi lần chạy typecheck sau đều đỏ và không phân
-  biệt được lỗi mới. Tác động: chỉ thêm một dòng `internalNotes: ""` vào fixture, không đổi khẳng
-  định test nào.
-- **Gộp kiểu dữ liệu (`type Submission = SubmissionDetailView`) thay vì giữ hai bản khai.** Lý do:
-  server-priming buộc trang server và component client dùng cùng một hình dạng dữ liệu; giữ hai bản
-  khai là tái tạo đúng lớp lỗi mà 2A-2 đã gặp (phải thêm `internalNotes` ở hai nơi). Tác động: kiểu
-  chặt hơn (`status` là `PublicStatus` thay vì `string`), đã lộ ra 2 điểm cần sửa và đã sửa.
+Một điều chỉnh so với phạm vi tối thiểu, đã cân nhắc: **tách `MAX_CERTIFICATE_PHOTOS`,
+`SUBMISSION_BYTE_BUDGET` và `discardIfOrphan` ra `src/modules/public-intake/upload-commit.ts`** thay
+vì để mỗi route giữ bản riêng. Đây là chạm vào file của bề mặt công khai, tức rộng hơn "chỉ thêm cái
+mới" — nhưng hai đường ghi vào **cùng thư mục Drive và cùng bảng `public_files`**, nên trần là trần
+của *hồ sơ*: để hai bản là sửa một bên thành hai bên lệch nhau, và cán bộ tải thêm ảnh sẽ vượt ngân
+sách mà bên kia vẫn tưởng còn chỗ. `discardIfOrphan` theo cùng vì bất biến "không bao giờ xóa tệp cơ
+sở dữ liệu đã nhận" phải giống nhau ở cả hai đường.
+
+Hành vi của đường hộ dân **không đổi một dòng logic nào** — chỉ đổi nơi import. 14 ca của
+`tests/public-upload-complete-route.test.ts` và 27 ca của `tests/upload-metrics.test.ts` vẫn xanh.
 
 ## 6. Decisions implemented
 
-| Decision | Implementation | Evidence |
-| -------- | -------------- | -------- |
-| Nạp sẵn hồ sơ trên server, client chỉ fetch khi nạp sẵn lỗi | `page.tsx` gọi `loadSubmissionDetail` → prop `initialSubmission`; `useState(initialSubmission)`; effect `if (initialSubmission) return;` | `src/app/submissions/[submissionId]/page.tsx`, `src/components/submission-detail.tsx` |
-| Audit không được mất khi bỏ vòng fetch của client | `appendAudit` đặt **trong** `loadSubmissionDetail`, không ở route | `tests/submission-detail-view.test.ts` — "ghi đúng MỘT dòng audit" |
-| PII trong HTML phải có `no-store` | `response.headers.set("cache-control", "private, no-store")` cho toàn matcher cán bộ | `src/proxy.ts` |
-| Một truy vấn cho một ảnh, giữ nguyên ngữ nghĩa `status = 'UPLOADED'` | `findActiveFile()` + áp dụng 2 route | `tests/submission-file-single-query.test.ts` — "dùng findActiveFile, không gọi listFiles" |
-| Không nới `no-store` của ảnh; thay vào đó giữ blob trong bộ nhớ trang | `usePreviewImages` + `URL.createObjectURL` + `revokeObjectURL` khi unmount | `tests/submission-file-single-query.test.ts` — "giữ no-store" |
-| Panel AI chỉ gọi API khi mở, vẫn tải lại theo `version` nếu đang mở | effect có điều kiện `if (!open \|\| loadedVersion === version) return;` | `src/components/admin/ai-draft-panel.tsx` |
-| Hình dạng dữ liệu màn duyệt về một nguồn | `SubmissionDetailView` export từ `detail-view.ts`; component dùng `type Submission = SubmissionDetailView` | `src/modules/submissions/detail-view.ts` |
+| #   | Quyết định                                                                | Lý do |
+| --- | ------------------------------------------------------------------------- | ----- |
+| 1   | Endpoint riêng `POST /api/submissions/:id/uploads/initiate\|complete`      | Đường hộ dân khóa theo cookie phiên + `isEditable`; nới ra là mở lại đường ghi cho hộ dân khi cán bộ đang làm |
+| 2   | Cửa quyền `mayStaffEdit` + `SUBMISSION_DECISION_ROLES` + CSRF cán bộ       | Ảnh giấy tờ là dữ liệu của hồ sơ → đi đúng cửa đang dùng cho dữ liệu của hồ sơ. Nghiệp vụ đổi thì sửa một hằng số, không phải ba route |
+| 3   | Chủ sử dụng đọc từ `effectivePayload(record).owners`, không từ `record.draft` | Chủ do cán bộ thêm ở Bàn làm việc chỉ tồn tại ở `working_payload`; đọc `draft_json` là ảnh CCCD của chủ vừa thêm không gắn được vào ai |
+| 4   | `request_log.kind = OFFICER_UPLOAD_COMPLETE`                              | `findStoredMutation` lọc theo cả khóa **và** loại; dùng chung là hai đường đọc được replay của nhau — cán bộ gửi lại một khóa hộ dân đã dùng sẽ nhận về `fileId` của hộ dân |
+| 5   | Thay ảnh CCCD **đòi `replaceFileId`** tường minh                          | `appendFile` tự đánh `REPLACED` cho ảnh cùng chủ + cùng mặt → không chặn là một lần bấm nhầm đẩy bằng chứng đang dùng xuống lịch sử mà cán bộ không biết |
+| 6   | Trần + `discardIfOrphan` sang `upload-commit.ts` dùng chung               | Trần là trần của hồ sơ, không của một đường |
+| 7   | **Không** nới `API_ERROR_CODES`                                           | Bề mặt công khai mở rộng **cục bộ** (`PublicErrorCode`), không nới bộ mã chung. Nới là đổi hợp đồng API cho mọi client cán bộ đang `switch` theo mã, mà client chỉ hiển thị `error.message` |
+| 8   | **Không** chuẩn hóa/nén ảnh ở client                                      | Bên hộ dân nén để dùng được 3G; cán bộ ngồi máy có dây và cần giữ nét để đọc số GCN. Trần `MAX_UPLOAD_MB` của server vẫn áp |
+| 9   | Tên tệp Drive có tiền tố `OFFICER-`                                       | Nhìn thư mục Drive là biết ảnh nào do cán bộ bổ sung. Ai bổ sung thì tra `audit_logs`, **không** nhét email vào tên tệp |
+
+Đã ghi đầy đủ vào `docs/brain/03-decisions.md`.
 
 ## 7. Changed files
 
-| File | Change type | Symbols/routes/components affected | Purpose | Risk |
-| ---- | ----------- | ---------------------------------- | ------- | ---- |
-| `src/modules/submissions/detail-view.ts` | Added | `SubmissionDetailView`, `loadSubmissionDetail()` | Đường đọc duy nhất của màn duyệt, có ghi audit; kiểu dữ liệu nguồn duy nhất | **Trung bình** — mọi lần đọc hồ sơ của cán bộ đi qua đây; sửa sai là ảnh hưởng cả API và trang |
-| `src/app/submissions/[submissionId]/page.tsx` | Modified | `SubmissionDetailPage` | Nạp sẵn hồ sơ trên server, `notFound()` khi không có, chịu lỗi tạm để client tự fetch | Trung bình — đổi thời điểm đọc dữ liệu và thêm nhánh `notFound()` |
-| `src/app/api/submissions/[submissionId]/route.ts` | Modified | `GET` (PATCH **không đổi**) | GET dựng phản hồi từ `loadSubmissionDetail`; bỏ 40 dòng dựng DTO trùng lặp; bỏ import `payloadLayerOf` không còn dùng | Thấp — trường và giá trị phản hồi giữ nguyên |
-| `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts` | Modified | `GET` | Dùng `findActiveFile` thay `listFiles` + `.find` | Thấp |
-| `src/app/api/public/submissions/current/files/[fileId]/route.ts` | Modified | `GET` (nhánh dự phòng; `DELETE` **không đổi**) | Dùng `findActiveFile` ở nhánh dự phòng; nhánh nhanh `record.fileSummaries` giữ nguyên | Thấp — `DELETE` cố ý không đổi vì cần cả trạng thái `DELETED` |
-| `src/modules/public-intake/repository.ts` | Modified | `findActiveFile()` (mới) | Truy vấn một ảnh theo `(submission_id, file_id, status='UPLOADED')` | Thấp — hàm mới, không sửa hàm cũ |
-| `src/components/submission-detail.tsx` | Modified | `SubmissionDetail`, `type Submission` | Nhận `initialSubmission`; bỏ bản khai lại kiểu; siết `status` thành `PublicStatus` ở 2 kiểu phản hồi cục bộ; bỏ import `IntakeDraft` không còn dùng | Trung bình — component lớn nhất của màn duyệt |
-| `src/components/admin/document-viewer.tsx` | Modified | `usePreviewImages` (mới), `DocumentViewerState`, `DocumentViewerProps.files` → `readonly` | Tải ảnh theo yêu cầu, một fetch/ảnh, trạng thái tải + nút thử lại | Trung bình — đổi cách ảnh được nạp |
-| `src/components/admin/ai-draft-panel.tsx` | Modified | `AiDraftPanel`, `renderBody()`, `renderDraft()` (mới) | Accordion lazy; `loading` thành giá trị suy ra | Thấp — panel phụ trợ, không phải đường ghi |
-| `src/proxy.ts` | Modified | proxy `auth()` handler | `cache-control: private, no-store` cho matcher cán bộ. **Matcher KHÔNG đổi** | Thấp — chỉ thêm header |
-| `docs/brain/01-architecture.md` | Modified | Code Graph | 4 khối mới: `detail-view.ts`, `page.tsx` priming, `document-viewer.tsx`, `ai-draft-panel.tsx`; thêm `findActiveFile` vào cây repository | — |
-| `docs/brain/03-decisions.md` | Modified | — | Entry `[2026-07-30] Đợt 2B` ở đầu file (mới nhất trước) | — |
-| `docs/brain/04-current-tasks.md` | Modified | — | 2B chuyển sang ĐÃ LÀM kèm giới hạn xác minh; ghi rõ 12 lỗi typecheck đã sửa | — |
-| `docs/brain/06-ai-working-log.md` | Modified | — | Entry bắt buộc theo `CLAUDE.md` | — |
-| `tests/submission-detail-view.test.ts` | Added | 5 ca | Khóa hành vi audit + DTO của `loadSubmissionDetail` | — |
-| `tests/submission-file-single-query.test.ts` | Added | 3 ca | Khóa `findActiveFile` + `no-store` + 404 không đọc Drive | — |
-| 12 file test khác | Modified | fixture `SubmissionRecord` | Thêm `internalNotes: ""` — sửa 12 lỗi typecheck baseline | — |
+### Mới
+
+| File | Nội dung |
+| ---- | -------- |
+| `src/app/api/submissions/[submissionId]/uploads/initiate/route.ts` | POST — tạo phiên resumable Drive cho cán bộ |
+| `src/app/api/submissions/[submissionId]/uploads/complete/route.ts` | POST — verify Drive + `appendFile` + audit |
+| `src/modules/public-intake/upload-commit.ts` | `MAX_CERTIFICATE_PHOTOS`, `SUBMISSION_BYTE_BUDGET`, `discardIfOrphan` |
+| `src/components/admin/officer-file-upload.tsx` | `OfficerFileUpload` — ô tải ảnh trên màn duyệt |
+| `tests/officer-file-upload.test.ts` | 33 ca cho đường cán bộ |
+| `tests/proxy-no-store.test.ts` | 4 ca cho header `no-store` của proxy |
+| `tests/submission-detail-page.test.ts` | 7 ca cho `page.tsx` |
+
+### Sửa
+
+| File | Symbol | Thay đổi |
+| ---- | ------ | -------- |
+| `src/modules/public-intake/repository.ts` | `appendFile` | thêm `idempotencyOptions.kind` (danh mục đóng 2 giá trị), mặc định `PUBLIC_UPLOAD_COMPLETE` |
+| `src/components/submission-detail.tsx` | `SubmissionDetail` | render `<OfficerFileUpload>` khi `isClaimedByMe && status === "UNDER_REVIEW"`; `onUploaded` gọi `loadSubmission` |
+| `src/app/api/public/.../uploads/initiate/route.ts` | (module) | gỡ 2 hằng số cục bộ, import từ `upload-commit` |
+| `src/app/api/public/.../uploads/complete/route.ts` | `discardIfOrphan` | gỡ hàm cục bộ, import từ `upload-commit` |
+| `tests/public-upload-complete-route.test.ts` | 4 ca | trỏ sang `upload-commit.ts`; bất biến không đổi |
+| `tests/upload-metrics.test.ts` | 1 ca sửa + 1 ca mới | sửa test **xanh sai** — xem §11 |
 
 ## 8. Detailed implementation by phase
 
-### Phase 1 — Server-priming + gộp đường đọc về một hàm
+### Phase A1 — `tests/proxy-no-store.test.ts`
 
-- **Mục tiêu:** bỏ vòng chờ fetch-sau-hydrate, **không** làm mất audit, **không** để PII vào cache.
-- **Các file liên quan:** `src/modules/submissions/detail-view.ts` (mới),
-  `src/app/submissions/[submissionId]/page.tsx`, `src/app/api/submissions/[submissionId]/route.ts`,
-  `src/components/submission-detail.tsx`, `src/proxy.ts`.
-- **Nội dung đã thực hiện:**
-  - `loadSubmissionDetail(submissionId, viewer, requestId)`: `findById` → `appendAudit` → `listFiles`
-    → DTO. Trả `null` khi không có hồ sơ, và khi đó **không** ghi audit, **không** gọi `listFiles`.
-  - `page.tsx` gọi hàm này; `null` → `notFound()`; ngoại lệ (lỗi DB tạm) → vẫn render với
-    `initialSubmission = null` để client tự fetch và tự báo lỗi, không làm cán bộ mất trang.
-  - `SubmissionDetail` seed state từ `initialSubmission`; effect fetch có `if (initialSubmission)
-    return;`.
-  - `GET /api/submissions/:id` dùng chung hàm đó — bỏ ~40 dòng dựng DTO trùng lặp.
-  - `SubmissionDetailView` thành kiểu nguồn duy nhất; component bỏ bản khai lại.
-  - `src/proxy.ts` gắn `cache-control: private, no-store`.
-- **Nội dung không thực hiện:** không đổi `PATCH` của route đó; không đổi matcher của proxy; không
-  thêm `revalidate`/`fetchCache` (trang đã `dynamic = "force-dynamic"`).
-- **Test đã chạy:** `npx vitest run tests/submission-detail-view.test.ts` → 5 pass. Toàn bộ suite →
-  687 pass/10 skip.
-- **Kết quả:** đạt.
-- **Rủi ro:** kiểu chặt hơn đã lộ 2 chỗ `status: string` trong kiểu phản hồi cục bộ của
-  `action`/`accept`; đã siết thành `PublicStatus`. Nếu server trả một status ngoài union thì TS không
-  bắt được — nhưng điều đó vốn đã đúng từ trước, không phải hồi quy mới.
+Mock `next-auth` để `NextAuth()` trả `{ auth: (handler) => handler }`, nhờ đó gọi được thân handler
+với request tự dựng, không cần session JWT thật hay biến môi trường Google. 4 ca: `private, no-store`
+cho phiên đã đăng nhập; chỉ thị luôn chứa `no-store` (không chỉ `private`) và không có `max-age`;
+chưa đăng nhập → 307 về trang chủ; session còn hạn nhưng **thiếu email** cũng bị coi là chưa đăng
+nhập (vì `requireActiveUser` phía Node không đối chiếu allowlist được).
 
-### Phase 2 — Truy vấn một tệp (`findActiveFile`)
+### Phase A2 — `tests/submission-detail-page.test.ts`
 
-- **Mục tiêu:** bỏ việc kéo toàn bộ ảnh của hồ sơ về để lấy một tệp.
-- **Các file liên quan:** `src/modules/public-intake/repository.ts`,
-  `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts`,
-  `src/app/api/public/submissions/current/files/[fileId]/route.ts`.
-- **Nội dung đã thực hiện:** thêm `findActiveFile` với `where submission_id = $1 and file_id = $2 and
-  status = 'UPLOADED' limit 1`; áp dụng vào route ảnh của cán bộ và nhánh **dự phòng** của route ảnh
-  công khai (nhánh nhanh `record.fileSummaries` giữ nguyên).
-- **Nội dung không thực hiện:** **cố ý không** áp dụng cho `DELETE` của route ảnh công khai — route
-  đó lọc `status === "UPLOADED" || status === "DELETED"` để trả về idempotent khi xóa lại; dùng
-  `findActiveFile` sẽ làm lần xóa thứ hai trả 404 thay vì 200.
-- **Test đã chạy:** `npx vitest run tests/submission-file-single-query.test.ts` → 3 pass.
-- **Kết quả:** đạt.
-- **Rủi ro:** **SQL của `findActiveFile` chưa chạy trên Postgres thật trong đợt này** — test dùng
-  repository mock. Điều kiện `(submission_id, file_id)` là khóa tra cứu tự nhiên nên rủi ro thấp,
-  nhưng cần xác nhận bằng thao tác thủ công ở mục 14.
+Mock `next/navigation` (`notFound`/`redirect` **ném lỗi** đúng như Next thật, để code sau lời gọi
+không chạy tiếp), `@/components/submission-detail`, `@/modules/auth/authorization`,
+`@/modules/submissions/detail-view`. 7 ca, trọng tâm là **cặp đối lập**: `null` → `notFound()`;
+`throw` → **không** `notFound()` mà vẫn render với `initialSubmission=null`.
 
-### Phase 3 — Tải ảnh theo yêu cầu trong viewer
+### Phase B1 — `initiate` (cán bộ)
 
-- **Mục tiêu:** bỏ tải trùng, chỉ tải ảnh cán bộ thực sự xem, **không** nới `no-store`.
-- **Các file liên quan:** `src/components/admin/document-viewer.tsx`.
-- **Nội dung đã thực hiện:** `usePreviewImages(submissionId)` giữ `Map<fileId, objectURL>` trong ref;
-  fetch một lần/ảnh (`pending` set chặn gọi trùng); dùng chung object URL cho khung nhỏ và khung toàn
-  màn hình; `revokeObjectURL` toàn bộ khi unmount; thêm "Đang tải ảnh…", thông báo lỗi lấy từ
-  `error.message` của API, và nút "Thử lại"; `DocumentViewerProps.files` thành `readonly`.
-- **Nội dung không thực hiện:** không prefetch các ảnh chưa chọn (sẽ ngược lại mục tiêu lazy); không
-  đổi header của route ảnh.
-- **Test đã chạy:** không có test tự động cho component (xem mục 15). Xác minh bằng typecheck, lint,
-  build và đọc code.
-- **Kết quả:** đạt về mặt biên dịch/lint/build; **hành vi runtime chưa được xác minh tự động**.
-- **Rủi ro:** đây là hạng mục rủi ro cao nhất của đợt — thay đổi cách ảnh được nạp mà không có test
-  tự động. Bắt buộc kiểm tra thủ công theo mục 14.
+Thứ tự cố định: parse Zod → `requireActiveUser(SUBMISSION_DECISION_ROLES)` → `verifyCsrfToken` →
+`findById` (404) → `mayStaffEdit` (403) → `canonicalImageMimeType` → trần `MAX_UPLOAD_MB` →
+`listFiles` **từ cơ sở dữ liệu** (không dùng `record.fileSummaries`: đường cán bộ không có phiên nào
+giữ bản chụp, và ảnh có thể vừa được thêm ở tab khác) → kiểm `replaceFileId` cùng loại giấy tờ →
+ngân sách byte → trần theo loại → `createUploadSession`.
 
-### Phase 4 — Panel AI thành accordion lazy
+Tên tệp do **máy chủ** đặt: `OFFICER-${documentType}-${Date.now()}-${randomUUID().slice(0,8)}.${ext}`.
+Không ghép mảnh nào của `body.data.fileName`; trường đó chỉ dùng để suy ra loại ảnh khi trình duyệt
+không khai được `mimeType`.
 
-- **Mục tiêu:** bỏ fetch lúc render và bỏ fetch theo mỗi lần `version` đổi khi panel đang đóng.
-- **Các file liên quan:** `src/components/admin/ai-draft-panel.tsx`.
-- **Nội dung đã thực hiện:** thêm state `open` + `loadedVersion`; effect chỉ chạy khi `open` và
-  `loadedVersion !== version`; `loading` là **giá trị suy ra** (`open && loadedVersion !== version`)
-  chứ không phải state — bắt buộc, vì quy tắc `react-hooks/set-state-in-effect` báo **lỗi** (không
-  phải warning) với `setState` đồng bộ trong thân effect; tách render thành `renderBody()` /
-  `renderDraft()`; thêm nút "Thử lại" (đặt `loadedVersion = null`).
-- **Nội dung không thực hiện:** không đổi `POST .../ai-draft/apply`; không đổi điều kiện `mayApply`.
-- **Test đã chạy:** không có test tự động cho component (xem mục 15).
-- **Kết quả:** đạt về biên dịch/lint/build.
-- **Rủi ro:** thay đổi giao diện thấy được — xem mục 9.
+### Phase B2 — `complete` (cán bộ)
+
+Hai điểm về thứ tự, cả hai là bài học đã có từ đường hộ dân:
+
+1. **Replay đứng trước mọi kiểm tra trạng thái.** Sau lần commit đầu, chính ảnh vừa nhận làm kiểm
+   tra "đã có ảnh CCCD" thất bại; nếu nhánh đó chạy trước thì lần gọi lại (response đầu mất mạng) sẽ
+   đi vào cửa dọn dẹp và **xóa mất tệp mà cơ sở dữ liệu đang trỏ tới**.
+2. **Mọi nhánh thất bại đều qua `discardIfOrphan`** (8 lời gọi), không `discardFile` trực tiếp ở đâu.
+
+`mutationHash` gồm `actorEmail`: hai cán bộ dùng cùng một idempotency key không được coi là một
+thao tác. Audit `SUBMISSION_OFFICER_FILE_UPLOADED`, metadata
+`{ documentType, fileId, sizeBytes, replaced }`.
+
+### Phase B3 — `OfficerFileUpload` + wiring
+
+Chọn loại giấy tờ → (nếu CCCD) chọn chủ sử dụng → chọn tệp. Khi mặt CCCD đó **đã có ảnh**, ô chọn
+tệp bị khóa tới khi cán bộ tích "Thay ảnh đang có" — lớp thứ nhất; server cũng từ chối lượt không kèm
+`replaceFileId`. Dùng lại `uploadWithResume` + `createXhrTransport` của luồng hộ dân để được thử lại
+tự động khi mạng chớp tắt. Xong thì gọi `loadSubmission` để khung xem ảnh thấy ảnh mới **mà không
+cần tải lại trang**.
 
 ## 9. Behavior before and after
 
-| Scenario | Before | After | Verification |
-| -------- | ------ | ----- | ------------ |
-| Mở `/submissions/:id` | HTML rỗng → tải JS → hydrate → fetch `GET /api/submissions/:id` → mới hiện dữ liệu. 2 lần xác thực, 2 lần đọc hồ sơ | Dữ liệu có ngay trong HTML lần đầu; client **không** fetch. 1 lần xác thực, 1 lần đọc | Đọc code + build; **cần kiểm tra thủ công** (mục 14) |
-| Audit khi mở hồ sơ | 1 dòng `SUBMISSION_SENSITIVE_DETAIL_VIEWED` (do client fetch) | 1 dòng (do server nạp sẵn) — **không tăng, không mất** | `tests/submission-detail-view.test.ts` |
-| Nạp sẵn thất bại (DB lỗi tạm) | Không có tình huống này | Trang vẫn render, client tự fetch, lỗi hiện "Không thể tải hồ sơ." | Đọc code (nhánh `catch`) |
-| Hồ sơ không tồn tại | Client fetch → 404 → hiện "Không thể tải hồ sơ." | `notFound()` của Next ngay trên server | Đọc code |
-| Header trang cán bộ | Phụ thuộc mặc định của Next | `cache-control: private, no-store` | `src/proxy.ts`; **cần xác nhận thủ công bằng DevTools** |
-| Lấy một ảnh xem trước | `listFiles` trả N dòng → `.find` lấy 1 | 1 truy vấn trả đúng 1 dòng | `tests/submission-file-single-query.test.ts` |
-| Mở ảnh toàn màn hình | Tải lại **cùng** ảnh lần thứ hai từ Drive (+1 dòng audit) | Dùng lại object URL — **0** request mới | Đọc code; **cần kiểm tra thủ công** |
-| Chuyển tab ảnh rồi quay lại | Tải lại từ đầu mỗi lần | Hiện ngay từ blob đã có | Đọc code; **cần kiểm tra thủ công** |
-| Ảnh lỗi/chưa có preview | `<img>` hiện icon hỏng, không rõ lý do | Hiện thông báo lỗi từ API + nút "Thử lại" | Đọc code |
-| Mở trang khi hồ sơ **không** có kết quả AI | Fetch `ai-draft`, panel render rỗng (ẩn hoàn toàn) | **Không** fetch; hiện một dòng thu gọn "Đối chiếu AI — bản nháp / Bấm để tải…" | Đọc code — **thay đổi giao diện thấy được** |
-| Lưu bàn làm việc hoặc ghi chú nội bộ | `version` đổi → fetch lại `ai-draft` dù panel đóng | Chỉ fetch lại nếu panel **đang mở** | Đọc code |
-| Nạp nháp AI (`apply`) | `onApplied` → reload → refetch `ai-draft` | Giữ nguyên (panel đang mở nên `version` đổi vẫn refetch) | Đọc code |
+| Tình huống | Trước | Sau |
+| ---------- | ----- | --- |
+| Hộ dân nộp thiếu 1 mặt CCCD, cán bộ đang giữ hồ sơ `UNDER_REVIEW` | Không có đường nào; phiên hộ dân đã khóa | Cán bộ tải trực tiếp trên màn duyệt |
+| Cán bộ **không** giữ hồ sơ, hoặc hồ sơ không `UNDER_REVIEW` | — | Không thấy ô tải ảnh; API trả 403 nếu gọi thẳng |
+| Tải ảnh CCCD vào chỗ đã có ảnh, không tích "thay ảnh" | — | Ô chọn tệp bị khóa; API trả 409 |
+| Thay ảnh CCCD | — | Ảnh cũ → `REPLACED`, **vẫn nằm trên Drive** |
+| Ghi cơ sở dữ liệu hỏng sau khi tệp đã lên Drive | — | `discardIfOrphan`: chỉ xóa khi chắc chưa ai nhận **và** tệp nằm đúng thư mục hồ sơ |
+| Đường tải ảnh của hộ dân | — | **Không đổi hành vi** |
 
 ## 10. API, data and security impact
 
 ### Authentication
 
-- Không thay đổi. Trang vẫn `requireActiveUser(SUBMISSION_READ_ROLES)` trước mọi thao tác đọc; proxy
-  vẫn kiểm tra session ở biên và redirect `/` khi thiếu. `loadSubmissionDetail` **không** tự xác
-  thực — nhận `viewer` đã xác thực từ người gọi, đúng như route cũ.
+`requireActiveUser(SUBMISSION_DECISION_ROLES)` — REVIEW_OFFICER, WARD_ADMIN, SYSTEM_ADMIN.
 
 ### Authorization
 
-- Không thay đổi. `SUBMISSION_READ_ROLES` giữ nguyên ở cả trang và route.
-  `canResetAccessSecret` vẫn chỉ bật cho `SYSTEM_ADMIN`/`WARD_ADMIN` — logic chuyển nguyên văn vào
-  `loadSubmissionDetail` và **có test khóa lại** (`canResetAccessSecret chỉ bật cho quản trị viên`).
+`verifyCsrfToken(AUTH_SECRET, user.email, header "x-csrf-token")`, rồi `mayStaffEdit(record, email)`
+= đang giữ hồ sơ **và** `UNDER_REVIEW`.
+
+⚠️ **`/api/submissions/*` KHÔNG nằm trong `matcher` của `src/proxy.ts`** — matcher có
+`/submissions/:path*` là **trang**, không phải API. Ba lớp trong route là lớp chặn **duy nhất**. Đã
+khóa bằng test.
+
+Không nhận `x-public-csrf-token` (token của phiên kê khai ẩn danh, không chứng minh được cán bộ nào).
+Đã khóa bằng test.
 
 ### DataScope
 
-- Không thay đổi phạm vi dữ liệu. `loadSubmissionDetail` đọc đúng một hồ sơ theo `submissionId` do
-  người gọi cung cấp, giống hành vi cũ của route. `findActiveFile` **luôn** kèm điều kiện
-  `submission_id = $1`, nên không thể lấy ảnh của hồ sơ khác bằng cách đoán `file_id`.
+Chỉ đọc/ghi trong phạm vi một `submissionId`: `verifyUploadedFile` đòi tệp nằm đúng
+`record.driveFolderId`; `discardIfOrphan` đòi cả "chưa ai nhận" **và** "nằm đúng thư mục hồ sơ đang
+gọi".
 
 ### API contract
 
-- Endpoint: `GET /api/submissions/:submissionId`
-- Method: `GET`
-- Request before / after: **không đổi** (không có body, không thêm tham số)
-- Response before: `{ submission: {...19 trường...}, requestId }`
-- Response after: **giống hệt** — cùng tên trường, cùng kiểu, cùng thứ tự nguồn dữ liệu; chỉ đổi chỗ
-  dựng DTO (từ inline trong route sang `loadSubmissionDetail`)
-- Error handling: **không đổi** — 404 `NOT_FOUND`, 401 `UNAUTHENTICATED`, 403 `ACCESS_DENIED`, 500
-  `INTERNAL_ERROR`; header `cache-control: no-store` giữ nguyên
-- Endpoint: `GET /api/submissions/:submissionId/files/:fileId` — **không đổi hợp đồng**; chỉ đổi cách
-  truy vấn nội bộ. Vẫn 404 khi không có tệp, vẫn `private, no-store` + `nosniff`
-- Endpoint: `GET /api/public/submissions/current/files/:fileId` — **không đổi hợp đồng**; chỉ đổi
-  nhánh dự phòng. `DELETE` **không đổi một dòng nào**
-- **Không có endpoint mới, không có endpoint bị xóa, không có trường nào bị thêm/bớt.**
+Hai endpoint mới. **Không** thay đổi endpoint nào đang có. **Không** nới `API_ERROR_CODES`:
+
+| Tình huống | Mã | HTTP |
+| ---------- | -- | ---- |
+| Body/idempotency key sai, mimeType lạ, quá `MAX_UPLOAD_MB`, vượt ngân sách byte, chủ sử dụng sai, `replaceFileId` sai | `VALIDATION_FAILED` | 400 |
+| Chưa đăng nhập | `UNAUTHENTICATED` | 401 |
+| CSRF sai, không đủ quyền, không giữ hồ sơ / không `UNDER_REVIEW` | `ACCESS_DENIED` | 403 |
+| Không có hồ sơ | `NOT_FOUND` | 404 |
+| Đã đủ 10 ảnh GCN, CCCD trùng chỗ, trạng thái thay ảnh không còn hợp lệ | `VERSION_CONFLICT` | 409 |
+| Khóa chống gửi trùng dùng cho thao tác khác | `IDEMPOTENCY_CONFLICT` | 409 |
+
+Mọi phản hồi (kể cả thành công) đều `cache-control: no-store`. Đã khóa bằng test.
 
 ### Database and migrations
 
-- Migration added: **không có**
-- Tables/columns/indexes affected: không có thay đổi schema. `findActiveFile` **đọc**
-  `public.public_files` theo `(submission_id, file_id, status)`
-- Backfill: không
-- Rollback: revert commit `7bb4341` là đủ; không có trạng thái DB nào cần hoàn tác
-- Production action required: **không có cho đợt này.** Tuy nhiên vẫn còn **nợ từ 2A-2**: migration
-  `202607290005_submission_internal_notes.sql` chưa chạy trên Preview/Production và **bắt buộc chạy
-  trước khi deploy** (cùng các migration đang chờ khác), rồi xác nhận bằng
-  `npx tsx scripts/preflight-public-intake-v2-migrations.ts`
+**KHÔNG CÓ MIGRATION.** Đã kiểm `supabase/migrations/202607230001_supabase_schema.sql`:
+`request_log.kind` và `audit_logs.action` đều là `text not null` **không có check constraint**, nên
+`OFFICER_UPLOAD_COMPLETE` và `SUBMISSION_OFFICER_FILE_UPLOADED` dùng được ngay. Không thêm bảng,
+không thêm cột, không đổi constraint, không backfill.
+
+⚠️ **4 migration của các đợt trước vẫn đang nợ** và không liên quan tới đợt này:
+`202607290002_full_pl3_editor.sql`, `202607290003_drop_working_payload_override_columns.sql`,
+`202607290004_queue_search_performance.sql`, `202607290005_submission_internal_notes.sql`. Phải áp
+**theo thứ tự tên file**.
 
 ### Validation and file handling
 
-- Trường bắt buộc: không đổi
-- Quy tắc tên file: không đổi
-- Giới hạn file: không đổi
-- MIME/type validation: không đổi. `content-type` của ảnh xem trước vẫn lấy từ
-  `storage.readPreview()`; `x-content-type-options: nosniff` giữ nguyên và **có test khóa lại**
-- Xử lý lỗi: **cải thiện ở client** — viewer giờ đọc `error.message` của API và hiện cho cán bộ kèm
-  nút "Thử lại", thay vì để `<img>` hiện icon hỏng không rõ lý do
+Zod ở ranh giới; `canonicalImageMimeType` quy bí danh `image/jpg` và trường hợp trình duyệt không
+khai được loại; `extensionFromMimeType` lấy đuôi từ mimeType **đã kiểm**, không từ tên client;
+`verifyUploadedFile` kiểm định dạng/dung lượng/checksum và thư mục trước khi nhận vào hồ sơ.
 
 ### Sensitive data
 
-- **Dữ liệu nhạy cảm bị tác động:**
-  1. **PII trong HTML (mới).** Server-priming đưa số điện thoại, CCCD, ngày sinh, địa chỉ, ghi chú
-     nội bộ vào chính tài liệu HTML của `/submissions/:id`. Trước đây chỉ nằm trong phản hồi JSON.
-  2. **Ảnh giấy tờ trong bộ nhớ trang (mới).** Blob ảnh CCCD/GCN được giữ trong `Map` cho tới khi
-     rời trang.
-- **Log có thể chứa dữ liệu:** **không**. Không thêm bất kỳ lệnh log nào trong đợt này. Audit của
-  `loadSubmissionDetail` chỉ ghi `actorEmail`, `action`, `entityId` (là `submissionId`), `requestId`
-  — **không** ghi nội dung hồ sơ. `findActiveFile` không log.
-- **Biện pháp che hoặc loại bỏ:**
-  1. `src/proxy.ts` gắn `cache-control: private, no-store` cho **toàn bộ** matcher cán bộ
-     (`/profile`, `/users`, `/submissions`, `/ke-khai-ho`, `/api/staff`) — không phụ thuộc mặc định
-     của Next hay của proxy đứng trước.
-  2. `revokeObjectURL` cho mọi object URL khi component unmount, không giữ ảnh PII lâu hơn mức cần.
-  3. **Không nới `no-store` của route ảnh** — cache đĩa của trình duyệt vẫn không được giữ ảnh giấy
-     tờ; việc giữ blob chỉ trong bộ nhớ của trang đang mở.
-  4. `loadSubmissionDetail` chỉ trả 3 trường cho mỗi ảnh (`fileId`, `documentType`, `ownerId`) —
-     **không** lộ `driveFileId`/`checksum` ra màn duyệt; **có test khóa lại** bằng
-     `expect(Object.keys(...)).toHaveLength(3)`.
-  5. Không lộ email công vụ cán bộ ra cổng công khai: đợt này **không chạm** bất kỳ route công khai
-     nào trả thông tin cán bộ.
+- Tên tệp trong kho do máy chủ đặt, không ghép tên client gửi lên (tên máy ảnh hay mang CCCD, họ
+  tên, ngày giờ, đôi khi cả toạ độ).
+- URL phiên upload là bí mật: trả trong response, **không** ghi log hay audit.
+- Audit metadata chỉ danh mục đóng và số — không `driveFileId`, không tên tệp, không `ownerId`.
+- Response thành công không trả `driveFileId`.
+
+Cả bốn điều trên đều có test khóa.
 
 ## 11. Tests added or changed
 
-| Test file | Test case | Requirement covered | Result |
-| --------- | --------- | ------------------- | ------ |
-| `tests/submission-detail-view.test.ts` | trả `null` và KHÔNG ghi audit khi không có hồ sơ | Không ghi audit cho hồ sơ không tồn tại; không gọi `listFiles` vô ích | PASS |
-| `tests/submission-detail-view.test.ts` | ghi đúng MỘT dòng audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` | **Server-priming không làm mất dấu vết "ai đã xem hồ sơ nào"** | PASS |
-| `tests/submission-detail-view.test.ts` | working payload che draft của người dân | `effectivePayload`/`payloadLayerOf` chuyển sang hàm dùng chung không đổi hành vi | PASS |
-| `tests/submission-detail-view.test.ts` | giữ `internalNotes` và ánh xạ ảnh gọn về 3 trường | Không lộ `driveFileId`/`checksum`; không mất trường 2A-2 | PASS |
-| `tests/submission-detail-view.test.ts` | `canResetAccessSecret` chỉ bật cho quản trị viên | Phân quyền chuyển vào hàm dùng chung không bị nới | PASS |
-| `tests/submission-file-single-query.test.ts` | dùng `findActiveFile`, không gọi `listFiles` | Truy vấn một tệp; khóa lại để không quay về cách cũ | PASS |
-| `tests/submission-file-single-query.test.ts` | giữ `private, no-store` + `nosniff` | **Không nới cache của ảnh PII** | PASS |
-| `tests/submission-file-single-query.test.ts` | 404 khi không có tệp, không đọc Drive, không ghi audit | Không gọi Drive/audit vô ích trên đường lỗi | PASS |
-| 12 file test hiện có | (không đổi khẳng định nào) | Thêm `internalNotes: ""` vào fixture — sửa 12 lỗi typecheck baseline | PASS |
+### Thêm mới — 44 ca
 
-**Chưa có test cho:** hành vi client của `usePreviewImages` (một fetch/ảnh, dùng chung object URL,
-revoke khi unmount) và của accordion AI (không fetch khi đóng). Lý do ở mục 15.
+| File | Ca | Nội dung |
+| ---- | -- | -------- |
+| `tests/proxy-no-store.test.ts` | 4 | `private, no-store` cho phiên đã đăng nhập; chỉ thị luôn chứa `no-store` không chỉ `private`, và không có `max-age`; chưa đăng nhập → 307 về trang chủ; session không có email cũng bị coi là chưa đăng nhập |
+| `tests/submission-detail-page.test.ts` | 7 | `null` → `notFound()`; **lỗi tạm KHÔNG thành 404** mà vẫn render với `initialSubmission=null`; nạp sẵn thành công truyền thẳng hồ sơ; luôn đi qua `loadSubmissionDetail` (giữ audit); không đủ quyền → `/profile`; lỗi hạ tầng không bị hạ cấp thành redirect; `isAdministrator` suy từ vai trò |
+| `tests/officer-file-upload.test.ts` | 33 | cửa quyền (3 lớp; không dùng cửa công khai; không tự viết lại điều kiện quyền); trần dùng chung; không im lặng ghi đè; `effectivePayload`; idempotency tách loại + replay trước kiểm tra trạng thái; `discardIfOrphan` đủ 8 nhánh; audit không PII; mọi phản hồi `no-store`; điều kiện hiện nút ở client |
+
+### ⚠️ SỬA MỘT TEST ĐANG XANH SAI
+
+`tests/upload-metrics.test.ts`, ca **"complete route nuốt lỗi ghi metric"**. Mẫu cũ:
+
+```
+/appendUploadAttempt\([\s\S]*?\)\s*\.catch\(\(\) => undefined\)/
+```
+
+`[\s\S]*?` là lazy nhưng **không bị chặn ở ranh giới câu lệnh**, nên nó chạy tuốt xuống
+`.catch(() => undefined)` nằm trong `discardIfOrphan` ở **cuối file** — một hàm không liên quan gì
+tới số đo. Route thật dùng `.catch(reportUploadMetricFailure)`. Tức là ca này **chưa bao giờ kiểm
+đúng thứ nó nói**, và vẫn xanh suốt.
+
+Chỉ lộ ra khi Đợt 2C chuyển `discardIfOrphan` sang module khác, làm mất đoạn `.catch` mà nó vô tình
+bám vào. Đã sửa mẫu thành `[^;]*?` (không vượt dấu chấm phẩy → ràng trong đúng một câu lệnh) và thêm
+một ca kiểm `reportUploadMetricFailure` thật sự không ném lại.
+
+### Sửa nơi đọc — `tests/public-upload-complete-route.test.ts`
+
+4 ca trỏ từ route sang `upload-commit.ts`. **Bất biến không đổi**, và giờ chúng khóa cho cả hai đường
+một lượt. Một ca (`route không gọi discardFile trực tiếp`) trước đây cắt chuỗi bằng
+`route.indexOf("/**\n * Xóa tệp")` — mốc cắt đó đã biến mất nên nó cũng đang xanh yếu; đã đổi sang
+khẳng định trực tiếp trên cả file.
+
+### Kiểm chứng test không rỗng (mutation testing)
+
+Không tin test xanh mà chưa thấy nó đỏ. Đã đột biến source rồi revert:
+
+| Đột biến | Kết quả |
+| -------- | ------- |
+| Bỏ `response.headers.set("cache-control", ...)` trong `proxy.ts` | 2 ca đỏ |
+| `catch { initialSubmission = null }` → `catch { missing = true }` trong `page.tsx` | 1 ca đỏ |
+| Vô hiệu hóa chốt `mayStaffEdit` ở `initiate` | 1 ca đỏ |
+| `kind: "OFFICER_UPLOAD_COMPLETE"` → `"PUBLIC_UPLOAD_COMPLETE"` | 1 ca đỏ |
+| Bỏ một lời gọi `discardIfOrphan` ở nhánh lỗi | 1 ca đỏ |
+| Nút tải ảnh hiện với mọi cán bộ (`isClaimedByMe && ...` → `true`) | 1 ca đỏ |
+
+Đã revert cả 6; `git diff src/` trống trước khi commit.
 
 ## 12. Final verification
 
-| Check             | Command | Result | Evidence |
-| ----------------- | ------- | ------ | -------- |
-| Unit tests        | `npm test` (`vitest run`) | **687 pass / 10 skip / 0 fail**; 80 file pass / 2 skip | Tăng từ 679 → 687 (+8 test mới); không test cũ nào fail hay mới skip |
-| Integration tests | `npm test` | Nằm chung bộ trên | Không có bộ riêng trong repo |
-| E2E tests         | `npm run test:e2e` | **NOT_RUN** | Cần Preview URL + credential rehearsal, không có trong môi trường này |
-| Build             | `npm run build` | Đạt | Turbopack build; `/submissions/[submissionId]` vẫn `ƒ (Dynamic)`; `next-env.d.ts` do build tự đổi đã revert |
-| Lint              | `npm run lint` | **0 lỗi / 5 warning** | Đúng baseline; 5 warning đều có sẵn từ trước ở `scripts/add-system-admins.ts` và `tests/staging-rehearsal-scenarios.test.ts` |
-| Typecheck         | `npm run typecheck` | **0 lỗi** (exit 0) | Từ 12 lỗi baseline về 0 |
-| Security check    | — | **NOT_RUN** | Repo không có script security tự động; rà soát thủ công ghi ở mục 10 |
-| Secret scan       | rà soát thủ công diff | Không có secret | Không thêm biến môi trường, không thêm chuỗi bí mật; không thêm lệnh log nào |
+| Lệnh | Baseline `6942381` | Sau `af4b9e1` |
+| ---- | ------------------ | ------------- |
+| `npm run typecheck` | 0 lỗi | **0 lỗi** |
+| `npm run lint` | 0 lỗi / 5 warning | **0 lỗi / 5 warning** (đúng baseline) |
+| `npx vitest run` | 687 pass / 10 skip | **732 pass / 10 skip** (83 file pass, 2 skip) |
+| `npm run build` | đạt | **đạt** — bảng route có cả `/api/submissions/[submissionId]/uploads/complete` và `/initiate` |
+
+732 = 687 + 44 ca mới + 1 ca thêm ở `upload-metrics`. **Không test cũ nào fail hay mới bị skip.**
+
+`npm run test:e2e` **KHÔNG chạy** — Playwright cần app chạy thật, và môi trường này không có
+credential (chỉ có `.env.example`; `loadServerEnvironment()` đòi ~15 biến nên `npm run dev` không
+khởi động được).
 
 ## 13. Acceptance criteria matrix
 
-| ID    | Acceptance criterion | Status | Evidence | Notes |
-| ----- | -------------------- | ------ | -------- | ----- |
-| AC-01 | Trang `/submissions/:id` nạp sẵn hồ sơ trên server; client không fetch khi đã có dữ liệu | PASS | Đọc code + build; `if (initialSubmission) return;` trong effect | Chưa đo thời gian thật — xem AC-09 |
-| AC-02 | Audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` vẫn được ghi **đúng một lần** mỗi lần đọc | PASS | `tests/submission-detail-view.test.ts` (2 ca) | |
-| AC-03 | HTML chứa PII không được cache | PASS (code) / NOT_TESTED (runtime) | `src/proxy.ts` gắn `private, no-store` | Cần xác nhận bằng DevTools — mục 14 |
-| AC-04 | `GET /api/submissions/:id` giữ nguyên hợp đồng | PASS | Toàn bộ test cũ liên quan vẫn xanh; DTO chuyển nguyên văn | |
-| AC-05 | Route ảnh chỉ truy vấn một tệp, không kéo cả danh sách | PASS | `tests/submission-file-single-query.test.ts` | SQL chưa chạy trên Postgres thật — mục 14 |
-| AC-06 | Ảnh giấy tờ vẫn `private, no-store` + `nosniff` | PASS | `tests/submission-file-single-query.test.ts` | |
-| AC-07 | Mở toàn màn hình không tải lại ảnh; chuyển tab quay lại không tải lại | NOT_TESTED | Đọc code (dùng chung object URL) | **Không có test tự động** — mục 14, 15 |
-| AC-08 | Panel AI không gọi API khi đóng; gọi khi mở; tải lại theo `version` nếu đang mở | NOT_TESTED | Đọc code (`if (!open \|\| loadedVersion === version) return;`) | **Không có test tự động** — mục 14, 15 |
-| AC-09 | Đạt mục tiêu hiệu năng đo được | NOT_TESTED | — | **Chưa có số đo P50/P95 trên Preview.** Không tuyên bố đạt |
-| AC-10 | Không migration, không đổi schema | PASS | `git diff --name-status` không có file nào trong `supabase/migrations/` | |
-| AC-11 | Typecheck/lint không tệ hơn baseline | PASS | Typecheck 12 → **0**; lint giữ 0 lỗi/5 warning | |
+| #     | Điều kiện | Trạng thái | Bằng chứng |
+| ----- | --------- | ---------- | ---------- |
+| AC-01 | Cán bộ đang giữ hồ sơ `UNDER_REVIEW` tải được ảnh CCCD/GCN bổ sung | **CODE_COMPLETE / NOT_TESTED_MANUALLY** | 2 route + component; 33 test đọc mã nguồn |
+| AC-02 | Cán bộ khác, hoặc trạng thái khác, không tải được | **PASS** (test) | `mayStaffEdit` ở cả 2 route + điều kiện hiện nút; mutation test |
+| AC-03 | Không im lặng ghi đè ảnh CCCD đang dùng | **PASS** (test) | 409 khi thiếu `replaceFileId`; ảnh cũ → `REPLACED` |
+| AC-04 | Không xóa tệp cơ sở dữ liệu đã nhận trên bất kỳ đường lỗi nào | **PASS** (test) | 8 lời gọi `discardIfOrphan`, 0 `discardFile` trực tiếp; đếm khóa bằng test |
+| AC-05 | Idempotency không lẫn với đường hộ dân | **PASS** (test) | `kind` tách riêng ở khóa + tra cứu + lúc ghi |
+| AC-06 | Audit ghi ai bổ sung ảnh nào, không PII | **PASS** (test) | `SUBMISSION_OFFICER_FILE_UPLOADED`; metadata chỉ danh mục đóng và số |
+| AC-07 | Đường tải ảnh của hộ dân không đổi hành vi | **PASS** (test) | 14 ca `public-upload-complete-route` + 27 ca `upload-metrics` xanh |
+| AC-08 | Header `no-store` của proxy được khóa bằng test | **PASS** | `tests/proxy-no-store.test.ts` + mutation test |
+| AC-09 | Nhánh `notFound()` vs lỗi tạm của `page.tsx` được khóa bằng test | **PASS** | `tests/submission-detail-page.test.ts` + mutation test |
+| AC-10 | Không migration | **PASS** | `request_log.kind`/`audit_logs.action` là `text` không check constraint |
+| AC-11 | Một lượt tải ảnh thật thành công trên môi trường có Drive | **NOT_TESTED** | cần credential — xem §14 |
+| AC-12 | Lazy ảnh / accordion AI của Đợt 2B | **NOT_TESTED** | cần testing-library + jsdom, chưa được duyệt |
 
 ## 14. Manual verification required
 
-- **Màn hình hoặc quy trình cần người dùng kiểm tra:** `/submissions/{submissionId}` với tài khoản
-  cán bộ (`REVIEW_OFFICER` trở lên).
-- **Dữ liệu mẫu cần dùng:** một hồ sơ có **ít nhất 3 ảnh** (CCCD trước, CCCD sau, GCN) — cần nhiều
-  ảnh để thấy hiệu quả của việc chuyển tab; và một hồ sơ **không** có kết quả AI.
-- **Các bước kiểm tra:**
-  1. Mở DevTools → tab Network, bật "Disable cache = OFF", tải `/submissions/{id}`.
-  2. Xem response header của **chính tài liệu HTML** → phải có `cache-control: private, no-store`
-     (AC-03).
-  3. Xác nhận **không** có request `GET /api/submissions/{id}` nào sau khi trang tải (AC-01).
-  4. Đếm request tới `/api/submissions/{id}/files/...`: phải có **đúng 1** (ảnh đầu tiên), không phải
-     3.
-  5. Bấm nút "Xem toàn màn hình" → **không** phát sinh request ảnh mới (AC-07).
-  6. Đóng toàn màn hình, chuyển sang tab ảnh 2 → **1** request mới; quay lại tab ảnh 1 → **0**
-     request mới (AC-07).
-  7. Kiểm tra zoom/xoay/đặt lại vẫn hoạt động trên cả khung nhỏ và khung toàn màn hình.
-  8. Panel "Đối chiếu AI — bản nháp" phải **thu gọn** và **chưa** có request `ai-draft` nào; bấm mở →
-     đúng 1 request; đóng/mở lại → **không** thêm request (AC-08).
-  9. Với panel AI đang **đóng**: lưu ghi chú nội bộ → **không** phát sinh request `ai-draft`. Với
-     panel đang **mở**: lưu ghi chú → **có** 1 request `ai-draft` (cột "Hiện có" phải cập nhật).
-  10. Mở một hồ sơ **không** có kết quả AI → mở panel → phải hiện "Hồ sơ này chưa có kết quả đọc tự
-      động…", không phải lỗi.
-  11. Mở một hồ sơ **không tồn tại** (`/submissions/sub_khong_co`) → trang 404 của Next.
-  12. Kiểm tra `audit_logs`: mỗi lần mở trang phải sinh **đúng một** dòng
-      `SUBMISSION_SENSITIVE_DETAIL_VIEWED`, không phải hai (AC-02).
-  13. **Xác nhận `findActiveFile` chạy đúng trên Postgres thật** (AC-05): ảnh hiện được bình thường
-      ở bước 4–6 là bằng chứng đủ; nếu 404 thì SQL sai.
-- **Kết quả mong đợi:** như ghi trong từng bước. Bất kỳ sai lệch nào ở bước 2, 3, 5, 6, 8, 12 là hồi
-  quy của đợt này.
+Chưa làm được ở đây: không có `.env`, mọi biến trống, `loadServerEnvironment()` đòi ~15 biến nên
+`npm run dev` không khởi động được. Cần chạy ở môi trường có credential:
+
+1. Áp 4 migration đang nợ **theo thứ tự tên file** (`202607290002` → `...0005`), rồi
+   `npx tsx scripts/preflight-public-intake-v2-migrations.ts`.
+2. Đăng nhập bằng tài khoản có vai trò REVIEW_OFFICER.
+3. Mở một hồ sơ `SUBMITTED` → **Nhận xử lý** (hồ sơ về `UNDER_REVIEW`).
+4. Xác nhận ô **"Tải thêm ảnh giấy tờ"** xuất hiện dưới khung xem ảnh.
+5. Chọn "Giấy chứng nhận" → chọn một ảnh JPG → xác nhận thông báo "Đã thêm…" và ảnh mới xuất hiện
+   trong tab của khung xem ảnh **mà không cần tải lại trang**.
+6. Chọn "CCCD — mặt trước" → chọn một chủ **đã có ảnh mặt trước** → xác nhận ô chọn tệp **bị khóa**
+   và có cảnh báo; tích "Thay ảnh đang có" → ô mở ra → thay được.
+7. Chọn "CCCD — mặt trước" của một chủ **chưa có ảnh** → tải được, không hỏi thay ảnh.
+8. Mở tab thứ hai cùng hồ sơ, **Trả hồ sơ** ở tab đó, rồi thử tải ảnh ở tab đầu → phải nhận 403 với
+   thông điệp về "đang nhận xử lý", **không** phải lỗi 500.
+9. Kiểm thư mục Drive của hồ sơ: ảnh vừa tải có tên bắt đầu bằng `OFFICER-`; ảnh bị thay **vẫn còn**
+   trên Drive.
+10. Kiểm `audit_logs`: có dòng `SUBMISSION_OFFICER_FILE_UPLOADED` với `actor_email` đúng, và
+    `metadata` **không** chứa tên tệp / `driveFileId` / `ownerId`.
+11. DevTools → Network: mọi phản hồi của `/api/submissions/*/uploads/*` có `cache-control: no-store`.
+12. Thử một ảnh lớn hơn `MAX_UPLOAD_MB` → thông điệp rõ ràng, không phải 500.
+13. Ngắt mạng giữa lúc tải rồi nối lại → `uploadWithResume` tiếp tục hoặc báo lỗi có thể hiểu; nếu
+    thất bại, kiểm Drive **không** còn tệp mồ côi.
 
 ## 15. Remaining issues and warnings
 
-| Severity | Issue | Impact | Recommended action |
-| -------- | ----- | ------ | ------------------ |
-| Medium | Phần client (lazy ảnh, accordion AI) **không có test tự động** | Hồi quy về sau sẽ không bị bắt bởi CI; hạng mục Phase 3 là rủi ro cao nhất của đợt | Kiểm tra thủ công theo mục 14 trước khi deploy. Muốn có test thì phải thêm hạ tầng test component React (`@testing-library/react` + jsdom) — **đổi stack**, cần quyết định của người dùng và một entry trong `03-decisions.md` |
-| Medium | **Chưa có số đo P50/P95** cho màn duyệt | Không chứng minh được đợt 2B thật sự nhanh hơn bao nhiêu | Đo trên Preview sau khi chạy migration đang chờ; ghi số vào `04-current-tasks.md` |
-| Medium | Migration `202607290005_submission_internal_notes.sql` (nợ từ 2A-2) **chưa chạy** | Deploy code hiện tại mà chưa chạy migration sẽ làm `GET /api/submissions/:id` lỗi vì thiếu cột `internal_notes` | Chạy migration trên Preview rồi Production **trước** khi deploy; xác nhận bằng `npx tsx scripts/preflight-public-intake-v2-migrations.ts` |
-| Low | Panel AI giờ **luôn hiện một dòng thu gọn**, kể cả hồ sơ không có kết quả AI (trước ẩn hoàn toàn) | Thay đổi giao diện thấy được; thêm một dòng vào màn hình | Chấp nhận có chủ đích (không fetch thì không biết có kết quả hay không). Nếu người dùng không muốn, phương án là để server trả sẵn cờ "có kết quả AI hay không" trong `SubmissionDetailView` |
-| Low | `SQL của findActiveFile` chưa chạy trên Postgres thật | Nếu sai điều kiện thì ảnh trả 404 | Mục 14 bước 4–6, 13 |
-| Low | 5 lint warning có sẵn từ trước vẫn còn | Không ảnh hưởng chức năng | Ngoài phạm vi đợt này; dọn trong một đợt riêng |
-| Low | Commit hiển thị "Unverified" trên GitHub | Chỉ ảnh hưởng nhãn xác minh, không ảnh hưởng nội dung | Đã chẩn đoán: commit **có** chữ ký SSH và author/committer **đúng** `noreply@anthropic.com`; git báo `N` vì không xác minh được cục bộ (`gpg.ssh.allowedSignersFile` chưa cấu hình, file khóa công khai 0 byte, không có ssh-agent). Chạy lại `--reset-author`/rebase **không** đổi được kết quả (đã thử một lần, chỉ viết lại hash) |
+1. **Chưa có `DELETE` ảnh cho cán bộ.** Gỡ hẳn một ảnh sai vẫn phải thay bằng ảnh khác. Cần quyết
+   định nghiệp vụ trước khi làm.
+2. **Chưa mở cho hồ sơ đã `ACCEPTED`.** Nếu nghiệp vụ cần, đường đúng là ghép vào
+   `mayAmendOfficialRecord` (đòi `amendmentReason`), **không** phải nới `mayStaffEdit`.
+3. **Không có test render cho `OfficerFileUpload`.** Điều kiện hiện nút được khóa bằng test đọc mã
+   nguồn, nhưng hành vi thật của ô chọn tệp và checkbox thay ảnh thì chưa.
+4. **33 test của 2C đọc mã nguồn, không chạy route thật.** Cùng cách và cùng lý do với
+   `tests/public-upload-complete-route.test.ts` đã có từ Phase 5. Chúng bắt hồi quy về *cấu trúc*
+   (mất một chốt quyền, quên một `discardIfOrphan`, lẫn loại idempotency) chứ **không** chứng minh
+   route chạy đúng với Supabase và Drive thật.
+5. **4 migration của đợt trước vẫn đang nợ.** Không liên quan tới đợt này nhưng chặn deploy.
+6. **Không có số đo P50/P95** cho bất cứ thứ gì. Không tuyên bố đạt mục tiêu hiệu năng nào.
+7. 5 warning lint có sẵn, không sửa (ngoài phạm vi).
 
 ## 16. Regression and compatibility notes
 
-- **Trình duyệt:** `URL.createObjectURL`/`revokeObjectURL` và `fetch` là API tiêu chuẩn, hỗ trợ ở mọi
-  trình duyệt hiện đại và trên iOS/Android Safari/Chrome — không dùng API thử nghiệm nào. Không dùng
-  `loading="lazy"` cho ảnh đang xem (không có tác dụng khi ảnh nằm trong khung nhìn); chỉ thêm
-  `decoding="async"`, thoái hóa an toàn nếu không hỗ trợ.
-- **Thiết bị:** ảnh vẫn tải theo yêu cầu nên máy yếu/mạng chậm được lợi (1 ảnh thay vì 3). Bộ nhớ:
-  giữ tối đa N blob ảnh của **một** hồ sơ đang mở, giải phóng khi rời trang.
-- **Node/runtime:** không đổi. Route ảnh vẫn `runtime = "nodejs"`; trang vẫn `dynamic =
-  "force-dynamic"`.
-- **Database:** không đổi schema; `findActiveFile` chỉ đọc. Không đổi cấu hình pooler.
-- **API bên ngoài:** Google Drive — **giảm** số lần gọi `readPreview` (bỏ tải trùng khi mở toàn màn
-  hình và khi chuyển tab quay lại). Không đổi cách gọi.
-- **Backward compatibility:** hợp đồng API **không đổi** — client cũ (nếu có) vẫn dùng được
-  `GET /api/submissions/:id` y nguyên. Không có trường bị bỏ.
-- **Excel/PDF/import/export compatibility:** không chạm. Không sửa PL3 export, official record, hay
-  acceptance saga.
-- **Khác:** proxy giờ set `cache-control` cho `/api/staff/*` — các route đó vốn tự set `no-store`
-  riêng, giá trị trùng nhau nên không có xung đột hành vi.
+- `appendFile` thêm tham số **tùy chọn** `kind` với mặc định `PUBLIC_UPLOAD_COMPLETE` → mọi bên gọi
+  cũ giữ nguyên hành vi, không cần sửa.
+- Đường tải ảnh của hộ dân chỉ đổi **nơi import** hai hằng số và `discardIfOrphan`; logic giữ nguyên
+  từng dòng.
+- `submission-detail.tsx` chỉ **thêm** một khối render có điều kiện; không sửa nhánh nào đang có.
+- Không đổi schema → không cần rollback dữ liệu, không cần backfill.
+- `PublicFileSummary` trả về từ `appendFile` không đổi hình dạng.
 
 ## 17. Rollback plan
 
-- **Cách rollback code:** `git revert 7bb4341` (một commit duy nhất, không phụ thuộc commit khác
-  trong đợt). Hoặc `git reset --hard 2d67eb2` nếu chưa push.
-- **Cách rollback migration:** không cần — đợt này **không có** migration.
-- **Dữ liệu có cần phục hồi:** không. Không có thao tác ghi dữ liệu mới; audit chỉ thêm dòng đọc như
-  trước.
-- **Điều kiện không được rollback tự động:** không có. Tuy nhiên nếu revert **sau khi** đã deploy,
-  lưu ý: revert sẽ **gỡ bỏ** header `cache-control: private, no-store` khỏi trang cán bộ. Vì bản
-  revert cũng gỡ luôn server-priming (HTML trở lại khung rỗng, không còn PII), điều này an toàn —
-  **nhưng không được revert lẻ riêng `src/proxy.ts` mà giữ server-priming.**
+Không có migration nên rollback là thuần code:
+
+```bash
+git revert af4b9e1        # chỉ bỏ Đợt 2C, giữ test của 2B
+git revert b548c7d        # nếu muốn bỏ cả test (không nên)
+```
+
+Ảnh cán bộ đã tải trước khi revert **vẫn nằm trong `public_files` và trên Drive** — chúng là bản ghi
+hợp lệ như ảnh của hộ dân, chỉ mất đường tải thêm. Không cần dọn dữ liệu.
 
 ## 18. Recommended next action
 
-`READY_FOR_COMMIT`
-
-Code đã commit local (`7bb4341`), toàn bộ kiểm tra tự động chạy được đều xanh và tốt hơn baseline
-(typecheck 12 → 0 lỗi). Chưa đề nghị deploy vì ba việc còn thiếu, không phải vì code có vấn đề đã
-biết: (1) chưa kiểm tra thủ công phần client theo mục 14 — đây là hạng mục không có test tự động;
-(2) chưa có số đo hiệu năng nào để nói đợt này đạt mục tiêu; (3) migration `202607290005` nợ từ 2A-2
-vẫn chưa chạy, deploy trước migration sẽ làm màn duyệt lỗi vì thiếu cột `internal_notes`.
-
-Chờ người dùng quyết định push và mở PR — **chưa push, chưa merge, chưa deploy.**
+1. Áp 4 migration đang nợ trên Preview, rồi chạy preflight.
+2. Chạy 13 bước ở §14 trên Preview.
+3. Nếu nghiệp vụ cần gỡ hẳn ảnh: chốt quyết định rồi làm `DELETE /api/submissions/:id/files/:fileId`
+   (kèm audit, và đánh `DELETED` thay vì xóa thật trên Drive).
+4. Nếu muốn có test render cho phần client (2B lẫn 2C): duyệt thêm `@testing-library/react` +
+   `jsdom` làm devDependency.
 
 ## 19. Commands to reproduce
 
@@ -573,205 +500,16 @@ Chờ người dùng quyết định push và mở PR — **chưa push, chưa me
 npm ci
 
 # Kiểm tra (đúng các lệnh đã chạy cho báo cáo này)
-npm run typecheck                                  # 0 lỗi
-npm run lint                                       # 0 lỗi / 5 warning có sẵn
-npm test                                           # 687 pass / 10 skip
-npm run build                                      # đạt
-git checkout -- next-env.d.ts                      # build tự sinh lại, không đưa vào commit
+npm run typecheck            # 0 lỗi
+npm run lint                 # 0 lỗi, 5 warning có sẵn
+npx vitest run               # 732 pass / 10 skip
+npm run build                # đạt; kiểm bảng route có 2 endpoint uploads mới
+git checkout next-env.d.ts   # build sửa file này, trả lại nguyên trạng
 
 # Chạy riêng test của đợt này
-npx vitest run tests/submission-detail-view.test.ts        # 5 pass
-npx vitest run tests/submission-file-single-query.test.ts  # 3 pass
-
-# Xem baseline trước thay đổi
-git stash -u && npm run typecheck ; git stash pop   # 12 lỗi tại 2d67eb2
-
-# Trước khi deploy (CHƯA CHẠY — nợ từ 2A-2)
-# 1) áp các migration đang chờ theo đúng thứ tự, gồm 202607290005_submission_internal_notes.sql
-npx tsx scripts/preflight-public-intake-v2-migrations.ts
-
-# Chạy dev để kiểm tra thủ công theo mục 14
-npm run dev
+npx vitest run tests/officer-file-upload.test.ts \
+               tests/proxy-no-store.test.ts \
+               tests/submission-detail-page.test.ts \
+               tests/public-upload-complete-route.test.ts \
+               tests/upload-metrics.test.ts
 ```
-
-## 20. Key diff excerpts
-
-**Audit đặt trong hàm dùng chung — điều kiện then chốt để server-priming không mất dấu vết:**
-
-```diff
-+++ b/src/modules/submissions/detail-view.ts
-+/**
-+ * Đọc hồ sơ cho màn duyệt, **có ghi audit**.
-+ *
-+ * Mỗi lần gọi ghi một dòng `SUBMISSION_SENSITIVE_DETAIL_VIEWED`: hàm này là đường xem dữ liệu
-+ * nhạy cảm (số điện thoại, CCCD, địa chỉ) nên dấu vết "ai đã xem hồ sơ nào" là bắt buộc. Khi
-+ * chuyển sang server-priming, việc dựng dữ liệu ngay trên server **không được** làm mất dòng
-+ * audit này — vì thế audit nằm trong hàm dùng chung chứ không nằm ở route.
-+ */
-+export async function loadSubmissionDetail(
-+  submissionId: string,
-+  viewer: { readonly email: string; readonly roles: readonly string[] },
-+  requestId: string,
-+): Promise<SubmissionDetailView | null> {
-+  const repository = getPublicIntakeRepository();
-+  const record = await repository.findById(submissionId);
-+  if (!record) return null;
-+  await repository.appendAudit({
-+    actorEmail: viewer.email,
-+    action: "SUBMISSION_SENSITIVE_DETAIL_VIEWED",
-+    entityId: record.submissionId,
-+    requestId,
-+  });
-```
-
-**Bảo mật — PII chuyển vào HTML nên phải gắn `no-store` (điều kiện bắt buộc thứ hai):**
-
-```diff
---- a/src/proxy.ts
-+++ b/src/proxy.ts
- export default auth((request) => {
-   if (request.auth?.user?.email) {
--    return NextResponse.next();
-+    const response = NextResponse.next();
-+    /*
-+     * Mọi đường dẫn trong `matcher` bên dưới đều là bề mặt của cán bộ và đều mang PII (số điện
-+     * thoại, CCCD, địa chỉ hộ dân). Từ khi trang `/submissions/[submissionId]` nạp sẵn hồ sơ trên
-+     * server, PII nằm ngay trong HTML chứ không còn chỉ trong phản hồi JSON (các route JSON tự gắn
-+     * `no-store` riêng). Gắn ở đây để không phụ thuộc vào mặc định của Next hay của proxy đứng
-+     * trước — không có trang nào trong danh sách này được phép nằm lại trong bất kỳ cache nào.
-+     */
-+    response.headers.set("cache-control", "private, no-store");
-+    return response;
-   }
-```
-
-**Client chỉ fetch khi nạp sẵn thất bại — nếu fetch cả khi đã có dữ liệu thì mất lợi ích VÀ ghi thêm
-một dòng audit:**
-
-```diff
---- a/src/components/submission-detail.tsx
-+++ b/src/components/submission-detail.tsx
-+  useEffect(() => {
-+    if (initialSubmission) return;
-     loadSubmission(submissionId)
-       .then(setSubmission)
-       .catch(() => setMessage("Không thể tải hồ sơ."));
-   }, [submissionId]);
-```
-
-**Truy vấn một tệp thay cho kéo cả danh sách:**
-
-```diff
---- a/src/app/api/submissions/[submissionId]/files/[fileId]/route.ts
-+++ b/src/app/api/submissions/[submissionId]/files/[fileId]/route.ts
--    const file = (await repository.listFiles(submissionId)).find(
--      (candidate) => candidate.fileId === fileId,
--    );
-+    const file = await repository.findActiveFile(submissionId, fileId);
-```
-
-```diff
-+++ b/src/modules/public-intake/repository.ts
-+  async findActiveFile(submissionId: string, fileId: string): Promise<StoredFile | null> {
-+    const database = getDatabase();
-+    const rows = await database<FileRow[]>`
-+      select file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
-+        size_bytes, checksum_sha256, file_name, status, created_at, updated_at
-+      from public.public_files
-+      where submission_id = ${submissionId}
-+        and file_id = ${fileId}
-+        and status = 'UPLOADED'
-+      limit 1
-+    `;
-+    return rows[0] ? mapFile(rows[0]) : null;
-+  }
-```
-
-**Không nới `no-store`; thay vào đó giữ blob trong bộ nhớ trang và thu hồi khi rời trang:**
-
-```diff
-+++ b/src/components/admin/document-viewer.tsx
-+function usePreviewImages(submissionId: string) {
-+  const cache = useRef(new Map<string, string>());
-+  const pending = useRef(new Set<string>());
-+
-+  useEffect(() => {
-+    const cached = cache.current;
-+    return () => {
-+      for (const url of cached.values()) URL.revokeObjectURL(url);
-+      cached.clear();
-+    };
-+  }, []);
-+
-+  const request = useCallback(
-+    (fileId: string) => {
-+      if (cache.current.has(fileId) || pending.current.has(fileId)) return;
-+      pending.current.add(fileId);
-```
-
-**Panel AI chỉ gọi API khi mở; `loading` là giá trị suy ra (quy tắc eslint cấm setState đồng bộ trong
-thân effect):**
-
-```diff
-+++ b/src/components/admin/ai-draft-panel.tsx
-+  /** Suy ra, không lưu state: đang mở mà dữ liệu chưa khớp phiên bản hồ sơ tức là đang tải. */
-+  const loading = open && loadedVersion !== version;
-...
-+    if (!open || loadedVersion === version) return;
-     let active = true;
-     fetch(`/api/submissions/${submissionId}/ai-draft`, { cache: "no-store" })
-```
-
-**Test khóa cam kết audit:**
-
-```diff
-+++ b/tests/submission-detail-view.test.ts
-+  it("ghi đúng MỘT dòng audit SUBMISSION_SENSITIVE_DETAIL_VIEWED cho mỗi lần đọc", async () => {
-+    mockFindById.mockResolvedValue(makeRecord());
-+
-+    await loadSubmissionDetail("sub_1", officer, "req-2");
-+
-+    expect(mockAppendAudit).toHaveBeenCalledTimes(1);
-```
-
-## 21. Full unified diff
-
-```text
-FULL_DIFF_OMITTED_DUE_TO_SIZE
-Reason: diff của commit 7bb4341 là 870 dòng thêm / 125 dòng xóa trên 28 file, trong đó 231 dòng là
-tài liệu (docs/brain/*) và 267 dòng là test mới. Xem toàn bộ bằng: git show 7bb4341
-Files requiring deeper review:
-  - src/modules/submissions/detail-view.ts  (MỚI — đường đọc dùng chung, có ghi audit; kiểm tra
-    audit không bị mất và DTO không lộ driveFileId/checksum)
-  - src/proxy.ts                            (bảo mật — header no-store cho bề mặt cán bộ)
-  - src/app/submissions/[submissionId]/page.tsx (đổi thời điểm đọc dữ liệu; nhánh notFound và nhánh
-    chịu lỗi tạm)
-  - src/components/admin/document-viewer.tsx (rủi ro cao nhất của đợt — đổi cách nạp ảnh, KHÔNG có
-    test tự động; kiểm tra vòng đời object URL và việc thu hồi khi unmount)
-  - src/modules/public-intake/repository.ts  (SQL mới, chưa chạy trên Postgres thật)
-```
-
-## 22. Agent declaration
-
-Agent xác nhận:
-
-- **Đã đọc các tài liệu nguồn sự thật:** `CLAUDE.md`, toàn bộ `docs/brain/` (00→06, đặc biệt Code
-  Graph trong `01-architecture.md`), `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`, và các file mã liên
-  quan trước khi sửa.
-- **Không tự mở rộng phạm vi ngoài phần đã nêu:** ba điểm vượt ra ngoài bốn hạng mục 2B đã được khai
-  báo rõ ở mục 5 → *Deviations* kèm lý do và tác động (header `no-store`, sửa 12 lỗi typecheck
-  baseline, gộp kiểu dữ liệu). Không thêm OCR, đối soát dân cư, Shared Drive hay bất kỳ tính năng
-  nào ngoài scope.
-- **Không ghi đè thay đổi có sẵn của người dùng:** cây làm việc sạch khi bắt đầu; chỉ revert
-  `next-env.d.ts` do `npm run build` tự sinh.
-- **Không đưa secret vào báo cáo:** không thêm biến môi trường, không hardcode khóa, không thêm lệnh
-  log nào; báo cáo không chứa CCCD, số điện thoại thật, token hay URL upload session.
-- **Không tự merge.**
-- **Không tự deploy** — và không chạy migration.
-- **Kết quả test được ghi đúng theo lệnh thực tế:** các số 687/10, 0 lỗi typecheck, 0 lỗi + 5 warning
-  lint đều lấy từ đầu ra thật của `npm test`, `npm run typecheck`, `npm run lint` trong phiên này.
-- **Các nội dung chưa xác minh đã được đánh dấu rõ:** AC-07, AC-08, AC-09 ghi `NOT_TESTED`; E2E và
-  security check ghi `NOT_RUN`; SQL `findActiveFile` ghi rõ chưa chạy trên Postgres thật; đã nêu là
-  **không có** số đo hiệu năng nào.
-- **Đã tự đính chính một báo cáo sai trước đó:** báo cáo Đợt 2A-2 và 2A-3 ghi "typecheck 0 lỗi" là
-  sai (thực tế 12 lỗi tại `2d67eb2`); nguyên nhân, bằng chứng và cách sửa ghi ở mục 3 và mục 4.
