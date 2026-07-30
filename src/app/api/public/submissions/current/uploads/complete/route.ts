@@ -11,14 +11,13 @@ import {
   type PublicFileRejectionReason,
 } from "@/modules/public-intake/repository";
 import {
-  isEditable,
   publicError,
   resolvePublicRequest,
   type PublicErrorCode,
 } from "@/modules/public-intake/route-context";
 import { getPublicIntakeStorage, UploadVerificationError } from "@/modules/public-intake/storage";
 import { discardIfOrphan } from "@/modules/public-intake/upload-commit";
-import { requiresCitizenId } from "@/modules/public-intake/types";
+
 import {
   buildFileNormalizationMetadata,
   buildUploadAttemptMetric,
@@ -118,6 +117,19 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   const driveFolderId = record.driveFolderId;
 
+  /* ── Replay nhanh TRƯỚC khi gọi Drive ──────────────────────────────────────
+   * Nếu server đã commit nhưng response mất, retry phải trả kết quả cũ trước
+   * mọi kiểm tra Drive hoặc trạng thái mới. Advisory lock bên trong
+   * `commitPublicFileUpload` vẫn xử lý hai request đồng thời.                */
+  const earlyReplay = await repository.findCompletedUploadReplay(idempotencyKey, mutationHash);
+  if (earlyReplay) {
+    return NextResponse.json({
+      ok: true,
+      fileId: earlyReplay.summary.fileId,
+      sizeBytes: earlyReplay.summary.sizeBytes,
+    });
+  }
+
   let verified;
   try {
     verified = await storage.verifyUploadedFile({
@@ -199,3 +211,4 @@ export async function POST(request: Request): Promise<NextResponse> {
     throw error;
   }
 }
+

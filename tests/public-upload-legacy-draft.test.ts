@@ -29,6 +29,7 @@ vi.mock("@/modules/public-intake/repository", () => ({
     findStoredMutation: mocks.findStoredMutation,
     isDriveFileAdopted: mocks.isDriveFileAdopted,
     commitPublicFileUpload: mocks.commitPublicFileUpload,
+    findCompletedUploadReplay: vi.fn().mockResolvedValue(null),
   }),
 }));
 

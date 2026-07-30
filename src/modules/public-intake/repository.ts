@@ -600,6 +600,29 @@ export class PublicIntakeRepository {
     };
   }
 
+  /**
+   * Tìm kết quả replay đã hoàn tất trong `request_log` **NGOÀI** transaction.
+   *
+   * Route upload-complete gọi phương thức này TRƯỚC khi xác minh Drive: nếu server đã commit
+   * nhưng response mất, retry phải trả kết quả cũ mà không đụng Drive. Advisory lock bên trong
+   * `commitPublicFileUpload` vẫn giữ nguyên để xử lý hai request đồng thời.
+   */
+  async findCompletedUploadReplay(
+    idempotencyKey: string,
+    mutationHash: string,
+  ): Promise<{ readonly summary: PublicFileSummary; readonly replayed: true } | null> {
+    const database = getDatabase();
+    const rows = await database<{ mutation_hash: string; response_json: unknown }[]>`
+      select mutation_hash, response_json from public.request_log
+      where idempotency_key = ${idempotencyKey}
+    `;
+    if (!rows[0]) return null;
+    if (rows[0].mutation_hash !== mutationHash) {
+      throw new SubmissionIdempotencyConflictError();
+    }
+    return { summary: rows[0].response_json as PublicFileSummary, replayed: true };
+  }
+
   async findById(submissionId: string): Promise<SubmissionRecord | null> {
     const database = getDatabase();
     const rows = await database.unsafe<SubmissionRow[]>(
@@ -2391,7 +2414,7 @@ export class PublicIntakeRepository {
           idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
         ) values (
           ${input.idempotencyKey}, 'OFFICER_UPLOAD_COMPLETE', ${input.requestId},
-          ${input.mutationHash}, ${transaction.json(summary)}, now() + interval '24 hours'
+          ${input.mutationHash}, ${transaction.json(summary as any)}, now() + interval '24 hours'
         )
       `;
 
@@ -3030,7 +3053,7 @@ export class PublicIntakeRepository {
     const summaries = rows.map((row) => this.fileSummary(mapFile(row)));
     await sql`
       update public.public_submissions
-      set file_summary_json = ${sql.json(summaries)}, updated_at = now()
+      set file_summary_json = ${sql.json(summaries as any)}, updated_at = now()
       where submission_id = ${submissionId}
     `;
   }
