@@ -2020,6 +2020,62 @@ export class PublicIntakeRepository {
   async markFileDeleted(submissionId: string, fileId: string): Promise<void> {
     await this.markFileStatus(submissionId, fileId, "DELETED");
   }
+
+  /**
+   * Sửa `owner_id` của một ảnh CCCD đang hiệu lực — vá lỗ "tải ảnh CCCD vào đúng ô nhưng gán nhầm
+   * chủ sử dụng" mà cả thay ảnh lẫn gỡ ảnh đều không vá được (ô đích nếu chưa có ảnh nào thì không
+   * có gì để "thay", còn "gỡ" chỉ để lại một ô trống, không đưa ảnh sang đúng chủ).
+   *
+   * Không dùng cho `CERTIFICATE`: ảnh GCN không gắn với một chủ sử dụng cụ thể (luôn ghi
+   * `owner_id = ''` từ lúc tải lên), nên "gán lại chủ" không có nghĩa với loại này.
+   *
+   * Trả `"NOOP"` khi `newOwnerId` trùng chủ hiện tại — coi là thành công, không phải lỗi, để việc gọi
+   * lại sau khi mất mạng giữa chừng không cần thêm cơ chế chống gửi trùng riêng.
+   *
+   * Ném `FileOwnerReassignConflictError` khi chủ đích đã có sẵn một ảnh cùng mặt đang hiệu lực. Cố
+   * tình KHÔNG tự động đánh `REPLACED` ảnh đó như `appendFile` làm khi thay ảnh: ảnh đang có ở ô đích
+   * có thể đang đúng, và đây là thao tác sửa nhãn chứ không phải "tôi vừa chụp ảnh mới". Bắt cán bộ
+   * xử lý ảnh đang chiếm chỗ trước (gỡ hoặc thay) thay vì âm thầm đẩy nó xuống lịch sử.
+   */
+  async reassignFileOwner(
+    submissionId: string,
+    fileId: string,
+    newOwnerId: string,
+  ): Promise<"REASSIGNED" | "NOOP"> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      const current = await transaction<
+        { owner_id: string; document_type: StoredFile["documentType"]; status: StoredFile["status"] }[]
+      >`
+        select owner_id, document_type, status from public.public_files
+        where submission_id = ${submissionId} and file_id = ${fileId} for update
+      `;
+      if (!current[0]) throw new Error("Không tìm thấy ảnh cần gán lại.");
+      if (current[0].status !== "UPLOADED") throw new Error("Ảnh không còn hiệu lực.");
+      if (current[0].document_type === "CERTIFICATE") {
+        throw new Error("Chỉ gán lại chủ sử dụng cho ảnh CCCD.");
+      }
+      if (current[0].owner_id === newOwnerId) return "NOOP";
+
+      // Khóa luôn hàng của chủ đích trong cùng transaction — hai yêu cầu gán lại đồng thời vào cùng
+      // một ô không được cùng thấy "còn trống" rồi cùng ghi đè lên nhau.
+      const collision = await transaction<{ file_id: string }[]>`
+        select file_id from public.public_files
+        where submission_id = ${submissionId} and owner_id = ${newOwnerId}
+          and document_type = ${current[0].document_type} and status = 'UPLOADED'
+        for update
+      `;
+      if (collision[0]) throw new FileOwnerReassignConflictError();
+
+      await transaction`
+        update public.public_files set owner_id = ${newOwnerId}, updated_at = now()
+        where submission_id = ${submissionId} and file_id = ${fileId}
+      `;
+      await this.refreshFileSummaries(transaction, submissionId);
+      return "REASSIGNED";
+    });
+  }
+
   async submit(input: {
     record: SubmissionRecord;
     draft: IntakeDraft;
@@ -2375,5 +2431,12 @@ export class SubmissionAlreadyClaimedError extends Error {
   constructor() {
     super("Hồ sơ đang do cán bộ khác nhận xử lý.");
     this.name = "SubmissionAlreadyClaimedError";
+  }
+}
+
+export class FileOwnerReassignConflictError extends Error {
+  constructor() {
+    super("Chủ sử dụng đích đã có ảnh cho mặt CCCD này.");
+    this.name = "FileOwnerReassignConflictError";
   }
 }

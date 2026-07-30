@@ -53,9 +53,10 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   **Bổ sung cùng ngày:** đã có `DELETE /api/submissions/:id/files/:fileId` — **xóa mềm**
   (`status = DELETED`, không chạm Drive), **chỉ ảnh GCN**, gỡ được cả ảnh do hộ dân tải lên (người
   dùng chốt). Nút gỡ nằm ở thanh công cụ khung xem ảnh, xác nhận hai bước. Không migration.
-  **Còn thiếu, biết trước:** chưa mở cho hồ sơ đã `ACCEPTED`; chưa có "gán lại ảnh CCCD sang chủ
-  khác" (lỗ thật mà thay ảnh không vá được — chờ ca thật, và cách vá đúng là đổi `owner_id` chứ
-  không phải mở cửa gỡ cho CCCD).
+  **Bổ sung cùng ngày (lần hai):** đã có `PATCH /api/submissions/:id/files/:fileId` — gán lại
+  `owner_id` của ảnh CCCD sang chủ khác, **không** tự động ghi đè ảnh đang đúng ở ô đích (409 nếu
+  chủ đích đã có ảnh cùng mặt). Chỉ ảnh CCCD, không áp dụng GCN. Không migration.
+  **Còn thiếu, biết trước:** chưa mở tải/gỡ/gán lại cho hồ sơ đã `ACCEPTED`.
 
 ## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
 

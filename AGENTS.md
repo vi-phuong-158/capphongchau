@@ -280,7 +280,7 @@ GET /api/submissions
 GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
 POST /api/submissions/:submissionId/reset-access-secret
-GET/DELETE /api/submissions/:submissionId/files/:fileId
+GET/DELETE/PATCH /api/submissions/:submissionId/files/:fileId
 POST /api/submissions/:submissionId/uploads/initiate
 POST /api/submissions/:submissionId/uploads/complete
 GET /api/submissions/:submissionId/ai-draft

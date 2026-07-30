@@ -16,6 +16,7 @@ import {
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 import { DocumentViewer } from "@/components/admin/document-viewer";
 import { OfficerFileUpload } from "@/components/admin/officer-file-upload";
+import { requiresCitizenId, type OwnerType } from "@/modules/public-intake/types";
 import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
 import type { SubmissionDetailView } from "@/modules/submissions/detail-view";
 
@@ -692,6 +693,40 @@ export function SubmissionDetail({
                         error?: { message?: string };
                       } | null;
                       throw new Error(data?.error?.message ?? "Không gỡ được ảnh khỏi hồ sơ.");
+                    }
+                    setSubmission(await loadSubmission(submission.submissionId));
+                  }
+                : undefined
+            }
+            reassignableOwners={
+              draft?.owners
+                .filter((owner) => requiresCitizenId(owner.ownerType as OwnerType))
+                .map((owner) => ({ id: owner.id, fullName: owner.fullName })) ?? []
+            }
+            /*
+             * Vá lỗ mà thay ảnh/gỡ ảnh không vá được: ảnh CCCD tải vào đúng ô nhưng gán nhầm người.
+             * Cùng điều kiện `mayStaffEdit` với `onDeleteFile` — server tự kiểm lại.
+             */
+            onReassignOwner={
+              isClaimedByMe && submission.status === "UNDER_REVIEW"
+                ? async (fileId, newOwnerId) => {
+                    const token = await csrfToken();
+                    const response = await fetch(
+                      `/api/submissions/${submission.submissionId}/files/${fileId}`,
+                      {
+                        method: "PATCH",
+                        headers: {
+                          "content-type": "application/json",
+                          "x-csrf-token": token,
+                        },
+                        body: JSON.stringify({ ownerId: newOwnerId }),
+                      },
+                    );
+                    if (!response.ok) {
+                      const data = (await response.json().catch(() => null)) as {
+                        error?: { message?: string };
+                      } | null;
+                      throw new Error(data?.error?.message ?? "Không gán lại được chủ sử dụng.");
                     }
                     setSubmission(await loadSubmission(submission.submissionId));
                   }

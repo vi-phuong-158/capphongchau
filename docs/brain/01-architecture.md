@@ -133,8 +133,10 @@ src/modules/public-intake/upload-commit.ts   DÙNG CHUNG cho hai đường tải
                                               (2026-07-30, Đợt 2C)
 src/components/admin/officer-file-upload.tsx  ô tải ảnh của cán bộ trên màn duyệt; hiện khi
                                               isClaimedByMe + UNDER_REVIEW (2026-07-30, Đợt 2C)
-src/components/admin/document-viewer.tsx      thêm prop `onDeleteFile` — không truyền = không hiện
-                                              nút gỡ, nên quyền nằm ở bên gọi (2026-07-30, Đợt 2C)
+src/components/admin/document-viewer.tsx      prop `onDeleteFile` (gỡ ảnh GCN) và
+                                              `onReassignOwner`+`reassignableOwners` (gán lại chủ
+                                              ảnh CCCD) — không truyền = không hiện nút tương ứng,
+                                              quyền nằm ở bên gọi (2026-07-30, Đợt 2C)
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive + findOrCreateFolder
                                               (cache trong tiến trình + PostgreSQL advisory lock
@@ -245,6 +247,20 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │   │   tạo trạng thái không tiếp nhận được; luồng đúng là THAY ảnh
 │   ├── KHÔNG chặn ảnh GCN cuối cùng — việc đó của completionChecks (FILES_CERTIFICATE_MISSING)
 │   └── audit SUBMISSION_OFFICER_FILE_DELETED (documentType/fileId/sizeBytes)
+│
+├── PATCH /api/submissions/:id/files/:fileId — CÁN BỘ GÁN LẠI CHỦ SỬ DỤNG ẢNH CCCD
+│   (2026-07-30, Đợt 2C bổ sung thứ hai)
+│   ├── repository.reassignFileOwner: transaction khóa CẢ hàng nguồn (for update) LẪN hàng đích
+│   │   cùng owner_id + document_type + status='UPLOADED' (for update) — chống hai gán lại đồng
+│   │   thời cùng thấy "còn trống" rồi cùng ghi vào một ô
+│   ├── ⚠️ owner_id trùng chủ đích → trả "NOOP", không lỗi, route KHÔNG ghi audit (an toàn khi
+│   │   gọi lại sau mất mạng, không cần idempotency-key)
+│   ├── ⚠️ chủ đích ĐÃ có ảnh cùng mặt → ném FileOwnerReassignConflictError → 409 VERSION_CONFLICT.
+│   │   KHÔNG tự động đánh REPLACED như appendFile lúc thay ảnh — reassign là "sửa nhãn ảnh cũ",
+│   │   không phải "vừa chụp ảnh mới"; ảnh đang chiếm ô đích có thể đang đúng
+│   ├── CHỈ CITIZEN_ID_FRONT/BACK — CERTIFICATE không gắn với một chủ cụ thể (luôn ownerId='')
+│   ├── chủ đích đọc từ effectivePayload(record).owners + requiresCitizenId, cùng quy tắc uploads/*
+│   └── audit SUBMISSION_OFFICER_FILE_OWNER_REASSIGNED (documentType/fileId, không ownerId)
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
     ├── isHeldByOfficer(record) → 409 INVALID_STATE NGAY, TRƯỚC Turnstile (2026-07-29, Đợt 2A-3)
     ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
@@ -586,6 +602,17 @@ POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE
                                                         `REQUEST_SUPPLEMENT` đã bị chặn server-side
                                                         2026-07-29, Đợt 2A-1 — luồng mới không còn
                                                         yêu cầu bổ sung, cán bộ sửa trực tiếp)
+PATCH /api/submissions/:submissionId/files/:fileId    (2026-07-30, Đợt 2C bổ sung — cán bộ gán
+                                                        lại chủ sử dụng của một ảnh CCCD. Vá lỗ
+                                                        "tải ảnh CCCD vào đúng ô nhưng gán nhầm
+                                                        người" mà cả thay ảnh lẫn gỡ ảnh đều không
+                                                        vá được. CHỈ ảnh CCCD (không áp dụng
+                                                        CERTIFICATE). KHÔNG tự động đánh REPLACED
+                                                        ảnh đang có ở ô đích — ném VERSION_CONFLICT
+                                                        bắt cán bộ xử lý trước, khác hẳn appendFile
+                                                        lúc thay ảnh. Gán đúng chủ đang có = NOOP
+                                                        thành công, không lỗi, không audit. Audit
+                                                        SUBMISSION_OFFICER_FILE_OWNER_REASSIGNED)
 DELETE /api/submissions/:submissionId/files/:fileId   (2026-07-30, Đợt 2C — cán bộ gỡ ảnh GCN.
                                                         XÓA MỀM `status = DELETED`, KHÔNG chạm
                                                         Drive. CHỈ `CERTIFICATE`: CCCD là ràng buộc

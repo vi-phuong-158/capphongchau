@@ -1891,3 +1891,31 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
   của chủ 2 vào ô của chủ 1 khi chủ 1 chưa có ảnh nào). Cách vá đúng là một thao tác đổi `owner_id`,
   KHÔNG phải mở cửa gỡ cho CCCD. Chờ tới khi vận hành gặp ca thật.
 
+## [2026-07-30] Đợt 2C bổ sung — gán lại chủ sử dụng ảnh CCCD, KHÔNG tự động ghi đè ô đích
+
+- **Quyết định:** thêm `PATCH /api/submissions/:id/files/:fileId` — đổi `owner_id` của một ảnh CCCD
+  đang hiệu lực sang chủ sử dụng khác trong cùng hồ sơ. Đây là lỗ đã nêu ở quyết định Đợt 2C trước:
+  cán bộ tải nhầm ảnh CCCD của chủ 2 vào ô mặt trước của chủ 1. Nếu chủ 1 chưa có ảnh nào khác thì
+  "thay ảnh" không có gì để thay; "gỡ ảnh" chỉ để lại một ô trống, ảnh của chủ 2 biến mất và phải tải
+  lại dù ảnh vốn đã đúng, chỉ sai nhãn.
+- **KHÔNG tự động đánh `REPLACED` ảnh đang có ở ô đích,** khác hẳn `appendFile` lúc thay ảnh. Thay
+  ảnh là "tôi vừa chụp ảnh mới cho đúng người" — ghi đè có chủ ý. Gán lại là "tôi sửa nhãn của một
+  ảnh cũ" — ảnh đang chiếm ô đích có thể đang **đúng**, và tự động đẩy nó xuống lịch sử là im lặng
+  phá một dữ liệu đúng để sửa một dữ liệu sai. Route ném `FileOwnerReassignConflictError` → 409
+  `VERSION_CONFLICT`, bắt cán bộ tự xử lý ảnh đang chiếm chỗ trước (gỡ hoặc thay) rồi mới gán lại.
+- **Chỉ ảnh CCCD** (`CITIZEN_ID_FRONT`/`CITIZEN_ID_BACK`). `CERTIFICATE` luôn ghi `owner_id = ''` từ
+  lúc tải lên — không gắn với một chủ cụ thể, nên "gán lại chủ" không có nghĩa với loại này.
+- **Gán đúng chủ đang có là `NOOP` thành công, không phải lỗi, không ghi audit.** Cho phép gọi lại
+  route này an toàn sau khi mất mạng giữa chừng mà không cần thêm `idempotency-key` — khác `DELETE`
+  ở cùng file chỉ vì lý do kỹ thuật giống nhau (đọc-khóa-rồi-so-sánh trước khi ghi), không phải một
+  quy ước mới.
+- **An toàn CÓ ĐIỀU KIỆN, không phải mặc định.** `reassignFileOwner` khóa **cả hai** hàng trong cùng
+  transaction — hàng nguồn (`for update` ngay khi đọc) và hàng đích (kiểm tra xung đột cũng
+  `for update`). Thiếu khóa hàng đích thì hai yêu cầu gán lại đồng thời vào cùng một ô có thể cùng
+  thấy "còn trống" rồi cùng ghi đè lên nhau — mất tính đúng đắn của kiểm tra xung đột.
+- **Chủ đích đọc từ `effectivePayload(record).owners`,** cùng quy tắc với các route `uploads/*` —
+  chủ do cán bộ thêm ở Bàn làm việc chỉ tồn tại ở `working_payload`.
+- **Không migration.** Chỉ đổi giá trị một cột đã có (`owner_id`), không đổi schema.
+- **Đã giải quyết:** lỗ "ảnh CCCD gán sai chủ" nêu trong quyết định Đợt 2C trước đây, giờ chuyển
+  trạng thái từ "chưa làm" sang "đã có".
+

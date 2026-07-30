@@ -8,6 +8,11 @@ export type DocumentFile = {
   ownerId: string;
 };
 
+export type ReassignableOwner = {
+  id: string;
+  fullName: string;
+};
+
 interface DocumentViewerProps {
   submissionId: string;
   files: readonly DocumentFile[];
@@ -19,6 +24,17 @@ interface DocumentViewerProps {
    * Chỉ ảnh Giấy chứng nhận gỡ được; server cũng từ chối loại khác. Nút không hiện với ảnh CCCD.
    */
   onDeleteFile?: (fileId: string) => Promise<void>;
+  /**
+   * Danh sách chủ sử dụng cần CCCD (đã lọc `requiresCitizenId` ở bên gọi), dùng cho ô "gán lại chủ
+   * sử dụng" của ảnh CCCD (Đợt 2C bổ sung) — vá lỗ ảnh CCCD bị tải vào đúng ô nhưng gán nhầm người.
+   */
+  reassignableOwners?: readonly ReassignableOwner[];
+  /**
+   * Gán lại chủ sử dụng của ảnh CCCD đang xem. Không truyền = không hiện nút, cùng lý do với
+   * `onDeleteFile`. Nút chỉ hiện khi ảnh đang xem là CCCD **và** còn ít nhất một chủ khác chủ hiện
+   * tại để chọn — server cũng tự từ chối gán lại cho ảnh Giấy chứng nhận.
+   */
+  onReassignOwner?: (fileId: string, newOwnerId: string) => Promise<void>;
 }
 
 export function documentFileLabel(
@@ -117,6 +133,8 @@ function DocumentViewerState({
   files,
   ownerIds,
   onDeleteFile,
+  reassignableOwners,
+  onReassignOwner,
 }: DocumentViewerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -126,6 +144,10 @@ function DocumentViewerState({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmingReassign, setConfirmingReassign] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
   const lightboxTitleId = useId();
   const { request: requestPreview, sourceFor, errorFor } = usePreviewImages(submissionId);
   /** Chỉ tải ảnh đang được chọn — các ảnh còn lại chờ cán bộ bấm sang tab của nó. */
@@ -168,6 +190,14 @@ function DocumentViewerState({
   const activeLabel = documentFileLabel(activeFile, files, ownerIds);
   // Chỉ ảnh GCN gỡ được: CCCD là ràng buộc bắt buộc của `completionChecks`, luồng đúng là thay ảnh.
   const canDelete = Boolean(onDeleteFile) && activeFile.documentType === "CERTIFICATE";
+  // Ngược lại: chỉ ảnh CCCD gán lại được, và phải còn ít nhất một chủ khác chủ hiện tại để chọn.
+  const reassignCandidates = (reassignableOwners ?? []).filter(
+    (owner) => owner.id !== activeFile.ownerId,
+  );
+  const canReassign =
+    Boolean(onReassignOwner) &&
+    activeFile.documentType !== "CERTIFICATE" &&
+    reassignCandidates.length > 0;
 
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 3));
   const handleZoomOut = () => setZoom((z) => Math.max(z - 0.5, 1));
@@ -296,6 +326,27 @@ function DocumentViewerState({
               </button>
             </>
           )}
+          {canReassign && (
+            <>
+              <div className="h-4 w-px bg-stone-300 mx-1" />
+              <button
+                type="button"
+                onClick={() => setConfirmingReassign(true)}
+                disabled={reassigning || confirmingReassign}
+                title="Gán ảnh này cho chủ sử dụng khác"
+                className="rounded p-1 text-sky-700 hover:bg-sky-100 disabled:opacity-40"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7a4 4 0 118 0 4 4 0 01-8 0zM2 21a6 6 0 0112 0M17 8l3 3m0 0l-3 3m3-3H14"
+                  />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -338,6 +389,63 @@ function DocumentViewerState({
         </div>
       )}
 
+      {canReassign && confirmingReassign && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900">
+          <span>
+            <strong>{activeLabel}</strong> thật ra là ảnh của chủ nào?
+          </span>
+          <select
+            value={reassignTarget}
+            disabled={reassigning}
+            onChange={(event) => setReassignTarget(event.target.value)}
+            className="rounded border border-sky-300 px-2 py-1 text-xs"
+          >
+            <option value="">— Chọn chủ sử dụng —</option>
+            {reassignCandidates.map((owner) => (
+              <option key={owner.id} value={owner.id}>
+                {owner.fullName || owner.id}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={reassigning || !reassignTarget}
+            onClick={async () => {
+              setReassigning(true);
+              setReassignError(null);
+              try {
+                await onReassignOwner!(activeFile.fileId, reassignTarget);
+                // Danh sách ảnh do bên gọi tải lại; `key` theo bộ fileId sẽ dựng lại component.
+                setConfirmingReassign(false);
+                setReassignTarget("");
+              } catch (reason) {
+                setReassignError(
+                  reason instanceof Error ? reason.message : "Không gán lại được chủ sử dụng.",
+                );
+              } finally {
+                setReassigning(false);
+              }
+            }}
+            className="rounded bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+          >
+            {reassigning ? "Đang gán…" : "Xác nhận gán lại"}
+          </button>
+          <button
+            type="button"
+            disabled={reassigning}
+            onClick={() => {
+              setConfirmingReassign(false);
+              setReassignTarget("");
+              setReassignError(null);
+            }}
+            className="rounded border border-sky-300 px-2.5 py-1 font-medium text-sky-800 hover:bg-sky-100"
+          >
+            Hủy
+          </button>
+          {reassignError && <span className="font-medium">{reassignError}</span>}
+        </div>
+      )}
+
       {/* Image Thumbnail Selector Tabs */}
       <div className="flex gap-1.5 overflow-x-auto border-b border-stone-200 bg-stone-100 p-2">
         {files.map((file, idx) => {
@@ -353,6 +461,9 @@ function DocumentViewerState({
                 setRotation(0);
                 setConfirmingDelete(false);
                 setDeleteError(null);
+                setConfirmingReassign(false);
+                setReassignTarget("");
+                setReassignError(null);
               }}
               className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                 isSelected

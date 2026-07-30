@@ -2946,3 +2946,34 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   **Giới hạn xác minh:** 19 test mới **đọc mã nguồn**, không chạy route thật. **Chưa kiểm thủ công.**
 - **Chưa merge, chưa deploy.**
 
+## [2026-07-30] Đợt 2C (bổ sung lần hai) — cán bộ gán lại chủ sử dụng ảnh CCCD
+
+- **Agent:** Claude Code
+- **Thay đổi:** thêm `PATCH` vào `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts`
+  (file đã có `GET` và `DELETE`). Repository có `reassignFileOwner` mới: transaction khóa cả hàng
+  nguồn lẫn hàng đích (`for update` cả hai), trả `"NOOP"` khi gán đúng chủ đang có, ném
+  `FileOwnerReassignConflictError` (mới, cùng chỗ với các error class khác của repository) khi chủ
+  đích đã có ảnh cùng mặt — **không** tự động đánh `REPLACED` như `appendFile` lúc thay ảnh. Chỉ áp
+  dụng cho CCCD, `CERTIFICATE` bị từ chối ở cả route lẫn repository. Audit
+  `SUBMISSION_OFFICER_FILE_OWNER_REASSIGNED` chỉ ghi khi thật sự đổi (`outcome === "REASSIGNED"`).
+  `DocumentViewer` thêm prop `onReassignOwner` + `reassignableOwners` — nút chỉ hiện với ảnh CCCD
+  và khi còn ít nhất một chủ khác chủ hiện tại; xác nhận qua dropdown + nút xác nhận tại chỗ.
+- **File đã sửa:** `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts` (thêm `PATCH`),
+  `src/modules/public-intake/repository.ts` (`reassignFileOwner`, `FileOwnerReassignConflictError`),
+  `src/components/admin/document-viewer.tsx`, `src/components/submission-detail.tsx`,
+  `tests/officer-file-reassign-owner.test.ts` (mới),
+  `docs/brain/{01-architecture,03-decisions,04-current-tasks,06-ai-working-log}.md`, `AGENTS.md`.
+- **Lý do:** vá lỗ đã nêu trong quyết định trước — cán bộ tải nhầm ảnh CCCD của chủ 2 vào ô của chủ
+  1; thay ảnh không có gì để thay, gỡ ảnh chỉ để lại ô trống và mất luôn ảnh đúng của chủ 2.
+- **Không làm:** không tự động ghi đè ảnh đang có ở ô đích (khác cố ý với hành vi thay ảnh); không
+  áp dụng cho GCN; không thêm idempotency-key (NOOP đã đủ an toàn cho việc gọi lại).
+- **Migration:** **không có.** Chỉ đổi giá trị cột `owner_id` đã có.
+- **Kiểm tra:** baseline `c57d4c3` — typecheck 0 lỗi, lint 0 lỗi/5 warning, 751 pass/10 skip. Sau khi
+  sửa — typecheck **0 lỗi**, lint **0 lỗi/5 warning** (đúng baseline), `npx vitest run`
+  **772 pass/10 skip** (751 + 21 test mới), `npm run build` đạt, route `PATCH` xuất hiện trong bảng.
+  **Đã kiểm chứng test không rỗng bằng 4 đột biến source:** bỏ kiểm tra xung đột (tự động ghi đè
+  như appendFile) → 1 ca đỏ; cho gán lại ảnh CERTIFICATE → 1 ca đỏ; bỏ chốt `mayStaffEdit` → 1 ca
+  đỏ; ghi audit cả khi NOOP → 1 ca đỏ. Đã revert cả bốn.
+  **Giới hạn xác minh:** 21 test mới **đọc mã nguồn**, không chạy route thật. **Chưa kiểm thủ công.**
+- **Chưa merge, chưa deploy.**
+
