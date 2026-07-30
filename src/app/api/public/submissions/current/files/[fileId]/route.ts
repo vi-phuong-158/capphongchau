@@ -1,15 +1,38 @@
+import { createHash } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { isValidPublicIdempotencyKey } from "@/modules/public-intake/creation-idempotency";
-import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import {
-  isEditable,
+  getPublicIntakeRepository,
+  PublicFileMutationRejectedError,
+  SubmissionIdempotencyConflictError,
+  type PublicFileRejectionReason,
+} from "@/modules/public-intake/repository";
+import {
   publicError,
   resolvePublicRequest,
+  type PublicErrorCode,
 } from "@/modules/public-intake/route-context";
 import { getPublicIntakeStorage, PreviewUnavailableError } from "@/modules/public-intake/storage";
 
 export const runtime = "nodejs";
+
+const REJECTION_HTTP: Record<
+  PublicFileRejectionReason,
+  { readonly code: PublicErrorCode; readonly status: number }
+> = {
+  NOT_FOUND: { code: "NOT_FOUND", status: 404 },
+  INVALID_STATE: { code: "INVALID_STATE", status: 409 },
+  OWNER_INVALID: { code: "VALIDATION_FAILED", status: 400 },
+  REPLACE_TARGET_INVALID: { code: "VERSION_CONFLICT", status: 409 },
+  SLOT_CONFLICT: { code: "VERSION_CONFLICT", status: 409 },
+  CERTIFICATE_LIMIT: { code: "VERSION_CONFLICT", status: 409 },
+  BYTE_BUDGET: { code: "VALIDATION_FAILED", status: 400 },
+  FILE_NOT_FOUND: { code: "NOT_FOUND", status: 404 },
+  FILE_INACTIVE: { code: "VERSION_CONFLICT", status: 409 },
+  DOCUMENT_TYPE_INVALID: { code: "VALIDATION_FAILED", status: 400 },
+};
 
 export async function GET(
   request: Request,
@@ -66,43 +89,35 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const access = await resolvePublicRequest(request, { requireCsrf: true });
   if (access instanceof NextResponse) return access;
-  if (!isEditable(access.record)) {
-    return publicError(
-      "INVALID_STATE",
-      "Bản kê khai đã gửi nên không xóa được ảnh.",
-      access.requestId,
-    );
-  }
-  if (!isValidPublicIdempotencyKey(request.headers.get("idempotency-key"))) {
+
+  const rawIdempotencyKey = request.headers.get("idempotency-key");
+  if (!isValidPublicIdempotencyKey(rawIdempotencyKey)) {
     return publicError("VALIDATION_FAILED", "Thiếu khóa chống gửi trùng.", access.requestId);
   }
-  if (!access.record.driveFolderId) {
-    return publicError(
-      "INVALID_STATE",
-      "Thư mục ảnh của bản kê khai chưa sẵn sàng.",
-      access.requestId,
-    );
-  }
-  const { fileId } = await context.params;
-  const file = (await getPublicIntakeRepository().listFiles(access.record.submissionId)).find(
-    (candidate) =>
-      candidate.fileId === fileId &&
-      (candidate.status === "UPLOADED" || candidate.status === "DELETED"),
-  );
-  if (!file) return publicError("NOT_FOUND", "Không tìm thấy ảnh cần xóa.", access.requestId);
-  if (file.documentType !== "CERTIFICATE") {
-    return publicError("VALIDATION_FAILED", "Chỉ xóa được ảnh Giấy chứng nhận.", access.requestId);
-  }
 
-  if (file.status === "UPLOADED") {
-    await getPublicIntakeRepository().markFileDeleted(access.record.submissionId, fileId);
-    await getPublicIntakeRepository().appendAudit({
-      actorEmail: "PUBLIC",
-      action: "PUBLIC_FILE_DELETED",
-      entityId: access.record.submissionId,
+  const { fileId } = await context.params;
+  const idempotencyKey = `PUBLIC_FILE_DELETE:${access.record.submissionId}:${fileId}:${rawIdempotencyKey}`;
+  const mutationHash = createHash("sha256")
+    .update(JSON.stringify({ submissionId: access.record.submissionId, fileId }))
+    .digest("hex");
+
+  try {
+    await getPublicIntakeRepository().commitPublicFileDelete({
+      submissionId: access.record.submissionId,
+      fileId,
       requestId: access.requestId,
-      metadata: { fileId },
+      idempotencyKey,
+      mutationHash,
     });
+    return NextResponse.json({ fileId, status: "DELETED" });
+  } catch (error) {
+    if (error instanceof PublicFileMutationRejectedError) {
+      const { code } = REJECTION_HTTP[error.reason];
+      return publicError(code, error.message, access.requestId);
+    }
+    if (error instanceof SubmissionIdempotencyConflictError) {
+      return publicError("IDEMPOTENCY_CONFLICT", "Yêu cầu xóa ảnh bị xung đột.", access.requestId);
+    }
+    throw error;
   }
-  return NextResponse.json({ fileId, status: "DELETED" });
 }

@@ -46,7 +46,7 @@
   - `src/modules/submissions/detail-view.ts` — **XÓA**.
   - `src/modules/public-intake/upload-commit.ts` — `discardIfOrphan` nhận `string | null`.
   - `src/app/api/submissions/[submissionId]/uploads/initiate/route.ts` — `ensureSubmissionFolderReady`
-    + `SERVICE_UNAVAILABLE`/`Retry-After`.
+    - `SERVICE_UNAVAILABLE`/`Retry-After`.
   - `src/app/api/submissions/[submissionId]/uploads/complete/route.ts` — dùng
     `commitOfficerFileUpload`, bảng `REJECTION_HTTP`, lazy folder trước `verifyUploadedFile`.
   - `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts` — `DELETE`/`PATCH` dùng hai
@@ -78,7 +78,7 @@
 ## [2026-07-30] App Script dự phòng — bổ sung phương án đọc lại QR và tối ưu EXIF
 
 - **Agent:** Antigravity (Gemini)
-- **Thay đổi:** 
+- **Thay đổi:**
   - Bổ sung nút "Đọc lại QR từ ảnh đã tải" trên giao diện như một phương án dự phòng. Nút này cho phép quét lại mã QR ở cả 4 góc xoay (0, 90, 180, 270) trên hai mặt ảnh CCCD đã tải lên mà không cần người dân/cán bộ phải thao tác chọn lại file.
   - Cập nhật hàm `loadImage` để tự động xử lý xoay ảnh (EXIF rotation) thông qua `createImageBitmap(..., { imageOrientation: 'from-image' })` nếu trình duyệt hỗ trợ. Cải tiến này giúp khung chứa QR không bị bóp méo khi ảnh chụp bằng điện thoại dọc, tăng khả năng nhận diện của ZXing.
   - Cập nhật font chữ Be Vietnam Pro, thay thế cảnh báo lừa đảo bằng cam kết sử dụng dữ liệu để làm sạch CSDL đất đai, và đổi logo Công an thành logo UBND Phường Phong Châu.
@@ -150,7 +150,7 @@
 
 - **Agent:** Antigravity (Gemini 3.6 Flash)
 - **Thay đổi:**
-  - Loại bỏ hoàn toàn khối form "Soạn yêu cầu bổ sung có cấu trúc" cũ khỏi `src/components/submission-detail.tsx` theo chỉ đạo người dùng; nâng cấp các nút hành động *Yêu cầu bổ sung* và *Từ chối* với giao diện xác nhận trực quan.
+  - Loại bỏ hoàn toàn khối form "Soạn yêu cầu bổ sung có cấu trúc" cũ khỏi `src/components/submission-detail.tsx` theo chỉ đạo người dùng; nâng cấp các nút hành động _Yêu cầu bổ sung_ và _Từ chối_ với giao diện xác nhận trực quan.
   - Tạo linh kiện `DocumentViewer` (`src/components/admin/document-viewer.tsx`) tương tác: Phóng to (Zoom 100-300%), Xoay ảnh (90°/180°/270°), Xoay/Đặt lại, Xem toàn màn hình (Lightbox) và Chuyển tab giữa ảnh CCCD mặt trước/sau và GCN.
   - Chuyển giao diện `SubmissionDetail` sang **bố cục Split-Screen song song 2 cột**: Cột trái ghim `DocumentViewer` đối chiếu ảnh, Cột phải chứa Bàn làm việc biên tập dữ liệu.
   - Phân Tab Bàn làm việc 49 cột PL3 trong `WorkingPayloadEditor` (`src/components/admin/working-payload-editor.tsx`): Tất cả, Giấy chứng nhận, Chủ sử dụng, Thửa đất PL3, Tài sản.
@@ -2505,6 +2505,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `saveDraft`.
 - **Kết quả HEAD mới:** focused 19/19; typecheck đạt; lint 0 error/5 warning có sẵn; unit 558
   pass/10 skipped; build đạt. Không push, merge, deploy, migration hoặc cleanup dữ liệu.
+
 ## [2026-07-29] Bổ sung tra cứu GCN theo số phát hành và ngày cấp
 
 - **Agent:** Codex
@@ -2526,12 +2527,14 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Sửa:** Dùng Unicode letter class `\p{L}` sau chuẩn hóa; vẫn chặn dấu câu/ký tự đặc biệt. Thêm
   regression test cho `ađ 266864` → `AĐ266864` và ngày `2006-02-20`.
 - **Kiểm tra:** focused 14/14 pass, typecheck pass, localhost trả HTTP 200.
+
 ## [2026-07-29] Rút ngắn luồng tải CCCD bằng QR nền
 
 - **Agent:** Codex
 - **Thay đổi:** Wizard tự giải mã QR theo thứ tự ảnh CCCD được tải cho đến khi một ảnh thành công; ảnh còn lại sau đó chỉ upload, không quét lại. Việc giải mã chạy nền nên không khóa nút “Tiếp tục”; nút “Đọc lại QR” vẫn thử cả hai mặt khi cán bộ/người dân chủ động yêu cầu.
 - **Bảo mật:** QR tiếp tục chỉ được đọc tại thiết bị. Không gửi payload QR, không thay đổi API, schema, Drive hoặc Supabase.
 - **Kiểm tra:** focused Vitest 67/67, typecheck, ESLint các file thay đổi, build và `git diff --check` đều đạt.
+
 ## [2026-07-29] Làm rõ điều kiện chặn trước tiếp nhận chính thức
 
 - **Agent:** Codex
@@ -2553,7 +2556,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Thay đổi:** Tách tổ chức F/G khỏi chủ/người đại diện H–L; CRUD người sử dụng hiện tại O–R;
   bổ sung thửa S–Y, cột W thủ công, tối đa ba bộ mục đích Z–AN và tài sản AO–AW gắn theo thửa.
   B/V/AX hiện nguồn tự động và cho ghi đè khi có lý do ≥10 ký tự. Repository ghi JSON + projection
-  + history + audit trong cùng transaction; official sync giữ payload đầy đủ.
+  - history + audit trong cùng transaction; official sync giữ payload đầy đủ.
 - **Schema:** Thêm migration additive `202607290002_full_pl3_editor.sql`; chưa áp dụng môi trường
   ngoài local. Payload cũ thiếu trường mới và tổ chức legacy vẫn đọc/xuất tương thích.
 - **Bảo mật/audit:** Audit chỉ ghi đường dẫn trường thay đổi và lý do override, không ghi giá trị
@@ -2586,7 +2589,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
      repo nên ESLint quét bản build trong worktree agent và **chết vì hết heap**, không phải chỉ
      "fail": lint gate coi như không tồn tại.
   6. `pl3-export.ts` — `buildSubmissionRows` dedupe `warnings` trước khi trả. `buildRow` chạy mỗi
-     cặp (thửa × chủ) nên cảnh báo thuộc về *thửa* bị lặp đúng bằng số đồng sở hữu; hồ sơ 3 đồng
+     cặp (thửa × chủ) nên cảnh báo thuộc về _thửa_ bị lặp đúng bằng số đồng sở hữu; hồ sơ 3 đồng
      sở hữu ra 3 dòng cảnh báo giống hệt. Sửa ở đây thay vì đẩy riêng cảnh báo tài sản ra ngoài vì
      nó dọn luôn cả cảnh báo `field19` và `landUseCells` vốn đã trùng từ PR #7.
 - **File đã sửa:** `eslint.config.mjs`, `src/components/admin/working-payload-editor.tsx`,
@@ -2616,7 +2619,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
      `assetLabel()` để thông báo gọi tên đúng tài sản ("Tài sản 2 (Công trình xây dựng khác — Nhà
      kho sau vườn) chưa chọn thửa đất") và chỉ ra ô cần sửa, thay cho "Tài sản thứ N" chung chung.
   3. **Một nguồn sự thật** — gỡ hai khối `update public.public_submissions set ward_admin_code_
-     override…` khỏi `repository.ts`; thêm migration `202607290003` `drop column if exists` cho 4
+override…` khỏi `repository.ts`; thêm migration `202607290003` `drop column if exists` cho 4
      cột. KHÔNG sửa `202607290002` (có thể đã chạy ở local/preview). Preflight bỏ 4 cột khỏi danh
      sách bắt buộc và thêm kiểm tra ngược: 4 cột đó phải KHÔNG còn tồn tại.
   4. **Người đại diện tổ chức** — giữ nguyên hành vi, không sửa code; viết release note
@@ -2681,6 +2684,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   tiêu giảm 35% thời gian/50% dung lượng, chất lượng chữ nhỏ hoặc tỷ lệ QR. Tài liệu nguồn sự thật
   được đồng bộ để ghi rõ ngoại lệ “bản tiếp nhận vận hành”. Rollback: đặt cờ `false` và redeploy,
   không có migration.
+
 ## [2026-07-29] Migration queue performance và benchmark Preview 20.000
 
 - **Agent:** Codex.
@@ -2689,6 +2693,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Benchmark:** Chèn 20.000 hồ sơ synthetic trong transaction, `EXPLAIN (ANALYZE, BUFFERS)`, sau đó rollback. Trang status 17,99 ms; owner trigram 4,95 ms; receipt trigram 47,22 ms; issue 62,60 ms (planner vẫn dùng status index + filter).
 - **Preflight:** 29/32; 3 fail do rehearsal chưa có migration `202607290001`/`202607290002`. Không deploy code mới từ database này cho đến khi chạy đủ migration phụ thuộc.
 - **An toàn:** Không seed dữ liệu lưu lại; không in secret; `.env.local` không bị sử dụng.
+
 ## [2026-07-29] Phase 1 rehearsal reset, preflight 32/32 và Preview deploy
 
 - **Agent:** Codex.
@@ -2711,6 +2716,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   chỉ chạy khi có `ACCEPTANCE_SAGA_TEST_DATABASE_URL` riêng.
 - **Giới hạn:** không migration, env, deploy/merge Production hay Phase 5B; chưa có benchmark Preview
   10 file vì chưa deploy Preview.
+
 ## [2026-07-29] Phase 4 — pool Supabase và region Preview
 
 - **Agent:** Codex.
@@ -2736,6 +2742,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Audit/scope:** Không thêm audit bypass. Detail page, API detail và preview thành công vẫn append audit theo contract; một lượt đầy đủ 10 warm-up + 40 đo có thể thêm tối đa 150 audit rows. Chỉ chạy dữ liệu synthetic/rehearsal và dọn/reset audit sau đo.
 - **Tài liệu:** đồng bộ AGENTS, Code Graph, decision/task/baseline hiệu năng để không mô tả sai là “không ghi database”. Không đổi runtime API, role, schema hay migration.
 - **Kiểm tra ban đầu:** baseline 5 file/13 test PASS; focused runner test sau sửa 6/6 PASS. Chưa chạy authenticated Preview vì không có cookie/session rehearsal được cấp; không deploy/merge Production.
+
 ## [2026-07-29] Codex — triển khai Phase 3 lazy Drive folder trên branch riêng
 
 - Base `origin/main` sau PR #9: `8942d3c`; branch `codex/phase3-lazy-drive-folder`.
@@ -2788,6 +2795,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** focused folder unit 6/6 PASS; typecheck PASS; lint PASS; full Vitest 79 file/689 test
   PASS (2 file/13 test skip không có rehearsal URL); webpack build PASS; preflight rehearsal PASS
   **36/36**. Chưa deploy/merge, flag vẫn `false`; trạng thái chỉ `READY_FOR_PREVIEW_REHEARSAL`.
+
 ## [2026-07-29] Đợt 2A-1 — dọn giao diện duyệt hồ sơ, bỏ luồng yêu cầu bổ sung, gộp một đường ghi
 
 - **Agent:** Claude Code (nhánh `claude/redesign-document-review-screen-tfuvov`).
@@ -2846,7 +2854,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
     `amendmentReason` hợp lệ trên hồ sơ `ACCEPTED` vẫn gọi `commitOfficialAmendment` thành công.
 - **Chưa làm (nằm ở đợt sau, đã báo người dùng):** ô ghi chú nội bộ + migration (2A-2); chặn dân
   gửi lại khi cán bộ đang giữ hồ sơ + cho tiếp nhận hồ sơ cũ `NEEDS_SUPPLEMENT` (2A-3); server-prime
-  + chuyển audit + lazy ảnh (2B); cán bộ tự tải ảnh bổ sung (2C).
+  - chuyển audit + lazy ảnh (2B); cán bộ tự tải ảnh bổ sung (2C).
 - **Migration:** không có (đợt này thuần code, không đổi schema).
 - **Kiểm tra:** baseline trước khi sửa — `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/10 warning
   có sẵn, `npm test` 664 pass/10 skip. Sau khi sửa — `npm run typecheck` 0 lỗi, `npm run lint`
@@ -2897,13 +2905,12 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   - `scripts/preflight-public-intake-v2-migrations.ts`
 - **Test mới:** `tests/submission-internal-notes.test.ts` — 5 ca: lưu hợp lệ gọi
   `commitInternalNotes` đúng một lần; cho phép ghi kể cả hồ sơ `ACCEPTED` và người khác đang giữ;
-  version lệch trả 409 không gọi commit; thiếu idempotency-key trả 400; ghi chú > 4000 ký tự trả
-  400.
+  version lệch trả 409 không gọi commit; thiếu idempotency-key trả 400; ghi chú > 4000 ký tự trả 400.
 - **Chưa làm (nằm ở đợt sau):** 2A-3 (chặn dân gửi lại khi cán bộ đang giữ + cho tiếp nhận hồ sơ
   cũ `NEEDS_SUPPLEMENT`), 2B (server-prime, lazy ảnh, single-file query, lazy AI panel), 2C (cán bộ
   tự tải ảnh bổ sung).
 - **Migration:** `202607290005_submission_internal_notes.sql` — additive thuần túy (`add column …
-  default ''`), không cần backfill, rollback là `drop column`. **Chưa chạy trên Preview/Production**
+default ''`), không cần backfill, rollback là `drop column`. **Chưa chạy trên Preview/Production**
   — phải chạy trước khi deploy code này, rồi xác nhận bằng
   `npx tsx scripts/preflight-public-intake-v2-migrations.ts`.
 - **Kiểm tra:** baseline trước khi sửa — `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/5 warning
@@ -2935,7 +2942,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   2. **`submit/route.ts` (công khai):** kiểm `isHeldByOfficer` **trước** `isEditable` để trả đúng
      lý do ("Hồ sơ đang được cán bộ phường xử lý…") thay vì thông báo sai "Bản kê khai này đã được
      gửi", và chặn **trước** bước Turnstile để không đốt lượt xác minh của người dân. `PATCH
-     /current` không phải sửa — thông báo sẵn có đã đúng nghĩa.
+/current` không phải sửa — thông báo sẵn có đã đúng nghĩa.
   3. **`review.ts` — `mayClaim` thêm `NEEDS_SUPPLEMENT`:** bắt buộc đi kèm, không phải tính năng
      rời. Sau khi chặn người dân gửi lại, hồ sơ `NEEDS_SUPPLEMENT` cũ sẽ kẹt vĩnh viễn (không
      claim được, không sửa được vì `mayStaffEdit` đòi `UNDER_REVIEW`, đường thoát duy nhất vừa bị
@@ -2988,7 +2995,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
      `GET /api/submissions/:id`. Audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` đặt **trong** hàm này
      để server-priming không làm mất dấu vết "ai đã xem hồ sơ nào". Kiểu `SubmissionDetailView`
      thành nguồn duy nhất; `submission-detail.tsx` bỏ bản khai lại (`type Submission =
-     SubmissionDetailView`).
+SubmissionDetailView`).
   3. **`cache-control: private, no-store`** cho toàn bộ matcher cán bộ trong `src/proxy.ts` — HTML
      giờ chứa PII (SĐT/CCCD/địa chỉ) chứ không còn là khung rỗng.
   4. **`findActiveFile(submissionId, fileId)`** — một truy vấn cho một ảnh, thay `listFiles` +
@@ -3064,7 +3071,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Kiểm tra:** `npx vitest run` **698 pass/10 skip** (687 + 11 test mới, không test cũ nào fail
   hay mới skip), `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/5 warning (đúng baseline).
   **Đã kiểm chứng test không rỗng bằng đột biến source:** bỏ dòng `response.headers.set(
-  "cache-control", ...)` → 2 ca đỏ; đổi `catch { initialSubmission = null }` thành
+"cache-control", ...)` → 2 ca đỏ; đổi `catch { initialSubmission = null }` thành
   `catch { missing = true }` → 1 ca đỏ. Đã revert cả hai đột biến, `git diff src/` trống.
 - **Không giải quyết:** lazy ảnh và accordion AI (bước 3–10 trong kịch bản thủ công) vẫn không có
   test — cần `@testing-library/react` + jsdom, tức thêm devDependency, chưa được duyệt.
@@ -3074,7 +3081,7 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
 - **Agent:** Claude Code
 - **Thay đổi:** thêm đường tải ảnh cho cán bộ, tách hẳn khỏi đường của hộ dân.
   - Hai route mới `POST /api/submissions/:id/uploads/initiate|complete`: `requireActiveUser(
-    SUBMISSION_DECISION_ROLES)` + `verifyCsrfToken` + `mayStaffEdit` (đang giữ hồ sơ +
+SUBMISSION_DECISION_ROLES)` + `verifyCsrfToken` + `mayStaffEdit` (đang giữ hồ sơ +
     `UNDER_REVIEW`). Chủ sử dụng đọc từ `effectivePayload(record).owners`, không từ `record.draft`.
     Idempotency `request_log.kind = OFFICER_UPLOAD_COMPLETE`; audit
     `SUBMISSION_OFFICER_FILE_UPLOADED` (metadata chỉ danh mục đóng + số).
@@ -3209,4 +3216,11 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   **Chưa chạy được bất kỳ migration nào thật** — cần bạn tự chạy theo runbook, hoặc cấp credential
   Preview cho một phiên có thể thực thi.
 - **Chưa merge, chưa deploy.**
-
+# #   2 0 2 6 - 0 7 - 3 0 :   F i x   I n t e g r a t i o n   T e s t s   f o r   O f f i c e r   F i l e   M u t a t i o n s 
+ 
+ -   C �p   n h �t   \ s r c / m o d u l e s / p u b l i c - i n t a k e / r e p o s i t o r y . t s \ :   T h a y   t h �  \ J S O N . s t r i n g i f y ( s u m m a r y ) : : j s o n b \   b �n g   \ 	 r a n s a c t i o n . j s o n ( s u m m a r y ) \   �  f i x   l �i   p a r s e   J S O N   c �a   \ p o s t g r e s . j s \   k h i   l �y   d �  l i �u   t �  c � c   c �t   \ j s o n b \   ( \  e q u e s t _ l o g . r e s p o n s e _ j s o n \   v �   \ p u b l i c _ s u b m i s s i o n s . f i l e _ s u m m a r y _ j s o n \ ) .   
+ -   �   v e r i f y   1 1 / 1 1   t e s t s   t r o n g   \ 	 e s t s / o f f i c e r - f i l e - m u t a t i o n s . i n t e g r a t i o n . t e s t . t s \   p a s s   a n   t o � n .   L �i   \ s u m m a r i e s . m a p   i s   n o t   a   f u n c t i o n \   v �   l �i   \ u n d e f i n e d . f i l e I d \   d o   P o s t g r e s . j s   t r �  v �  s t r i n g   n g u y � n   b �n   �   ��c   k h �c   p h �c . 
+ -   �   b �  s u n g   s c r i p t   \ s c r i p t s / a d d - m i s s i n g - c o l . j s \   �  p a t c h   c �t   \ i n t e r n a l _ n o t e s \   l � n   R e h e a r s a l   D B . 
+ 
+  
+ 

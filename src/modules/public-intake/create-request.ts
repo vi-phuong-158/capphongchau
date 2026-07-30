@@ -14,9 +14,7 @@ export type CreateSubmissionRequestValidation =
  * đồng ý với thông báo đang hiển thị. Không nhận `channel`, danh tính cán bộ hoặc phiên bản
  * consent từ body vì các giá trị đó phải đến từ route/session/config phía server.
  */
-export function validateCreateSubmissionRequest(
-  body: unknown,
-): CreateSubmissionRequestValidation {
+export function validateCreateSubmissionRequest(body: unknown): CreateSubmissionRequestValidation {
   if (typeof body !== "object" || body === null) {
     return { ok: false, message: "Nội dung yêu cầu không hợp lệ." };
   }

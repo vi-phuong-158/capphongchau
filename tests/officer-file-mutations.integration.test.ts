@@ -104,9 +104,8 @@ describe.skipIf(!hasTestDb)("Thao tác ảnh của cán bộ — nguyên tử tr
 
     const bootstrapped = await sql<{ exists: boolean }[]>`
       select exists (
-        select 1 from information_schema.columns
-        where table_schema = 'public' and table_name = 'public_submissions'
-          and column_name = 'internal_notes'
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'users'
       ) as exists
     `;
     if (!bootstrapped[0]?.exists) {
@@ -147,6 +146,7 @@ describe.skipIf(!hasTestDb)("Thao tác ảnh của cán bộ — nguyên tử tr
   afterEach(async () => {
     await sql`delete from public.audit_logs where entity_id = ${submissionId}`;
     await sql`delete from public.request_log where idempotency_key like ${`%${submissionId}%`}`;
+    await sql`delete from public.public_files where submission_id = ${submissionId}`;
     await sql`delete from public.public_submissions where submission_id = ${submissionId}`;
   });
 

@@ -45,47 +45,48 @@ Tài liệu nội bộ đang có hai câu chuyện khác nhau về bốn migrati
       không cần đoán qua tài liệu (script kiểm cả `drive_folder_*` của `005` và `internal_notes` của
       `006`). Nếu báo PASS cho cả năm: dừng, không cần chạy gì thêm ở runbook này.
 - [ ] **Kiểm lịch sử migration của chính database đang trỏ tới, vì số `202607290005` từng bị cấp cho
-      hai nội dung khác nhau.** Một database rehearsal có thể đã ghi nhận `202607290005` cho *ghi chú
-      nội bộ* (bản cũ của nhánh PR) chứ không phải cho *lazy Drive folder*:
+      hai nội dung khác nhau.** Một database rehearsal có thể đã ghi nhận `202607290005` cho _ghi chú
+      nội bộ_ (bản cũ của nhánh PR) chứ không phải cho _lazy Drive folder_:
 
       ```sql
-      select version, name from supabase_migrations.schema_migrations
-      where version >= '202607290002' order by version;
-      ```
+          select version, name from supabase_migrations.schema_migrations
+          where version >= '202607290002' order by version;
+          ```
 
-      Đối chiếu với schema thật — hai câu dưới phân biệt được database đã áp nội dung nào:
+          Đối chiếu với schema thật — hai câu dưới phân biệt được database đã áp nội dung nào:
 
-      ```sql
-      -- đã áp lazy Drive folder (đúng nghĩa 005)?
-      select count(*) from information_schema.columns
-      where table_schema='public' and table_name='public_submissions'
-        and column_name='drive_folder_state';
-
-      -- đã áp ghi chú nội bộ (nay là 006)?
-      select count(*) from information_schema.columns
-      where table_schema='public' and table_name='public_submissions'
-        and column_name='internal_notes';
-      ```
-
-      Nếu database đã có `internal_notes` nhưng `schema_migrations` ghi `202607290005`: **không xóa
-      cột**. Chèn thủ công dòng lịch sử cho số mới rồi để `db push` chạy tiếp phần còn thiếu —
-
-      ```sql
-      insert into supabase_migrations.schema_migrations (version, name)
-      values ('202607290006', 'submission_internal_notes')
-      on conflict (version) do nothing;
-
-      delete from supabase_migrations.schema_migrations
-      where version = '202607290005'
-        and not exists (
-          select 1 from information_schema.columns
+          ```sql
+          -- đã áp lazy Drive folder (đúng nghĩa 005)?
+          select count(*) from information_schema.columns
           where table_schema='public' and table_name='public_submissions'
-            and column_name='drive_folder_state'
-        );
-      ```
+            and column_name='drive_folder_state';
 
-      Câu `delete` chỉ gỡ dòng `005` khi schema **chưa** có cột của lazy Drive folder — tức dòng đó
-      thực sự là dấu vết của nội dung cũ, không phải của `005` hiện tại.
+          -- đã áp ghi chú nội bộ (nay là 006)?
+          select count(*) from information_schema.columns
+          where table_schema='public' and table_name='public_submissions'
+            and column_name='internal_notes';
+          ```
+
+          Nếu database đã có `internal_notes` nhưng `schema_migrations` ghi `202607290005`: **không xóa
+          cột**. Chèn thủ công dòng lịch sử cho số mới rồi để `db push` chạy tiếp phần còn thiếu —
+
+          ```sql
+          insert into supabase_migrations.schema_migrations (version, name)
+          values ('202607290006', 'submission_internal_notes')
+          on conflict (version) do nothing;
+
+          delete from supabase_migrations.schema_migrations
+          where version = '202607290005'
+            and not exists (
+              select 1 from information_schema.columns
+              where table_schema='public' and table_name='public_submissions'
+                and column_name='drive_folder_state'
+            );
+          ```
+
+          Câu `delete` chỉ gỡ dòng `005` khi schema **chưa** có cột của lazy Drive folder — tức dòng đó
+          thực sự là dấu vết của nội dung cũ, không phải của `005` hiện tại.
+
 - [ ] Gọi `GET /api/health/database` trên deployment preview hiện tại — phải trả `status: "ok"`.
 
 ## 1. An toàn từng migration — đã đọc mã nguồn `.sql`, không đoán
@@ -95,13 +96,13 @@ Cả năm đều **additive và idempotent** (`add column if not exists` / `drop
 cột/index là no-op, không lỗi. Đây là lý do năm migration này an toàn để `db push` mà không cần biết
 chính xác trạng thái hiện tại, miễn đã xác nhận **đúng project** và **đúng lịch sử số hiệu** ở mục 0.
 
-| Migration | Việc làm | Rủi ro khóa bảng |
-| --- | --- | --- |
-| `202607290002_full_pl3_editor.sql` | Thêm cột cho `public_submissions`, `public_owners`, `public_parcels`, `public_assets`, `owners`, `official_parcels`, `official_land_uses`; thêm FK `public_assets_parcel_fk` (có kiểm tồn tại trước khi thêm); thêm 1 index | **Thấp.** Cột `parcel_id` mới thêm trong cùng migration nên toàn bộ hàng đang có là `NULL` lúc thêm FK — validate FK trên cột toàn `NULL` gần như tức thời, không quét dữ liệu thật |
-| `202607290003_drop_working_payload_override_columns.sql` | Gỡ 4 cột `ward_admin_code_override*`/`scanned_file_names_override*` trên `public_submissions` | **Thấp.** `DROP COLUMN` trong Postgres là thao tác catalog, không viết lại toàn bảng ngay (dọn không gian đĩa để `VACUUM` sau) |
-| `202607290004_queue_search_performance.sql` | Tạo extension `pg_trgm`; thêm 2 **generated column `STORED`** (`queue_owner_name`, `queue_issue_number`); tạo 5 index (2 btree, 3 GIN trigram) | **Migration rủi ro nhất trong bốn cái.** Thêm generated column `STORED` bắt Postgres **tính và ghi giá trị cho mọi hàng đang có ngay lúc `ALTER TABLE`** — giữ khóa `ACCESS EXCLUSIVE` trên `public_submissions` suốt quá trình đó, chặn cả đọc lẫn ghi. Năm lệnh `CREATE INDEX` phía sau **không dùng `CONCURRENTLY`** — mỗi lệnh cũng khóa ghi (không khóa đọc) trong lúc build. Ở quy mô hồ sơ hiện tại (theo benchmark trong log 2026-07-29: 20.000 hàng synthetic, trang trạng thái 17,99 ms) mức này vẫn ổn; canh giờ ít cán bộ thao tác nếu bảng đã lớn hơn |
-| `202607290005_lazy_drive_folder_creation.sql` | `drive_folder_id` bỏ `NOT NULL`; thêm `drive_folder_state`/`drive_folder_lease_until`/`drive_folder_attempts`; backfill trạng thái cho hàng đang có; thêm CHECK constraint + 1 partial index | **Thấp.** `drop not null` là thao tác catalog. Ba lệnh `update` backfill có quét bảng nhưng chỉ ghi vào cột vừa thêm; ở quy mô hiện tại là tức thời. An toàn khi `LAZY_DRIVE_FOLDER_CREATION_ENABLED` còn `false` — đường eager cũ vẫn chạy nguyên |
-| `202607290006_submission_internal_notes.sql` | Thêm cột `internal_notes text not null default ''` | **Không đáng kể.** Có default hằng số nên Postgres không cần viết lại bảng (tối ưu có từ Postgres 11), chỉ đổi catalog |
+| Migration                                                | Việc làm                                                                                                                                                                                                                    | Rủi ro khóa bảng                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `202607290002_full_pl3_editor.sql`                       | Thêm cột cho `public_submissions`, `public_owners`, `public_parcels`, `public_assets`, `owners`, `official_parcels`, `official_land_uses`; thêm FK `public_assets_parcel_fk` (có kiểm tồn tại trước khi thêm); thêm 1 index | **Thấp.** Cột `parcel_id` mới thêm trong cùng migration nên toàn bộ hàng đang có là `NULL` lúc thêm FK — validate FK trên cột toàn `NULL` gần như tức thời, không quét dữ liệu thật                                                                                                                                                                                                                                                                                                                                                                                |
+| `202607290003_drop_working_payload_override_columns.sql` | Gỡ 4 cột `ward_admin_code_override*`/`scanned_file_names_override*` trên `public_submissions`                                                                                                                               | **Thấp.** `DROP COLUMN` trong Postgres là thao tác catalog, không viết lại toàn bảng ngay (dọn không gian đĩa để `VACUUM` sau)                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `202607290004_queue_search_performance.sql`              | Tạo extension `pg_trgm`; thêm 2 **generated column `STORED`** (`queue_owner_name`, `queue_issue_number`); tạo 5 index (2 btree, 3 GIN trigram)                                                                              | **Migration rủi ro nhất trong bốn cái.** Thêm generated column `STORED` bắt Postgres **tính và ghi giá trị cho mọi hàng đang có ngay lúc `ALTER TABLE`** — giữ khóa `ACCESS EXCLUSIVE` trên `public_submissions` suốt quá trình đó, chặn cả đọc lẫn ghi. Năm lệnh `CREATE INDEX` phía sau **không dùng `CONCURRENTLY`** — mỗi lệnh cũng khóa ghi (không khóa đọc) trong lúc build. Ở quy mô hồ sơ hiện tại (theo benchmark trong log 2026-07-29: 20.000 hàng synthetic, trang trạng thái 17,99 ms) mức này vẫn ổn; canh giờ ít cán bộ thao tác nếu bảng đã lớn hơn |
+| `202607290005_lazy_drive_folder_creation.sql`            | `drive_folder_id` bỏ `NOT NULL`; thêm `drive_folder_state`/`drive_folder_lease_until`/`drive_folder_attempts`; backfill trạng thái cho hàng đang có; thêm CHECK constraint + 1 partial index                                | **Thấp.** `drop not null` là thao tác catalog. Ba lệnh `update` backfill có quét bảng nhưng chỉ ghi vào cột vừa thêm; ở quy mô hiện tại là tức thời. An toàn khi `LAZY_DRIVE_FOLDER_CREATION_ENABLED` còn `false` — đường eager cũ vẫn chạy nguyên                                                                                                                                                                                                                                                                                                                 |
+| `202607290006_submission_internal_notes.sql`             | Thêm cột `internal_notes text not null default ''`                                                                                                                                                                          | **Không đáng kể.** Có default hằng số nên Postgres không cần viết lại bảng (tối ưu có từ Postgres 11), chỉ đổi catalog                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Không migration nào xóa hay đổi kiểu dữ liệu đang có — chỉ thêm mới hoặc gỡ cột đã xác nhận không
 còn đường đọc (`202607290003`, xem lý do đầy đủ ở `docs/brain/03-decisions.md`, mục
@@ -220,13 +221,13 @@ npx tsx scripts/preflight-public-intake-v2-migrations.ts
 
 ## 5. Dấu hiệu phải rollback
 
-| Dấu hiệu | Mức độ | Diễn giải |
-| --- | --- | --- |
-| `preflight` FAIL ở bất kỳ dòng nào | **Dừng ngay** | Đừng chạy migration tiếp theo, đừng deploy code |
-| `GET /api/health/database` lỗi sau khi migrate | **Dừng ngay** | Kết nối hoặc schema tối thiểu hỏng |
-| `db push` treo/timeout ở `202607290004` | Trung bình, không lạ | Migration này khóa bảng lâu nhất trong năm (xem mục 1) — nếu preview đang có truy vấn dài chạy song song, đợi rồi thử lại ngoài giờ traffic thấp, **không ép chạy song song thứ hai** |
-| Code đã deploy trước migration, màn hồ sơ 500 hàng loạt | **Khẩn** | Kinh điển "code trước, migration sau" — rollback code trước, xem mục 6. Thiếu `202607290006` gây đúng triệu chứng này vì `internal_notes` nằm trong `SUBMISSION_SELECT` dùng chung: **mọi** truy vấn đọc hồ sơ lỗi, không riêng chức năng ghi chú |
-| `schema_migrations` có `202607290005` nhưng schema không có `drive_folder_state` | **Dừng ngay** | Database này đã ghi nhận số `005` cho nội dung cũ (ghi chú nội bộ). Xử lý theo mục 0 trước khi push, đừng chạy `db push` để "nó tự sửa" |
+| Dấu hiệu                                                                         | Mức độ               | Diễn giải                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preflight` FAIL ở bất kỳ dòng nào                                               | **Dừng ngay**        | Đừng chạy migration tiếp theo, đừng deploy code                                                                                                                                                                                                   |
+| `GET /api/health/database` lỗi sau khi migrate                                   | **Dừng ngay**        | Kết nối hoặc schema tối thiểu hỏng                                                                                                                                                                                                                |
+| `db push` treo/timeout ở `202607290004`                                          | Trung bình, không lạ | Migration này khóa bảng lâu nhất trong năm (xem mục 1) — nếu preview đang có truy vấn dài chạy song song, đợi rồi thử lại ngoài giờ traffic thấp, **không ép chạy song song thứ hai**                                                             |
+| Code đã deploy trước migration, màn hồ sơ 500 hàng loạt                          | **Khẩn**             | Kinh điển "code trước, migration sau" — rollback code trước, xem mục 6. Thiếu `202607290006` gây đúng triệu chứng này vì `internal_notes` nằm trong `SUBMISSION_SELECT` dùng chung: **mọi** truy vấn đọc hồ sơ lỗi, không riêng chức năng ghi chú |
+| `schema_migrations` có `202607290005` nhưng schema không có `drive_folder_state` | **Dừng ngay**        | Database này đã ghi nhận số `005` cho nội dung cũ (ghi chú nội bộ). Xử lý theo mục 0 trước khi push, đừng chạy `db push` để "nó tự sửa"                                                                                                           |
 
 ## 6. Rollback
 
@@ -337,6 +338,5 @@ Checklist deploy:
 - [ ] `npx tsx scripts/preflight-public-intake-v2-migrations.ts` PASS toàn bộ.
 - [ ] `GET /api/health/database` trả `status: "ok"`.
 - [ ] Mở `/submissions/:id` (Bàn làm việc PL3), thử lưu→tải lại→tiếp nhận→xuất một hồ sơ giả đủ B–AX.
-- [ ] Mở `/submissions` (hàng đợi), thử tìm kiếm theo tên chủ/số GCN/mã tiếp nhận — không trang nào
-      500.
+- [ ] Mở `/submissions` (hàng đợi), thử tìm kiếm theo tên chủ/số GCN/mã tiếp nhận — không trang nào 500.
 - [ ] Mở một hồ sơ `UNDER_REVIEW`, thử ghi và lưu ghi chú nội bộ.

@@ -5,15 +5,15 @@ Ghi hiện trạng **trước** khi sửa, theo yêu cầu §5 của
 
 ## Repo
 
-| Mục | Giá trị |
-|---|---|
-| Repo | `https://github.com/vi-phuong-158/capphongchau.git` |
-| Worktree | `.claude/worktrees/land-declaration-process-feedback-126f2e` |
-| Nhánh | `claude/land-declaration-process-feedback-126f2e` |
-| Base commit | `79f4ae67448625c9e92fb20c356c889008a27940` |
+| Mục                  | Giá trị                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| Repo                 | `https://github.com/vi-phuong-158/capphongchau.git`            |
+| Worktree             | `.claude/worktrees/land-declaration-process-feedback-126f2e`   |
+| Nhánh                | `claude/land-declaration-process-feedback-126f2e`              |
+| Base commit          | `79f4ae67448625c9e92fb20c356c889008a27940`                     |
 | `git status --short` | sạch (chỉ thêm kế hoạch V2 đã lưu trong `docs/archive/plans/`) |
-| Node / npm | v24.11.0 / 11.6.1 |
-| Ngày đo | 2026-07-28 |
+| Node / npm           | v24.11.0 / 11.6.1                                              |
+| Ngày đo              | 2026-07-28                                                     |
 
 **Lệch với §0.2 mục 4 của kế hoạch:** kế hoạch yêu cầu `git switch -c
 claude/public-intake-v2-upload-performance`. Phiên này đã được mở sẵn trong một git worktree
@@ -23,14 +23,14 @@ phân mảnh công việc, nên giữ nguyên nhánh của worktree — vẫn th
 
 ## Kết quả baseline
 
-| Lệnh | Kết quả |
-|---|---|
-| `npm ci` | OK |
-| `npm run lint` | **PASS** — 0 error, 5 warning có từ trước (`scripts/add-system-admins.ts` ×2, `tests/staging-rehearsal-scenarios.test.ts` ×3, đều là `no-unused-vars`) |
-| `npm run typecheck` | **PASS** — 0 lỗi |
-| `npm test` | **PASS** — 46 test file passed, 2 skipped; 266 test passed, 10 skipped |
-| `npm run build` | **PASS** — Next.js 16 build hoàn tất, toàn bộ route render được |
-| `npm run test:e2e` | **KHÔNG CHẠY** — Playwright cần dev server + Supabase/Google credentials thật, không có trong môi trường này. Ghi nhận là khoảng trống, không dùng kết quả lịch sử thay thế. |
+| Lệnh                | Kết quả                                                                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm ci`            | OK                                                                                                                                                                           |
+| `npm run lint`      | **PASS** — 0 error, 5 warning có từ trước (`scripts/add-system-admins.ts` ×2, `tests/staging-rehearsal-scenarios.test.ts` ×3, đều là `no-unused-vars`)                       |
+| `npm run typecheck` | **PASS** — 0 lỗi                                                                                                                                                             |
+| `npm test`          | **PASS** — 46 test file passed, 2 skipped; 266 test passed, 10 skipped                                                                                                       |
+| `npm run build`     | **PASS** — Next.js 16 build hoàn tất, toàn bộ route render được                                                                                                              |
+| `npm run test:e2e`  | **KHÔNG CHẠY** — Playwright cần dev server + Supabase/Google credentials thật, không có trong môi trường này. Ghi nhận là khoảng trống, không dùng kết quả lịch sử thay thế. |
 
 Baseline **xanh**. Không có điều kiện dừng nào ở §0.3 bị kích hoạt tại thời điểm này.
 

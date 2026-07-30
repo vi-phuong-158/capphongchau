@@ -155,19 +155,13 @@ export async function POST(
     const usedBytes =
       files.reduce((sum, file) => sum + file.sizeBytes, 0) - (replaceTarget?.sizeBytes ?? 0);
     if (usedBytes + sizeBytes > SUBMISSION_BYTE_BUDGET) {
-      return fail(
-        "VALIDATION_FAILED",
-        "Tổng dung lượng hồ sơ đã vượt giới hạn.",
-        requestId,
-        400,
-      );
+      return fail("VALIDATION_FAILED", "Tổng dung lượng hồ sơ đã vượt giới hạn.", requestId, 400);
     }
 
     if (documentType === "CERTIFICATE") {
       if (
         !replaceFileId &&
-        files.filter((file) => file.documentType === "CERTIFICATE").length >=
-          MAX_CERTIFICATE_PHOTOS
+        files.filter((file) => file.documentType === "CERTIFICATE").length >= MAX_CERTIFICATE_PHOTOS
       ) {
         return fail(
           "VERSION_CONFLICT",

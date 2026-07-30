@@ -66,6 +66,7 @@ xong; chi tiết quyết định ở `03-decisions.md` [2026-07-30], Code Graph 
 - Chạy lần lượt 1/2/3 với warm-up 10, đo 40 lượt/route, 4 worker; chọn giá trị cao hơn chỉ khi P95 tốt hơn ≥10%, error rate 0 và peak connection <70% quota. Không thao tác Production trong phase này.
 
 ---
+
 ## [2026-07-29] Redesign màn duyệt hồ sơ — Đợt 2A (đang làm theo yêu cầu người dùng)
 
 Kế hoạch chốt: coi mỗi hồ sơ là một bản nộp hoàn chỉnh, bỏ luồng "yêu cầu bổ sung"/"gửi lại", chỉ
@@ -166,16 +167,16 @@ production.**
 
 ### Đã xong (7 commit)
 
-| Phase | Nội dung | Commit |
-|---|---|---|
-| 0 | Baseline + test characterization khóa lỗ hổng `completionChecks` | `1cc7d93` |
-| 1 | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức) | `e938bab` |
-| 2 | Wizard 7 bước → 4 bước | `fe3e2e3` |
-| 3 | Chuẩn hóa ảnh trên thiết bị (source default TẮT; Vercel Preview/Production đã BẬT 2026-07-29) | `814eee7` |
-| 4 | Tiến độ tải thật qua XHR + hàng đợi 2 luồng | `bdbf180` |
-| 6 | Màn hình thành công + kê khai hồ sơ tiếp theo | `ee30ee8` |
-| 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
-| 7 | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho` | `7345090` |
+| Phase | Nội dung                                                                                      | Commit    |
+| ----- | --------------------------------------------------------------------------------------------- | --------- |
+| 0     | Baseline + test characterization khóa lỗ hổng `completionChecks`                              | `1cc7d93` |
+| 1     | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức)                                  | `e938bab` |
+| 2     | Wizard 7 bước → 4 bước                                                                        | `fe3e2e3` |
+| 3     | Chuẩn hóa ảnh trên thiết bị (source default TẮT; Vercel Preview/Production đã BẬT 2026-07-29) | `814eee7` |
+| 4     | Tiến độ tải thật qua XHR + hàng đợi 2 luồng                                                   | `bdbf180` |
+| 6     | Màn hình thành công + kê khai hồ sơ tiếp theo                                                 | `ee30ee8` |
+| 8     | Lưu và hiển thị tên cán bộ tiếp nhận                                                          | `ea3f716` |
+| 7     | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho`                                                    | `7345090` |
 
 | 5 | Số đo tải ảnh, dọn tệp mồ côi an toàn, hai script vận hành | vòng rà soát |
 
@@ -210,8 +211,8 @@ render và E2E chưa chạy lần nào.
    `SYSTEM_ADMIN`) đúng nghiệp vụ. `REVIEW_OFFICER` bị loại có chủ đích — không để một người vừa
    nhập hộ dân vừa thẩm định chính hồ sơ đó.
 7. **Chạy hai test integration còn skip** (`ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run
-   tests/staging-rehearsal-acceptance-saga.integration.test.ts
-   tests/canonical-projection.integration.test.ts`) trên một Postgres thử nghiệm — bảo vệ đúng
+tests/staging-rehearsal-acceptance-saga.integration.test.ts
+tests/canonical-projection.integration.test.ts`) trên một Postgres thử nghiệm — bảo vệ đúng
    luồng "official acceptance guard" và "idempotent replay". Danh sách đầy đủ 10 test đang skip:
    `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
 8. **Sau mỗi đợt E2E, dọn dữ liệu**: `npm run cleanup:e2e-preview-data -- --apply --confirm=...`
@@ -578,6 +579,7 @@ Theo thứ tự mốc trong `PLAN.md`:
 - [2026-07-21] Khởi tạo bộ não dự án AI dùng chung: `CLAUDE.md`, `docs/brain/00-06` (merge với `AGENTS.md` hiện có, không ghi đè).
 
 - [2026-07-23] PR #1: code sửa import ngày sinh, backfill append-only, staff action atomic và reset idempotent đã hoàn tất; còn dry-run/backup/apply Google Sheet và xác nhận Preview.
+
 # Phase 2 hiệu năng chi tiết hồ sơ — đã thi công, chờ nghiệm thu Preview
 
 - Không có migration. Cần kiểm tra server-prime detail, ảnh/AI lazy, `findActiveFile` scope, audit và `Server-Timing` trên Preview bằng session cán bộ hợp lệ.

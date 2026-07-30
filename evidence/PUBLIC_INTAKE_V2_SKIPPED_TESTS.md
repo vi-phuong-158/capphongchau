@@ -7,18 +7,18 @@ Không có test nào khác trong repo bị `skip`/`fixme` ở tầng vitest — 
 
 ## Danh sách đầy đủ
 
-| # | File | Tên test | Loại | Lý do skip |
-|---|---|---|---|---|
-| 1 | `tests/staging-rehearsal-acceptance-saga.integration.test.ts` | Kịch bản 1: ngắt giữa chừng bước FILES_MOVED → retry cùng idempotency key → tiếp tục đúng | Integration (Postgres thật, Drive giả lập) | Thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` |
-| 2 | ″ | Kịch bản 1b: GCN nhiều thửa nhiều mục đích → parcels/assets ghi đủ, replay không nhân đôi | ″ | ″ |
-| 3 | ″ | Kịch bản 1c: làm mới hình chiếu chuẩn hóa 2 lần liên tiếp không vi phạm khóa ngoại `public_land_uses → public_parcels` | ″ | ″ |
-| 4 | ″ | Kịch bản 1d: điều chỉnh hồ sơ ĐÃ tiếp nhận → dữ liệu chính thức ghi lại đúng, mã hồ sơ giữ nguyên | ″ | ″ |
-| 5 | ″ | Kịch bản 2a: saga dở dang → request khác key khác bị từ chối `ACCEPTANCE_IN_PROGRESS` | ″ | ″ |
-| 6 | ″ | Kịch bản 2b: hai request tiếp nhận đồng thời cho hồ sơ mới, không bao giờ sinh 2 case/reservation | ″ | ″ |
-| 7 | ″ | Kịch bản 3a: bấm lại sau COMPLETED (request_log còn hạn) → trả cache y hệt, không tăng version | ″ | ″ |
-| 8 | ″ | Kịch bản 3b: bấm lại sau COMPLETED, request_log đã hết hạn/bị dọn → vẫn đúng, đọc từ saga step | ″ | ″ |
-| 9 | ″ | Kịch bản 3c: idempotency key cũ + payload khác → `IDEMPOTENCY_CONFLICT` | ″ | ″ |
-| 10 | `tests/canonical-projection.integration.test.ts` | CP1: xóa thửa đất tự động xóa theo mục đích sử dụng (`on delete cascade`) | Integration (Postgres thật) | Thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` |
+| #   | File                                                          | Tên test                                                                                                               | Loại                                       | Lý do skip                                |
+| --- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------- |
+| 1   | `tests/staging-rehearsal-acceptance-saga.integration.test.ts` | Kịch bản 1: ngắt giữa chừng bước FILES_MOVED → retry cùng idempotency key → tiếp tục đúng                              | Integration (Postgres thật, Drive giả lập) | Thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` |
+| 2   | ″                                                             | Kịch bản 1b: GCN nhiều thửa nhiều mục đích → parcels/assets ghi đủ, replay không nhân đôi                              | ″                                          | ″                                         |
+| 3   | ″                                                             | Kịch bản 1c: làm mới hình chiếu chuẩn hóa 2 lần liên tiếp không vi phạm khóa ngoại `public_land_uses → public_parcels` | ″                                          | ″                                         |
+| 4   | ″                                                             | Kịch bản 1d: điều chỉnh hồ sơ ĐÃ tiếp nhận → dữ liệu chính thức ghi lại đúng, mã hồ sơ giữ nguyên                      | ″                                          | ″                                         |
+| 5   | ″                                                             | Kịch bản 2a: saga dở dang → request khác key khác bị từ chối `ACCEPTANCE_IN_PROGRESS`                                  | ″                                          | ″                                         |
+| 6   | ″                                                             | Kịch bản 2b: hai request tiếp nhận đồng thời cho hồ sơ mới, không bao giờ sinh 2 case/reservation                      | ″                                          | ″                                         |
+| 7   | ″                                                             | Kịch bản 3a: bấm lại sau COMPLETED (request_log còn hạn) → trả cache y hệt, không tăng version                         | ″                                          | ″                                         |
+| 8   | ″                                                             | Kịch bản 3b: bấm lại sau COMPLETED, request_log đã hết hạn/bị dọn → vẫn đúng, đọc từ saga step                         | ″                                          | ″                                         |
+| 9   | ″                                                             | Kịch bản 3c: idempotency key cũ + payload khác → `IDEMPOTENCY_CONFLICT`                                                | ″                                          | ″                                         |
+| 10  | `tests/canonical-projection.integration.test.ts`              | CP1: xóa thửa đất tự động xóa theo mục đích sử dụng (`on delete cascade`)                                              | Integration (Postgres thật)                | Thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` |
 
 Không có test nào trong 10 test này thuộc phạm vi thi công V2 trực tiếp (wizard 4 bước, chuẩn hóa
 ảnh, hàng đợi upload, chế độ hỗ trợ, Phase 5) — cả 10 đều bảo vệ `runOfficialAcceptance`
@@ -27,18 +27,18 @@ Không có test nào trong 10 test này thuộc phạm vi thi công V2 trực ti
 
 ## Đối chiếu với danh sách luồng bắt buộc không được để skip/fixme ở preview có credential
 
-| Luồng bắt buộc | Có nằm trong 10 test này không | Ở đâu |
-|---|---|---|
-| Official acceptance guard | **Có** — #1, #4, #5, #6 | File 1, Kịch bản 1/1d/2a/2b |
-| Idempotent replay | **Có** — #1, #2, #7, #8, #9 | File 1, Kịch bản 1/1b/3a/3b/3c |
-| Public minimal submit | Không | Đã chạy không skip — `tests/citizen-submit-validation.test.ts`, `tests/public-wizard-validation.test.ts` |
-| Required image validation | Không | `tests/citizen-submit-validation.test.ts` (`validateCitizenRequiredFiles`) |
-| Google Drive upload | Không (unit) / **Có** (E2E) | Unit: `tests/resumable-upload.test.ts`, `tests/upload-transport.test.ts`. Thật: `tests/e2e/public-intake-v2.spec.ts` E2E-01/E2E-03 |
-| Retry/resume | Không (unit) / **Có** (E2E) | Unit: `tests/resumable-upload.test.ts` (đơn điệu tăng, hỏi lại tiến độ). Thật: E2E-04 |
-| Assisted intake | Không | `tests/officer-assisted-intake.test.ts`, `tests/assisted-submissions-route.test.ts` (mock đầy đủ, chạy thật không cần DB thật) |
-| Public officer privacy | Không | `tests/assigned-officer.test.ts`, `tests/public-intake-v2-review-fixes.test.ts` |
-| Next-submission flow | Không (unit không dựng được — wizard là component) / **Có** (E2E) | E2E-08 |
-| Orphan cleanup | Không (unit đọc mã nguồn) / **Có** (E2E) | Unit: `tests/public-upload-complete-route.test.ts`. Thật: E2E-09 |
+| Luồng bắt buộc            | Có nằm trong 10 test này không                                    | Ở đâu                                                                                                                              |
+| ------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Official acceptance guard | **Có** — #1, #4, #5, #6                                           | File 1, Kịch bản 1/1d/2a/2b                                                                                                        |
+| Idempotent replay         | **Có** — #1, #2, #7, #8, #9                                       | File 1, Kịch bản 1/1b/3a/3b/3c                                                                                                     |
+| Public minimal submit     | Không                                                             | Đã chạy không skip — `tests/citizen-submit-validation.test.ts`, `tests/public-wizard-validation.test.ts`                           |
+| Required image validation | Không                                                             | `tests/citizen-submit-validation.test.ts` (`validateCitizenRequiredFiles`)                                                         |
+| Google Drive upload       | Không (unit) / **Có** (E2E)                                       | Unit: `tests/resumable-upload.test.ts`, `tests/upload-transport.test.ts`. Thật: `tests/e2e/public-intake-v2.spec.ts` E2E-01/E2E-03 |
+| Retry/resume              | Không (unit) / **Có** (E2E)                                       | Unit: `tests/resumable-upload.test.ts` (đơn điệu tăng, hỏi lại tiến độ). Thật: E2E-04                                              |
+| Assisted intake           | Không                                                             | `tests/officer-assisted-intake.test.ts`, `tests/assisted-submissions-route.test.ts` (mock đầy đủ, chạy thật không cần DB thật)     |
+| Public officer privacy    | Không                                                             | `tests/assigned-officer.test.ts`, `tests/public-intake-v2-review-fixes.test.ts`                                                    |
+| Next-submission flow      | Không (unit không dựng được — wizard là component) / **Có** (E2E) | E2E-08                                                                                                                             |
+| Orphan cleanup            | Không (unit đọc mã nguồn) / **Có** (E2E)                          | Unit: `tests/public-upload-complete-route.test.ts`. Thật: E2E-09                                                                   |
 
 **Kết luận:** hai luồng "official acceptance guard" và "idempotent replay" là hai luồng DUY NHẤT
 trong danh sách bắt buộc thực sự bị skip ở tầng vitest, và chỉ vì thiếu một Postgres thử nghiệm.

@@ -84,9 +84,7 @@ export function certificateLookupFingerprint(
   normalizedIssueNumber: string,
   issueDate: string,
 ): string {
-  return createHmac("sha256", pepper)
-    .update(`${normalizedIssueNumber}:${issueDate}`)
-    .digest("hex");
+  return createHmac("sha256", pepper).update(`${normalizedIssueNumber}:${issueDate}`).digest("hex");
 }
 
 export function certificateLookupRateLimitKey(pepper: string, source: string): string {

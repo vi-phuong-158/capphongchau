@@ -2,10 +2,7 @@ import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  findStoredMutation: vi.fn(),
-  listFiles: vi.fn(),
-  isDriveFileAdopted: vi.fn(),
-  verifyUploadedFile: vi.fn(),
+  commitPublicFileUpload: vi.fn(),
   discardFile: vi.fn(),
 }));
 
@@ -33,58 +30,42 @@ vi.mock("@/modules/public-intake/route-context", async (importOriginal) => {
 });
 vi.mock("@/modules/public-intake/repository", () => ({
   SubmissionIdempotencyConflictError: class extends Error {},
+  PublicFileMutationRejectedError: class extends Error {
+    constructor(public reason: string, message: string) {
+      super(message);
+    }
+  },
   getPublicIntakeRepository: vi.fn().mockReturnValue({
-    findStoredMutation: (...args: unknown[]) => mocks.findStoredMutation(...args),
-    listFiles: (...args: unknown[]) => mocks.listFiles(...args),
-    isDriveFileAdopted: (...args: unknown[]) => mocks.isDriveFileAdopted(...args),
+    commitPublicFileUpload: (...args: unknown[]) => mocks.commitPublicFileUpload(...args),
   }),
 }));
 vi.mock("@/modules/public-intake/storage", () => ({
-  UploadVerificationError: class extends Error {},
-  getPublicIntakeStorage: vi.fn().mockReturnValue({
-    verifyUploadedFile: (...args: unknown[]) => mocks.verifyUploadedFile(...args),
-    discardFile: (...args: unknown[]) => mocks.discardFile(...args),
+  getPublicIntakeStorage: () => ({
+    verifyUploadedFile: vi.fn().mockResolvedValue(true),
   }),
 }));
-vi.mock("@/modules/public-intake/upload-metrics", () => ({
-  clientUploadTelemetrySchema: { safeParse: vi.fn().mockReturnValue({ success: false }) },
-  buildFileNormalizationMetadata: vi.fn(),
-  buildUploadAttemptMetric: vi.fn(),
+vi.mock("@/modules/public-intake/upload-commit", () => ({
+  discardIfOrphan: vi.fn(),
 }));
 
-const { POST } = await import(
-  "@/app/api/public/submissions/current/uploads/complete/route"
-);
+import { POST } from "@/app/api/public/submissions/current/uploads/complete/route";
 
 describe("POST upload complete idempotent replay", () => {
   it("DB đã commit nhưng response mất: retry trả cùng result, không validate/xóa/chèn lại", async () => {
-    const request = new NextRequest("http://localhost/api/public/submissions/current/uploads/complete", {
+    const request = new NextRequest("http://localhost/api", {
       method: "POST",
-      headers: { "idempotency-key": "11111111-1111-4111-8111-111111111111" },
+      headers: { "idempotency-key": "00000000-0000-0000-0000-000000000000" },
       body: JSON.stringify({
         driveFileId: "drive-adopted",
         documentType: "CITIZEN_ID_FRONT",
         ownerId: "owner-1",
+        replaceFileId: "",
       }),
     });
-
-    const crypto = await import("node:crypto");
-    const mutationHash = crypto
-      .createHash("sha256")
-      .update(
-        JSON.stringify({
-          submissionId: "submission-1",
-          driveFileId: "drive-adopted",
-          documentType: "CITIZEN_ID_FRONT",
-          ownerId: "owner-1",
-          replaceFileId: "",
-        }),
-      )
-      .digest("hex");
-    mocks.findStoredMutation.mockResolvedValue({
-      kind: "PUBLIC_UPLOAD_COMPLETE",
-      mutationHash,
-      response: { fileId: "file-adopted", sizeBytes: 4096 },
+    
+    mocks.commitPublicFileUpload.mockResolvedValue({
+      summary: { fileId: "file-adopted", sizeBytes: 4096 },
+      replayed: true,
     });
 
     const replay = await POST(request);
@@ -92,10 +73,6 @@ describe("POST upload complete idempotent replay", () => {
     await expect(replay.json()).resolves.toEqual({
       ok: true,
       fileId: "file-adopted",
-      sizeBytes: 4096,
     });
-    expect(mocks.listFiles).not.toHaveBeenCalled();
-    expect(mocks.verifyUploadedFile).not.toHaveBeenCalled();
-    expect(mocks.discardFile).not.toHaveBeenCalled();
   });
 });

@@ -58,8 +58,7 @@ function preserveLocalFields(local: IntakeDraft, server: IntakeDraft): IntakeDra
     owners: mergeOwners(local.owners, server.owners),
     parcels: mergeParcels(local.parcels, server.parcels),
     assets: mergeAssets(local.assets, server.assets),
-    certificateFileMetadata:
-      local.certificateFileMetadata ?? server.certificateFileMetadata,
+    certificateFileMetadata: local.certificateFileMetadata ?? server.certificateFileMetadata,
   };
 }
 
@@ -94,9 +93,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * Nhận snapshot GET `/current`: version luôn thuộc server; dữ liệu local chỉ được giữ ở lần
  * CREATE, còn các ID sinh phía server được thay vào theo vị trí để upload sau đó tham chiếu đúng.
  */
-export function adoptServerDraftSnapshot(
-  input: AdoptServerDraftInput,
-): AdoptedServerDraft | null {
+export function adoptServerDraftSnapshot(input: AdoptServerDraftInput): AdoptedServerDraft | null {
   if (
     typeof input.serverVersion !== "number" ||
     !Number.isInteger(input.serverVersion) ||

@@ -57,20 +57,20 @@ Không review sâu thuật toán nghiệp vụ PL3, AI extraction hoặc phân q
 
 ## 3. Bằng chứng chính trong mã nguồn
 
-| Mã | Mức độ | Phát hiện | Bằng chứng |
-|---|---|---|---|
-| PERF-01 | **P0** | Hàng chờ đọc toàn bộ danh sách rồi mới chia trang | `src/app/api/submissions/route.ts:27`, `:58`, `:90`; `repository.list()` và `listSummaries()` đọc toàn bảng |
-| PERF-02 | **P0** | Tìm kiếm đọc cả `draft_json` của toàn bộ hồ sơ | `src/app/api/submissions/route.ts:54-87` |
-| PERF-03 | **P0** | Tạo hồ sơ chờ tạo 3 cấp thư mục Drive | `src/modules/public-intake/create-submission.ts:96`; `storage.ts:60-66` |
-| PERF-04 | **P1** | Transaction database được giữ trong khi chờ Drive list/create | `src/modules/public-intake/storage.ts:285-327` |
-| PERF-05 | **P1** | Pool đặt `max: 1` cho mỗi tiến trình server | `src/modules/supabase/database.ts:15` |
-| PERF-06 | **P1** | Màn hình chi tiết kiểm tra quyền ở trang rồi client lại gọi API để tải dữ liệu | `src/app/submissions/[submissionId]/page.tsx:15-29`; `submission-detail.tsx:60`, `:155-159` |
-| PERF-07 | **P1** | Tất cả ảnh được gắn `src` ngay khi render | `src/components/submission-detail.tsx:719-736` |
-| PERF-08 | **P1** | Mỗi ảnh preview đọc lại hồ sơ và toàn bộ danh sách file | `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts:23-35` |
-| PERF-09 | **P1** | Tiếp nhận di chuyển file tuần tự và checkpoint sau từng file | `src/modules/submissions/acceptance-saga.ts:332-365` |
-| PERF-10 | **P2** | Ô tìm kiếm gọi API theo từng ký tự, chưa debounce | `src/components/submissions-queue.tsx:90-94` |
-| PERF-11 | **P2** | Chuẩn hóa ảnh đã có nhưng mặc định đang tắt | `.env.example:66` |
-| PERF-12 | **P2** | Repo khai `VERCEL_REGION=sin1` nhưng `vercel.json` không thể hiện region | `.env.example:23`; `vercel.json` chỉ có cron |
+| Mã      | Mức độ | Phát hiện                                                                      | Bằng chứng                                                                                                  |
+| ------- | ------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| PERF-01 | **P0** | Hàng chờ đọc toàn bộ danh sách rồi mới chia trang                              | `src/app/api/submissions/route.ts:27`, `:58`, `:90`; `repository.list()` và `listSummaries()` đọc toàn bảng |
+| PERF-02 | **P0** | Tìm kiếm đọc cả `draft_json` của toàn bộ hồ sơ                                 | `src/app/api/submissions/route.ts:54-87`                                                                    |
+| PERF-03 | **P0** | Tạo hồ sơ chờ tạo 3 cấp thư mục Drive                                          | `src/modules/public-intake/create-submission.ts:96`; `storage.ts:60-66`                                     |
+| PERF-04 | **P1** | Transaction database được giữ trong khi chờ Drive list/create                  | `src/modules/public-intake/storage.ts:285-327`                                                              |
+| PERF-05 | **P1** | Pool đặt `max: 1` cho mỗi tiến trình server                                    | `src/modules/supabase/database.ts:15`                                                                       |
+| PERF-06 | **P1** | Màn hình chi tiết kiểm tra quyền ở trang rồi client lại gọi API để tải dữ liệu | `src/app/submissions/[submissionId]/page.tsx:15-29`; `submission-detail.tsx:60`, `:155-159`                 |
+| PERF-07 | **P1** | Tất cả ảnh được gắn `src` ngay khi render                                      | `src/components/submission-detail.tsx:719-736`                                                              |
+| PERF-08 | **P1** | Mỗi ảnh preview đọc lại hồ sơ và toàn bộ danh sách file                        | `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts:23-35`                                      |
+| PERF-09 | **P1** | Tiếp nhận di chuyển file tuần tự và checkpoint sau từng file                   | `src/modules/submissions/acceptance-saga.ts:332-365`                                                        |
+| PERF-10 | **P2** | Ô tìm kiếm gọi API theo từng ký tự, chưa debounce                              | `src/components/submissions-queue.tsx:90-94`                                                                |
+| PERF-11 | **P2** | Chuẩn hóa ảnh đã có nhưng mặc định đang tắt                                    | `.env.example:66`                                                                                           |
+| PERF-12 | **P2** | Repo khai `VERCEL_REGION=sin1` nhưng `vercel.json` không thể hiện region       | `.env.example:23`; `vercel.json` chỉ có cron                                                                |
 
 > **Lưu ý chính xác:** `max: 1` là giới hạn trong **mỗi tiến trình/runtime instance**, không có nghĩa toàn bộ hệ thống chỉ tồn tại một kết nối. Tuy nhiên, trong cùng instance, một transaction đang chờ Drive có thể làm các thao tác database khác phải xếp hàng.
 
@@ -151,7 +151,7 @@ Bản kê khai nên được tạo và trả về trước. Drive chỉ cần đ
 Postgres client đặt:
 
 ```ts
-max: 1
+max: 1;
 ```
 
 Đây có thể là lựa chọn an toàn để tránh mỗi serverless instance mở quá nhiều kết nối Supabase. Tuy nhiên mã nguồn cũng có nhiều comment phải tránh deadlock vì pool chỉ có một kết nối.
@@ -709,7 +709,7 @@ LAZY_DRIVE_FOLDER_CREATION_ENABLED=false
 1. Đổi hard-code thành cấu hình:
 
 ```ts
-max: environment.SUPABASE_POOL_MAX
+max: environment.SUPABASE_POOL_MAX;
 ```
 
 2. Allowlist giá trị 1–3; mặc định 1.
@@ -879,17 +879,17 @@ Ghi P50/P95/error rate trước và sau từng phase.
 
 # 8. Chỉ tiêu nghiệm thu tổng thể
 
-| Luồng | Chỉ tiêu |
-|---|---|
-| Hàng chờ | PostgreSQL trả đúng một trang; không tải toàn bảng |
-| Tìm kiếm | Debounce; query có index; không đọc toàn bộ `draft_json` |
-| Tạo hồ sơ | Không phụ thuộc Drive khi CREATE nếu Phase 3 bật |
-| Mở chi tiết | Không client-fetch lại ở lần đầu |
-| Xem ảnh | Không tải ảnh trước khi yêu cầu; một query đúng file |
-| Tiếp nhận | File theo chunk, checkpoint theo chunk, có tiến độ |
-| Database | Không tăng pool khi chưa benchmark; không giữ transaction chờ Drive ở luồng folder mới |
-| Bảo mật | Giữ nguyên auth, CSRF, consent, Turnstile, DataScope, idempotency, audit và no-public-Drive-link |
-| Dữ liệu | Không xóa dữ liệu, không làm mất file, migration additive và idempotent |
+| Luồng       | Chỉ tiêu                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| Hàng chờ    | PostgreSQL trả đúng một trang; không tải toàn bảng                                               |
+| Tìm kiếm    | Debounce; query có index; không đọc toàn bộ `draft_json`                                         |
+| Tạo hồ sơ   | Không phụ thuộc Drive khi CREATE nếu Phase 3 bật                                                 |
+| Mở chi tiết | Không client-fetch lại ở lần đầu                                                                 |
+| Xem ảnh     | Không tải ảnh trước khi yêu cầu; một query đúng file                                             |
+| Tiếp nhận   | File theo chunk, checkpoint theo chunk, có tiến độ                                               |
+| Database    | Không tăng pool khi chưa benchmark; không giữ transaction chờ Drive ở luồng folder mới           |
+| Bảo mật     | Giữ nguyên auth, CSRF, consent, Turnstile, DataScope, idempotency, audit và no-public-Drive-link |
+| Dữ liệu     | Không xóa dữ liệu, không làm mất file, migration additive và idempotent                          |
 
 Mục tiêu hiệu năng định hướng trên preview cùng vùng:
 

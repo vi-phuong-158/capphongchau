@@ -110,8 +110,7 @@ function usePreviewImages(submissionId: string) {
         .catch((reason: unknown) => {
           setErrors((previous) => ({
             ...previous,
-            [fileId]:
-              reason instanceof Error ? reason.message : "Không tải được ảnh xem trước.",
+            [fileId]: reason instanceof Error ? reason.message : "Không tải được ảnh xem trước.",
           }));
         })
         .finally(() => {

@@ -125,6 +125,7 @@ hỏng chức năng ghi chú. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V
 - **Lý do:** tăng pool theo từng lambda có thể nhân số kết nối toàn hệ thống. Chỉ chọn 2 hoặc 3 khi cùng workload Preview cho P95 tốt hơn ít nhất 10%, không lỗi/timeout/deadlock và peak connection dưới 70% quota Supabase; ngoài ra giữ 1.
 - **Runner rehearsal:** benchmark không có route bỏ audit vì sẽ làm sai contract đọc nhạy cảm. Mỗi request SSR detail, API detail hoặc preview thành công vẫn append audit; runner bắt buộc HTTPS Vercel Preview rehearsal/synthetic, exact expected host và literal `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY` trước khi đọc/gửi cookie. Một lượt đầy đủ (10 warm-up + 40 đo) có thể thêm tối đa 150 audit rows từ ba route này; chuẩn bị reset/dọn dữ liệu rehearsal sau đo, không chạy Production.
 - **Region/đo lường:** đặt `regions: ["sin1"]` trong `vercel.json`; xác minh qua deployment settings và nhãn region của `x-vercel-id`, không tin riêng biến môi trường. Benchmark chỉ tổng hợp duration/status/metric allowlist, không log session, URL/query, ID hoặc PII.
+
 ## [2026-07-30] Đợt 2B: hiệu năng màn duyệt hồ sơ — nạp sẵn trên server, tải ảnh/AI theo yêu cầu
 
 - **Server-priming trang `/submissions/[submissionId]`:** trang nạp hồ sơ ngay trên server và
@@ -176,7 +177,7 @@ hỏng chức năng ghi chú. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V
   `isHeldByOfficer()` để route `submit` trả đúng lý do ("cán bộ đang xử lý") thay vì thông báo sai
   "bản kê khai đã được gửi".
 - **Lỗi thật đã đóng:** `repository.submit()` đặt `claimed_by = null, claimed_by_display_name =
-  null, claimed_at = null` mỗi lần người dân gửi lại, trong khi luồng "yêu cầu bổ sung" cũ (bỏ ở
+null, claimed_at = null` mỗi lần người dân gửi lại, trong khi luồng "yêu cầu bổ sung" cũ (bỏ ở
   2A-1) **giữ nguyên** `claimed_by` khi chuyển sang `NEEDS_SUPPLEMENT`. Nghĩa là một lần bấm "Bổ
   sung hồ sơ" của người dân **âm thầm cướp hồ sơ khỏi tay cán bộ đang xử lý** — và không có cơ chế
   nào chặn, vì `version` vẫn khớp nên optimistic concurrency không coi đó là xung đột. Khóa phiên
@@ -210,7 +211,7 @@ hỏng chức năng ghi chú. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V
   `manualIdentityConfirmation`/`amendmentReason` (yêu cầu hồ sơ `ACCEPTED`); ghi chú nội bộ phải sửa
   được ở **bất kỳ trạng thái nào** kể cả trước khi claim hoặc sau khi đã `ACCEPTED`/`REJECTED`, nên
   gộp vào sẽ tái tạo đúng bug staleness vừa đóng. Endpoint mới `PUT
-  /api/submissions/:id/internal-notes` theo mẫu `PUT /working-payload` (version guard +
+/api/submissions/:id/internal-notes` theo mẫu `PUT /working-payload` (version guard +
   idempotency-key, không canonical projection vì không chạm dữ liệu PL3, không sinh timeline vì
   người dân không bao giờ thấy trường này).
 - **Quyền:** `SUBMISSION_DECISION_ROLES` (không bắt buộc đang claim hồ sơ) — ghi chú là kênh trao
@@ -365,7 +366,7 @@ hỏng chức năng ghi chú. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V
 ## [2026-07-29] Tra cứu bằng số phát hành Giấy chứng nhận, không lộ dữ liệu hồ sơ
 
 - **Quyết định:** Màn hình tra cứu công khai cho chọn QR CCCD hoặc `Số phát hành GCN` + `Ngày cấp
-  GCN`. Khi tra số, chuẩn hóa bỏ mọi khoảng trắng/dấu gạch và viết hoa trước so sánh; repository
+GCN`. Khi tra số, chuẩn hóa bỏ mọi khoảng trắng/dấu gạch và viết hoa trước so sánh; repository
   tìm `public_certificates` của hồ sơ active, `certificates` chính thức và bản cuối `VERIFIED` của
   `existing_certificates`. Kết quả chỉ có `found`, `IN_PROCESSING`/`OFFICIALLY_RECEIVED` và hướng
   dẫn cố định — không trả số GCN, ID, họ tên, CCCD, điện thoại, địa chỉ hoặc ảnh. QR CCCD vẫn decode
@@ -376,7 +377,7 @@ hỏng chức năng ghi chú. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V
   riêng để kiểm trùng nền khi nhập đủ hai trường; nó loại trừ bản nháp hiện tại và chỉ cảnh báo, không
   chặn. `REJECTED`/`EXPIRED` không được coi là active.
 - **Không migration:** `public_certificates.issue_number/issue_date`, `certificates.issue_number/
-  issue_date` và `existing_certificates.issue_number/issue_date` đã đáp ứng; không thêm bảng/cột.
+issue_date` và `existing_certificates.issue_number/issue_date` đã đáp ứng; không thêm bảng/cột.
 - **Đánh đổi:** Rate-limit bền vững cần một aggregate query vào `audit_logs` thay vì cache tiến trình;
   lưu lượng pilot nhỏ nên chấp nhận, không tạo thêm nơi lưu dữ liệu.
 
@@ -1875,6 +1876,7 @@ làm yếu điều đang được kiểm.
 nhận). Không có Postgres/Drive thật trong môi trường CI hiện tại; tách phần thuần ra là cách duy
 nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nhóm, tính tỷ lệ nén trên mẫu thiếu số
 đo) mà không cần hạ tầng đó. Phần chạm DB/Drive trong hai script gốc không đổi hành vi.
+
 ## [2026-07-29] Hiển thị điều kiện chặn tiếp nhận cho cán bộ
 
 - **Quyết định:** Giữ nguyên toàn bộ `completionChecks` ở server; khi còn lỗi `BLOCKING`, route
@@ -1958,6 +1960,7 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Giới hạn:** concurrency luôn 2, không migration, worker/background task hay resume đa phiên.
   Phase 5B/work-unit chỉ được lập riêng nếu benchmark sau 5A không đạt mục tiêu; key ở tab không là
   cam kết resume phiên mới.
+
 ## [2026-07-29] Phase 2 dùng SSR initial detail, lazy preview và lazy AI
 
 - **Quyết định:** Trang chi tiết cán bộ tự kiểm quyền rồi gọi `loadStaffSubmissionDetail` ở Server Component; `SubmissionDetail` nhận `initialSubmission` và không fetch detail khi mount. GET detail giữ nguyên contract để refresh sau mutation/direct access.
@@ -2007,6 +2010,7 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Điều kiện bắt buộc:** file `tests/staging-rehearsal-acceptance-saga.integration.test.ts` phải
   chạy với database rehearsal thật trước khi bật cờ ở bất kỳ môi trường nào. Không unit test nào
   chạm tới đường lease thật — toàn bộ đều mock repository.
+
 ## [2026-07-30] Đợt 2C — cán bộ tải ảnh giấy tờ qua endpoint riêng, cửa quyền `mayStaffEdit`
 
 - **Quyết định:** thêm `POST /api/submissions/:id/uploads/initiate|complete` thay vì nới đường của
@@ -2112,4 +2116,3 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Không migration.** Chỉ đổi giá trị một cột đã có (`owner_id`), không đổi schema.
 - **Đã giải quyết:** lỗ "ảnh CCCD gán sai chủ" nêu trong quyết định Đợt 2C trước đây, giờ chuyển
   trạng thái từ "chưa làm" sang "đã có".
-

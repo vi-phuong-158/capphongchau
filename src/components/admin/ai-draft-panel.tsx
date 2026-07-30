@@ -150,9 +150,7 @@ export function AiDraftPanel({
           {open ? "▲" : "▼"}
         </span>
       </button>
-      {open ? (
-        <div className="px-5 pb-5 sm:px-7 sm:pb-7">{renderBody()}</div>
-      ) : null}
+      {open ? <div className="px-5 pb-5 sm:px-7 sm:pb-7">{renderBody()}</div> : null}
     </section>
   );
 
@@ -189,60 +187,62 @@ export function AiDraftPanel({
     );
     return (
       <>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-sm text-sky-950">
-          {aiDraft.modelName} chỉ đọc GCN chữ đánh máy. Kết quả không phải xác nhận pháp lý.
-        </p>
-        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-          Quyền trạm: {aiDraft.stationAccessRisk}
-        </span>
-      </div>
-      {aiDraft.payload.quality.imageStatus !== "CLEAR" ? (
-        <p className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">
-          AI cảnh báo {aiDraft.payload.quality.imageStatus.toLowerCase()}:{" "}
-          {aiDraft.payload.quality.note || "cần kiểm tra thủ công"}.
-        </p>
-      ) : null}
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[680px] text-left text-sm">
-          <thead className="border-b border-sky-200 text-sky-900">
-            <tr>
-              <th className="p-2">Trường</th>
-              <th className="p-2">Hiện có</th>
-              <th className="p-2">Gợi ý AI / bằng chứng</th>
-              <th className="p-2">Trạng thái</th>
-            </tr>
-          </thead>
-          <tbody>
-            {aiDraft.comparisons.map((comparison) => (
-              <tr className="border-b border-sky-100 align-top" key={comparison.fieldPath}>
-                <td className="p-2 font-medium">{label(comparison.fieldPath)}</td>
-                <td className="p-2">{comparison.currentValue || "—"}</td>
-                <td className="p-2">
-                  <div>{comparison.aiValue ?? "—"}</div>
-                  <div className="mt-1 text-xs text-sky-800">
-                    {comparison.evidence?.pageLabel || ""} {comparison.evidence?.note || ""}
-                  </div>
-                </td>
-                <td className="p-2 font-semibold">{comparison.fieldStatus}</td>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="text-sm text-sky-950">
+            {aiDraft.modelName} chỉ đọc GCN chữ đánh máy. Kết quả không phải xác nhận pháp lý.
+          </p>
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            Quyền trạm: {aiDraft.stationAccessRisk}
+          </span>
+        </div>
+        {aiDraft.payload.quality.imageStatus !== "CLEAR" ? (
+          <p className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">
+            AI cảnh báo {aiDraft.payload.quality.imageStatus.toLowerCase()}:{" "}
+            {aiDraft.payload.quality.note || "cần kiểm tra thủ công"}.
+          </p>
+        ) : null}
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left text-sm">
+            <thead className="border-b border-sky-200 text-sky-900">
+              <tr>
+                <th className="p-2">Trường</th>
+                <th className="p-2">Hiện có</th>
+                <th className="p-2">Gợi ý AI / bằng chứng</th>
+                <th className="p-2">Trạng thái</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-3 text-sm text-sky-950">
-        Nút nạp chỉ điền trường <strong>CLEAR</strong> đang trống. Giá trị khác biệt hoặc cần kiểm
-        tra không bị ghi đè.
-      </p>
-      {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
-      <button
-        className="pc-button mt-4"
-        disabled={!mayApply || applying || aiDraft.validationStatus === "BLOCKED" || !hasClearBlank}
-        onClick={() => void apply()}
-        type="button"
-      >
-        {applying ? "Đang nạp…" : "Nạp nháp AI"}
-      </button>
+            </thead>
+            <tbody>
+              {aiDraft.comparisons.map((comparison) => (
+                <tr className="border-b border-sky-100 align-top" key={comparison.fieldPath}>
+                  <td className="p-2 font-medium">{label(comparison.fieldPath)}</td>
+                  <td className="p-2">{comparison.currentValue || "—"}</td>
+                  <td className="p-2">
+                    <div>{comparison.aiValue ?? "—"}</div>
+                    <div className="mt-1 text-xs text-sky-800">
+                      {comparison.evidence?.pageLabel || ""} {comparison.evidence?.note || ""}
+                    </div>
+                  </td>
+                  <td className="p-2 font-semibold">{comparison.fieldStatus}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-sm text-sky-950">
+          Nút nạp chỉ điền trường <strong>CLEAR</strong> đang trống. Giá trị khác biệt hoặc cần kiểm
+          tra không bị ghi đè.
+        </p>
+        {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
+        <button
+          className="pc-button mt-4"
+          disabled={
+            !mayApply || applying || aiDraft.validationStatus === "BLOCKED" || !hasClearBlank
+          }
+          onClick={() => void apply()}
+          type="button"
+        >
+          {applying ? "Đang nạp…" : "Nạp nháp AI"}
+        </button>
       </>
     );
   }

@@ -67,9 +67,7 @@ export function OfficerFileUpload({
   readonly onUploaded: () => Promise<void> | void;
 }) {
   const [documentType, setDocumentType] = useState<DocumentType>("CERTIFICATE");
-  const identityOwners = owners.filter((owner) =>
-    requiresCitizenId(owner.ownerType as OwnerType),
-  );
+  const identityOwners = owners.filter((owner) => requiresCitizenId(owner.ownerType as OwnerType));
   const [ownerId, setOwnerId] = useState(identityOwners[0]?.id ?? "");
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -157,16 +155,36 @@ export function OfficerFileUpload({
         return;
       }
 
-      const complete = await fetch(`/api/submissions/${submissionId}/uploads/complete`, {
-        method: "POST",
-        headers: { ...headers, "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({
-          driveFileId,
-          documentType,
-          ownerId: isIdentity ? ownerId : "",
-          replaceFileId,
-        }),
-      });
+      const idempotencyKey = crypto.randomUUID();
+      let complete: Response | undefined;
+      let lastNetworkError: unknown;
+
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          complete = await fetch(`/api/submissions/${submissionId}/uploads/complete`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-csrf-token": token,
+              "idempotency-key": idempotencyKey,
+            },
+            body: JSON.stringify({
+              driveFileId,
+              documentType,
+              ownerId: isIdentity ? ownerId : "",
+              replaceFileId,
+            }),
+          });
+          if (complete.ok || complete.status < 500) break;
+        } catch (networkError) {
+          lastNetworkError = networkError;
+        }
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      }
+
+      if (!complete) {
+        throw lastNetworkError ?? new Error("Không thể kết nối đến máy chủ.");
+      }
       if (!complete.ok) {
         setError(await errorMessage(complete, "Không nhận được ảnh vừa tải lên."));
         return;
@@ -179,6 +197,12 @@ export function OfficerFileUpload({
           : `Đã thêm ${DOCUMENT_TYPE_LABELS[documentType]}.`,
       );
       await onUploaded();
+    } catch (globalError) {
+      setError(
+        globalError instanceof Error
+          ? globalError.message
+          : "Đã có lỗi không xác định. Vui lòng tải lại trang.",
+      );
     } finally {
       setBusy(false);
     }

@@ -266,7 +266,9 @@ export function SubmissionDetail({
       const refreshed = await loadSubmission(submission.submissionId);
       setSubmission(refreshed);
       setEditOpen(false);
-      setMessage("Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới.");
+      setMessage(
+        "Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới.",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể lưu thay đổi.");
     } finally {

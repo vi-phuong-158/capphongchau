@@ -116,7 +116,7 @@ Sau khi kiểm thử xong:
 Khi App chính hoạt động trở lại, chạy:
 
 ```javascript
-disableEmergencyMode()
+disableEmergencyMode();
 ```
 
 Link vẫn tồn tại nhưng chỉ hiện thông báo hệ thống chưa mở.
@@ -190,9 +190,7 @@ URL `/exec` cũ được giữ nguyên.
 Không nhúng bằng iframe. Chỉ mở Web App ở tab mới khi có sự cố:
 
 ```html
-<a href="URL_WEB_APP_EXEC" target="_blank" rel="noopener noreferrer">
-  Kê khai dự phòng
-</a>
+<a href="URL_WEB_APP_EXEC" target="_blank" rel="noopener noreferrer"> Kê khai dự phòng </a>
 ```
 
 Nên lưu URL trong biến môi trường hoặc cấu hình quản trị để có thể bật nút mà không sửa sâu giao diện.

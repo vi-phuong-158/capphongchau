@@ -1410,11 +1410,11 @@ export class PublicIntakeRepository {
       const next = mapSubmission(rows[0]);
 
       await this.refreshCanonicalProjection(
-          transaction,
-          input.record.submissionId,
-          input.draft,
-          input.pendingIdentityHmacs,
-        );
+        transaction,
+        input.record.submissionId,
+        input.draft,
+        input.pendingIdentityHmacs,
+      );
 
       const counts = await syncOfficialRecord(transaction, {
         caseId: next.officialCaseId,
@@ -2282,9 +2282,13 @@ export class PublicIntakeRepository {
       }
 
       if (input.documentType === "CERTIFICATE") {
-        const certificateCount = files.filter(
-          (file) => file.documentType === "CERTIFICATE",
-        ).length;
+        if (input.ownerId !== "") {
+          throw new OfficerFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Ảnh Giấy chứng nhận không được gắn với cá nhân.",
+          );
+        }
+        const certificateCount = files.filter((file) => file.documentType === "CERTIFICATE").length;
         if (!replaceTarget && certificateCount >= MAX_CERTIFICATE_PHOTOS) {
           throw new OfficerFileMutationRejectedError(
             "CERTIFICATE_LIMIT",
@@ -2315,7 +2319,10 @@ export class PublicIntakeRepository {
          * im lặng cho ghi đè: câu `update ... REPLACED` bên dưới tự đẩy ảnh cùng chủ + cùng mặt
          * xuống lịch sử, nên một lần bấm nhầm sẽ mất bằng chứng đang dùng mà cán bộ không hề biết.
          */
-        if ((existing && existing.fileId !== input.replaceFileId) || (!existing && input.replaceFileId)) {
+        if (
+          (existing && existing.fileId !== input.replaceFileId) ||
+          (!existing && input.replaceFileId)
+        ) {
           throw new OfficerFileMutationRejectedError(
             "SLOT_CONFLICT",
             "Trạng thái ảnh CCCD của chủ sử dụng này đã thay đổi. Hãy tải lại trang.",
@@ -2384,7 +2391,7 @@ export class PublicIntakeRepository {
           idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
         ) values (
           ${input.idempotencyKey}, 'OFFICER_UPLOAD_COMPLETE', ${input.requestId},
-          ${input.mutationHash}, ${JSON.stringify(summary)}::jsonb, now() + interval '24 hours'
+          ${input.mutationHash}, ${transaction.json(summary)}, now() + interval '24 hours'
         )
       `;
 
@@ -2541,6 +2548,274 @@ export class PublicIntakeRepository {
         metadata: { documentType: current[0].document_type, fileId: input.fileId },
       });
       return "REASSIGNED";
+    });
+  }
+
+  private async lockSubmissionForPublicEdit(
+    transaction: Sql,
+    submissionId: string,
+  ): Promise<SubmissionRecord> {
+    const rows = await transaction.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions
+       where submission_id = $1 for update`,
+      [submissionId],
+    );
+    if (!rows[0]) {
+      throw new PublicFileMutationRejectedError("NOT_FOUND", "Không tìm thấy bản kê khai.");
+    }
+    const record = mapSubmission(rows[0]);
+    if (
+      record.claimedBy.trim().length > 0 ||
+      (record.status !== "DRAFT" && record.status !== "NEEDS_SUPPLEMENT")
+    ) {
+      throw new PublicFileMutationRejectedError(
+        "INVALID_STATE",
+        "Bản kê khai đang bị khóa hoặc không ở trạng thái cho phép sửa.",
+      );
+    }
+    return record;
+  }
+
+  async commitPublicFileUpload(input: {
+    readonly submissionId: string;
+    readonly requestId: string;
+    readonly idempotencyKey: string;
+    readonly mutationHash: string;
+    readonly documentType: StoredFile["documentType"];
+    readonly ownerId: string;
+    readonly replaceFileId: string;
+    readonly file: {
+      readonly fileId: string;
+      readonly driveFileId: string;
+      readonly mimeType: string;
+      readonly sizeBytes: number;
+      readonly checksum: string;
+      readonly fileName: string;
+    };
+    readonly normalization?: FileNormalizationMetadata;
+  }): Promise<{ readonly summary: PublicFileSummary; readonly replayed: boolean }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+        select mutation_hash, response_json from public.request_log
+        where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return { summary: cached[0].response_json as PublicFileSummary, replayed: true };
+      }
+
+      const record = await this.lockSubmissionForPublicEdit(transaction, input.submissionId);
+      if (!record.driveFolderId) {
+        throw new PublicFileMutationRejectedError(
+          "INVALID_STATE",
+          "Thư mục tải ảnh chưa sẵn sàng. Vui lòng tải lại ảnh từ đầu.",
+        );
+      }
+      const files = await this.lockActiveFiles(transaction, input.submissionId);
+
+      const replaceTarget = input.replaceFileId
+        ? files.find((file) => file.fileId === input.replaceFileId)
+        : undefined;
+      if (input.replaceFileId && !replaceTarget) {
+        throw new PublicFileMutationRejectedError(
+          "REPLACE_TARGET_INVALID",
+          "Ảnh cần thay không còn hợp lệ. Hãy tải lại trang.",
+        );
+      }
+      if (replaceTarget && replaceTarget.documentType !== input.documentType) {
+        throw new PublicFileMutationRejectedError(
+          "REPLACE_TARGET_INVALID",
+          "Ảnh cần thay không cùng loại giấy tờ.",
+        );
+      }
+
+      if (input.documentType === "CERTIFICATE") {
+        if (input.ownerId !== "") {
+          throw new PublicFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Ảnh Giấy chứng nhận không được gắn với cá nhân.",
+          );
+        }
+        const certificateCount = files.filter((file) => file.documentType === "CERTIFICATE").length;
+        if (!replaceTarget && certificateCount >= MAX_CERTIFICATE_PHOTOS) {
+          throw new PublicFileMutationRejectedError(
+            "CERTIFICATE_LIMIT",
+            `Tối đa ${MAX_CERTIFICATE_PHOTOS} ảnh Giấy chứng nhận.`,
+          );
+        }
+      } else {
+        const owners = record.draft?.owners;
+        const owner = Array.isArray(owners)
+          ? owners.find((candidate) => candidate.id === input.ownerId)
+          : undefined;
+        if (!owner || !requiresCitizenId(owner.ownerType)) {
+          throw new PublicFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Chủ sử dụng của ảnh CCCD không hợp lệ.",
+          );
+        }
+        const existing = files.find(
+          (file) => file.ownerId === input.ownerId && file.documentType === input.documentType,
+        );
+        if (
+          (existing && existing.fileId !== input.replaceFileId) ||
+          (!existing && input.replaceFileId)
+        ) {
+          throw new PublicFileMutationRejectedError(
+            "SLOT_CONFLICT",
+            "Trạng thái thay ảnh CCCD không còn hợp lệ.",
+          );
+        }
+      }
+
+      const usedBytes =
+        files.reduce((sum, file) => sum + file.sizeBytes, 0) - (replaceTarget?.sizeBytes ?? 0);
+      if (usedBytes + input.file.sizeBytes > SUBMISSION_BYTE_BUDGET) {
+        throw new PublicFileMutationRejectedError(
+          "BYTE_BUDGET",
+          "Tổng dung lượng hồ sơ đã vượt giới hạn.",
+        );
+      }
+
+      if (input.replaceFileId) {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${input.submissionId} and file_id = ${input.replaceFileId}
+            and status = 'UPLOADED'
+        `;
+      }
+      if (input.documentType !== "CERTIFICATE") {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${input.submissionId} and owner_id = ${input.ownerId}
+            and document_type = ${input.documentType} and status = 'UPLOADED'
+        `;
+      }
+
+      const rows = await transaction<FileRow[]>`
+        insert into public.public_files (
+          file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name,
+          source_size_bytes, source_mime_type, source_width, source_height,
+          upload_width, upload_height, normalization_version
+        ) values (
+          ${input.file.fileId}, ${input.submissionId}, ${input.ownerId}, ${input.documentType},
+          ${input.file.driveFileId}, ${input.file.mimeType}, ${input.file.sizeBytes},
+          ${input.file.checksum}, ${input.file.fileName},
+          ${input.normalization?.sourceSizeBytes ?? null}, ${input.normalization?.sourceMimeType ?? null},
+          ${input.normalization?.sourceWidth ?? null}, ${input.normalization?.sourceHeight ?? null},
+          ${input.normalization?.uploadWidth ?? null}, ${input.normalization?.uploadHeight ?? null},
+          ${input.normalization?.normalizationVersion ?? ""}
+        ) returning file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      const summary = this.fileSummary(mapFile(rows[0]));
+
+      await this.insertAudit(transaction, {
+        actorEmail: "PUBLIC",
+        action: "PUBLIC_FILE_UPLOADED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          documentType: input.documentType,
+          fileId: summary.fileId,
+          sizeBytes: input.file.sizeBytes,
+          replaced: Boolean(input.replaceFileId),
+        },
+      });
+
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, 'PUBLIC_UPLOAD_COMPLETE', ${input.requestId},
+          ${input.mutationHash}, ${JSON.stringify(summary)}::jsonb, now() + interval '24 hours'
+        )
+      `;
+
+      return { summary, replayed: false };
+    });
+  }
+
+  async commitPublicFileDelete(input: {
+    readonly submissionId: string;
+    readonly fileId: string;
+    readonly requestId: string;
+    readonly idempotencyKey: string;
+    readonly mutationHash: string;
+  }): Promise<{ readonly alreadyDeleted: boolean }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+        select mutation_hash, response_json from public.request_log
+        where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return { alreadyDeleted: true };
+      }
+
+      await this.lockSubmissionForPublicEdit(transaction, input.submissionId);
+
+      const current = await transaction<
+        {
+          document_type: StoredFile["documentType"];
+          status: StoredFile["status"];
+          size_bytes: number;
+        }[]
+      >`
+        select document_type, status, size_bytes from public.public_files
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+        for update
+      `;
+      if (!current[0]) {
+        throw new PublicFileMutationRejectedError("FILE_NOT_FOUND", "Không tìm thấy ảnh cần xóa.");
+      }
+      if (current[0].document_type !== "CERTIFICATE") {
+        throw new PublicFileMutationRejectedError(
+          "DOCUMENT_TYPE_INVALID",
+          "Chỉ xóa được ảnh Giấy chứng nhận.",
+        );
+      }
+      if (current[0].status === "REPLACED") {
+        throw new PublicFileMutationRejectedError("FILE_INACTIVE", "Ảnh không còn hiệu lực.");
+      }
+      if (current[0].status === "DELETED") return { alreadyDeleted: true };
+
+      await transaction`
+        update public.public_files set status = 'DELETED', updated_at = now()
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      await this.insertAudit(transaction, {
+        actorEmail: "PUBLIC",
+        action: "PUBLIC_FILE_DELETED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          documentType: current[0].document_type,
+          fileId: input.fileId,
+          sizeBytes: current[0].size_bytes,
+        },
+      });
+
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, 'PUBLIC_FILE_DELETE', ${input.requestId},
+          ${input.mutationHash}, '{"alreadyDeleted":true}'::jsonb, now() + interval '24 hours'
+        )
+      `;
+      return { alreadyDeleted: false };
     });
   }
 
@@ -2755,7 +3030,7 @@ export class PublicIntakeRepository {
     const summaries = rows.map((row) => this.fileSummary(mapFile(row)));
     await sql`
       update public.public_submissions
-      set file_summary_json = ${JSON.stringify(summaries)}::jsonb, updated_at = now()
+      set file_summary_json = ${sql.json(summaries)}, updated_at = now()
       where submission_id = ${submissionId}
     `;
   }
@@ -2934,5 +3209,27 @@ export class OfficerFileMutationRejectedError extends Error {
   ) {
     super(message);
     this.name = "OfficerFileMutationRejectedError";
+  }
+}
+
+export type PublicFileRejectionReason =
+  | "NOT_FOUND"
+  | "INVALID_STATE"
+  | "OWNER_INVALID"
+  | "REPLACE_TARGET_INVALID"
+  | "SLOT_CONFLICT"
+  | "CERTIFICATE_LIMIT"
+  | "BYTE_BUDGET"
+  | "FILE_NOT_FOUND"
+  | "FILE_INACTIVE"
+  | "DOCUMENT_TYPE_INVALID";
+
+export class PublicFileMutationRejectedError extends Error {
+  constructor(
+    readonly reason: PublicFileRejectionReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PublicFileMutationRejectedError";
   }
 }

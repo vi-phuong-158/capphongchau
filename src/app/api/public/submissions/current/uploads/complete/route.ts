@@ -6,12 +6,15 @@ import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { isValidPublicIdempotencyKey } from "@/modules/public-intake/creation-idempotency";
 import {
   getPublicIntakeRepository,
+  PublicFileMutationRejectedError,
   SubmissionIdempotencyConflictError,
+  type PublicFileRejectionReason,
 } from "@/modules/public-intake/repository";
 import {
   isEditable,
   publicError,
   resolvePublicRequest,
+  type PublicErrorCode,
 } from "@/modules/public-intake/route-context";
 import { getPublicIntakeStorage, UploadVerificationError } from "@/modules/public-intake/storage";
 import { discardIfOrphan } from "@/modules/public-intake/upload-commit";
@@ -24,6 +27,25 @@ import {
 } from "@/modules/public-intake/upload-metrics";
 
 export const runtime = "nodejs";
+
+/**
+ * Vì sao lượt ghi bị từ chối → mã lỗi HTTP nào.
+ */
+const REJECTION_HTTP: Record<
+  PublicFileRejectionReason,
+  { readonly code: PublicErrorCode; readonly status: number }
+> = {
+  NOT_FOUND: { code: "NOT_FOUND", status: 404 },
+  INVALID_STATE: { code: "INVALID_STATE", status: 409 },
+  OWNER_INVALID: { code: "VALIDATION_FAILED", status: 400 },
+  REPLACE_TARGET_INVALID: { code: "VERSION_CONFLICT", status: 409 },
+  SLOT_CONFLICT: { code: "VERSION_CONFLICT", status: 409 },
+  CERTIFICATE_LIMIT: { code: "VERSION_CONFLICT", status: 409 },
+  BYTE_BUDGET: { code: "VALIDATION_FAILED", status: 400 },
+  FILE_NOT_FOUND: { code: "NOT_FOUND", status: 404 },
+  FILE_INACTIVE: { code: "VERSION_CONFLICT", status: 409 },
+  DOCUMENT_TYPE_INVALID: { code: "VALIDATION_FAILED", status: 400 },
+};
 
 export async function POST(request: Request): Promise<NextResponse> {
   const requestId = request.headers.get("x-request-id") ?? randomUUID();
@@ -87,31 +109,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
     .digest("hex");
 
-  // Replay phải đứng trước mọi kiểm tra trạng thái của một lượt upload mới. Sau lần đầu commit,
-  // chính file vừa adopt làm các kiểm tra "đã có ảnh" bên dưới thất bại; cleanup khi đó sẽ xóa
-  // bằng chứng mà DB đang trỏ tới nếu response đầu bị mất.
-  const replay = await repository.findStoredMutation(idempotencyKey, "PUBLIC_UPLOAD_COMPLETE");
-  if (replay) {
-    if (replay.mutationHash !== mutationHash) {
-      await discardIfOrphan(repository, record, driveFileId);
-      return publicError(
-        "IDEMPOTENCY_CONFLICT",
-        "Yêu cầu hoàn tất tải lên bị xung đột.",
-        requestId,
-      );
-    }
-    const replayFileId = replay.response.fileId;
-    const replaySizeBytes = replay.response.sizeBytes;
-    if (typeof replayFileId === "string" && typeof replaySizeBytes === "number") {
-      return NextResponse.json({ ok: true, fileId: replayFileId, sizeBytes: replaySizeBytes });
-    }
-    return publicError("INTERNAL_ERROR", "Kết quả tải lên đã lưu không hợp lệ.", requestId);
-  }
-
-  if (!isEditable(record)) {
-    await discardIfOrphan(repository, record, driveFileId);
-    return publicError("INVALID_STATE", "Bản kê khai đang bị khóa.", requestId);
-  }
   if (!record.driveFolderId) {
     return publicError(
       "INVALID_STATE",
@@ -120,48 +117,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
   const driveFolderId = record.driveFolderId;
-
-  const identityImage = documentType === "CITIZEN_ID_FRONT" || documentType === "CITIZEN_ID_BACK";
-  if (identityImage) {
-    const owners = record.draft?.owners;
-    if (!Array.isArray(owners)) {
-      await discardIfOrphan(repository, record, driveFileId);
-      return publicError(
-        "INVALID_STATE",
-        "Dữ liệu bản kê khai chưa đầy đủ. Tải lại trang và thử lại.",
-        requestId,
-      );
-    }
-    const owner = owners.find((candidate) => candidate.id === ownerId);
-    if (!owner || !requiresCitizenId(owner.ownerType)) {
-      return publicError("VALIDATION_FAILED", "Chủ sử dụng của ảnh CCCD không hợp lệ.", requestId);
-    }
-    // Kiểm tra thay ảnh phải đọc nguồn thật, không dùng cache có thể bị trễ sau upload trước đó.
-    const currentFiles = await repository.listFiles(record.submissionId);
-    const existing = currentFiles.find(
-      (file) => file.ownerId === ownerId && file.documentType === documentType,
-    );
-    if ((existing && existing.fileId !== replaceFileId) || (!existing && replaceFileId)) {
-      await discardIfOrphan(repository, record, driveFileId);
-      return publicError("INVALID_STATE", "Trạng thái thay ảnh CCCD không còn hợp lệ.", requestId);
-    }
-  } else if (replaceFileId) {
-    const currentFiles = await repository.listFiles(record.submissionId);
-    const existing = currentFiles.find(
-      (file) =>
-        file.fileId === replaceFileId &&
-        file.documentType === "CERTIFICATE" &&
-        file.status === "UPLOADED",
-    );
-    if (!existing) {
-      await discardIfOrphan(repository, record, driveFileId);
-      return publicError(
-        "INVALID_STATE",
-        "Ảnh Giấy chứng nhận cần thay không còn hợp lệ.",
-        requestId,
-      );
-    }
-  }
 
   let verified;
   try {
@@ -172,7 +127,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
   } catch (error) {
     if (error instanceof UploadVerificationError) {
-      // Tệp không đạt phải rời khỏi Drive ngay, không để tích rác trong kho của quản trị viên.
       await discardIfOrphan(repository, record, driveFileId);
       return publicError("VALIDATION_FAILED", error.message, requestId);
     }
@@ -181,51 +135,49 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const fileId = randomUUID();
   try {
-    const summary = await repository.appendFile(
-      {
+    const { summary, replayed } = await repository.commitPublicFileUpload({
+      submissionId: record.submissionId,
+      requestId,
+      idempotencyKey,
+      mutationHash,
+      documentType,
+      ownerId,
+      replaceFileId,
+      file: {
         fileId,
-        submissionId: record.submissionId,
-        ownerId,
-        documentType,
         driveFileId: verified.driveFileId,
         mimeType: verified.mimeType,
         sizeBytes: verified.sizeBytes,
         checksum: verified.checksum,
         fileName: verified.fileName,
       },
-      record,
-      {
-        idempotencyKey,
-        mutationHash,
-        requestId,
-        replaceFileId: replaceFileId || undefined,
-      },
-      buildFileNormalizationMetadata(telemetry),
-    );
+      normalization: buildFileNormalizationMetadata(telemetry),
+    });
 
-    // Số đo là việc phụ: bảng metric hỏng không được làm hỏng một lượt tải đã thành công. Người
-    // dân đã chụp, đã chờ tải xong; trả lỗi ở đây là bắt họ làm lại vì chuyện không liên quan.
-    await repository
-      .appendUploadAttempt(
-        buildUploadAttemptMetric({
-          attemptId: telemetry?.attemptId ?? randomUUID(),
-          submissionId: record.submissionId,
-          documentType,
-          outcome: "COMPLETED",
-          verifiedUploadSizeBytes: verified.sizeBytes,
-          completeDurationMs: Date.now() - startedAt,
-          telemetry,
-        }),
-      )
-      .catch(reportUploadMetricFailure);
+    if (!replayed) {
+      await repository
+        .appendUploadAttempt(
+          buildUploadAttemptMetric({
+            attemptId: telemetry?.attemptId ?? randomUUID(),
+            submissionId: record.submissionId,
+            documentType,
+            outcome: "COMPLETED",
+            verifiedUploadSizeBytes: verified.sizeBytes,
+            completeDurationMs: Date.now() - startedAt,
+            telemetry,
+          }),
+        )
+        .catch(reportUploadMetricFailure);
+    }
 
-    // Không trả Drive ID ra ngoài — người dân không cần và không được biết.
     return NextResponse.json({ ok: true, fileId: summary.fileId, sizeBytes: verified.sizeBytes });
   } catch (error) {
+    if (error instanceof PublicFileMutationRejectedError) {
+      await discardIfOrphan(repository, record, verified.driveFileId);
+      const { code } = REJECTION_HTTP[error.reason];
+      return publicError(code, error.message, requestId);
+    }
     if (error instanceof SubmissionIdempotencyConflictError) {
-      // Xung đột idempotency nghĩa là khóa này đã dùng cho nội dung khác — tệp vừa xác minh
-      // KHÔNG phải tệp đã được nhận, nhưng cũng không chắc chưa ai nhận nó. Đi qua cùng một cửa
-      // dọn dẹp an toàn bên dưới thay vì xóa thẳng.
       await discardIfOrphan(repository, record, verified.driveFileId);
       return publicError(
         "IDEMPOTENCY_CONFLICT",

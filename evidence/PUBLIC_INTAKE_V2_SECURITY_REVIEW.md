@@ -3,24 +3,24 @@
 Checklist §22 của `docs/archive/plans/CLAUDE_IMPLEMENTATION_PLAN_PUBLIC_INTAKE_V2-2026-07-28.md`, đối chiếu với mã nguồn thực tế
 tại commit cuối của nhánh `claude/land-declaration-process-feedback-126f2e`.
 
-| # | Mục | Trạng thái | Bằng chứng |
-|---|---|---|---|
-| 1 | Không log CCCD | **ĐẠT** | Lỗi trả về chỉ có `code` + `fieldPath` + thông báo; `issuesDetails()` ở submit route không đưa giá trị người dùng nhập vào payload |
-| 2 | Không log QR raw | **ĐẠT** (giữ nguyên) | `citizen-id-qr.client.ts` chỉ trả hash, không đổi ở V2 |
-| 3 | Không log upload URL | **ĐẠT** | `xhr-upload-transport.client.ts` có chú thích cấm; không có `console.*` nào trong đường upload |
-| 4 | Không log Drive ID ở client | **ĐẠT** | Không thêm log nào; Drive ID chỉ đi trong body request tới complete route |
-| 5 | Metric không có filename/PII | **ĐẠT** | Bảng `public_upload_attempts` chỉ có số, enum và `submission_id`; `clientUploadTelemetrySchema` là `strict()` với danh mục đóng. `tests/upload-metrics.test.ts` |
-| 6 | Assisted channel không forge được | **ĐẠT** | Cổng công khai gán cứng `SELF_SERVICE`; route cán bộ lấy danh tính từ `requireActiveUser`; CHECK ở DB bắt buộc đủ dấu vết. `tests/officer-assisted-intake.test.ts` |
-| 7 | Public status không trả email cán bộ | **ĐẠT** | `publicAssignedOfficer()` chỉ trả `displayName`; test khẳng định payload không chứa ký tự `@` |
-| 8 | Complete cleanup không xóa file đã adopt | **ĐẠT** | `discardIfOrphan` hỏi `isDriveFileAdopted` trước, `.catch(() => true)` nghiêng về giữ lại. `tests/public-upload-complete-route.test.ts` |
-| 9 | Idempotency giữ nguyên | **ĐẠT** | `create-submission.ts` giữ nguyên logic cũ, chỉ đổi chỗ đặt; `tests/public-submission-create.test.ts` vẫn xanh |
-| 10 | CSRF/Turnstile giữ nguyên | **ĐẠT** | Cổng công khai không đổi. Route cán bộ **thay** Turnstile bằng phiên đăng nhập + CSRF (mạnh hơn), không phải bỏ trống |
-| 11 | Service worker không cache API/ảnh | **ĐẠT** (giữ nguyên) | Không đụng tới cấu hình PWA |
-| 12 | Không lưu Blob vào localStorage/IndexedDB | **ĐẠT** | Ảnh chỉ nằm trong bộ nhớ phiên; `sessionStorage` chỉ chứa nhãn trang và khóa idempotency |
-| 13 | Official acceptance full validation | **ĐẠT — siết chặt hơn trước** | `completion-checks.ts` viết lại; xem bảng bên dưới |
-| 14 | Working payload cần claim | **ĐẠT** (giữ nguyên) | Không đụng `commitWorkingPayload` |
-| 15 | Migration additive và có constraint | **ĐẠT** | Cả hai migration chỉ `add column if not exists`; `202607280002` có 2 CHECK |
-| 16 | Error message không lộ nội bộ | **ĐẠT** | Route cán bộ không trả stack/`String(error)`; test khóa lại |
+| #   | Mục                                       | Trạng thái                    | Bằng chứng                                                                                                                                                         |
+| --- | ----------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Không log CCCD                            | **ĐẠT**                       | Lỗi trả về chỉ có `code` + `fieldPath` + thông báo; `issuesDetails()` ở submit route không đưa giá trị người dùng nhập vào payload                                 |
+| 2   | Không log QR raw                          | **ĐẠT** (giữ nguyên)          | `citizen-id-qr.client.ts` chỉ trả hash, không đổi ở V2                                                                                                             |
+| 3   | Không log upload URL                      | **ĐẠT**                       | `xhr-upload-transport.client.ts` có chú thích cấm; không có `console.*` nào trong đường upload                                                                     |
+| 4   | Không log Drive ID ở client               | **ĐẠT**                       | Không thêm log nào; Drive ID chỉ đi trong body request tới complete route                                                                                          |
+| 5   | Metric không có filename/PII              | **ĐẠT**                       | Bảng `public_upload_attempts` chỉ có số, enum và `submission_id`; `clientUploadTelemetrySchema` là `strict()` với danh mục đóng. `tests/upload-metrics.test.ts`    |
+| 6   | Assisted channel không forge được         | **ĐẠT**                       | Cổng công khai gán cứng `SELF_SERVICE`; route cán bộ lấy danh tính từ `requireActiveUser`; CHECK ở DB bắt buộc đủ dấu vết. `tests/officer-assisted-intake.test.ts` |
+| 7   | Public status không trả email cán bộ      | **ĐẠT**                       | `publicAssignedOfficer()` chỉ trả `displayName`; test khẳng định payload không chứa ký tự `@`                                                                      |
+| 8   | Complete cleanup không xóa file đã adopt  | **ĐẠT**                       | `discardIfOrphan` hỏi `isDriveFileAdopted` trước, `.catch(() => true)` nghiêng về giữ lại. `tests/public-upload-complete-route.test.ts`                            |
+| 9   | Idempotency giữ nguyên                    | **ĐẠT**                       | `create-submission.ts` giữ nguyên logic cũ, chỉ đổi chỗ đặt; `tests/public-submission-create.test.ts` vẫn xanh                                                     |
+| 10  | CSRF/Turnstile giữ nguyên                 | **ĐẠT**                       | Cổng công khai không đổi. Route cán bộ **thay** Turnstile bằng phiên đăng nhập + CSRF (mạnh hơn), không phải bỏ trống                                              |
+| 11  | Service worker không cache API/ảnh        | **ĐẠT** (giữ nguyên)          | Không đụng tới cấu hình PWA                                                                                                                                        |
+| 12  | Không lưu Blob vào localStorage/IndexedDB | **ĐẠT**                       | Ảnh chỉ nằm trong bộ nhớ phiên; `sessionStorage` chỉ chứa nhãn trang và khóa idempotency                                                                           |
+| 13  | Official acceptance full validation       | **ĐẠT — siết chặt hơn trước** | `completion-checks.ts` viết lại; xem bảng bên dưới                                                                                                                 |
+| 14  | Working payload cần claim                 | **ĐẠT** (giữ nguyên)          | Không đụng `commitWorkingPayload`                                                                                                                                  |
+| 15  | Migration additive và có constraint       | **ĐẠT**                       | Cả hai migration chỉ `add column if not exists`; `202607280002` có 2 CHECK                                                                                         |
+| 16  | Error message không lộ nội bộ             | **ĐẠT**                       | Route cán bộ không trả stack/`String(error)`; test khóa lại                                                                                                        |
 
 ## Thay đổi làm hệ thống **an toàn hơn** so với trước V2
 

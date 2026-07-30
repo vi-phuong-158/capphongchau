@@ -5,10 +5,10 @@ production, mỗi bước xác nhận xong mới đi tiếp.
 
 ## Danh sách
 
-| File | Nội dung | Loại |
-|---|---|---|
-| `202607280001_assigned_officer_display_name.sql` | `public_submissions.claimed_by_display_name` (nullable) | Additive |
-| `202607280002_officer_assisted_intake.sql` | `intake_channel` (NOT NULL DEFAULT), `assisted_by_email`, `assisted_by_display_name`, `assisted_at`, 2 CHECK, 1 index | Additive |
+| File                                             | Nội dung                                                                                                              | Loại     |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | -------- |
+| `202607280001_assigned_officer_display_name.sql` | `public_submissions.claimed_by_display_name` (nullable)                                                               | Additive |
+| `202607280002_officer_assisted_intake.sql`       | `intake_channel` (NOT NULL DEFAULT), `assisted_by_email`, `assisted_by_display_name`, `assisted_at`, 2 CHECK, 1 index | Additive |
 
 Migration mới nhất trước đợt này là `202607260002_harden_antigravity_ai_jobs.sql`; hai số
 `202607280001`/`202607280002` chưa ai dùng. `tests/migration-versions.test.ts` xanh.
@@ -25,12 +25,12 @@ Migration mới nhất trước đợt này là `202607260002_harden_antigravity
 
 ## Rủi ro và cách xử lý
 
-| Rủi ro | Đánh giá | Xử lý |
-|---|---|---|
-| `ALTER TABLE ... ADD COLUMN` khóa bảng | Thấp — PostgreSQL 11+ thêm cột có DEFAULT không rewrite bảng | Chạy ngoài giờ cao điểm cho chắc |
-| CHECK constraint fail lúc thêm | Rất thấp — hàng cũ đều thỏa | Nếu fail: kiểm hàng có `intake_channel = 'OFFICER_ASSISTED'` mà thiếu `assisted_*` (không nên tồn tại trước khi deploy code) |
-| Code deploy trước migration | **Đây là rủi ro thật** | Chạy migration TRƯỚC khi deploy code. Code mới `select` các cột này; thiếu cột là 500 ở mọi màn hình hồ sơ |
-| Migration chạy trước, code cũ còn chạy | An toàn | Cột thừa không ảnh hưởng code cũ |
+| Rủi ro                                 | Đánh giá                                                     | Xử lý                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `ALTER TABLE ... ADD COLUMN` khóa bảng | Thấp — PostgreSQL 11+ thêm cột có DEFAULT không rewrite bảng | Chạy ngoài giờ cao điểm cho chắc                                                                                             |
+| CHECK constraint fail lúc thêm         | Rất thấp — hàng cũ đều thỏa                                  | Nếu fail: kiểm hàng có `intake_channel = 'OFFICER_ASSISTED'` mà thiếu `assisted_*` (không nên tồn tại trước khi deploy code) |
+| Code deploy trước migration            | **Đây là rủi ro thật**                                       | Chạy migration TRƯỚC khi deploy code. Code mới `select` các cột này; thiếu cột là 500 ở mọi màn hình hồ sơ                   |
+| Migration chạy trước, code cũ còn chạy | An toàn                                                      | Cột thừa không ảnh hưởng code cũ                                                                                             |
 
 **Thứ tự deploy bắt buộc: migration trước, code sau.**
 
