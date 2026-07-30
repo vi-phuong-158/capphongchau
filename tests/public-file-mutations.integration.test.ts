@@ -274,7 +274,7 @@ describe.skipIf(!hasTestDb)("Thao tác ảnh công khai — nguyên tử trên P
   // ── PF-04: Hai upload đồng thời ở ảnh GCN thứ 10 → chỉ một thành công ───
 
   it("PF-04: hai upload công khai đồng thời ở ảnh GCN thứ 10 → chỉ một thành công", async () => {
-    // Tạo MAX_CERTIFICATE_PHOTOS - 1 ảnh (9 ảnh) 
+    // Tạo MAX_CERTIFICATE_PHOTOS - 1 ảnh (9 ảnh)
     for (let i = 0; i < MAX_CERTIFICATE_PHOTOS - 1; i++) {
       await insertFile();
     }
