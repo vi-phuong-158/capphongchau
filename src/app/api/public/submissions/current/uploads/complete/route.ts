@@ -14,6 +14,7 @@ import {
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
 import { getPublicIntakeStorage, UploadVerificationError } from "@/modules/public-intake/storage";
+import { discardIfOrphan } from "@/modules/public-intake/upload-commit";
 import { requiresCitizenId } from "@/modules/public-intake/types";
 import {
   buildFileNormalizationMetadata,
@@ -245,39 +246,4 @@ export async function POST(request: Request): Promise<NextResponse> {
     await discardIfOrphan(repository, record, verified.driveFileId);
     throw error;
   }
-}
-
-/**
- * Xóa tệp trên Drive **chỉ khi** cả hai điều kiện dưới đây cùng đúng.
- *
- * 1. Chưa hồ sơ nào nhận tệp này (`isDriveFileAdopted`, hỏi toàn bảng chứ không lọc theo hồ sơ
- *    đang gọi).
- * 2. Tệp nằm đúng trong thư mục Drive của chính hồ sơ đang gọi.
- *
- * Vì sao cần điều kiện 2: phần lớn nhánh gọi hàm này truyền thẳng `body.driveFileId` — dữ liệu
- * client, chưa qua `verifyUploadedFile`. Chỉ với điều kiện 1, một `driveFileId` trỏ sang thư mục
- * hộ khác mà chưa kịp `complete` vẫn thỏa "chưa ai nhận" và sẽ bị xóa. Hai điều kiện cộng lại thu
- * hẹp phạm vi xóa về đúng những gì hộ dân đang gọi tự tải lên.
- *
- * `.catch(() => true)` / `.catch(() => false)` không phải là nuốt lỗi cho gọn: hỏi mà không hỏi
- * được thì mặc định coi như **đã nhận** và **không xác nhận được thư mục**, tức là không xóa. Sai
- * theo hướng để lại một tệp thừa thì có `scripts/audit-orphan-public-files.ts` dọn sau; sai theo
- * hướng kia thì mất bằng chứng của hồ sơ, vĩnh viễn.
- */
-async function discardIfOrphan(
-  repository: ReturnType<typeof getPublicIntakeRepository>,
-  record: { readonly driveFolderId: string | null },
-  driveFileId: string,
-): Promise<void> {
-  if (!driveFileId || !record.driveFolderId) return;
-  const adopted = await repository.isDriveFileAdopted(driveFileId).catch(() => true);
-  if (adopted) return;
-
-  const storage = getPublicIntakeStorage();
-  const ownedByCaller = await storage
-    .isFileInFolder(driveFileId, record.driveFolderId)
-    .catch(() => false);
-  if (!ownedByCaller) return;
-
-  await storage.discardFile(driveFileId).catch(() => undefined);
 }

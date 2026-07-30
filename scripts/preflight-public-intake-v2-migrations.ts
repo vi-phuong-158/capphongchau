@@ -19,6 +19,7 @@
  *   202607290003_drop_working_payload_override_columns.sql
  *   202607290004_queue_search_performance.sql
  *   202607290005_lazy_drive_folder_creation.sql
+ *   202607290006_submission_internal_notes.sql
  */
 
 import { loadEnvConfig } from "@next/env";
@@ -410,6 +411,19 @@ async function runChecks(): Promise<CheckResult[]> {
       "Index public_submissions_drive_folder_lease_idx tồn tại",
       leaseIndex,
       leaseIndex ? "OK" : "THIẾU INDEX",
+    );
+  }
+
+  // 202607290006 — cột ghi chú nội bộ cán bộ (Đợt 2A-2).
+  //
+  // Cột này nằm trong `SUBMISSION_SELECT` dùng chung, nên thiếu nó KHÔNG chỉ làm mất chức năng ghi
+  // chú: mọi truy vấn đọc hồ sơ đều lỗi. Đây là điều kiện chặn deploy, không phải kiểm tra phụ.
+  {
+    const column = await columnExists("public_submissions", "internal_notes");
+    check(
+      "public_submissions.internal_notes tồn tại (202607290006)",
+      column.exists,
+      column.exists ? "OK" : "THIẾU CỘT — migration 202607290006 chưa chạy",
     );
   }
 

@@ -215,10 +215,11 @@ Không xóa bảng/cột hoặc dữ liệu đã dùng. Nếu thay đổi schema
 - Sau CREATE, client lấy draft/`version` từ `GET /api/public/submissions/current`, đồng bộ các ID do
   server sinh nhưng không được ghi đè phone, consent hoặc dữ liệu người dùng vừa nhập; mọi PATCH
   tiếp theo phải gửi lại server version gần nhất và cập nhật version từ response.
-- `CLAIM`, `REQUEST_SUPPLEMENT` và `REJECT` phải ghi transition, yêu cầu bổ sung (nếu có), audit, timeline và `REQUEST_LOG` trong cùng một PostgreSQL transaction. Lặp cùng key/payload trả lại kết quả đã cache; dùng lại key cho payload khác trả `409 IDEMPOTENCY_CONFLICT`.
+- `CLAIM` và `REJECT` phải ghi transition, audit, timeline và `REQUEST_LOG` trong cùng một PostgreSQL transaction. Lặp cùng key/payload trả lại kết quả đã cache; dùng lại key cho payload khác trả `409 IDEMPOTENCY_CONFLICT`. **[2026-07-29] `REQUEST_SUPPLEMENT` đã bị chặn server-side** (trả `400` ngay đầu hàm, trước mọi truy vấn) — luồng nghiệp vụ mới không còn yêu cầu bổ sung, cán bộ chỉnh sửa trực tiếp; xem `docs/brain/03-decisions.md` [2026-07-29] "Đợt 2A-1".
 - Đặt lại mã bí mật phải sinh ổn định theo idempotency key, không lưu mã rõ trong `REQUEST_LOG`, và chỉ cập nhật cột truy cập (`access_code_hash`, sai/khóa, `updated_at`, `access_version`) — không ghi đè `draft_json` hay tăng `version` nghiệp vụ.
 - Import GCN cũ chỉ khớp/lưu HMAC CCCD; ngày sinh không là điều kiện hợp lệ và không được chép vào `EXISTING_*`. Backfill dùng append-only, dòng cuối cùng theo `existing_record_id` là trạng thái hiệu lực.
 - Không tách một mutation nghiệp vụ thành nhiều transaction. Gộp bản ghi nghiệp vụ, audit, timeline và chỉ mục liên quan trong một PostgreSQL transaction; cache đọc ngắn hạn phải invalidation khi ghi.
+- **[2026-07-30, review PR #11] Kiểm quyền và trạng thái phải kiểm LẠI bên trong transaction ghi, không chỉ ở route.** Ba thao tác ảnh của cán bộ (`POST .../uploads/complete`, `DELETE`/`PATCH .../files/:fileId`) khóa hàng `public_submissions` bằng `for update` rồi mới kiểm lại `mayStaffEditState`, đếm lại trần số ảnh/dung lượng bằng dữ liệu thật, ghi ảnh, làm mới `file_summary_json`, ghi audit và ghi `request_log` — tất cả trong một transaction. Kiểm ở route rồi mở transaction sau là một khoảng trống thật: hồ sơ có thể đã `ACCEPTED`, đã chuyển cho cán bộ khác, hay đã trả về hàng chờ. Thứ tự khóa luôn là **hồ sơ trước, ảnh sau**.
 - Xóa ảnh GCN là soft-delete (`DELETED`) và không xóa file Drive. CCCD không được xóa trắng: upload/xác minh ảnh mới trước, sau đó chuyển ảnh cũ sang `REPLACED`.
 - Thứ tự và nhãn trang ảnh GCN của biểu mẫu người dân lưu tại `draft_json.certificateFileMetadata`, tham chiếu bằng `file_id`; trạng thái file và Drive ID chỉ lấy từ `PUBLIC_FILES`.
 - Khi thay ảnh CCCD hoặc GCN, phải xác minh ảnh mới trước rồi mới chuyển ảnh cũ sang `REPLACED`; không xóa vật lý file Drive.
@@ -305,7 +306,10 @@ GET /api/submissions
 GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
 POST /api/submissions/:submissionId/reset-access-secret
-GET /api/submissions/:submissionId/files/:fileId
+GET/DELETE/PATCH /api/submissions/:submissionId/files/:fileId
+POST /api/submissions/:submissionId/uploads/initiate
+POST /api/submissions/:submissionId/uploads/complete
+PUT /api/submissions/:submissionId/internal-notes
 GET /api/submissions/:submissionId/ai-draft
 POST /api/submissions/:submissionId/ai-draft/apply
 GET /api/ai/jobs/ready

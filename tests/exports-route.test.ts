@@ -151,6 +151,7 @@ function makeRecord(
       },
     ],
     rowIndex: 1,
+    internalNotes: "",
     ...overrides,
   };
 }

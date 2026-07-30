@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
+import type { PublicStatus } from "@/modules/public-intake/repository";
+import { mayClaim } from "@/modules/submissions/review";
 
 type Summary = {
   submissionId: string;
@@ -31,7 +33,12 @@ const labels: Record<string, string> = {
 const statusStyles: Record<string, { label: string; bg: string }> = {
   SUBMITTED: { label: "Chờ tiếp nhận", bg: "bg-amber-50 text-amber-800 border-amber-200" },
   UNDER_REVIEW: { label: "Đang xử lý", bg: "bg-sky-50 text-sky-800 border-sky-200" },
-  NEEDS_SUPPLEMENT: { label: "Cần bổ sung", bg: "bg-orange-50 text-orange-800 border-orange-200" },
+  // "(hồ sơ cũ)": luồng yêu cầu bổ sung đã bỏ ở 2A-1 nên không hồ sơ mới nào vào trạng thái này;
+  // từ 2A-3 các hồ sơ còn lại tiếp nhận được như bình thường nên được đếm vào "Chờ tiếp nhận".
+  NEEDS_SUPPLEMENT: {
+    label: "Cần bổ sung (hồ sơ cũ)",
+    bg: "bg-orange-50 text-orange-800 border-orange-200",
+  },
   RESUBMITTED: { label: "Đã gửi lại", bg: "bg-blue-50 text-blue-800 border-blue-200" },
   REJECTED: { label: "Từ chối", bg: "bg-rose-50 text-rose-800 border-rose-200" },
   ACCEPTING: {
@@ -114,9 +121,9 @@ export function SubmissionsQueue() {
       });
   };
 
-  const countPending = items.filter(
-    (i) => i.status === "SUBMITTED" || i.status === "RESUBMITTED",
-  ).length;
+  // Đọc thẳng từ `mayClaim` thay vì liệt kê lại trạng thái: ô đếm này mang nhãn "Chờ tiếp nhận"
+  // nên phải khớp đúng định nghĩa "tiếp nhận được" của máy chủ, không được lệch (2026-07-29).
+  const countPending = items.filter((i) => mayClaim(i.status as PublicStatus)).length;
   const countReviewing = items.filter((i) => i.status === "UNDER_REVIEW").length;
   const countAccepted = items.filter((i) => i.status === "ACCEPTED").length;
 

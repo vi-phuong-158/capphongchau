@@ -79,6 +79,7 @@ function makeRecord(id: string, draft: IntakeDraft): SubmissionRecord {
     accessVersion: 1,
     fileSummaries: [],
     rowIndex: 1,
+    internalNotes: "",
   };
 }
 

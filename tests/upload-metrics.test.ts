@@ -253,8 +253,28 @@ describe("Phân loại thiết bị không lưu user agent thô", () => {
 });
 
 describe("Số đo hỏng không phá luồng tải ảnh", () => {
+  /**
+   * Ca này từng **xanh sai**: mẫu cũ là `appendUploadAttempt\([\s\S]*?\)\.catch\(\(\) => undefined\)`,
+   * và `[\s\S]*?` chạy tuốt xuống `.catch(() => undefined)` của `discardIfOrphan` ở cuối file — một
+   * hàm chẳng liên quan gì tới số đo. Nó xanh suốt trong khi route thật dùng
+   * `.catch(reportUploadMetricFailure)`, tức chưa bao giờ kiểm đúng thứ nó nói. Đợt 2C chuyển
+   * `discardIfOrphan` sang module dùng chung, mất đoạn `.catch` kia và ca này mới đỏ.
+   *
+   * Mẫu mới chặn `[^;]` để không vượt qua dấu chấm phẩy — đã ràng trong đúng một câu lệnh, không
+   * thể lại bắt sang một `.catch` ở nơi khác.
+   */
   it("complete route nuốt lỗi ghi metric", () => {
-    expect(completeRoute).toMatch(/appendUploadAttempt\([\s\S]*?\)\s*\.catch\(\(\) => undefined\)/);
+    expect(completeRoute).toMatch(/appendUploadAttempt\([^;]*?\)\s*\.catch\(reportUploadMetricFailure\)/);
+  });
+
+  /** Và bên nhận phải thật sự nuốt: `reportUploadMetricFailure` chỉ log, không ném lại. */
+  it("hàm báo lỗi số đo không ném lại", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/modules/public-intake/upload-metrics.ts", import.meta.url)),
+      "utf8",
+    );
+    const body = source.slice(source.indexOf("export function reportUploadMetricFailure"));
+    expect(body.slice(0, body.indexOf("\n}"))).not.toContain("throw");
   });
 
   it("telemetry sai định dạng bị bỏ qua chứ không trả 400", () => {

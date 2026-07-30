@@ -46,8 +46,22 @@ export function isClaimedBy(record: SubmissionRecord, email: string): boolean {
   return record.claimedBy.trim().toLowerCase() === email.trim().toLowerCase();
 }
 
+/**
+ * Trạng thái nào còn nhận xử lý được.
+ *
+ * **[2026-07-29] Đợt 2A-3 — thêm `NEEDS_SUPPLEMENT`.** Luồng "yêu cầu bổ sung" đã bỏ ở 2A-1, nên
+ * không hồ sơ mới nào vào được trạng thái này nữa; nhưng hồ sơ **cũ** đang nằm đó thì trước bản
+ * sửa này bị kẹt vĩnh viễn: cán bộ không claim được (hàm này từ chối), không sửa được
+ * (`mayStaffEdit` đòi `UNDER_REVIEW`), và đường thoát duy nhất — người dân bấm gửi lại — vừa bị
+ * chặn ở `isEditable` cùng đợt. Cho claim là cách đưa chúng về đúng luồng mới: nhận xử lý → sửa
+ * trực tiếp ở Bàn làm việc → Hoàn thành xử lý.
+ *
+ * Hồ sơ `NEEDS_SUPPLEMENT` cũ thường vẫn còn `claimed_by` của cán bộ đã yêu cầu bổ sung; route
+ * CLAIM đã chặn sẵn người khác cướp hồ sơ (403 `Hồ sơ đang do cán bộ khác nhận xử lý`) và quản
+ * trị viên vẫn dùng được FORCE_CLAIM, nên mở trạng thái này không mở thêm lối vào nào.
+ */
 export function mayClaim(status: PublicStatus): boolean {
-  return status === "SUBMITTED" || status === "RESUBMITTED";
+  return status === "SUBMITTED" || status === "RESUBMITTED" || status === "NEEDS_SUPPLEMENT";
 }
 
 export function mayForceClaim(roles: readonly string[]): boolean {
@@ -78,8 +92,29 @@ export function mayReject(record: SubmissionRecord, email: string): boolean {
   return mayRequestSupplement(record, email);
 }
 
+/**
+ * Phần thuần của `mayStaffEdit`: chỉ cần trạng thái hồ sơ và email cán bộ đang giữ.
+ *
+ * Tách ra để **repository kiểm lại đúng luật này ngay trong transaction**, sau khi đã khóa hàng
+ * `public_submissions` (`for update`). Kiểm ở route rồi mới mở transaction để lượt ghi là một
+ * khoảng trống thật: trong khoảng đó hồ sơ có thể đã được tiếp nhận chính thức, chuyển cho cán bộ
+ * khác hay trả về hàng chờ, mà lượt ghi đã qua cửa cũ vẫn đi tiếp.
+ *
+ * Đừng chép lại điều kiện này ở nơi khác — sửa luật thì sửa đúng ở đây, cả route lẫn repository đọc
+ * cùng một hàm.
+ */
+export function mayStaffEditState(
+  state: { readonly status: string; readonly claimedBy: string },
+  email: string,
+): boolean {
+  return (
+    state.claimedBy.trim().toLowerCase() === email.trim().toLowerCase() &&
+    state.status === "UNDER_REVIEW"
+  );
+}
+
 export function mayStaffEdit(record: SubmissionRecord, email: string): boolean {
-  return isClaimedBy(record, email) && record.status === "UNDER_REVIEW";
+  return mayStaffEditState(record, email);
 }
 
 /**

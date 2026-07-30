@@ -260,6 +260,27 @@ async function bootstrapDatabase(sql: Sql): Promise<void> {
       );
       await sql.unsafe(phase3Migration);
     }
+    /*
+     * `internal_notes` (202607290006) nằm trong `SUBMISSION_SELECT` dùng chung, nên thiếu nó là
+     * **mọi** truy vấn đọc hồ sơ lỗi, không riêng chức năng ghi chú. Một database thử nghiệm đã
+     * bootstrap từ trước đợt này sẽ không có cột đó — bù ở đây, cùng cách với catch-up của Phase 3.
+     */
+    const internalNotesApplied = await sql<{ exists: boolean }[]>`
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'public_submissions'
+          and column_name = 'internal_notes'
+      ) as exists
+    `;
+    if (!internalNotesApplied[0]?.exists) {
+      await sql.unsafe(
+        readFileSync(
+          join(REPO_ROOT, "supabase", "migrations", "202607290006_submission_internal_notes.sql"),
+          "utf8",
+        ),
+      );
+    }
     return;
   }
 

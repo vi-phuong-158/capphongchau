@@ -51,10 +51,25 @@ export function AiDraftPanel({
 }) {
   const [aiDraft, setAiDraft] = useState<AiDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
+  const [open, setOpen] = useState(false);
+  /** Phiên bản hồ sơ mà dữ liệu AI đang hiển thị ứng với. `null` = chưa tải lần nào. */
+  const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
+  /** Suy ra, không lưu state: đang mở mà dữ liệu chưa khớp phiên bản hồ sơ tức là đang tải. */
+  const loading = open && loadedVersion !== version;
 
+  /**
+   * Chỉ gọi API khi cán bộ mở panel.
+   *
+   * Trước đây panel fetch ngay khi trang render **và** fetch lại mỗi lần `version` đổi — tức mỗi
+   * lần lưu bàn làm việc hay lưu ghi chú nội bộ cũng kéo theo một lần tải kết quả AI, dù phần lớn
+   * hồ sơ không có kết quả AI nào và panel render ra rỗng (`return null`).
+   *
+   * Vẫn tải lại khi `version` đổi **nếu panel đang mở**: cột "Hiện có" so sánh với dữ liệu hồ sơ
+   * hiện tại, để nguyên sau khi lưu thì cán bộ đọc phải số cũ.
+   */
   useEffect(() => {
+    if (!open || loadedVersion === version) return;
     let active = true;
     fetch(`/api/submissions/${submissionId}/ai-draft`, { cache: "no-store" })
       .then(async (response) => {
@@ -63,19 +78,22 @@ export function AiDraftPanel({
           error?: { message?: string };
         };
         if (!response.ok) throw new Error(data.error?.message ?? "Không thể tải kết quả AI.");
-        if (active) setAiDraft(data.aiDraft ?? null);
+        if (active) {
+          setAiDraft(data.aiDraft ?? null);
+          setError(null);
+        }
       })
       .catch((reason: unknown) => {
         if (active)
           setError(reason instanceof Error ? reason.message : "Không thể tải kết quả AI.");
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setLoadedVersion(version);
       });
     return () => {
       active = false;
     };
-  }, [submissionId, version]);
+  }, [open, submissionId, version, loadedVersion]);
 
   async function apply() {
     if (!aiDraft) return;
@@ -102,22 +120,79 @@ export function AiDraftPanel({
     }
   }
 
-  if (loading) return null;
-  if (error && !aiDraft) return <p className="mt-5 text-sm text-amber-800">{error}</p>;
-  if (!aiDraft) return null;
-  const hasClearBlank = aiDraft.comparisons.some(
-    (comparison) =>
-      comparison.fieldStatus === "CLEAR" && !comparison.currentValue.trim() && comparison.aiValue,
-  );
+  const loaded = loadedVersion !== null;
+  const summary = !loaded
+    ? "Bấm để tải kết quả đọc tự động Giấy chứng nhận."
+    : loading
+      ? "Đang tải…"
+      : error
+        ? error
+        : aiDraft
+          ? `${aiDraft.modelName} · ${aiDraft.comparisons.length} trường đối chiếu`
+          : "Chưa có kết quả AI cho hồ sơ này.";
+
   return (
-    <section className="mt-5 rounded-xl border border-sky-200 bg-sky-50 p-5 sm:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="mt-5 rounded-xl border border-sky-200 bg-sky-50">
+      {/* Thu gọn mặc định: mở ra mới gọi API, phần lớn hồ sơ không có kết quả AI để xem. */}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 p-5 text-left sm:p-7"
+      >
+        <span>
+          <span className="block text-xl font-bold text-sky-950">Đối chiếu AI — bản nháp</span>
+          <span className={`mt-1 block text-sm ${error ? "text-amber-800" : "text-sky-900"}`}>
+            {summary}
+          </span>
+        </span>
+        <span aria-hidden="true" className="text-sky-800">
+          {open ? "▲" : "▼"}
+        </span>
+      </button>
+      {open ? (
+        <div className="px-5 pb-5 sm:px-7 sm:pb-7">{renderBody()}</div>
+      ) : null}
+    </section>
+  );
+
+  function renderBody() {
+    if (loading) return <p className="text-sm text-sky-900">Đang tải kết quả AI…</p>;
+    if (error && !aiDraft) {
+      return (
         <div>
-          <h2 className="text-xl font-bold text-sky-950">Đối chiếu AI — bản nháp</h2>
-          <p className="mt-1 text-sm text-sky-950">
-            {aiDraft.modelName} chỉ đọc GCN chữ đánh máy. Kết quả không phải xác nhận pháp lý.
-          </p>
+          <p className="text-sm text-amber-800">{error}</p>
+          <button
+            className="pc-button-quiet mt-3 text-xs"
+            type="button"
+            onClick={() => setLoadedVersion(null)}
+          >
+            Thử lại
+          </button>
         </div>
+      );
+    }
+    if (!aiDraft) {
+      return (
+        <p className="text-sm text-sky-900">
+          Hồ sơ này chưa có kết quả đọc tự động. Cán bộ nhập tay theo ảnh Giấy chứng nhận.
+        </p>
+      );
+    }
+    return renderDraft(aiDraft);
+  }
+
+  function renderDraft(aiDraft: AiDraft) {
+    const hasClearBlank = aiDraft.comparisons.some(
+      (comparison) =>
+        comparison.fieldStatus === "CLEAR" && !comparison.currentValue.trim() && comparison.aiValue,
+    );
+    return (
+      <>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-sm text-sky-950">
+          {aiDraft.modelName} chỉ đọc GCN chữ đánh máy. Kết quả không phải xác nhận pháp lý.
+        </p>
         <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
           Quyền trạm: {aiDraft.stationAccessRisk}
         </span>
@@ -168,6 +243,7 @@ export function AiDraftPanel({
       >
         {applying ? "Đang nạp…" : "Nạp nháp AI"}
       </button>
-    </section>
-  );
+      </>
+    );
+  }
 }
