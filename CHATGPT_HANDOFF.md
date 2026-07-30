@@ -1,5 +1,105 @@
 # CHATGPT HANDOFF REPORT
 
+## Emergency Apps Script — QR both CCCD faces (2026-07-30)
+
+### Status: DEPLOYED AND VERIFIED
+
+- The existing Web App deployment is now **version 9**, description `Production v8 - scan QR from
+  both CCCD faces`; its URL is unchanged.
+- Selecting either CCCD front or back starts its own device-local QR attempt. The two attempts do
+  not cancel one another; the first valid result is kept and only blank form fields are suggested.
+  A failure explicitly directs the user to try the other face or enter data manually.
+- Passed: typecheck, lint, inline browser-code parse, focused QR tests **17/17**, and `git diff
+  --check`. Live URL returned HTTP 200, includes both-face reader wiring, and has no HTML exception.
+
+## Emergency Apps Script — CCCD QR autofill (2026-07-30)
+
+### Status: DEPLOYED AND VERIFIED
+
+- **User-authorized action:** Updated the existing emergency Apps Script Web App at deployment
+  `AKfycbzk7tQbNvs8wamXGd-uHY_l8Eb1WX5SJ3lJFU3lhtPaO3PCuXujgWa86443yCEIq3bumA` to version
+  **8**, description `Production v7 - remove invalid QR partial`. URL remains unchanged.
+- **Outcome:** The wizard now starts with `CCCD và quét QR`, then moves to manual personal
+  information. Selecting the CCCD back image attempts a fully local QR read and fills only empty
+  name, CCCD and address fields. It never overwrites manual edits; unreadable QR remains a
+  non-blocking manual-entry path.
+- **Decoder:** Reused the main project's `@zxing/browser` **0.1.5** runtime. Apps Script rejects
+  a JavaScript-only file as an HTML partial, so the page dynamically loads this exact pinned runtime
+  in the browser instead. The request is made only when the user selects a CCCD-back image.
+- **Privacy:** QR decoding and image rasterization run in the browser only. The QR function does
+  not call `google.script.run`/`callServer`, log payloads, or persist raw QR; the parser accepts
+  only conservative pipe payloads containing a valid 12-digit CCCD, valid date, recognized gender
+  and non-empty address. It tries 0/90/180/270 degrees with `TRY_HARDER`.
+- **No main-app architecture/API/schema/migration change.** The Apps Script emergency artifact was
+  already an untracked user-provided directory at baseline; its existing files were preserved.
+
+### Files changed in this task
+
+| File | Change |
+| --- | --- |
+| `phong-chau-emergency-appscript/Index.html` | Reordered wizard; added local QR parsing, rotations, status/fallback and conservative autofill. |
+| `phong-chau-emergency-appscript/Code.gs` | No longer contains a decoder include helper. |
+| `phong-chau-emergency-appscript/README.md` | Documents local-only QR handling and manual test cases. |
+| `tests/emergency-appscript-qr.test.ts` | New regression coverage for wiring, parsing constraints, rotations and no server call. |
+| `docs/brain/06-ai-working-log.md` | Required implementation log entry. |
+
+### Verification and remaining manual check
+
+- Passed: `npm run typecheck`; `npm run lint -- --quiet`; focused Vitest **16/16**; parse of the
+  inline Apps Script browser code; `git diff --check`.
+- Live verification: health returned `ok`, `configured`, `enabled`; Web App returned HTTP 200,
+  includes the dynamic loader, and no longer includes the invalid HTML exception or QR partial.
+- `prettier --check` still reports the pre-existing emergency App Script formatting issues in
+  `Index.html`, `Code.gs`, and `README.md`; no bulk reformat was applied to the user-provided
+  artifact.
+- Still perform one manual Android Chrome and iPhone Safari check with an anonymized CCCD-back QR:
+  ensure status becomes success, fields fill only when blank, rotate/blur failure can continue by
+  manual entry, and no sensitive values appear in UI diagnostics.
+
+## Production incident remediation — missing Phase 3 migration (2026-07-30)
+
+### Status: READY_FOR_CHATGPT_REVIEW
+
+- **User-authorized production action:** Applied the existing additive migration
+  `supabase/migrations/202607290005_lazy_drive_folder_creation.sql` to the verified production
+  Supabase database. No source code, Vercel configuration, feature flag or deployment changed.
+- **Incident:** `/api/public/submissions` returned HTTP 500 because deployed
+  `PublicIntakeRepository.create` inserts `drive_folder_state`, while Production did not yet have
+  that column. The wizard retried its same request; its one-time Turnstile token then correctly
+  received `timeout-or-duplicate` (HTTP 403), obscuring the original 500 in the UI.
+- **Database impact:** The migration ran as one PostgreSQL transaction. It made
+  `public_submissions.drive_folder_id` nullable; added `drive_folder_state`,
+  `drive_folder_lease_until`, and `drive_folder_attempts`; backfilled existing folder-bearing
+  rows to `READY`; and added the state CHECK constraint and partial lease index. It contains no
+  data deletion.
+- **Post-action verification:** `npm.cmd run preflight:public-intake-v2-migrations` passed
+  **36/36** checks (exit 0). Production database and Google Drive health endpoints both returned
+  HTTP 200 with all checks `ok`.
+- **Manual follow-up:** Reload `/ke-khai` and create a new test declaration through the normal
+  UI; do not reuse the page or Turnstile token from the failed attempt. This handoff deliberately
+  does not create a real public declaration during verification.
+
+### Evidence
+
+| Check | Before | After |
+| --- | --- | --- |
+| Production schema preflight | 32/36; four Phase 3 failures | 36/36 PASS |
+| `drive_folder_state` | missing | present, non-null/default verified |
+| `drive_folder_id` | `NOT NULL` | nullable verified |
+| state constraint / lease index | missing | present verified |
+| `/api/health/database` | 200 / `ok` | 200 / `ok` |
+| `/api/health/google` | 200 / `ok` | 200 / `ok` |
+
+### Scope and rollback
+
+- Changed local file: this report only. The production schema is now aligned with code already
+  deployed on `main` at `1d171d6556960797a0cce734a3cb1f010ca39d90`.
+- The lazy-folder flag remains unchanged. The migration is still required while it is `false`,
+  because the create repository writes `drive_folder_state` on the eager path as well.
+- Do not automatically roll back this schema repair. A rollback would again break the deployed
+  create route; if needed, use an approved database rollback plan after reverting the dependent
+  application code.
+
 ## Phase 3 lease-token rehearsal after PR #10 (2026-07-29)
 
 ### Outcome: READY_FOR_PREVIEW_REHEARSAL — not Phase 3 PASS, not Production-ready

@@ -1,5 +1,28 @@
 # 06 — AI Working Log
 
+## [2026-07-30] App Script dự phòng — bổ sung phương án đọc lại QR và tối ưu EXIF
+
+- **Agent:** Antigravity (Gemini)
+- **Thay đổi:** 
+  - Bổ sung nút "Đọc lại QR từ ảnh đã tải" trên giao diện như một phương án dự phòng. Nút này cho phép quét lại mã QR ở cả 4 góc xoay (0, 90, 180, 270) trên hai mặt ảnh CCCD đã tải lên mà không cần người dân/cán bộ phải thao tác chọn lại file.
+  - Cập nhật hàm `loadImage` để tự động xử lý xoay ảnh (EXIF rotation) thông qua `createImageBitmap(..., { imageOrientation: 'from-image' })` nếu trình duyệt hỗ trợ. Cải tiến này giúp khung chứa QR không bị bóp méo khi ảnh chụp bằng điện thoại dọc, tăng khả năng nhận diện của ZXing.
+  - Cập nhật font chữ Be Vietnam Pro, thay thế cảnh báo lừa đảo bằng cam kết sử dụng dữ liệu để làm sạch CSDL đất đai, và đổi logo Công an thành logo UBND Phường Phong Châu.
+- **Triển khai:** Deploy ghi đè trực tiếp lên deployment `@12` (thành `@13`) qua Clasp để giữ nguyên URL truy cập của Web App dự phòng.
+
+## [2026-07-30] App Script dự phòng — thử QR ở cả hai mặt CCCD
+
+- **Agent:** Codex.
+- **Thay đổi:** Mỗi lần người kê khai chọn ảnh CCCD mặt trước hoặc mặt sau, browser đều tự thử giải mã QR cục bộ với cùng parser bảo thủ, xoay 0/90/180/270 và `TRY_HARDER`. Hai lần đọc độc lập; mặt đọc thành công trước được giữ, các ô đã nhập tay vẫn không bị ghi đè. Thông báo lỗi một mặt hướng người dùng thử mặt còn lại hoặc nhập tay.
+- **Bảo mật/phạm vi:** Không gửi ảnh hay QR raw tới Apps Script, không đổi API/schema/Drive/Sheet. Chỉ thay luồng QR của App Script dự phòng.
+- **Kiểm thử/deploy:** `typecheck`, lint, parser kiểm tra mã browser và focused Vitest 17/17 pass; Web App deployment hiện tại version 9 (`Production v8 - scan QR from both CCCD faces`) trả HTTP 200, có logic hai mặt và không có lỗi HTML.
+
+## [2026-07-30] App Script dự phòng — quét QR CCCD trước bước nhập thông tin
+
+- **Agent:** Codex.
+- **Thay đổi:** Đổi thứ tự wizard của `phong-chau-emergency-appscript/Index.html` thành `CCCD và quét QR → Thông tin → Ảnh GCN → Xác nhận`. Ảnh CCCD mặt sau được giải mã hoàn toàn trên thiết bị bằng đúng runtime `@zxing/browser` 0.1.5 của cổng chính; runtime nạp động tại browser vì HtmlService không nhận JavaScript thuần làm partial HTML. Parser `cccd-pipe-v1` chỉ chấp nhận CCCD 12 số, ngày hợp lệ, giới tính và địa chỉ. QR thử 0/90/180/270 độ với `TRY_HARDER`, tự điền các ô đang trống và không ghi đè chỉnh sửa tay.
+- **Bảo mật/giới hạn:** Không gửi ảnh hoặc payload QR tới Apps Script khi quét, không ghi payload QR vào Drive/Sheet/log, không thêm API, schema, quyền hay migration. QR không đọc được hoặc decoder lỗi vẫn đi tiếp bằng nhập tay.
+- **Kiểm thử:** Reuse test parser/decoder của dự án chính và thêm regression test kiểm wiring của App Script: 16 test focused pass. Đã sửa lỗi phát hành đầu tiên `Nội dung HTML không đúng định dạng` do cố include UMD JavaScript thuần như HTML partial; Web App bản sửa trả HTTP 200, có dynamic loader và không còn lỗi đó. Cần kiểm thử thủ công trên Android Chrome và iPhone Safari với ảnh CCCD giả/đã ẩn danh trước khi dùng thực tế.
+
 ## [2026-07-29] Bổ sung nút cài PWA trên trang chủ
 
 - **Agent:** Codex.
