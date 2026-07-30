@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
-import type { IntakeDraft } from "@/modules/public-intake/types";
 import type { PublicStatus } from "@/modules/public-intake/repository";
 import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
 import { isOwnerIdentityQrConfirmed, mayClaim } from "@/modules/submissions/review";
@@ -17,31 +16,14 @@ import {
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 import { DocumentViewer } from "@/components/admin/document-viewer";
 import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
+import type { SubmissionDetailView } from "@/modules/submissions/detail-view";
 
-type Submission = {
-  submissionId: string;
-  receiptCode: string;
-  status: string;
-  phone: string;
-  version: number;
-  claimedBy: string | null;
-  claimedByDisplayName?: string | null;
-  intakeChannel?: string | null;
-  assistedByDisplayName?: string | null;
-  claimedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  officialCaseId: string | null;
-  acceptStep: string | null;
-  canResetAccessSecret: boolean;
-  internalNotes: string;
-  draft: IntakeDraft | null;
-  files: {
-    fileId: string;
-    documentType: "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE";
-    ownerId: string;
-  }[];
-};
+/**
+ * Hình dạng dữ liệu hồ sơ do server quy định (`SubmissionDetailView`) — dùng lại thay vì khai lại
+ * ở đây. Cùng một kiểu cho cả dữ liệu nạp sẵn từ trang server và dữ liệu tải lại qua
+ * `GET /api/submissions/:id`, nên thêm/bớt trường chỉ phải sửa một nơi.
+ */
+type Submission = SubmissionDetailView;
 
 /**
  * Giao diện cán bộ chỉ hiển thị đúng ba trạng thái nghiệp vụ: Chờ tiếp nhận, Đang xử lý,
@@ -134,12 +116,15 @@ export function SubmissionDetail({
   submissionId,
   currentUserEmail,
   isAdministrator,
+  initialSubmission = null,
 }: {
   readonly submissionId: string;
   readonly currentUserEmail: string;
   readonly isAdministrator: boolean;
+  /** Dữ liệu nạp sẵn trên server. `null` khi nạp sẵn lỗi — lúc đó client tự fetch như trước. */
+  readonly initialSubmission?: Submission | null;
 }) {
-  const [submission, setSubmission] = useState<Submission | null>(null);
+  const [submission, setSubmission] = useState<Submission | null>(initialSubmission);
   const [message, setMessage] = useState<string | null>(null);
   const [acceptanceIssues, setAcceptanceIssues] = useState<AcceptanceBlockingIssue[]>([]);
   const [busy, setBusy] = useState(false);
@@ -176,10 +161,19 @@ export function SubmissionDetail({
     setNotesDraft(currentNotes);
   }
   const notesDirty = submission !== null && notesDraft !== submission.internalNotes;
+  /**
+   * Chỉ fetch khi trang server **không** nạp sẵn được hồ sơ. Có dữ liệu nạp sẵn thì bỏ hẳn vòng
+   * fetch sau hydrate — nếu vẫn fetch thì mất luôn cái lợi của server-priming và ghi thêm một dòng
+   * audit "đã xem dữ liệu nhạy cảm" cho cùng một lần mở trang.
+   */
   useEffect(() => {
+    if (initialSubmission) return;
     loadSubmission(submissionId)
       .then(setSubmission)
       .catch(() => setMessage("Không thể tải hồ sơ."));
+    // `initialSubmission` cố định trong suốt vòng đời trang (đến từ server render), không đưa vào
+    // danh sách phụ thuộc để tránh fetch lại vô ích.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissionId]);
   /** Cảnh báo rời trang khi bàn làm việc hoặc ghi chú nội bộ còn thay đổi chưa lưu (§3.2). */
   useEffect(() => {
@@ -329,7 +323,7 @@ export function SubmissionDetail({
       });
       const data = (await response.json()) as {
         submission?: {
-          status: string;
+          status: PublicStatus;
           version: number;
           claimedBy?: string;
           claimedByDisplayName?: string;
@@ -418,7 +412,7 @@ export function SubmissionDetail({
         body: JSON.stringify({ version: submission.version }),
       });
       const data = (await response.json()) as {
-        submission?: { officialCaseId: string; status: string; version: number };
+        submission?: { officialCaseId: string; status: PublicStatus; version: number };
         error?: { message?: string; details?: unknown };
       };
       if (!response.ok || !data.submission) {

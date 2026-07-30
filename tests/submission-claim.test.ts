@@ -32,6 +32,7 @@ function makeRecord(claimedBy: string, status: PublicStatus = "UNDER_REVIEW"): S
     accessVersion: 1,
     fileSummaries: [],
     rowIndex: 1,
+    internalNotes: "",
   };
 }
 

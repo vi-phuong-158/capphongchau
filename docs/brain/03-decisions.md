@@ -1,5 +1,46 @@
 # 03 — Technical Decisions
 
+## [2026-07-30] Đợt 2B: hiệu năng màn duyệt hồ sơ — nạp sẵn trên server, tải ảnh/AI theo yêu cầu
+
+- **Server-priming trang `/submissions/[submissionId]`:** trang nạp hồ sơ ngay trên server và
+  truyền `initialSubmission` xuống component client, thay vì để client fetch sau khi hydrate. Bỏ
+  một vòng chờ (HTML → JS → hydrate → fetch → hiện dữ liệu) và bỏ một lần xác thực + một lần đọc
+  hồ sơ trùng lặp. `SubmissionDetail` **chỉ** fetch khi nạp sẵn thất bại — fetch cả khi đã có dữ
+  liệu thì vừa mất lợi ích vừa ghi thêm một dòng audit cho cùng một lần mở trang.
+- **Hai điều kiện phải giữ khi làm việc này** (viết vào doc-comment của cả hai file, đừng gỡ):
+  1. **Audit không được mất.** `loadSubmissionDetail()` (`src/modules/submissions/detail-view.ts`)
+     ghi `SUBMISSION_SENSITIVE_DETAIL_VIEWED`; audit đặt trong hàm dùng chung chứ không ở route,
+     nên đường server và đường API không thể lệch nhau. Nếu trang tự dựng DTO thì dấu vết "ai đã
+     xem hồ sơ nào" sẽ mất im lặng — đây là dữ liệu nhạy cảm (SĐT/CCCD/địa chỉ), dấu vết là bắt
+     buộc.
+  2. **HTML giờ chứa PII.** Trước đây PII chỉ nằm trong phản hồi JSON (`no-store` sẵn); nạp sẵn
+     đưa PII vào chính tài liệu HTML. `src/proxy.ts` gắn `cache-control: private, no-store` cho
+     **toàn bộ** matcher cán bộ (`/profile`, `/users`, `/submissions`, `/ke-khai-ho`,
+     `/api/staff`) để không phụ thuộc vào mặc định của Next hay của proxy đứng trước.
+- **Kiểu dữ liệu về một nguồn:** `SubmissionDetailView` là hình dạng duy nhất; `submission-detail.tsx`
+  dùng `type Submission = SubmissionDetailView` thay vì khai lại. Trước 2B hình dạng bị khai hai
+  lần và **đã lệch thật** — 2A-2 phải thêm `internalNotes` ở cả route lẫn component.
+- **`findActiveFile` — một truy vấn cho một ảnh:** route phục vụ ảnh trước đây gọi `listFiles` rồi
+  `.find(...)`, kéo toàn bộ ảnh của hồ sơ về để lấy một tệp. Giữ nguyên điều kiện
+  `status = 'UPLOADED'` để không lệch ngữ nghĩa `listFiles`. **Không** dùng cho DELETE công khai:
+  route đó cần cả trạng thái `DELETED` để trả về idempotent.
+- **Tải ảnh theo yêu cầu, giữ blob trong bộ nhớ trang:** không để `<img src>` tự tải nữa. Vì route
+  ảnh trả `cache-control: private, no-store` — đúng, ảnh giấy tờ là PII, không được nằm trong cache
+  đĩa — nên mỗi lần thẻ `<img>` mount lại là một lần tải lại từ Drive kèm một dòng audit. Hệ quả
+  trước 2B: **mở toàn màn hình tải đúng ảnh đó hai lần**, chuyển qua lại giữa các tab ảnh thì lần
+  nào cũng tải lại. Nay fetch một lần/ảnh thành blob, dùng chung object URL cho cả hai khung, và
+  `revokeObjectURL` khi rời trang để không giữ ảnh PII trong bộ nhớ lâu hơn mức cần. **Không nới
+  `no-store`** — cache đĩa của trình duyệt vẫn không được giữ ảnh giấy tờ.
+- **Panel AI thành accordion thu gọn:** chỉ gọi API khi cán bộ mở. Trước đó panel fetch ngay khi
+  render **và** fetch lại mỗi lần `version` đổi — mỗi lần lưu bàn làm việc hay lưu ghi chú nội bộ
+  cũng kéo theo một lần tải kết quả AI, dù phần lớn hồ sơ không có kết quả AI nào và panel render
+  ra rỗng. Vẫn tải lại khi `version` đổi **nếu panel đang mở**, vì cột "Hiện có" so sánh với dữ
+  liệu hồ sơ hiện tại.
+- **Đánh đổi đã nhận:** panel AI giờ **luôn hiện một dòng thu gọn**, kể cả hồ sơ không có kết quả
+  AI (trước đây ẩn hoàn toàn) — vì không fetch thì không biết có kết quả hay không. Chấp nhận: cán
+  bộ biết chức năng tồn tại, và mở ra thì được trả lời rõ "Hồ sơ này chưa có kết quả đọc tự động".
+- **Không có migration.** Thuần code.
+
 ## [2026-07-29] Đợt 2A-3: cán bộ ưu tiên khi tranh chấp, mở claim hồ sơ `NEEDS_SUPPLEMENT` cũ
 
 - **Quyết định (người dùng chọn "Chặn — cán bộ ưu tiên"):** Khi hồ sơ đã có cán bộ cầm

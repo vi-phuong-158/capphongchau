@@ -30,8 +30,18 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   khớp). `mayClaim` mở thêm `NEEDS_SUPPLEMENT` để hồ sơ cũ không kẹt vĩnh viễn sau khi chặn.
   `GET /current` trả thêm cờ boolean `hasAssignedOfficer` cho `/tra-cuu` ẩn nút "Bổ sung hồ sơ".
   Không migration.
-- **2B — CHƯA LÀM:** server-priming, lazy-load ảnh trong split-screen viewer, single-file query
-  (`findActiveFile`), lazy-load AI panel.
+- **2B — ĐÃ LÀM (code, chưa merge/push/deploy):** hiệu năng màn duyệt. (a) server-priming trang
+  `/submissions/[submissionId]` qua `loadSubmissionDetail` dùng chung với `GET /api/submissions/:id`
+  — audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` giữ nguyên, `src/proxy.ts` thêm
+  `cache-control: private, no-store` vì HTML giờ chứa PII; (b) `findActiveFile` truy vấn một ảnh
+  thay cho `listFiles` + `.find`; (c) viewer tải ảnh theo yêu cầu và giữ blob trong bộ nhớ trang —
+  bỏ việc mở toàn màn hình tải lại ảnh lần hai; (d) panel AI thành accordion thu gọn, chỉ gọi API
+  khi mở. Không migration.
+  **Nhân đây đã sửa 12 lỗi typecheck tồn từ 2A-2** (fixture test thiếu `internalNotes` — báo cáo
+  2A-2 nói "typecheck 0 lỗi" là SAI vì `npm run typecheck` có bao gồm `tests/`).
+  **Chưa đo P50/P95 thật** trên Preview — không tuyên bố đạt mục tiêu hiệu năng nào cho tới khi có
+  số đo. Phần client (lazy ảnh, accordion) **không có test tự động** vì repo chưa có hạ tầng test
+  component React; xác minh bằng typecheck + build + đọc code.
 - **2C — CHƯA LÀM (tính năng mới, người dùng yêu cầu thêm):** cán bộ tự tải ảnh giấy tờ
   cá nhân/GCN bổ sung khi hồ sơ nộp thiếu — cần endpoint mới vì API upload hiện tại của người dân
   bị khóa theo session cookie + trạng thái hồ sơ, cán bộ không dùng lại được trực tiếp.

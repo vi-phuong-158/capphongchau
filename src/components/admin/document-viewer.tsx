@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 export type DocumentFile = {
   fileId: string;
@@ -10,7 +10,7 @@ export type DocumentFile = {
 
 interface DocumentViewerProps {
   submissionId: string;
-  files: DocumentFile[];
+  files: readonly DocumentFile[];
   ownerIds: readonly string[];
 }
 
@@ -33,12 +33,90 @@ export function DocumentViewer(props: DocumentViewerProps) {
   return <DocumentViewerState key={filesKey} {...props} />;
 }
 
+/**
+ * Tải ảnh xem trước **theo yêu cầu** và giữ lại trong bộ nhớ của trang.
+ *
+ * Vì sao không để `<img src>` tự tải: route ảnh trả `cache-control: private, no-store` — đúng, ảnh
+ * giấy tờ là PII, không được nằm trong cache đĩa của trình duyệt — nên mỗi lần thẻ `<img>` được
+ * mount lại là một lần tải lại từ Drive kèm một dòng audit nữa. Hệ quả trước đây: mở toàn màn hình
+ * render thêm một `<img>` cùng `src` nên tải đúng ảnh đó **hai lần**, và chuyển qua lại giữa các
+ * tab ảnh thì lần nào cũng tải lại từ đầu.
+ *
+ * Cách làm: fetch một lần cho mỗi ảnh thành blob, rồi dùng chung object URL cho cả khung nhỏ và
+ * khung toàn màn hình. Ảnh chỉ được tải khi cán bộ thật sự chọn nó, và object URL được thu hồi khi
+ * rời trang để không giữ ảnh PII trong bộ nhớ lâu hơn mức cần.
+ */
+function usePreviewImages(submissionId: string) {
+  const cache = useRef(new Map<string, string>());
+  const pending = useRef(new Set<string>());
+  const [, bumpRender] = useState(0);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const cached = cache.current;
+    return () => {
+      for (const url of cached.values()) URL.revokeObjectURL(url);
+      cached.clear();
+    };
+  }, []);
+
+  const request = useCallback(
+    (fileId: string) => {
+      if (cache.current.has(fileId) || pending.current.has(fileId)) return;
+      pending.current.add(fileId);
+      setErrors((previous) => {
+        if (!(fileId in previous)) return previous;
+        const next = { ...previous };
+        delete next[fileId];
+        return next;
+      });
+      fetch(`/api/submissions/${submissionId}/files/${fileId}`, { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) {
+            const data = (await response.json().catch(() => null)) as {
+              error?: { message?: string };
+            } | null;
+            throw new Error(data?.error?.message ?? "Không tải được ảnh xem trước.");
+          }
+          return response.blob();
+        })
+        .then((blob) => {
+          cache.current.set(fileId, URL.createObjectURL(blob));
+          bumpRender((value) => value + 1);
+        })
+        .catch((reason: unknown) => {
+          setErrors((previous) => ({
+            ...previous,
+            [fileId]:
+              reason instanceof Error ? reason.message : "Không tải được ảnh xem trước.",
+          }));
+        })
+        .finally(() => {
+          pending.current.delete(fileId);
+        });
+    },
+    [submissionId],
+  );
+
+  return {
+    request,
+    sourceFor: (fileId: string) => cache.current.get(fileId) ?? null,
+    errorFor: (fileId: string) => errors[fileId] ?? null,
+  };
+}
+
 function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const lightboxTitleId = useId();
+  const { request: requestPreview, sourceFor, errorFor } = usePreviewImages(submissionId);
+  /** Chỉ tải ảnh đang được chọn — các ảnh còn lại chờ cán bộ bấm sang tab của nó. */
+  const activeFileId = (files[selectedIndex] || files[0])?.fileId ?? null;
+  useEffect(() => {
+    if (activeFileId) requestPreview(activeFileId);
+  }, [activeFileId, requestPreview]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -81,7 +159,8 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
     setRotation(0);
   };
 
-  const imageSrc = `/api/submissions/${submissionId}/files/${activeFile.fileId}`;
+  const imageSrc = sourceFor(activeFile.fileId);
+  const imageError = errorFor(activeFile.fileId);
 
   return (
     <div className="flex flex-col rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden sticky top-4">
@@ -212,20 +291,36 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
 
       {/* Main Display Box */}
       <div className="relative h-[480px] w-full flex-1 overflow-auto bg-stone-900/95 p-4 flex items-center justify-center">
-        <div
-          className="transition-transform duration-200 ease-out flex items-center justify-center"
-          style={{
-            transform: `scale(${zoom}) rotate(${rotation}deg)`,
-            transformOrigin: "center center",
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageSrc}
-            alt={activeLabel}
-            className="max-h-[440px] w-auto max-w-full rounded object-contain shadow-2xl transition-all"
-          />
-        </div>
+        {imageError ? (
+          <div className="text-center text-sm text-stone-200">
+            <p>{imageError}</p>
+            <button
+              type="button"
+              onClick={() => requestPreview(activeFile.fileId)}
+              className="mt-3 rounded bg-stone-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-600"
+            >
+              Thử lại
+            </button>
+          </div>
+        ) : imageSrc ? (
+          <div
+            className="transition-transform duration-200 ease-out flex items-center justify-center"
+            style={{
+              transform: `scale(${zoom}) rotate(${rotation}deg)`,
+              transformOrigin: "center center",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageSrc}
+              alt={activeLabel}
+              decoding="async"
+              className="max-h-[440px] w-auto max-w-full rounded object-contain shadow-2xl transition-all"
+            />
+          </div>
+        ) : (
+          <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh…</p>
+        )}
       </div>
 
       {/* Fullscreen Lightbox Modal */}
@@ -264,13 +359,21 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
             </div>
           </div>
           <div className="flex-1 overflow-auto flex items-center justify-center p-6">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageSrc}
-              alt={activeLabel}
-              style={{ transform: `rotate(${rotation}deg)` }}
-              className="max-h-full max-w-full object-contain transition-transform"
-            />
+            {/* Dùng lại đúng object URL của khung nhỏ — mở toàn màn hình không tải lại ảnh. */}
+            {imageSrc ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={imageSrc}
+                alt={activeLabel}
+                decoding="async"
+                style={{ transform: `rotate(${rotation}deg)` }}
+                className="max-h-full max-w-full object-contain transition-transform"
+              />
+            ) : (
+              <p className="animate-pulse text-sm text-stone-300">
+                {imageError ?? "Đang tải ảnh…"}
+              </p>
+            )}
           </div>
         </div>
       )}

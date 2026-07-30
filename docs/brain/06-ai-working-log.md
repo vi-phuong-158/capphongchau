@@ -2776,3 +2776,75 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   (không đổi), `npx vitest run` **679 pass/10 skip** (672 + 7 test mới, không test cũ nào fail hay
   mới skip), `npm run build` đạt. `next-env.d.ts` do build tự đổi đã revert, không đưa vào commit.
 - **Chưa merge, chưa push, chưa deploy.**
+
+## [2026-07-30] Redesign màn duyệt hồ sơ — Đợt 2B (hiệu năng)
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  1. **Server-priming** trang `/submissions/[submissionId]`: trang nạp hồ sơ ngay trên server rồi
+     truyền `initialSubmission` xuống `SubmissionDetail`; component chỉ fetch khi nạp sẵn thất bại.
+     Bỏ vòng chờ "HTML → tải JS → hydrate → fetch" và bỏ một lần xác thực + một lần đọc hồ sơ
+     trùng lặp.
+  2. **Gộp đường đọc về một hàm** `loadSubmissionDetail()` trong module mới
+     `src/modules/submissions/detail-view.ts`, dùng chung cho trang server và
+     `GET /api/submissions/:id`. Audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` đặt **trong** hàm này
+     để server-priming không làm mất dấu vết "ai đã xem hồ sơ nào". Kiểu `SubmissionDetailView`
+     thành nguồn duy nhất; `submission-detail.tsx` bỏ bản khai lại (`type Submission =
+     SubmissionDetailView`).
+  3. **`cache-control: private, no-store`** cho toàn bộ matcher cán bộ trong `src/proxy.ts` — HTML
+     giờ chứa PII (SĐT/CCCD/địa chỉ) chứ không còn là khung rỗng.
+  4. **`findActiveFile(submissionId, fileId)`** — một truy vấn cho một ảnh, thay `listFiles` +
+     `.find(...)` ở route ảnh của cán bộ và ở nhánh dự phòng của route ảnh công khai.
+  5. **Viewer tải ảnh theo yêu cầu** (`usePreviewImages`): fetch một lần/ảnh thành blob, dùng chung
+     object URL cho khung nhỏ và khung toàn màn hình, `revokeObjectURL` khi rời trang. Chỉ tải ảnh
+     đang chọn. Thêm trạng thái "Đang tải ảnh…" và nút "Thử lại" (trước đây ảnh lỗi chỉ hiện icon
+     hỏng).
+  6. **Panel AI thành accordion thu gọn**, chỉ gọi API khi cán bộ mở; vẫn tải lại khi `version` đổi
+     nếu đang mở.
+- **Lý do:**
+  - Ảnh giấy tờ trả `cache-control: private, no-store` (đúng — là PII), nên mỗi lần thẻ `<img>`
+    mount lại là **một lần tải lại từ Drive kèm một dòng audit**. Khung toàn màn hình render thêm
+    một `<img>` cùng `src` nên **mở toàn màn hình tải đúng ảnh đó hai lần**; chuyển qua lại giữa các
+    tab ảnh cũng tải lại từ đầu. Giữ blob trong bộ nhớ trang sửa cả hai mà **không** phải nới
+    `no-store`.
+  - Panel AI fetch ngay khi render **và** fetch lại mỗi lần `version` đổi — nghĩa là mỗi lần lưu bàn
+    làm việc hoặc lưu ghi chú nội bộ cũng kéo theo một lần tải kết quả AI, dù phần lớn hồ sơ không
+    có kết quả AI nào và panel render ra rỗng (`return null`).
+  - Hình dạng dữ liệu hồ sơ bị khai hai nơi và **đã lệch thật**: 2A-2 phải thêm `internalNotes` ở cả
+    route lẫn component.
+- **File đã sửa:**
+  - `src/modules/submissions/detail-view.ts` (MỚI)
+  - `src/app/submissions/[submissionId]/page.tsx`
+  - `src/app/api/submissions/[submissionId]/route.ts`
+  - `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts`
+  - `src/app/api/public/submissions/current/files/[fileId]/route.ts`
+  - `src/modules/public-intake/repository.ts` (`findActiveFile`)
+  - `src/components/submission-detail.tsx`, `src/components/admin/document-viewer.tsx`,
+    `src/components/admin/ai-draft-panel.tsx`
+  - `src/proxy.ts`
+  - 12 file test: thêm `internalNotes: ""` vào fixture `SubmissionRecord`
+- **Test mới:**
+  - `tests/submission-detail-view.test.ts` — 5 ca: không có hồ sơ thì trả `null` và **không** ghi
+    audit; đọc thành công ghi **đúng một** dòng `SUBMISSION_SENSITIVE_DETAIL_VIEWED`; working
+    payload che draft của người dân (`payloadLayer === "WORKING"`); giữ `internalNotes` và ánh xạ
+    ảnh gọn về đúng ba trường (không lộ `driveFileId`/checksum); `canResetAccessSecret` chỉ bật cho
+    quản trị viên.
+  - `tests/submission-file-single-query.test.ts` — 3 ca: dùng `findActiveFile` và **không** gọi
+    `listFiles`; giữ `private, no-store` + `nosniff`; không có tệp thì 404 và **không** đọc Drive,
+    **không** ghi audit.
+- **SỬA BÁO CÁO SAI CỦA 2A-2:** báo cáo 2A-2 và 2A-3 ghi "typecheck 0 lỗi" là **sai**.
+  `npm run typecheck` dùng `tsconfig.typecheck.json` (có bao gồm `tests/`, khác `tsconfig.json`),
+  và tại `HEAD` = `2d67eb2` có **12 lỗi** `internalNotes` thiếu trong fixture test — hồi quy từ lúc
+  2A-2 thêm trường bắt buộc vào `SubmissionRecord`. Vitest không typecheck nên test vẫn xanh và lỗi
+  bị lọt. Đã sửa cả 12.
+- **Chưa làm (đợt sau):** 2C — cán bộ tự tải ảnh giấy tờ cá nhân/GCN bổ sung khi hồ sơ nộp thiếu.
+- **Migration:** không có (thuần code).
+- **Kiểm tra:** baseline (`2d67eb2`) — typecheck **12 lỗi** (xem trên), lint 0 lỗi/5 warning có
+  sẵn, `npx vitest run` 679 pass/10 skip. Sau khi sửa — typecheck **0 lỗi**, lint 0 lỗi/5 warning
+  (đúng baseline), `npx vitest run` **687 pass/10 skip** (679 + 8 test mới, không test cũ nào fail
+  hay mới skip), `npm run build` đạt. `next-env.d.ts` do build tự đổi đã revert.
+  **Giới hạn xác minh:** phần client (lazy ảnh, accordion, server-priming ở phía render) **không có
+  test tự động** — repo chưa có hạ tầng test component React (không có testing-library/jsdom) và
+  thêm vào là đổi stack, ngoài phạm vi task. Xác minh bằng typecheck + lint + build + đọc code.
+  **Chưa có số đo P50/P95 trên Preview**, không tuyên bố đạt mục tiêu hiệu năng nào.
+- **Chưa merge, chưa push, chưa deploy.**

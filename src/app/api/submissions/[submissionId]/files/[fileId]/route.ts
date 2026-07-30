@@ -31,9 +31,7 @@ export async function GET(
         { status: 404 },
       );
     }
-    const file = (await repository.listFiles(submissionId)).find(
-      (candidate) => candidate.fileId === fileId,
-    );
+    const file = await repository.findActiveFile(submissionId, fileId);
     if (!file) {
       return NextResponse.json(
         createApiErrorPayload({

@@ -104,6 +104,7 @@ function makeRecord(): SubmissionRecord {
     accessVersion: 1,
     fileSummaries: makeFiles(),
     rowIndex: 1,
+    internalNotes: "",
   };
 }
 

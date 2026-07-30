@@ -102,6 +102,7 @@ function makeRecord(overrides: Partial<SubmissionRecord> = {}): SubmissionRecord
     accessVersion: 1,
     fileSummaries: [],
     rowIndex: 1,
+    internalNotes: "",
     ...overrides,
   };
 }

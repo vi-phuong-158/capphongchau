@@ -24,9 +24,7 @@ export async function GET(
   );
   const file = summarized
     ? { ...summarized, driveFileId: summarized.driveFileId! }
-    : (await getPublicIntakeRepository().listFiles(access.record.submissionId)).find(
-        (candidate) => candidate.fileId === fileId && candidate.status === "UPLOADED",
-      );
+    : await getPublicIntakeRepository().findActiveFile(access.record.submissionId, fileId);
   if (!file) return publicError("NOT_FOUND", "Không tìm thấy ảnh đã nộp.", access.requestId);
 
   try {

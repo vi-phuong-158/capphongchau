@@ -245,6 +245,45 @@ src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-
     │   consentAccepted/consentVersion/intakeChannel
     └── đặt CÙNG cookie phiên công khai → wizard/upload/submit dùng lại y nguyên
 
+src/modules/submissions/detail-view.ts — ĐƯỜNG ĐỌC DUY NHẤT của màn duyệt hồ sơ (2026-07-30, Đợt 2B)
+├── SubmissionDetailView — kiểu dữ liệu DUY NHẤT cho màn duyệt. `submission-detail.tsx` lấy luôn
+│   kiểu này (`type Submission = SubmissionDetailView`) thay vì khai lại như trước, nên thêm/bớt
+│   trường chỉ sửa một nơi. Trước 2B hình dạng bị khai hai lần và đã lệch thật (2A-2 phải thêm
+│   `internalNotes` ở cả route lẫn component).
+└── loadSubmissionDetail(submissionId, viewer, requestId) — findById → appendAudit → listFiles → DTO
+    ⚠️ CÓ GHI AUDIT `SUBMISSION_SENSITIVE_DETAIL_VIEWED`. Audit nằm TRONG hàm dùng chung chứ không
+    ở route, để server-priming của trang không làm mất dấu vết "ai đã xem hồ sơ nào". Cả
+    `GET /api/submissions/:id` và `src/app/submissions/[submissionId]/page.tsx` đều gọi hàm này;
+    khóa bằng tests/submission-detail-view.test.ts.
+
+src/app/submissions/[submissionId]/page.tsx — SERVER-PRIMING (2026-07-30, Đợt 2B)
+├── loadSubmissionDetail ngay trên server → truyền `initialSubmission` xuống SubmissionDetail.
+│   Trước 2B component tự fetch sau hydrate: HTML → tải JS → hydrate → fetch → mới thấy dữ liệu.
+├── SubmissionDetail chỉ fetch khi `initialSubmission` là null (nạp sẵn lỗi tạm) — nếu fetch cả khi
+│   đã có dữ liệu thì mất lợi ích VÀ ghi thêm một dòng audit cho cùng một lần mở trang.
+├── record không tồn tại → notFound(); lỗi tạm (DB) → vẫn render, để client tự fetch và tự báo lỗi
+└── ⚠️ HTML giờ CHỨA PII (SĐT/CCCD/địa chỉ), không còn là khung rỗng → `src/proxy.ts` gắn
+    `cache-control: private, no-store` cho toàn bộ matcher cán bộ. Gỡ header đó = để PII của hộ dân
+    nằm lại trong cache của proxy trung gian.
+
+src/components/admin/document-viewer.tsx — TẢI ẢNH THEO YÊU CẦU (2026-07-30, Đợt 2B)
+├── usePreviewImages(submissionId) — fetch ảnh thành blob MỘT lần/ảnh, giữ object URL trong Map ref
+│   ⚠️ Vì sao không để `<img src>` tự tải: route ảnh trả `cache-control: private, no-store` (đúng —
+│   ảnh giấy tờ là PII), nên mỗi lần `<img>` mount lại là MỘT lần tải lại từ Drive + MỘT dòng audit.
+│   Trước 2B khung toàn màn hình render thêm `<img>` cùng `src` → tải đúng ảnh đó HAI lần; chuyển
+│   qua lại giữa các tab ảnh cũng tải lại từ đầu.
+├── Chỉ tải ảnh ĐANG CHỌN; các ảnh khác chờ cán bộ bấm sang tab của nó
+└── revokeObjectURL khi rời trang — không giữ ảnh PII trong bộ nhớ lâu hơn mức cần
+
+src/components/admin/ai-draft-panel.tsx — ACCORDION, LAZY (2026-07-30, Đợt 2B)
+├── Thu gọn mặc định; chỉ gọi `GET /api/submissions/:id/ai-draft` khi cán bộ MỞ panel.
+│   Trước 2B panel fetch ngay khi render VÀ fetch lại mỗi lần `version` đổi — tức mỗi lần lưu bàn
+│   làm việc/ghi chú nội bộ cũng kéo một lần tải kết quả AI, dù phần lớn hồ sơ không có kết quả AI
+│   và panel render ra rỗng (`return null`).
+├── Vẫn tải lại khi `version` đổi NẾU panel đang mở — cột "Hiện có" so với dữ liệu hồ sơ hiện tại
+└── `loading` là giá trị SUY RA (`open && loadedVersion !== version`), không phải state — quy tắc
+    eslint react-hooks/set-state-in-effect cấm setState đồng bộ trong thân effect
+
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
     ├── listQueuePage — hàng chờ SQL keyset; không đọc toàn bảng/draft_json
@@ -310,6 +349,13 @@ src/app/submissions/page.tsx / [submissionId]
     │   │   projection, KHÔNG sinh timeline (người dân không bao giờ thấy trường này)
     │   └── audit SUBMISSION_INTERNAL_NOTE_UPDATED chỉ ghi noteLength, không ghi nội dung ghi chú
     │       (ô tự do — cán bộ có thể gõ SĐT/tên người dân vào đây)
+    ├── findActiveFile(submissionId, fileId) — MỘT truy vấn cho MỘT ảnh (2026-07-30, Đợt 2B)
+    │   Các route phục vụ ảnh trước đây gọi `listFiles` rồi `.find(...)`: kéo toàn bộ ảnh của hồ sơ
+    │   về chỉ để lấy một tệp. Điều kiện `status = 'UPLOADED'` giữ đúng ngữ nghĩa mặc định của
+    │   `listFiles` để hai đường không lệch. Dùng ở GET /api/submissions/:id/files/:fileId và ở
+    │   nhánh dự phòng của GET /api/public/submissions/current/files/:fileId (nhánh nhanh vẫn là
+    │   `record.fileSummaries`). KHÔNG dùng cho DELETE công khai — route đó cần cả trạng thái
+    │   DELETED để trả về idempotent.
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
