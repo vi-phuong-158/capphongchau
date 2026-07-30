@@ -126,6 +126,13 @@ src/modules/ai-extraction/                   fingerprints.ts, prompt-safety.ts, 
 src/modules/users/supabase-user-repository.ts allowlist/roles Supabase
 src/modules/submissions/acceptance-saga.ts   saga tiếp nhận chính thức resumable
 src/modules/public-intake/file-naming.ts     quy ước tên file gốc GCN/GT (thuần, dùng chung)
+src/modules/public-intake/upload-commit.ts   DÙNG CHUNG cho hai đường tải ảnh (hộ dân + cán bộ):
+                                              MAX_CERTIFICATE_PHOTOS, SUBMISSION_BYTE_BUDGET và
+                                              discardIfOrphan. Trần là trần của HỒ SƠ, không của
+                                              một đường — hai đường ghi vào cùng thư mục Drive
+                                              (2026-07-30, Đợt 2C)
+src/components/admin/officer-file-upload.tsx  ô tải ảnh của cán bộ trên màn duyệt; hiện khi
+                                              isClaimedByMe + UNDER_REVIEW (2026-07-30, Đợt 2C)
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive + findOrCreateFolder
                                               (cache trong tiến trình + PostgreSQL advisory lock
@@ -202,11 +209,27 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │   ├── src/modules/public-intake/upload-metrics.ts (thuần) — Zod strict, danh mục ĐÓNG,
 │   │   kẹp giá trị; KHÔNG có ô văn bản tự do nào để CCCD/tên tệp lọt vào
 │   ├── appendUploadAttempt(...).catch(() => undefined) — metric hỏng KHÔNG phá lượt tải
-│   └── discardIfOrphan → isDriveFileAdopted(...).catch(() => true)
+│   └── discardIfOrphan (src/modules/public-intake/upload-commit.ts — DÙNG CHUNG với đường cán
+│       bộ từ Đợt 2C) → isDriveFileAdopted(...).catch(() => true)
 │       ⚠️ hỏi DB không được thì mặc định ĐÃ NHẬN, tức là KHÔNG xóa. Sót tệp thừa thì
 │       scripts/audit-orphan-public-files.ts dọn được; xóa nhầm là mất ảnh vĩnh viễn.
 ├── POST .../uploads/metrics → số đo cho lượt HỎNG (lượt hỏng không có complete để bám vào);
 │   luôn trả 204, vẫn đòi phiên + CSRF
+│
+├── POST /api/submissions/:id/uploads/initiate|complete — ĐƯỜNG CÁN BỘ (2026-07-30, Đợt 2C)
+│   ├── requireActiveUser(SUBMISSION_DECISION_ROLES) + verifyCsrfToken + mayStaffEdit
+│   │   ⚠️ `/api/submissions/*` KHÔNG nằm trong matcher của src/proxy.ts → ba lớp này là lớp
+│   │   chặn DUY NHẤT. Không dùng lại resolvePublicRequest được: phiên kê khai của hộ dân đã
+│   │   khóa đúng lúc cán bộ cần thêm ảnh (isEditable đòi DRAFT/NEEDS_SUPPLEMENT + chưa ai giữ).
+│   ├── chủ sử dụng đọc từ effectivePayload(record).owners, KHÔNG từ record.draft — chủ do cán bộ
+│   │   thêm ở Bàn làm việc chỉ tồn tại ở working_payload
+│   ├── ảnh CCCD trùng chỗ ĐÒI replaceFileId tường minh; appendFile đánh ảnh cũ thành REPLACED
+│   │   (không xóa khỏi Drive). Chưa có DELETE ảnh cho cán bộ — thay ảnh là đường duy nhất.
+│   ├── request_log.kind = OFFICER_UPLOAD_COMPLETE (appendFile nhận `kind`, mặc định
+│   │   PUBLIC_UPLOAD_COMPLETE) — dùng chung một loại là hai đường đọc replay của nhau
+│   ├── audit SUBMISSION_OFFICER_FILE_UPLOADED — metadata chỉ documentType/fileId/sizeBytes/
+│   │   replaced, KHÔNG driveFileId, KHÔNG tên tệp, KHÔNG ownerId
+│   └── dùng chung upload-commit.ts với đường hộ dân (trần + discardIfOrphan)
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
     ├── isHeldByOfficer(record) → 409 INVALID_STATE NGAY, TRƯỚC Turnstile (2026-07-29, Đợt 2A-3)
     ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
@@ -548,6 +571,18 @@ POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE
                                                         `REQUEST_SUPPLEMENT` đã bị chặn server-side
                                                         2026-07-29, Đợt 2A-1 — luồng mới không còn
                                                         yêu cầu bổ sung, cán bộ sửa trực tiếp)
+POST /api/submissions/:submissionId/uploads/initiate  (2026-07-30, Đợt 2C — cán bộ tự tải ảnh
+POST /api/submissions/:submissionId/uploads/complete    giấy tờ bổ sung. Cửa quyền `mayStaffEdit`
+                                                        (đang giữ hồ sơ + `UNDER_REVIEW`) +
+                                                        SUBMISSION_DECISION_ROLES + CSRF; KHÔNG
+                                                        dùng `resolvePublicRequest` được vì phiên
+                                                        kê khai của hộ dân đã khóa đúng lúc đó.
+                                                        `request_log.kind` =
+                                                        `OFFICER_UPLOAD_COMPLETE`, tách khỏi
+                                                        `PUBLIC_UPLOAD_COMPLETE` để hai đường
+                                                        không đọc replay của nhau. Ghi audit
+                                                        `SUBMISSION_OFFICER_FILE_UPLOADED`.
+                                                        Không migration)
 POST /api/submissions/:submissionId/accept             (chạy completionChecks trước khi mở saga)
 POST /api/submissions/:submissionId/reset-access-secret
 POST /api/exports

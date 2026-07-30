@@ -2870,3 +2870,49 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   `catch { missing = true }` → 1 ca đỏ. Đã revert cả hai đột biến, `git diff src/` trống.
 - **Không giải quyết:** lazy ảnh và accordion AI (bước 3–10 trong kịch bản thủ công) vẫn không có
   test — cần `@testing-library/react` + jsdom, tức thêm devDependency, chưa được duyệt.
+
+## [2026-07-30] Đợt 2C — cán bộ tự tải ảnh giấy tờ bổ sung
+
+- **Agent:** Claude Code
+- **Thay đổi:** thêm đường tải ảnh cho cán bộ, tách hẳn khỏi đường của hộ dân.
+  - Hai route mới `POST /api/submissions/:id/uploads/initiate|complete`: `requireActiveUser(
+    SUBMISSION_DECISION_ROLES)` + `verifyCsrfToken` + `mayStaffEdit` (đang giữ hồ sơ +
+    `UNDER_REVIEW`). Chủ sử dụng đọc từ `effectivePayload(record).owners`, không từ `record.draft`.
+    Idempotency `request_log.kind = OFFICER_UPLOAD_COMPLETE`; audit
+    `SUBMISSION_OFFICER_FILE_UPLOADED` (metadata chỉ danh mục đóng + số).
+  - `upload-commit.ts` mới: `MAX_CERTIFICATE_PHOTOS`, `SUBMISSION_BYTE_BUDGET`, `discardIfOrphan`
+    chuyển từ route công khai sang, hai đường dùng chung.
+  - `appendFile` nhận thêm `kind` (danh mục đóng hai giá trị, mặc định `PUBLIC_UPLOAD_COMPLETE`).
+  - `OfficerFileUpload` trên màn duyệt, hiện khi `isClaimedByMe && status === "UNDER_REVIEW"`.
+- **File đã sửa:** `src/app/api/submissions/[submissionId]/uploads/{initiate,complete}/route.ts`
+  (mới), `src/modules/public-intake/upload-commit.ts` (mới),
+  `src/components/admin/officer-file-upload.tsx` (mới), `tests/officer-file-upload.test.ts` (mới),
+  `src/modules/public-intake/repository.ts` (`appendFile`),
+  `src/app/api/public/submissions/current/uploads/{initiate,complete}/route.ts` (trỏ sang module
+  dùng chung), `src/components/submission-detail.tsx`,
+  `tests/public-upload-complete-route.test.ts`, `tests/upload-metrics.test.ts`,
+  `docs/brain/{01-architecture,03-decisions,04-current-tasks,06-ai-working-log}.md`, `AGENTS.md`.
+- **Lý do:** hồ sơ hộ dân nộp thiếu ảnh là chuyện thường, nhưng phiên kê khai của hộ dân đã khóa
+  đúng lúc cán bộ nhận xử lý (`isEditable` đòi `DRAFT`/`NEEDS_SUPPLEMENT` và chưa ai giữ). Cán bộ
+  ngồi trước mặt hộ dân với ảnh trong tay mà không có nút nào.
+- **SỬA MỘT TEST XANH SAI:** `tests/upload-metrics.test.ts` ca "complete route nuốt lỗi ghi metric"
+  dùng mẫu `appendUploadAttempt\([\s\S]*?\)\.catch\(\(\) => undefined\)`; `[\s\S]*?` chạy tuốt
+  xuống `.catch(() => undefined)` của `discardIfOrphan` ở **cuối file**, một hàm không liên quan gì
+  tới số đo. Route thật dùng `.catch(reportUploadMetricFailure)`, nên ca này **chưa bao giờ kiểm
+  đúng thứ nó nói**. Chỉ lộ ra khi 2C chuyển `discardIfOrphan` đi. Đã sửa mẫu thành `[^;]` (không
+  vượt dấu chấm phẩy) và thêm một ca kiểm `reportUploadMetricFailure` thật sự không ném lại.
+- **Migration:** **không có.** `request_log.kind` và `audit_logs.action` đều là `text` không check
+  constraint (đã kiểm `202607230001_supabase_schema.sql`), nên loại mới dùng được ngay.
+- **Kiểm tra:** baseline `b548c7d` — typecheck 0 lỗi, lint 0 lỗi/5 warning, 698 pass/10 skip. Sau
+  khi sửa — typecheck **0 lỗi**, lint **0 lỗi/5 warning** (đúng baseline), `npx vitest run`
+  **732 pass/10 skip** (698 + 33 test mới + 1 ca thêm ở upload-metrics, không test cũ nào fail hay
+  mới skip), `npm run build` đạt và cả hai route mới xuất hiện trong bảng route.
+  **Đã kiểm chứng test không rỗng bằng 4 đột biến source:** vô hiệu hóa chốt `mayStaffEdit` →
+  1 ca đỏ; đổi `kind` về `PUBLIC_UPLOAD_COMPLETE` → 1 ca đỏ; bỏ một lời gọi `discardIfOrphan` ở
+  nhánh lỗi → 1 ca đỏ; cho nút hiện với mọi cán bộ → 1 ca đỏ. Đã revert cả bốn.
+  **Giới hạn xác minh:** 33 test mới **đọc mã nguồn**, không chạy route thật — route cần Supabase,
+  Google Drive và phiên đăng nhập, không có credential nào trong môi trường này (chỉ có
+  `.env.example`). **Chưa kiểm thủ công một lượt tải ảnh thật.** Component `OfficerFileUpload`
+  không có test render (repo chưa có testing-library/jsdom).
+- **Chưa merge, chưa deploy.**
+

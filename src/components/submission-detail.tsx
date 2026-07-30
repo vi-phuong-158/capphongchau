@@ -15,6 +15,7 @@ import {
 } from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 import { DocumentViewer } from "@/components/admin/document-viewer";
+import { OfficerFileUpload } from "@/components/admin/officer-file-upload";
 import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
 import type { SubmissionDetailView } from "@/modules/submissions/detail-view";
 
@@ -675,6 +676,26 @@ export function SubmissionDetail({
             files={submission.files}
             ownerIds={draft?.owners.map((owner) => owner.id) ?? []}
           />
+          {/*
+            Cùng điều kiện với `mayStaffEdit` ở server (đang giữ hồ sơ + `UNDER_REVIEW`). Ẩn nút chỉ
+            là phép lịch sự với cán bộ không đủ điều kiện; hai route `uploads/*` vẫn tự kiểm lại.
+          */}
+          {isClaimedByMe && submission.status === "UNDER_REVIEW" && (
+            <OfficerFileUpload
+              submissionId={submission.submissionId}
+              files={submission.files}
+              owners={
+                draft?.owners.map((owner) => ({
+                  id: owner.id,
+                  ownerType: owner.ownerType,
+                  fullName: owner.fullName,
+                })) ?? []
+              }
+              onUploaded={async () => {
+                setSubmission(await loadSubmission(submission.submissionId));
+              }}
+            />
+          )}
         </div>
 
         {/* Right Column: Information & Working Payload Editor (7 Cols on large screen) */}

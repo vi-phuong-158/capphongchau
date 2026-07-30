@@ -1907,6 +1907,12 @@ export class PublicIntakeRepository {
       mutationHash: string;
       requestId: string;
       replaceFileId?: string;
+      /**
+       * Loại thao tác ghi vào `request_log`. Mặc định là đường của người dân để mọi bên gọi cũ giữ
+       * nguyên hành vi. Đường cán bộ (Đợt 2C) phải dùng loại riêng: `findStoredMutation` lọc theo
+       * cả khóa **và** loại, nên dùng chung một loại là hai đường đọc được replay của nhau.
+       */
+      kind?: "PUBLIC_UPLOAD_COMPLETE" | "OFFICER_UPLOAD_COMPLETE";
     },
     normalization?: FileNormalizationMetadata,
   ): Promise<PublicFileSummary> {
@@ -1964,7 +1970,7 @@ export class PublicIntakeRepository {
           insert into public.request_log (
             idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
           ) values (
-            ${idempotencyOptions.idempotencyKey}, 'PUBLIC_UPLOAD_COMPLETE',
+            ${idempotencyOptions.idempotencyKey}, ${idempotencyOptions.kind ?? "PUBLIC_UPLOAD_COMPLETE"},
             ${idempotencyOptions.requestId}, ${idempotencyOptions.mutationHash},
             ${JSON.stringify(summary)}::jsonb, now() + interval '24 hours'
           )

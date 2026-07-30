@@ -1818,3 +1818,42 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Đánh đổi đã chấp nhận:** hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn tới khi bổ sung. Đây là
   thay đổi hành vi thấy được với cán bộ, nên **bắt buộc** có release note —
   `evidence/PUBLIC_INTAKE_V2_RELEASE_CHECKLIST.md` §7.1.
+
+## [2026-07-30] Đợt 2C — cán bộ tải ảnh giấy tờ qua endpoint riêng, cửa quyền `mayStaffEdit`
+
+- **Quyết định:** thêm `POST /api/submissions/:id/uploads/initiate|complete` thay vì nới đường của
+  hộ dân. Cửa vào là `mayStaffEdit(record, email)` — **đang giữ hồ sơ và hồ sơ `UNDER_REVIEW`** —
+  cộng `SUBMISSION_DECISION_ROLES` và CSRF của bề mặt cán bộ.
+- **Lý do không dùng lại đường hộ dân:** `resolvePublicRequest` xác thực bằng cookie phiên kê khai
+  ẩn danh, và `isEditable` đòi `DRAFT`/`NEEDS_SUPPLEMENT` **và** chưa ai nhận xử lý. Đúng lúc cán bộ
+  cần thêm ảnh thì cả ba điều kiện đều sai. Nới `isEditable` để chứa trường hợp này là mở lại đường
+  ghi cho hộ dân trong khi cán bộ đang làm — đúng thứ Đợt 2A-3 vừa đóng.
+- **Vì sao `mayStaffEdit` chứ không phải một khái niệm quyền mới:** ảnh giấy tờ là dữ liệu của hồ sơ,
+  nên đi đúng cửa đang dùng cho dữ liệu của hồ sơ (`PATCH /:id`, Bàn làm việc PL3). Nghiệp vụ đổi thì
+  sửa một hằng số, không phải ba route.
+- **Không migration.** `request_log.kind` và `audit_logs.action` đều là `text` không có check
+  constraint, nên loại mới (`OFFICER_UPLOAD_COMPLETE`, `SUBMISSION_OFFICER_FILE_UPLOADED`) dùng được
+  ngay. Không thêm bảng, không thêm cột.
+- **`request_log.kind` phải tách khỏi `PUBLIC_UPLOAD_COMPLETE`.** `findStoredMutation` lọc theo cả
+  khóa **và** loại; dùng chung một loại là hai đường đọc được replay của nhau — cán bộ gửi lại một
+  khóa hộ dân đã dùng sẽ nhận về `fileId` của hộ dân. `appendFile` nhận thêm `kind` (danh mục đóng
+  hai giá trị), mặc định giữ nguyên đường hộ dân để mọi bên gọi cũ không đổi hành vi.
+- **KHÔNG nới `API_ERROR_CODES`.** Bề mặt công khai có `SIZE_BUDGET_EXCEEDED`/`INVALID_STATE` riêng
+  nhưng đó là **mở rộng cục bộ** (`PublicErrorCode`), không nới bộ mã chung. Hai route mới quy về mã
+  có sẵn: trần dung lượng → `VALIDATION_FAILED`, vướng do trạng thái ảnh → `VERSION_CONFLICT`. Nới bộ
+  mã chung là đổi hợp đồng API cho mọi client cán bộ đang `switch` theo mã, mà ở đây không cần —
+  client chỉ hiển thị `error.message`.
+- **Thay ảnh CCCD phải tường minh.** `appendFile` tự đánh `REPLACED` cho ảnh cùng chủ + cùng mặt, nên
+  route đòi `replaceFileId` khớp đúng ảnh đang có; thiếu thì 409. Không có bước này thì một lần bấm
+  nhầm đẩy bằng chứng đang dùng xuống lịch sử mà cán bộ không biết. Ảnh cũ **không** bị xóa khỏi
+  Drive.
+- **Trần số ảnh/dung lượng chuyển sang `upload-commit.ts` dùng chung.** Hai đường ghi vào cùng thư
+  mục Drive nên trần là trần của **hồ sơ**; để mỗi route giữ hằng số riêng là sửa một bên thành hai
+  bên lệch nhau. `discardIfOrphan` chuyển cùng, vì bất biến "không bao giờ xóa tệp đã nhận" phải
+  giống nhau ở cả hai đường.
+- **Không chuẩn hóa/nén ảnh ở client như luồng hộ dân.** Bên đó nén để hộ dân dùng 3G tải được; cán
+  bộ ngồi máy có dây và cần giữ nét để đọc số GCN. Trần `MAX_UPLOAD_MB` của server vẫn áp.
+- **Chưa làm, biết trước:** không có `DELETE` ảnh cho cán bộ, nên gỡ hẳn một ảnh sai vẫn phải thay
+  bằng ảnh khác. Cũng chưa mở cho hồ sơ đã `ACCEPTED` (đường đó là `mayAmendOfficialRecord`, đòi lý
+  do điều chỉnh — chưa gộp vào đợt này).
+

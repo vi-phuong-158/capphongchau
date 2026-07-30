@@ -42,9 +42,16 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   **Chưa đo P50/P95 thật** trên Preview — không tuyên bố đạt mục tiêu hiệu năng nào cho tới khi có
   số đo. Phần client (lazy ảnh, accordion) **không có test tự động** vì repo chưa có hạ tầng test
   component React; xác minh bằng typecheck + build + đọc code.
-- **2C — CHƯA LÀM (tính năng mới, người dùng yêu cầu thêm):** cán bộ tự tải ảnh giấy tờ
-  cá nhân/GCN bổ sung khi hồ sơ nộp thiếu — cần endpoint mới vì API upload hiện tại của người dân
-  bị khóa theo session cookie + trạng thái hồ sơ, cán bộ không dùng lại được trực tiếp.
+- **2C — ĐÃ TRIỂN KHAI TRONG CODE [2026-07-30]:** cán bộ tự tải ảnh giấy tờ cá nhân/GCN bổ sung.
+  Hai endpoint mới `POST /api/submissions/:id/uploads/initiate|complete` (đúng như dự đoán: không
+  dùng lại được đường của hộ dân vì nó khóa theo cookie phiên kê khai + `isEditable`). Cửa quyền
+  `mayStaffEdit` — đang giữ hồ sơ + `UNDER_REVIEW`. **Không migration** (`request_log.kind` và
+  `audit_logs.action` là `text` không có check constraint). Ô tải ảnh ở
+  `src/components/admin/officer-file-upload.tsx`, hiện cùng điều kiện với server.
+  **Chưa kiểm thủ công trên môi trường thật** — cần đăng nhập Google + Drive thật; xác minh bằng
+  33 test đọc mã nguồn (đã kiểm chứng không rỗng bằng 4 đột biến) + typecheck + lint + build.
+  **Còn thiếu, biết trước:** không có `DELETE` ảnh cho cán bộ (gỡ ảnh sai phải thay bằng ảnh khác);
+  chưa mở cho hồ sơ đã `ACCEPTED`.
 
 ## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
 

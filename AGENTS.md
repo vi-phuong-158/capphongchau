@@ -281,6 +281,8 @@ GET /api/submissions/:submissionId
 POST /api/submissions/:submissionId/action
 POST /api/submissions/:submissionId/reset-access-secret
 GET /api/submissions/:submissionId/files/:fileId
+POST /api/submissions/:submissionId/uploads/initiate
+POST /api/submissions/:submissionId/uploads/complete
 GET /api/submissions/:submissionId/ai-draft
 POST /api/submissions/:submissionId/ai-draft/apply
 GET /api/ai/jobs/ready

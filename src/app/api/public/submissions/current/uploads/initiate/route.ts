@@ -13,12 +13,12 @@ import {
 import { canonicalImageMimeType } from "@/modules/public-intake/image-format";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import { requiresCitizenId } from "@/modules/public-intake/types";
+import {
+  MAX_CERTIFICATE_PHOTOS,
+  SUBMISSION_BYTE_BUDGET,
+} from "@/modules/public-intake/upload-commit";
 
 export const runtime = "nodejs";
-
-const MAX_CERTIFICATE_PHOTOS = 10;
-/** Ngân sách byte mỗi bản kê khai — chống lạm dụng trên endpoint ẩn danh (PLAN_NL §6.1). */
-const SUBMISSION_BYTE_BUDGET = 150 * 1024 * 1024;
 
 export async function POST(request: Request): Promise<NextResponse> {
   const context = await resolvePublicRequest(request, { requireCsrf: true });

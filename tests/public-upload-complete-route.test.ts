@@ -27,6 +27,12 @@ const initiateRoute = read(
   "../src/app/api/public/submissions/current/uploads/initiate/route.ts",
 );
 const repository = read("../src/modules/public-intake/repository.ts");
+/**
+ * Từ Đợt 2C, `discardIfOrphan` nằm ở module dùng chung: cán bộ cũng tải ảnh vào đúng thư mục Drive
+ * của hồ sơ, nên cùng một cửa dọn dẹp phải phục vụ cả hai đường. Các bất biến dưới đây không đổi —
+ * chỉ đổi nơi đọc, và giờ chúng khóa cho cả hai đường một lượt.
+ */
+const uploadCommit = read("../src/modules/public-intake/upload-commit.ts");
 
 describe("Ghi cơ sở dữ liệu hỏng không để lại tệp mồ côi", () => {
   it("dọn dẹp trước khi ném lỗi ra ngoài", () => {
@@ -50,32 +56,31 @@ describe("Không bao giờ xóa tệp cơ sở dữ liệu đã nhận", () => {
   });
 
   it("route không gọi discardFile trực tiếp trên bất kỳ đường lỗi nào", () => {
-    const postBody = route.slice(route.indexOf("export async function POST"), route.indexOf("/**\n * Xóa tệp"));
-    expect(postBody).not.toContain(".discardFile(");
+    expect(route).not.toContain(".discardFile(");
   });
 
   it("hỏi cơ sở dữ liệu trước khi xóa", () => {
-    expect(route).toContain("isDriveFileAdopted");
-    expect(route).toMatch(/if \(adopted\) return;/);
+    expect(uploadCommit).toContain("isDriveFileAdopted");
+    expect(uploadCommit).toMatch(/if \(adopted\) return;/);
   });
 
   it("hỏi không được thì mặc định coi như ĐÃ nhận", () => {
     // Đảo chiều `.catch` ở đây là lỗi mất dữ liệu, không phải lỗi phong cách.
-    expect(route).toContain("isDriveFileAdopted(driveFileId).catch(() => true)");
+    expect(uploadCommit).toContain("isDriveFileAdopted(driveFileId).catch(() => true)");
   });
 
   it("không xác nhận được thư mục thì KHÔNG xóa", () => {
     // Hai `.catch` ngược chiều nhau nhưng cùng một ý: không chắc thì giữ tệp lại.
     //   - hỏi cơ sở dữ liệu hỏng  → coi như ĐÃ nhận (`true`)  → không xóa;
     //   - hỏi Drive hỏng          → coi như KHÔNG thuộc (`false`) → không xóa.
-    const guard = route.slice(route.indexOf("async function discardIfOrphan"));
+    const guard = uploadCommit.slice(uploadCommit.indexOf("export async function discardIfOrphan"));
     expect(guard).toContain(".isFileInFolder(driveFileId, record.driveFolderId)");
     expect(guard).toContain(".catch(() => false)");
     expect(guard).toMatch(/if \(!ownedByCaller\) return;/);
   });
 
   it("kiểm thư mục đứng TRƯỚC lệnh xóa, không phải sau", () => {
-    const guard = route.slice(route.indexOf("async function discardIfOrphan"));
+    const guard = uploadCommit.slice(uploadCommit.indexOf("export async function discardIfOrphan"));
     expect(guard.indexOf("isFileInFolder")).toBeLessThan(guard.indexOf("discardFile("));
   });
 
