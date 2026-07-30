@@ -23,7 +23,9 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   (`internal_notes`, endpoint riêng `PUT /internal-notes`, không thuộc PL3/draft, không timeline).
   **Chưa chạy migration** `202607290005_submission_internal_notes.sql` trên Preview/Production —
   bắt buộc chạy trước khi deploy, xác nhận bằng
-  `npx tsx scripts/preflight-public-intake-v2-migrations.ts`.
+  `npx tsx scripts/preflight-public-intake-v2-migrations.ts`. Quy trình đầy đủ (thứ tự, kiểm tra
+  sau từng bước, rollback SQL) ở
+  `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_005_RUNBOOK.md` [2026-07-30].
 - **2A-3 — ĐÃ LÀM (code, chưa merge/push/deploy):** cán bộ ưu tiên — `isEditable()` chặn mọi đường
   ghi công khai của người dân khi hồ sơ đã có cán bộ cầm (đóng lỗi "người dân gửi lại thì
   `repository.submit()` xóa sạch `claimed_by`", mà khóa phiên bản không bắt được vì version vẫn

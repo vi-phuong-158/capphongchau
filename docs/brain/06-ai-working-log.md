@@ -2977,3 +2977,38 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   **Giới hạn xác minh:** 21 test mới **đọc mã nguồn**, không chạy route thật. **Chưa kiểm thủ công.**
 - **Chưa merge, chưa deploy.**
 
+## [2026-07-30] Runbook migration cho bốn migration còn nợ 202607290002–202607290005
+
+- **Agent:** Claude Code.
+- **Thay đổi:** thêm `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_005_RUNBOOK.md` — quy trình đầy đủ
+  cho bốn migration đang nợ (`202607290002_full_pl3_editor.sql`,
+  `202607290003_drop_working_payload_override_columns.sql`,
+  `202607290004_queue_search_performance.sql`, `202607290005_submission_internal_notes.sql`): bảng
+  an toàn từng migration (rủi ro khóa bảng), thứ tự chạy, câu SQL kiểm tra sau mỗi bước, dấu hiệu
+  phải rollback, **rollback SQL đầy đủ** (chưa có ở đâu trước đó cho bốn file này), và checklist
+  deploy. Thêm một dòng trỏ tới runbook này ở `04-current-tasks.md`, không sửa nội dung cũ.
+- **File đã sửa:** `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_005_RUNBOOK.md` (mới),
+  `docs/brain/04-current-tasks.md` (thêm một dòng trỏ), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** người dùng chọn "áp 4 migration đang nợ" làm việc tiếp theo. Container này không có
+  `SUPABASE_DATABASE_URL` (chỉ `.env.example`) nên không tự chạy migration vào database thật được;
+  việc có giá trị nhất làm được là chuẩn bị đầy đủ để người dùng tự chạy an toàn.
+- **PHÁT HIỆN QUAN TRỌNG khi rà soát:** `evidence/PUBLIC_INTAKE_V2_PREVIEW_MIGRATION_RUNBOOK.md` đã
+  có sẵn nhưng nói về **đợt migration khác** (`202607280001`–`04`, ngày 28/7) — không phải bốn file
+  đang nợ. Tài liệu nội bộ cũng mâu thuẫn nhau về trạng thái: `04-current-tasks.md` ghi cả bốn là
+  "chưa chạy", nhưng `06-ai-working-log.md` (mục "Phase 1 rehearsal reset") ghi một agent khác đã
+  reset và áp lại 20 migration (gồm ba trong bốn file, thiếu `202607290005` vì sinh sau) trên một
+  project ref gọi là "rehearsal/Preview" — không rõ đây có phải chính project Preview thật đang
+  chạy hay một project tập dượt riêng. Runbook mới **không giả định** trạng thái nào; mục 0 yêu cầu
+  chạy `preflight` (chỉ đọc) trước để xác nhận thật trước khi áp bất cứ gì.
+- **An toàn đã xác nhận bằng cách đọc mã nguồn `.sql`:** cả bốn additive/idempotent. Migration rủi
+  ro khóa bảng cao nhất là `202607290004` — thêm 2 generated column `STORED` (bắt Postgres tính lại
+  giá trị cho mọi hàng đang có, giữ khóa `ACCESS EXCLUSIVE` trong lúc đó) và 5 index không dùng
+  `CONCURRENTLY`. Ở quy mô hồ sơ hiện tại (benchmark 20.000 hàng trong log 2026-07-29, trang trạng
+  thái 17,99 ms) mức này vẫn ổn, nhưng đã ghi rõ trong runbook để cảnh giác khi dữ liệu lớn hơn.
+- **Migration:** không có — đây là tài liệu, không chạm database.
+- **Kiểm tra:** `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/5 warning (đúng baseline),
+  `npx vitest run` 772 pass/10 skip — không đổi vì không sửa code.
+  **Chưa chạy được bất kỳ migration nào thật** — cần bạn tự chạy theo runbook, hoặc cấp credential
+  Preview cho một phiên có thể thực thi.
+- **Chưa merge, chưa deploy.**
+
