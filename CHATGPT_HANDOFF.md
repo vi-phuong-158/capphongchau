@@ -13,10 +13,13 @@
   - **(A)** Test cho hai điểm Đợt 2B sửa mà không test nào khóa được (`src/proxy.ts` header
     `no-store`; nhánh `notFound()` của `/submissions/[submissionId]/page.tsx`).
   - **(B) Đợt 2C** — cán bộ tự tải ảnh giấy tờ cá nhân/GCN bổ sung khi hồ sơ nộp thiếu.
-  Người dùng yêu cầu: *"Làm 2 test đó rồi sang 2C"*.
+  - **(C) Đợt 2C bổ sung** — cán bộ **gỡ** ảnh Giấy chứng nhận khỏi hồ sơ (xóa mềm).
+  Người dùng yêu cầu: *"Làm 2 test đó rồi sang 2C"*, rồi sau khi tôi nêu lỗ còn lại và ba phương án:
+  *"Cho phép cả hai, làm phương án 1 đi"* — tức cho gỡ cả ảnh do hộ dân tải lên, và làm phương án xóa
+  mềm GCN-only.
 - Nhánh: `claude/redesign-document-review-screen-tfuvov`
 - Baseline khi bắt đầu: `6942381`
-- HEAD khi kết thúc: `af4b9e1`
+- HEAD khi kết thúc: `69dfa2e`
 - Status: `READY_FOR_REVIEW` — đã commit local; **chưa push, chưa merge, chưa deploy**
 - Migration: **KHÔNG CÓ**
 - Source plan: phạm vi 2C đã được ghi thành văn từ Đợt 2B trong `docs/brain/04-current-tasks.md`:
@@ -42,34 +45,40 @@ vào đợt này.
 ### Commits
 
 ```
+69dfa2e feat(submissions): Đợt 2C - cán bộ gỡ ảnh Giấy chứng nhận khỏi hồ sơ (xóa mềm)
+9ed64ca docs: cập nhật CHATGPT_HANDOFF.md cho Đợt 2C và test của 2B
 af4b9e1 feat(submissions): Đợt 2C - cán bộ tự tải ảnh giấy tờ bổ sung vào hồ sơ
 b548c7d test(submissions): khóa header no-store của proxy và nhánh notFound của trang duyệt
 6942381 docs: cập nhật CHATGPT_HANDOFF.md cho Đợt 2B          ← baseline
 7bb4341 perf(submissions): Đợt 2B - nạp sẵn màn duyệt trên server, tải ảnh/AI theo yêu cầu
 ```
 
-### Diff statistics (`6942381..af4b9e1`)
+### Diff statistics (`6942381..69dfa2e`)
 
 ```
- AGENTS.md                                          |   2 +
- docs/brain/01-architecture.md                      |  37 ++-
- docs/brain/03-decisions.md                         |  39 +++
- docs/brain/04-current-tasks.md                     |  13 +-
- docs/brain/06-ai-working-log.md                    |  46 ++++
- .../submissions/current/uploads/complete/route.ts  |  36 +--
- .../submissions/current/uploads/initiate/route.ts  |   8 +-
- .../[submissionId]/uploads/complete/route.ts       | 266 ++++++++++++++++++++
- .../[submissionId]/uploads/initiate/route.ts       | 247 ++++++++++++++++++
- src/components/admin/officer-file-upload.tsx       | 278 +++++++++++++++++++++
- src/components/submission-detail.tsx               |  21 ++
- src/modules/public-intake/repository.ts            |   8 +-
- src/modules/public-intake/upload-commit.ts         |  54 ++++
- tests/officer-file-upload.test.ts                  | 258 +++++++++++++++++++
- tests/proxy-no-store.test.ts                       |  71 +++++
- tests/public-upload-complete-route.test.ts         |  19 +-
- tests/submission-detail-page.test.ts               | 127 ++++++++++
- tests/upload-metrics.test.ts                       |  22 +-
- 18 files changed, 1523 insertions(+), 52 deletions(-)
+ AGENTS.md                                          |    4 +-
+ CHATGPT_HANDOFF.md                                 | 1074 ++++++++------------
+ docs/brain/01-architecture.md                      |   61 +-
+ docs/brain/03-decisions.md                         |   73 ++
+ docs/brain/04-current-tasks.md                     |   17 +-
+ docs/brain/06-ai-working-log.md                    |   98 ++
+ .../submissions/current/uploads/complete/route.ts  |   36 +-
+ .../submissions/current/uploads/initiate/route.ts  |    8 +-
+ .../[submissionId]/files/[fileId]/route.ts         |  110 +-
+ .../[submissionId]/uploads/complete/route.ts       |  266 +++++
+ .../[submissionId]/uploads/initiate/route.ts       |  247 +++++
+ src/components/admin/document-viewer.tsx           |   82 +-
+ src/components/admin/officer-file-upload.tsx       |  278 +++++
+ src/components/submission-detail.tsx               |   43 +
+ src/modules/public-intake/repository.ts            |    8 +-
+ src/modules/public-intake/upload-commit.ts         |   54 +
+ tests/officer-file-delete.test.ts                  |  195 ++++
+ tests/officer-file-upload.test.ts                  |  258 +++++
+ tests/proxy-no-store.test.ts                       |   72 ++
+ tests/public-upload-complete-route.test.ts         |   19 +-
+ tests/submission-detail-page.test.ts               |  127 +++
+ tests/upload-metrics.test.ts                       |   22 +-
+ 22 files changed, 2429 insertions(+), 723 deletions(-)
 ```
 
 ### Name status
@@ -82,6 +91,9 @@ A  src/components/admin/officer-file-upload.tsx
 A  tests/officer-file-upload.test.ts
 A  tests/proxy-no-store.test.ts
 A  tests/submission-detail-page.test.ts
+A  tests/officer-file-delete.test.ts
+M  src/app/api/submissions/[submissionId]/files/[fileId]/route.ts   (thêm DELETE)
+M  src/components/admin/document-viewer.tsx
 M  src/modules/public-intake/repository.ts
 M  src/components/submission-detail.tsx
 M  src/app/api/public/submissions/current/uploads/initiate/route.ts
@@ -118,6 +130,14 @@ là mở lại đường ghi cho hộ dân trong khi cán bộ đang làm — đ
 Cửa vào của đường mới là `mayStaffEdit` — **đang giữ hồ sơ và hồ sơ `UNDER_REVIEW`** — cùng chốt với
 `PATCH /api/submissions/:id` và Bàn làm việc PL3. Không mở khái niệm quyền mới.
 
+**(C) `69dfa2e` — Đợt 2C bổ sung: gỡ ảnh GCN.**
+
+Đợt 2C để lại đúng một lỗ: cán bộ tải nhầm, hoặc hộ dân nộp một trang GCN sai, thì không có cách nào
+gỡ — chỉ thay được bằng ảnh khác. `DELETE /api/submissions/:id/files/:fileId` sao y hợp đồng của
+đường hộ dân đã có: **xóa mềm** (`status = 'DELETED'`, tệp nằm nguyên trên Drive), **chỉ ảnh
+`CERTIFICATE`**, cùng cửa quyền `mayStaffEdit`. Người dùng chốt: **gỡ được cả ảnh do hộ dân tải lên**,
+không chỉ ảnh cán bộ vừa bổ sung.
+
 **Phát hiện ngoài dự kiến:** một test đang **xanh sai** từ trước, chưa bao giờ kiểm đúng thứ nó nói.
 Chi tiết ở §11.
 
@@ -147,9 +167,11 @@ Chạy tại `6942381` **trước** khi sửa gì:
 
 ### Out of scope — cố tình KHÔNG làm
 
-- **`DELETE` ảnh cho cán bộ.** Chưa có, nên gỡ hẳn một ảnh sai vẫn phải thay bằng ảnh khác. Không
-  tự thêm: xóa bằng chứng khỏi hồ sơ là một quyết định nghiệp vụ riêng.
-- **Mở tải ảnh cho hồ sơ đã `ACCEPTED`.** Đường đó là `mayAmendOfficialRecord`, đòi
+- **Gỡ ảnh CCCD.** Chỉ ảnh GCN gỡ được — xem §6 quyết định #10.
+- **"Gán lại ảnh CCCD sang chủ khác".** Đây là lỗ thật mà thay ảnh không vá được: tải CCCD của chủ 2
+  vào ô của chủ 1 khi chủ 1 chưa có ảnh nào thì ô đó bị chiếm và không làm trống được. Cách vá đúng là
+  một thao tác đổi `owner_id`, **không** phải mở cửa gỡ cho CCCD. Chờ tới khi vận hành gặp ca thật.
+- **Mở tải/gỡ ảnh cho hồ sơ đã `ACCEPTED`.** Đường đó là `mayAmendOfficialRecord`, đòi
   `amendmentReason`.
 - **Nới `API_ERROR_CODES`.** Xem §10.
 - **Chuẩn hóa/nén ảnh ở client** như luồng hộ dân. Xem §6 quyết định #8.
@@ -183,6 +205,10 @@ Hành vi của đường hộ dân **không đổi một dòng logic nào** — 
 | 7   | **Không** nới `API_ERROR_CODES`                                           | Bề mặt công khai mở rộng **cục bộ** (`PublicErrorCode`), không nới bộ mã chung. Nới là đổi hợp đồng API cho mọi client cán bộ đang `switch` theo mã, mà client chỉ hiển thị `error.message` |
 | 8   | **Không** chuẩn hóa/nén ảnh ở client                                      | Bên hộ dân nén để dùng được 3G; cán bộ ngồi máy có dây và cần giữ nét để đọc số GCN. Trần `MAX_UPLOAD_MB` của server vẫn áp |
 | 9   | Tên tệp Drive có tiền tố `OFFICER-`                                       | Nhìn thư mục Drive là biết ảnh nào do cán bộ bổ sung. Ai bổ sung thì tra `audit_logs`, **không** nhét email vào tên tệp |
+| 10  | Gỡ ảnh là **xóa mềm**, chỉ ảnh `CERTIFICATE`                              | Bất biến không đối xứng: giữ lại một ảnh đáng gỡ thì bấm lại mất vài giây, xóa thật là bằng chứng mất vĩnh viễn. CCCD là ràng buộc của `completionChecks` nên gỡ nó chỉ tạo trạng thái bí — luồng đúng là thay ảnh |
+| 11  | **Gỡ được cả ảnh do hộ dân tải lên** (người dùng chốt 2026-07-30)         | Cán bộ là người quyết định hồ sơ gồm những gì (cùng tinh thần `[2026-07-25] Q2`); xóa mềm không mất dữ liệu và audit ghi rõ ai làm. Chặn lại thì một trang GCN chụp nhầm nằm trong hồ sơ vĩnh viễn |
+| 12  | `DELETE` **không** đòi `idempotency-key`                                  | `markFileStatus` khóa dòng (`for update`) rồi mới chuyển trạng thái và no-op khi đã `DELETED`; route chỉ ghi audit trong nhánh `UPLOADED`. Thêm một khóa không dùng tới chỉ là hình thức |
+| 13  | **Không** chặn ảnh GCN cuối cùng ở tầng route                             | Việc đó của `completionChecks` (`FILES_CERTIFICATE_MISSING`). Chặn ở đây là bắt cán bộ muốn thay cả bộ ảnh phải làm ngược thứ tự, và có thể vượt trần 10 ảnh giữa đường |
 
 Đã ghi đầy đủ vào `docs/brain/03-decisions.md`.
 
@@ -199,6 +225,7 @@ Hành vi của đường hộ dân **không đổi một dòng logic nào** — 
 | `tests/officer-file-upload.test.ts` | 33 ca cho đường cán bộ |
 | `tests/proxy-no-store.test.ts` | 4 ca cho header `no-store` của proxy |
 | `tests/submission-detail-page.test.ts` | 7 ca cho `page.tsx` |
+| `tests/officer-file-delete.test.ts` | 19 ca cho đường gỡ ảnh |
 
 ### Sửa
 
@@ -210,6 +237,8 @@ Hành vi của đường hộ dân **không đổi một dòng logic nào** — 
 | `src/app/api/public/.../uploads/complete/route.ts` | `discardIfOrphan` | gỡ hàm cục bộ, import từ `upload-commit` |
 | `tests/public-upload-complete-route.test.ts` | 4 ca | trỏ sang `upload-commit.ts`; bất biến không đổi |
 | `tests/upload-metrics.test.ts` | 1 ca sửa + 1 ca mới | sửa test **xanh sai** — xem §11 |
+| `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts` | `DELETE` (mới) | gỡ ảnh GCN, xóa mềm; `GET` không đổi |
+| `src/components/admin/document-viewer.tsx` | `DocumentViewer` | thêm prop tùy chọn `onDeleteFile`; nút gỡ + xác nhận hai bước, chỉ hiện với ảnh GCN |
 
 ## 8. Detailed implementation by phase
 
@@ -348,6 +377,7 @@ Cả bốn điều trên đều có test khóa.
 | `tests/proxy-no-store.test.ts` | 4 | `private, no-store` cho phiên đã đăng nhập; chỉ thị luôn chứa `no-store` không chỉ `private`, và không có `max-age`; chưa đăng nhập → 307 về trang chủ; session không có email cũng bị coi là chưa đăng nhập |
 | `tests/submission-detail-page.test.ts` | 7 | `null` → `notFound()`; **lỗi tạm KHÔNG thành 404** mà vẫn render với `initialSubmission=null`; nạp sẵn thành công truyền thẳng hồ sơ; luôn đi qua `loadSubmissionDetail` (giữ audit); không đủ quyền → `/profile`; lỗi hạ tầng không bị hạ cấp thành redirect; `isAdministrator` suy từ vai trò |
 | `tests/officer-file-upload.test.ts` | 33 | cửa quyền (3 lớp; không dùng cửa công khai; không tự viết lại điều kiện quyền); trần dùng chung; không im lặng ghi đè; `effectivePayload`; idempotency tách loại + replay trước kiểm tra trạng thái; `discardIfOrphan` đủ 8 nhánh; audit không PII; mọi phản hồi `no-store`; điều kiện hiện nút ở client |
+| `tests/officer-file-delete.test.ts` | 19 | **không có đường xóa thật nào** (`discardFile`/`files.delete`/`discardIfOrphan`); `markFileStatus` chỉ `update`, không `delete from`; script dọn tệp mồ côi không dọn ảnh đã gỡ; chỉ `CERTIFICATE` ở cả route lẫn nút; cùng cửa quyền với upload; gọi lại là no-op và **không** ghi audit thứ hai; `refreshFileSummaries` để `completionChecks` thấy bộ ảnh mới; audit không PII; không đếm ảnh GCN còn lại ở tầng route |
 
 ### ⚠️ SỬA MỘT TEST ĐANG XANH SAI
 
@@ -385,8 +415,12 @@ Không tin test xanh mà chưa thấy nó đỏ. Đã đột biến source rồi
 | `kind: "OFFICER_UPLOAD_COMPLETE"` → `"PUBLIC_UPLOAD_COMPLETE"` | 1 ca đỏ |
 | Bỏ một lời gọi `discardIfOrphan` ở nhánh lỗi | 1 ca đỏ |
 | Nút tải ảnh hiện với mọi cán bộ (`isClaimedByMe && ...` → `true`) | 1 ca đỏ |
+| Thêm `discardFile` vào route gỡ ảnh cho "gọn kho" | 1 ca đỏ |
+| Cho gỡ cả ảnh CCCD (`documentType !== "CERTIFICATE"` → `false`) | 1 ca đỏ |
+| Bỏ chốt `status === "UPLOADED"` → audit ghi mỗi lần gọi | 1 ca đỏ |
+| Bỏ chốt `mayStaffEdit` ở route gỡ ảnh | 1 ca đỏ |
 
-Đã revert cả 6; `git diff src/` trống trước khi commit.
+Đã revert cả 10; `git diff src/` trống trước mỗi commit.
 
 ## 12. Final verification
 
@@ -394,10 +428,10 @@ Không tin test xanh mà chưa thấy nó đỏ. Đã đột biến source rồi
 | ---- | ------------------ | ------------- |
 | `npm run typecheck` | 0 lỗi | **0 lỗi** |
 | `npm run lint` | 0 lỗi / 5 warning | **0 lỗi / 5 warning** (đúng baseline) |
-| `npx vitest run` | 687 pass / 10 skip | **732 pass / 10 skip** (83 file pass, 2 skip) |
-| `npm run build` | đạt | **đạt** — bảng route có cả `/api/submissions/[submissionId]/uploads/complete` và `/initiate` |
+| `npx vitest run` | 687 pass / 10 skip | **751 pass / 10 skip** (84 file pass, 2 skip) |
+| `npm run build` | đạt | **đạt** — bảng route có `/api/submissions/[submissionId]/uploads/{initiate,complete}` và `/files/[fileId]` |
 
-732 = 687 + 44 ca mới + 1 ca thêm ở `upload-metrics`. **Không test cũ nào fail hay mới bị skip.**
+751 = 687 + 63 ca mới + 1 ca thêm ở `upload-metrics`. **Không test cũ nào fail hay mới bị skip.**
 
 `npm run test:e2e` **KHÔNG chạy** — Playwright cần app chạy thật, và môi trường này không có
 credential (chỉ có `.env.example`; `loadServerEnvironment()` đòi ~15 biến nên `npm run dev` không
@@ -418,6 +452,10 @@ khởi động được).
 | AC-09 | Nhánh `notFound()` vs lỗi tạm của `page.tsx` được khóa bằng test | **PASS** | `tests/submission-detail-page.test.ts` + mutation test |
 | AC-10 | Không migration | **PASS** | `request_log.kind`/`audit_logs.action` là `text` không check constraint |
 | AC-11 | Một lượt tải ảnh thật thành công trên môi trường có Drive | **NOT_TESTED** | cần credential — xem §14 |
+| AC-13 | Cán bộ gỡ được ảnh GCN; ảnh biến khỏi khung xem nhưng **vẫn còn trên Drive** | **CODE_COMPLETE / NOT_TESTED_MANUALLY** | `DELETE` + 19 test; `listFiles` mặc định lọc `UPLOADED` |
+| AC-14 | Không có đường nào xóa thật tệp trên Drive từ chức năng gỡ ảnh | **PASS** (test) | 3 ca phủ định + mutation test |
+| AC-15 | Không gỡ được ảnh CCCD | **PASS** (test) | route 400 + nút không hiện; mutation test |
+| AC-16 | Gỡ lại ảnh đã gỡ là no-op, không ghi audit thứ hai | **PASS** (test) | nhánh `status === "UPLOADED"`; `markFileStatus` khóa dòng |
 | AC-12 | Lazy ảnh / accordion AI của Đợt 2B | **NOT_TESTED** | cần testing-library + jsdom, chưa được duyệt |
 
 ## 14. Manual verification required
@@ -446,21 +484,37 @@ Chưa làm được ở đây: không có `.env`, mọi biến trống, `loadSer
 13. Ngắt mạng giữa lúc tải rồi nối lại → `uploadWithResume` tiếp tục hoặc báo lỗi có thể hiểu; nếu
     thất bại, kiểm Drive **không** còn tệp mồ côi.
 
+Thêm cho chức năng **gỡ ảnh**:
+
+14. Chọn một tab ảnh GCN → xác nhận **có** nút thùng rác trên thanh công cụ; chọn một tab ảnh CCCD →
+    xác nhận **không** có nút đó.
+15. Bấm nút gỡ → hiện dải xác nhận đỏ với đúng nhãn ảnh đang xem → bấm **Hủy** → không có gì xảy ra.
+16. Bấm gỡ lần nữa → **Xác nhận gỡ** → ảnh biến khỏi danh sách tab **mà không cần tải lại trang**.
+17. Kiểm thư mục Drive: **tệp vừa gỡ vẫn còn nguyên**. Kiểm `public_files`: dòng đó
+    `status = 'DELETED'`.
+18. Kiểm `audit_logs`: có đúng **một** dòng `SUBMISSION_OFFICER_FILE_DELETED`.
+19. Gỡ hết ảnh GCN → bấm **Tiếp nhận** → phải bị chặn với lỗi `FILES_CERTIFICATE_MISSING`
+    ("Thiếu ảnh Giấy chứng nhận"), không phải lỗi 500.
+20. **Trả hồ sơ** rồi thử gọi thẳng `DELETE` bằng curl với cookie hợp lệ → 403, không phải 500.
+
 ## 15. Remaining issues and warnings
 
-1. **Chưa có `DELETE` ảnh cho cán bộ.** Gỡ hẳn một ảnh sai vẫn phải thay bằng ảnh khác. Cần quyết
-   định nghiệp vụ trước khi làm.
-2. **Chưa mở cho hồ sơ đã `ACCEPTED`.** Nếu nghiệp vụ cần, đường đúng là ghép vào
+1. **Chưa có "gán lại ảnh CCCD sang chủ khác".** Đây là lỗ thật mà cả thay ảnh lẫn gỡ ảnh đều không
+   vá được: tải CCCD của chủ 2 vào ô của chủ 1 khi chủ 1 chưa có ảnh nào thì ô đó bị chiếm và không
+   làm trống được. Cách vá đúng là đổi `owner_id`, **không** phải mở cửa gỡ cho CCCD.
+2. **Ảnh `DELETED`/`REPLACED` tích trên Drive vĩnh viễn** — không có script nào dọn, và đó là cố ý.
+   Nếu dung lượng thành vấn đề thật thì bàn **chính sách lưu trữ**, đừng cho xóa thật.
+3. **Chưa mở cho hồ sơ đã `ACCEPTED`.** Nếu nghiệp vụ cần, đường đúng là ghép vào
    `mayAmendOfficialRecord` (đòi `amendmentReason`), **không** phải nới `mayStaffEdit`.
-3. **Không có test render cho `OfficerFileUpload`.** Điều kiện hiện nút được khóa bằng test đọc mã
+4. **Không có test render cho `OfficerFileUpload`** và cho dải xác nhận gỡ ảnh trong `DocumentViewer`. Điều kiện hiện nút được khóa bằng test đọc mã
    nguồn, nhưng hành vi thật của ô chọn tệp và checkbox thay ảnh thì chưa.
-4. **33 test của 2C đọc mã nguồn, không chạy route thật.** Cùng cách và cùng lý do với
+5. **52 test của 2C đọc mã nguồn, không chạy route thật.** Cùng cách và cùng lý do với
    `tests/public-upload-complete-route.test.ts` đã có từ Phase 5. Chúng bắt hồi quy về *cấu trúc*
    (mất một chốt quyền, quên một `discardIfOrphan`, lẫn loại idempotency) chứ **không** chứng minh
    route chạy đúng với Supabase và Drive thật.
-5. **4 migration của đợt trước vẫn đang nợ.** Không liên quan tới đợt này nhưng chặn deploy.
-6. **Không có số đo P50/P95** cho bất cứ thứ gì. Không tuyên bố đạt mục tiêu hiệu năng nào.
-7. 5 warning lint có sẵn, không sửa (ngoài phạm vi).
+6. **4 migration của đợt trước vẫn đang nợ.** Không liên quan tới đợt này nhưng chặn deploy.
+7. **Không có số đo P50/P95** cho bất cứ thứ gì. Không tuyên bố đạt mục tiêu hiệu năng nào.
+8. 5 warning lint có sẵn, không sửa (ngoài phạm vi).
 
 ## 16. Regression and compatibility notes
 
@@ -471,25 +525,30 @@ Chưa làm được ở đây: không có `.env`, mọi biến trống, `loadSer
 - `submission-detail.tsx` chỉ **thêm** một khối render có điều kiện; không sửa nhánh nào đang có.
 - Không đổi schema → không cần rollback dữ liệu, không cần backfill.
 - `PublicFileSummary` trả về từ `appendFile` không đổi hình dạng.
+- `DocumentViewer.onDeleteFile` là prop **tùy chọn**; không truyền thì component hành xử y như trước.
+- `GET /api/submissions/:id/files/:fileId` không đổi một dòng nào — chỉ thêm `DELETE` vào cùng file.
 
 ## 17. Rollback plan
 
 Không có migration nên rollback là thuần code:
 
 ```bash
-git revert af4b9e1        # chỉ bỏ Đợt 2C, giữ test của 2B
+git revert 69dfa2e        # chỉ bỏ chức năng gỡ ảnh, giữ tải ảnh
+git revert af4b9e1        # bỏ cả Đợt 2C, giữ test của 2B
 git revert b548c7d        # nếu muốn bỏ cả test (không nên)
 ```
 
 Ảnh cán bộ đã tải trước khi revert **vẫn nằm trong `public_files` và trên Drive** — chúng là bản ghi
-hợp lệ như ảnh của hộ dân, chỉ mất đường tải thêm. Không cần dọn dữ liệu.
+hợp lệ như ảnh của hộ dân, chỉ mất đường tải thêm. Ảnh đã gỡ vẫn ở `status = 'DELETED'`; muốn phục hồi
+thì `update public.public_files set status = 'UPLOADED' where file_id = ...` rồi refresh
+`file_summary_json` — **tệp trên Drive chưa bao giờ bị xóa** nên không mất gì. Không cần dọn dữ liệu.
 
 ## 18. Recommended next action
 
 1. Áp 4 migration đang nợ trên Preview, rồi chạy preflight.
 2. Chạy 13 bước ở §14 trên Preview.
-3. Nếu nghiệp vụ cần gỡ hẳn ảnh: chốt quyết định rồi làm `DELETE /api/submissions/:id/files/:fileId`
-   (kèm audit, và đánh `DELETED` thay vì xóa thật trên Drive).
+3. Nếu vận hành gặp ca "ảnh CCCD gán sai chủ": làm thao tác **đổi `owner_id`** của ảnh, đừng mở cửa
+   gỡ cho CCCD.
 4. Nếu muốn có test render cho phần client (2B lẫn 2C): duyệt thêm `@testing-library/react` +
    `jsdom` làm devDependency.
 
@@ -502,12 +561,13 @@ npm ci
 # Kiểm tra (đúng các lệnh đã chạy cho báo cáo này)
 npm run typecheck            # 0 lỗi
 npm run lint                 # 0 lỗi, 5 warning có sẵn
-npx vitest run               # 732 pass / 10 skip
+npx vitest run               # 751 pass / 10 skip
 npm run build                # đạt; kiểm bảng route có 2 endpoint uploads mới
 git checkout next-env.d.ts   # build sửa file này, trả lại nguyên trạng
 
 # Chạy riêng test của đợt này
 npx vitest run tests/officer-file-upload.test.ts \
+               tests/officer-file-delete.test.ts \
                tests/proxy-no-store.test.ts \
                tests/submission-detail-page.test.ts \
                tests/public-upload-complete-route.test.ts \
