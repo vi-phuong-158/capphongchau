@@ -2414,7 +2414,7 @@ export class PublicIntakeRepository {
           idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
         ) values (
           ${input.idempotencyKey}, 'OFFICER_UPLOAD_COMPLETE', ${input.requestId},
-          ${input.mutationHash}, ${transaction.json(summary as any)}, now() + interval '24 hours'
+          ${input.mutationHash}, ${transaction.json(serializeFileSummary(summary))}, now() + interval '24 hours'
         )
       `;
 
@@ -3053,7 +3053,7 @@ export class PublicIntakeRepository {
     const summaries = rows.map((row) => this.fileSummary(mapFile(row)));
     await sql`
       update public.public_submissions
-      set file_summary_json = ${sql.json(summaries as any)}, updated_at = now()
+      set file_summary_json = ${sql.json(summaries.map(serializeFileSummary))}, updated_at = now()
       where submission_id = ${submissionId}
     `;
   }
@@ -3255,4 +3255,22 @@ export class PublicFileMutationRejectedError extends Error {
     super(message);
     this.name = "PublicFileMutationRejectedError";
   }
+}
+
+type JsonScalar = string | number | boolean | null;
+type JsonRecord = Record<string, JsonScalar>;
+
+function serializeFileSummary(summary: PublicFileSummary): JsonRecord {
+  return {
+    fileId: summary.fileId,
+    ownerId: summary.ownerId,
+    documentType: summary.documentType,
+    status: summary.status,
+    sizeBytes: summary.sizeBytes,
+    checksum: summary.checksum,
+    createdAt: summary.createdAt,
+    updatedAt: summary.updatedAt,
+    driveFileId: summary.driveFileId ?? null,
+    mimeType: summary.mimeType ?? null,
+  };
 }
