@@ -675,6 +675,28 @@ export function SubmissionDetail({
             submissionId={submission.submissionId}
             files={submission.files}
             ownerIds={draft?.owners.map((owner) => owner.id) ?? []}
+            /*
+             * Cùng điều kiện với `mayStaffEdit` ở server. Không truyền hàm = viewer không hiện nút,
+             * nên quyền nằm đúng một nơi ở client và vẫn được server kiểm lại.
+             */
+            onDeleteFile={
+              isClaimedByMe && submission.status === "UNDER_REVIEW"
+                ? async (fileId) => {
+                    const token = await csrfToken();
+                    const response = await fetch(
+                      `/api/submissions/${submission.submissionId}/files/${fileId}`,
+                      { method: "DELETE", headers: { "x-csrf-token": token } },
+                    );
+                    if (!response.ok) {
+                      const data = (await response.json().catch(() => null)) as {
+                        error?: { message?: string };
+                      } | null;
+                      throw new Error(data?.error?.message ?? "Không gỡ được ảnh khỏi hồ sơ.");
+                    }
+                    setSubmission(await loadSubmission(submission.submissionId));
+                  }
+                : undefined
+            }
           />
           {/*
             Cùng điều kiện với `mayStaffEdit` ở server (đang giữ hồ sơ + `UNDER_REVIEW`). Ẩn nút chỉ

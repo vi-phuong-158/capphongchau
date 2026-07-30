@@ -1857,3 +1857,37 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
   bằng ảnh khác. Cũng chưa mở cho hồ sơ đã `ACCEPTED` (đường đó là `mayAmendOfficialRecord`, đòi lý
   do điều chỉnh — chưa gộp vào đợt này).
 
+## [2026-07-30] Đợt 2C — gỡ ảnh là XÓA MỀM, chỉ ảnh GCN, và gỡ được cả ảnh do hộ dân tải lên
+
+- **Quyết định:** `DELETE /api/submissions/:id/files/:fileId` đổi `status` sang `DELETED` và **không
+  bao giờ** xóa tệp trên Drive. Sao y hợp đồng của đường hộ dân
+  (`DELETE /api/public/submissions/current/files/:fileId`) đã có từ trước, không phát minh cái mới.
+- **Vì sao xóa mềm:** bất biến ở đây không đối xứng. Giữ lại một ảnh đáng gỡ thì cán bộ bấm lại, mất
+  vài giây; xóa thật một ảnh giấy tờ là bằng chứng của hộ dân mất vĩnh viễn và không ai biết cho tới
+  lúc cần tra lại. `isDriveFileAdopted` không lọc theo `status` nên
+  `scripts/audit-orphan-public-files.ts` vẫn coi tệp là "đã có hồ sơ nhận" và không dọn nó.
+- **Hệ quả đã chấp nhận:** ảnh `DELETED`/`REPLACED` tích lại trên Drive **vĩnh viễn**, không có script
+  nào dọn. Nếu dung lượng Drive thành vấn đề thật thì bàn **chính sách lưu trữ** (chuyển ảnh của hồ sơ
+  đã `ACCEPTED` quá N tháng sang thư mục lưu trữ), KHÔNG giải quyết bằng cách cho xóa thật.
+- **Chỉ ảnh `CERTIFICATE`.** `completionChecks.checkFiles` chặn tiếp nhận khi một chủ sử dụng thiếu
+  CCCD mặt trước/mặt sau, nên "gỡ một ảnh CCCD" chỉ tạo ra trạng thái không tiếp nhận được mà cán bộ
+  phải sửa ngay. Luồng đúng cho CCCD là **thay ảnh** (`uploads/*` kèm `replaceFileId`) — một bước,
+  không có khoảng thời gian hồ sơ bị hổng. Đây cũng đúng luật của đường hộ dân.
+- **Gỡ được cả ảnh do hộ dân tự tải lên,** không chỉ ảnh chính cán bộ vừa bổ sung. Người dùng chốt
+  ngày 2026-07-30. Lý do: cán bộ là người quyết định hồ sơ gồm những gì (cùng tinh thần quyết định
+  `[2026-07-25] Q2`), xóa mềm không mất dữ liệu, và audit ghi rõ ai làm. Chặn lại thì một trang GCN
+  hộ dân chụp nhầm nằm trong hồ sơ vĩnh viễn.
+- **KHÔNG đòi `idempotency-key`,** khác đường hộ dân ở đúng điểm này. `markFileStatus` khóa dòng
+  (`for update`) rồi mới chuyển trạng thái và **không làm gì** nếu đã ở `DELETED`, nên gọi lại là
+  no-op tự nhiên; route cũng chỉ ghi audit trong nhánh `status === "UPLOADED"` nên không có dòng audit
+  trùng. Thêm một khóa không dùng tới chỉ là hình thức.
+- **KHÔNG chặn khi đây là ảnh GCN cuối cùng.** Việc đó thuộc `completionChecks`
+  (`FILES_CERTIFICATE_MISSING`) lúc tiếp nhận. Chặn ngay ở route là bắt cán bộ muốn thay cả bộ ảnh
+  phải làm ngược thứ tự (tải mới trước, gỡ sau) và có thể vượt trần 10 ảnh giữa đường.
+- **Không migration.** `DELETED` đã có trong check constraint của `public_files.status` từ
+  `202607230001`, và `repository.markFileDeleted` đã tồn tại. `listFiles` mặc định lọc
+  `status = 'UPLOADED'` nên khung xem ảnh tự ẩn ảnh đã gỡ, không sửa read path.
+- **Chưa làm:** "gán lại ảnh CCCD sang chủ khác" — đây là lỗ thật mà thay ảnh không vá được (tải CCCD
+  của chủ 2 vào ô của chủ 1 khi chủ 1 chưa có ảnh nào). Cách vá đúng là một thao tác đổi `owner_id`,
+  KHÔNG phải mở cửa gỡ cho CCCD. Chờ tới khi vận hành gặp ca thật.
+

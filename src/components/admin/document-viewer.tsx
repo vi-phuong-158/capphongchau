@@ -12,6 +12,13 @@ interface DocumentViewerProps {
   submissionId: string;
   files: readonly DocumentFile[];
   ownerIds: readonly string[];
+  /**
+   * Gỡ ảnh đang xem khỏi hồ sơ (Đợt 2C). Không truyền = không hiện nút, nên quyền "ai được gỡ" nằm ở
+   * bên gọi chứ không nằm ở đây — cùng nơi đã quyết định có hiện ô tải ảnh hay không.
+   *
+   * Chỉ ảnh Giấy chứng nhận gỡ được; server cũng từ chối loại khác. Nút không hiện với ảnh CCCD.
+   */
+  onDeleteFile?: (fileId: string) => Promise<void>;
 }
 
 export function documentFileLabel(
@@ -105,11 +112,20 @@ function usePreviewImages(submissionId: string) {
   };
 }
 
-function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerProps) {
+function DocumentViewerState({
+  submissionId,
+  files,
+  ownerIds,
+  onDeleteFile,
+}: DocumentViewerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  /** Xác nhận hai bước ngay tại chỗ — `window.confirm` bị chặn ở một số cấu hình trình duyệt. */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const lightboxTitleId = useId();
   const { request: requestPreview, sourceFor, errorFor } = usePreviewImages(submissionId);
   /** Chỉ tải ảnh đang được chọn — các ảnh còn lại chờ cán bộ bấm sang tab của nó. */
@@ -150,6 +166,8 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
 
   const activeFile = files[selectedIndex] || files[0];
   const activeLabel = documentFileLabel(activeFile, files, ownerIds);
+  // Chỉ ảnh GCN gỡ được: CCCD là ràng buộc bắt buộc của `completionChecks`, luồng đúng là thay ảnh.
+  const canDelete = Boolean(onDeleteFile) && activeFile.documentType === "CERTIFICATE";
 
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 3));
   const handleZoomOut = () => setZoom((z) => Math.max(z - 0.5, 1));
@@ -257,8 +275,68 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
               />
             </svg>
           </button>
+          {canDelete && (
+            <>
+              <div className="h-4 w-px bg-stone-300 mx-1" />
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                disabled={deleting || confirmingDelete}
+                title="Gỡ ảnh này khỏi hồ sơ"
+                className="rounded p-1 text-rose-700 hover:bg-rose-100 disabled:opacity-40"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {canDelete && confirmingDelete && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-900">
+          <span>
+            Gỡ <strong>{activeLabel}</strong> khỏi hồ sơ? Ảnh vẫn được lưu lại trong lịch sử hồ sơ,
+            không bị xóa khỏi kho.
+          </span>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={async () => {
+              setDeleting(true);
+              setDeleteError(null);
+              try {
+                await onDeleteFile!(activeFile.fileId);
+                // Danh sách ảnh do bên gọi tải lại; `key` theo bộ fileId sẽ dựng lại component nên
+                // không cần tự đặt lại `selectedIndex` ở đây.
+                setConfirmingDelete(false);
+              } catch (reason) {
+                setDeleteError(reason instanceof Error ? reason.message : "Không gỡ được ảnh.");
+              } finally {
+                setDeleting(false);
+              }
+            }}
+            className="rounded bg-rose-600 px-2.5 py-1 font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+          >
+            {deleting ? "Đang gỡ…" : "Xác nhận gỡ"}
+          </button>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => setConfirmingDelete(false)}
+            className="rounded border border-rose-300 px-2.5 py-1 font-medium text-rose-800 hover:bg-rose-100"
+          >
+            Hủy
+          </button>
+          {deleteError && <span className="font-medium">{deleteError}</span>}
+        </div>
+      )}
 
       {/* Image Thumbnail Selector Tabs */}
       <div className="flex gap-1.5 overflow-x-auto border-b border-stone-200 bg-stone-100 p-2">
@@ -273,6 +351,8 @@ function DocumentViewerState({ submissionId, files, ownerIds }: DocumentViewerPr
                 setSelectedIndex(idx);
                 setZoom(1);
                 setRotation(0);
+                setConfirmingDelete(false);
+                setDeleteError(null);
               }}
               className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                 isSelected

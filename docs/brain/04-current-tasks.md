@@ -50,8 +50,12 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   `src/components/admin/officer-file-upload.tsx`, hiện cùng điều kiện với server.
   **Chưa kiểm thủ công trên môi trường thật** — cần đăng nhập Google + Drive thật; xác minh bằng
   33 test đọc mã nguồn (đã kiểm chứng không rỗng bằng 4 đột biến) + typecheck + lint + build.
-  **Còn thiếu, biết trước:** không có `DELETE` ảnh cho cán bộ (gỡ ảnh sai phải thay bằng ảnh khác);
-  chưa mở cho hồ sơ đã `ACCEPTED`.
+  **Bổ sung cùng ngày:** đã có `DELETE /api/submissions/:id/files/:fileId` — **xóa mềm**
+  (`status = DELETED`, không chạm Drive), **chỉ ảnh GCN**, gỡ được cả ảnh do hộ dân tải lên (người
+  dùng chốt). Nút gỡ nằm ở thanh công cụ khung xem ảnh, xác nhận hai bước. Không migration.
+  **Còn thiếu, biết trước:** chưa mở cho hồ sơ đã `ACCEPTED`; chưa có "gán lại ảnh CCCD sang chủ
+  khác" (lỗ thật mà thay ảnh không vá được — chờ ca thật, và cách vá đúng là đổi `owner_id` chứ
+  không phải mở cửa gỡ cho CCCD).
 
 ## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
 

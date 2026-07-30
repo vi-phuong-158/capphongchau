@@ -2916,3 +2916,33 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   không có test render (repo chưa có testing-library/jsdom).
 - **Chưa merge, chưa deploy.**
 
+## [2026-07-30] Đợt 2C (bổ sung) — cán bộ gỡ ảnh Giấy chứng nhận khỏi hồ sơ
+
+- **Agent:** Claude Code
+- **Thay đổi:** thêm `DELETE` vào `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts`
+  (file đã có `GET` ảnh xem trước). Xóa **mềm**: `markFileDeleted` → `status = 'DELETED'`, tệp nằm
+  nguyên trên Drive. Chỉ ảnh `CERTIFICATE`. Cùng ba lớp chặn với `uploads/*` (`mayStaffEdit`), không
+  đòi `idempotency-key`. Audit `SUBMISSION_OFFICER_FILE_DELETED`.
+  `DocumentViewer` nhận prop tùy chọn `onDeleteFile` — không truyền = không hiện nút, nên quyền nằm ở
+  bên gọi; nút chỉ hiện với ảnh GCN, xác nhận hai bước ngay tại chỗ (không dùng `window.confirm`).
+- **File đã sửa:** `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts`,
+  `src/components/admin/document-viewer.tsx`, `src/components/submission-detail.tsx`,
+  `tests/officer-file-delete.test.ts` (mới),
+  `docs/brain/{01-architecture,03-decisions,04-current-tasks,06-ai-working-log}.md`, `AGENTS.md`.
+- **Lý do:** Đợt 2C để lại đúng một lỗ — cán bộ tải nhầm hoặc hộ dân nộp một trang GCN sai thì không
+  có cách nào gỡ, chỉ thay được bằng ảnh khác. Người dùng chốt cho gỡ cả ảnh do hộ dân tải lên.
+- **Không làm:** không mở cửa gỡ cho ảnh CCCD (`completionChecks` chặn tiếp nhận khi thiếu CCCD, gỡ
+  chỉ tạo trạng thái bí — luồng đúng là thay ảnh); không chặn ảnh GCN cuối cùng ở tầng route (việc đó
+  của `completionChecks`); không xóa tệp trên Drive.
+- **Migration:** **không có.** `DELETED` đã có trong check constraint `public_files.status` từ
+  `202607230001`; `repository.markFileDeleted` đã tồn tại; `listFiles` mặc định lọc
+  `status = 'UPLOADED'` nên khung xem ảnh tự ẩn ảnh đã gỡ.
+- **Kiểm tra:** baseline `9ed64ca` — typecheck 0 lỗi, lint 0 lỗi/5 warning, 732 pass/10 skip. Sau khi
+  sửa — typecheck **0 lỗi**, lint **0 lỗi/5 warning** (đúng baseline), `npx vitest run`
+  **751 pass/10 skip** (732 + 19 test mới), `npm run build` đạt.
+  **Đã kiểm chứng test không rỗng bằng 4 đột biến source:** thêm `discardFile` vào route → 1 ca đỏ;
+  cho gỡ cả ảnh CCCD → 1 ca đỏ; bỏ chốt `status === "UPLOADED"` (audit ghi mỗi lần gọi) → 1 ca đỏ;
+  bỏ chốt `mayStaffEdit` → 1 ca đỏ. Đã revert cả bốn.
+  **Giới hạn xác minh:** 19 test mới **đọc mã nguồn**, không chạy route thật. **Chưa kiểm thủ công.**
+- **Chưa merge, chưa deploy.**
+

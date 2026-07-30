@@ -133,6 +133,8 @@ src/modules/public-intake/upload-commit.ts   DÙNG CHUNG cho hai đường tải
                                               (2026-07-30, Đợt 2C)
 src/components/admin/officer-file-upload.tsx  ô tải ảnh của cán bộ trên màn duyệt; hiện khi
                                               isClaimedByMe + UNDER_REVIEW (2026-07-30, Đợt 2C)
+src/components/admin/document-viewer.tsx      thêm prop `onDeleteFile` — không truyền = không hiện
+                                              nút gỡ, nên quyền nằm ở bên gọi (2026-07-30, Đợt 2C)
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive + findOrCreateFolder
                                               (cache trong tiến trình + PostgreSQL advisory lock
@@ -230,6 +232,19 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │   ├── audit SUBMISSION_OFFICER_FILE_UPLOADED — metadata chỉ documentType/fileId/sizeBytes/
 │   │   replaced, KHÔNG driveFileId, KHÔNG tên tệp, KHÔNG ownerId
 │   └── dùng chung upload-commit.ts với đường hộ dân (trần + discardIfOrphan)
+│
+├── DELETE /api/submissions/:id/files/:fileId — CÁN BỘ GỠ ẢNH GCN (2026-07-30, Đợt 2C)
+│   ├── cùng ba lớp chặn với uploads/* (mayStaffEdit); không đòi idempotency-key
+│   ├── repository.markFileDeleted → markFileStatus: `for update` + no-op khi đã DELETED
+│   │   + refreshFileSummaries (completionChecks đọc `fileSummaries`, không refresh là hồ sơ
+│   │   thiếu ảnh vẫn tiếp nhận được)
+│   ├── ⚠️ XÓA MỀM. Tuyệt đối KHÔNG discardFile/drive.files.delete ở đây. isDriveFileAdopted
+│   │   không lọc status nên audit-orphan-public-files.ts vẫn coi tệp là đã có hồ sơ nhận →
+│   │   ảnh đã gỡ tra lại được. Hệ quả đã chấp nhận: ảnh DELETED/REPLACED tích trên Drive vĩnh viễn.
+│   ├── CHỈ `CERTIFICATE` — CCCD là ràng buộc bắt buộc của completionChecks.checkFiles, gỡ nó chỉ
+│   │   tạo trạng thái không tiếp nhận được; luồng đúng là THAY ảnh
+│   ├── KHÔNG chặn ảnh GCN cuối cùng — việc đó của completionChecks (FILES_CERTIFICATE_MISSING)
+│   └── audit SUBMISSION_OFFICER_FILE_DELETED (documentType/fileId/sizeBytes)
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
     ├── isHeldByOfficer(record) → 409 INVALID_STATE NGAY, TRƯỚC Turnstile (2026-07-29, Đợt 2A-3)
     ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
@@ -571,6 +586,15 @@ POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE
                                                         `REQUEST_SUPPLEMENT` đã bị chặn server-side
                                                         2026-07-29, Đợt 2A-1 — luồng mới không còn
                                                         yêu cầu bổ sung, cán bộ sửa trực tiếp)
+DELETE /api/submissions/:submissionId/files/:fileId   (2026-07-30, Đợt 2C — cán bộ gỡ ảnh GCN.
+                                                        XÓA MỀM `status = DELETED`, KHÔNG chạm
+                                                        Drive. CHỈ `CERTIFICATE`: CCCD là ràng buộc
+                                                        của completionChecks, luồng đúng là thay
+                                                        ảnh. Gỡ được cả ảnh do hộ dân tải lên.
+                                                        Không đòi idempotency-key —
+                                                        `markFileStatus` khóa dòng và no-op khi đã
+                                                        `DELETED`. Audit
+                                                        `SUBMISSION_OFFICER_FILE_DELETED`)
 POST /api/submissions/:submissionId/uploads/initiate  (2026-07-30, Đợt 2C — cán bộ tự tải ảnh
 POST /api/submissions/:submissionId/uploads/complete    giấy tờ bổ sung. Cửa quyền `mayStaffEdit`
                                                         (đang giữ hồ sơ + `UNDER_REVIEW`) +
