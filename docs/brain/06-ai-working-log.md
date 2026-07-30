@@ -2848,3 +2848,25 @@ repository,storage,route-context,validation}.ts`, `src/app/api/public/submission
   thêm vào là đổi stack, ngoài phạm vi task. Xác minh bằng typecheck + lint + build + đọc code.
   **Chưa có số đo P50/P95 trên Preview**, không tuyên bố đạt mục tiêu hiệu năng nào.
 - **Chưa merge, chưa push, chưa deploy.**
+
+## [2026-07-30] Test cho hai điểm không có test của Đợt 2B
+
+- **Agent:** Claude Code
+- **Thay đổi:** thêm test tự động cho hai chỗ Đợt 2B sửa mà không khóa được bằng test nào:
+  (a) `src/proxy.ts` gắn `cache-control: private, no-store`; (b) trang
+  `/submissions/[submissionId]` phân biệt **hồ sơ không tồn tại** (`notFound()`) với **lỗi tạm khi
+  nạp sẵn** (vẫn render, `initialSubmission={null}` để client tự fetch). Không sửa source.
+- **File đã sửa:** `tests/proxy-no-store.test.ts` (mới), `tests/submission-detail-page.test.ts`
+  (mới), `docs/brain/06-ai-working-log.md`.
+- **Lý do:** `tests/public-surface-guard.test.ts` chỉ khóa `matcher` của proxy — gỡ dòng
+  `cache-control` đi thì matcher vẫn xanh, HTML chứa PII được phép nằm lại trong cache trung gian
+  mà không test nào kêu. Hai nhánh `null` và `throw` trong `page.tsx` cách nhau đúng một dòng sửa;
+  đảo chúng thì cán bộ thấy "không tìm thấy hồ sơ" khi cơ sở dữ liệu chỉ chớp tắt một nhịp, trong
+  khi typecheck và lint đều xanh.
+- **Kiểm tra:** `npx vitest run` **698 pass/10 skip** (687 + 11 test mới, không test cũ nào fail
+  hay mới skip), `npm run typecheck` 0 lỗi, `npm run lint` 0 lỗi/5 warning (đúng baseline).
+  **Đã kiểm chứng test không rỗng bằng đột biến source:** bỏ dòng `response.headers.set(
+  "cache-control", ...)` → 2 ca đỏ; đổi `catch { initialSubmission = null }` thành
+  `catch { missing = true }` → 1 ca đỏ. Đã revert cả hai đột biến, `git diff src/` trống.
+- **Không giải quyết:** lazy ảnh và accordion AI (bước 3–10 trong kịch bản thủ công) vẫn không có
+  test — cần `@testing-library/react` + jsdom, tức thêm devDependency, chưa được duyệt.
