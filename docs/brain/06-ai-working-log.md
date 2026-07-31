@@ -1,5 +1,17 @@
 # 06 — AI Working Log
 
+## [2026-07-31] Bỏ yêu cầu xuất `CHATGPT_HANDOFF.md`
+
+- **Agent:** Claude Code.
+- **Thay đổi:** gỡ nghĩa vụ tạo/cập nhật `CHATGPT_HANDOFF.md` sau mỗi đợt thi công. Thay bằng: báo
+  cáo trong chat + entry trong chính file này.
+- **File đã sửa:** `CLAUDE.md` (mục "Quy trình bàn giao"), `AGENTS.md` §10,
+  `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md` (thêm cảnh báo đầu file, không xóa nội dung),
+  `docs/brain/03-decisions.md`.
+- **Lý do:** chủ dự án yêu cầu. Chi tiết trong `03-decisions.md` [2026-07-31].
+- **Kiểm tra:** `prettier --check` đạt trên 4 file đã sửa. Không chạm mã nguồn nên không chạy lại
+  test — thay đổi thuần tài liệu.
+
 ## [2026-07-31] Trạm AI cục bộ: coding agent đọc ảnh GCN và ghi thẳng Supabase
 
 - **Agent:** Claude Code.

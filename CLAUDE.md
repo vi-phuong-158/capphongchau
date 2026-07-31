@@ -77,23 +77,22 @@ schema Google Sheets · luồng xử lý chính —
   dọn biến/import thừa do mình tạo.
 - **Theo mục tiêu:** biến task thành mục tiêu xác minh được — [Bước làm] → [Cách kiểm tra].
 
-## Quy trình bàn giao bắt buộc
+## Quy trình bàn giao
 
-Trước khi thực hiện bất kỳ nhiệm vụ sửa code nào, phải đọc
-`AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`.
+> **Đổi từ 2026-07-31:** không còn bắt buộc tạo `CHATGPT_HANDOFF.md`. Báo cáo trong chat + entry
+> trong `docs/brain/06-ai-working-log.md` là đủ. Chỉ tạo báo cáo bàn giao riêng khi người dùng yêu
+> cầu rõ.
 
-Sau khi thực hiện, phải tạo hoặc cập nhật `CHATGPT_HANDOFF.md` tại thư mục
-gốc repository theo đúng cấu trúc và yêu cầu trong tài liệu trên.
+Trước khi sửa code, kiểm tra nhánh hiện tại, `git status` và các thay đổi chưa commit — không ghi đè
+việc đang làm dở của người khác. Chạy baseline (test/lint/typecheck) đủ để phân biệt lỗi có sẵn với
+lỗi do mình gây ra.
 
-Không được chỉ báo cáo kết quả trong cửa sổ chat của agent. Báo cáo chính thức
-phải được ghi vào `CHATGPT_HANDOFF.md`.
+Kết thúc nhiệm vụ, báo cáo trong chat và ghi entry `docs/brain/06-ai-working-log.md` với:
 
-Không được kết thúc nhiệm vụ nếu chưa ghi:
-
-- Git status và commit;
-- Baseline trước thay đổi;
-- Danh sách file và symbol đã sửa;
-- Kết quả test, build, lint và typecheck;
-- Acceptance criteria;
+- File và symbol đã sửa, lý do;
+- Kết quả test/lint/typecheck theo đúng lệnh đã chạy — không khai "pass" nếu chưa chạy;
 - Rủi ro và việc còn lại;
-- Diff hoặc các đoạn diff quan trọng.
+- Phần chưa xác minh phải đánh dấu rõ.
+
+`AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md` vẫn còn trong repo làm tham chiếu cho quy tắc thi công và
+điều kiện dừng, nhưng phần yêu cầu xuất file `CHATGPT_HANDOFF.md` đã bỏ.

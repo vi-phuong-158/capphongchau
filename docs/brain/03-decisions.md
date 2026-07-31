@@ -1,5 +1,21 @@
 # 03 — Technical Decisions
 
+## [2026-07-31] Bỏ yêu cầu xuất `CHATGPT_HANDOFF.md`
+
+- **Quyết định:** agent không còn phải tạo/cập nhật `CHATGPT_HANDOFF.md` sau mỗi đợt thi công. Báo
+  cáo trong chat cộng với entry trong `docs/brain/06-ai-working-log.md` là đủ. Chỉ làm báo cáo bàn
+  giao đầy đủ khi người dùng yêu cầu rõ trong chính nhiệm vụ đó.
+- **Lý do:** file bàn giao sinh ra cho quy trình "người dùng tải một file lên ChatGPT để nghiệm thu".
+  Thực tế hiện nay người dùng làm việc trực tiếp với agent trong repository, nên bản báo cáo dài kèm
+  toàn bộ diff chỉ lặp lại thứ đã có trong `git log`/`git diff` và trong nhật ký làm việc.
+- **Giữ lại:** mục 4 (kiểm tra git/baseline trước khi sửa), mục 5 (quy tắc thi công) và mục 6 (điều
+  kiện dừng bắt buộc) của `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md` vẫn có hiệu lực. Nghĩa vụ ghi
+  nhật ký `06-ai-working-log.md` sau mỗi lần sửa code **không đổi**, và vẫn phải ghi đúng lệnh test
+  đã chạy — không khai "pass" khi chưa chạy.
+- **Không xóa file cũ:** `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md` giữ nguyên kèm cảnh báo ở đầu file;
+  `CHATGPT_HANDOFF.md` của đợt gần nhất và các bản trong `docs/handoffs/` giữ làm hồ sơ lịch sử.
+- **File đã sửa:** `CLAUDE.md`, `AGENTS.md` §10, `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`.
+
 ## [2026-07-31] Coding agent đọc ảnh GCN tại máy trạm và ghi thẳng Supabase, bỏ đường `/api/ai/*`
 
 - **Đảo quyết định [2026-07-26].** Quyết định cũ cấm local station kết nối Supabase, buộc đi qua

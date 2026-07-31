@@ -1,5 +1,19 @@
 # QUY TRÌNH CHUNG CHO AI AGENT VÀ BÁO CÁO BÀN GIAO CHO CHATGPT
 
+> ## ⚠️ Phần bắt buộc xuất `CHATGPT_HANDOFF.md` đã BỎ từ 2026-07-31
+>
+> Chủ dự án quyết định không cần tạo file `CHATGPT_HANDOFF.md` sau mỗi đợt thi công nữa. Agent báo
+> cáo trong chat và ghi entry vào `docs/brain/06-ai-working-log.md` là đủ. Chỉ làm báo cáo bàn giao
+> riêng khi người dùng yêu cầu rõ trong nhiệm vụ đó.
+>
+> **Phần còn hiệu lực:** mục 4 (kiểm tra trước khi sửa code), mục 5 (quy tắc thi công), mục 6 (điều
+> kiện dừng bắt buộc). Đọc ba mục đó.
+>
+> **Phần chỉ còn là tham chiếu, không bắt buộc:** mục 7–13 và mục 10 (mẫu báo cáo). Dùng khi nào
+> người dùng yêu cầu một báo cáo bàn giao đầy đủ.
+>
+> Quyết định gốc: `docs/brain/03-decisions.md`, mục `[2026-07-31] Bỏ yêu cầu xuất CHATGPT_HANDOFF.md`.
+
 > Tên khuyến nghị của file này trong mỗi repository: `AGENT_WORKFLOW_AND_CHATGPT_HANDOFF.md`
 >
 > Phạm vi áp dụng: mọi project có sử dụng ChatGPT, Codex, Claude Code, Gemini/Antigravity, Cursor hoặc coding agent khác.
