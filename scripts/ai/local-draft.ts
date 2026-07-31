@@ -19,7 +19,6 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 
 import { loadEnvConfig } from "@next/env";
 import type { Sql } from "postgres";
@@ -36,7 +35,10 @@ import {
 } from "../../src/modules/ai-extraction/fingerprints";
 import {
   decideResultOutcome,
+  findPersonalInfoInFreeText,
   parseLocalDraftOptions,
+  parseStoredLocalResult,
+  resolveManifestFilePath,
   type LocalDraftOptions,
 } from "../../src/modules/ai-extraction/local-draft-support";
 import {
@@ -48,9 +50,6 @@ import { getDatabase } from "../../src/modules/supabase/database";
 import { validateAiResultPayload } from "./validator";
 
 loadEnvConfig(process.cwd());
-
-const INBOX_FOLDER = "01_INBOX";
-const ORIGINALS_FOLDER = "originals";
 
 /**
  * Chỉ những file vừa nằm trong manifest vừa còn khớp `public_files` mới được coi là hợp lệ — cùng
@@ -70,10 +69,6 @@ function selectManifestFiles(sql: Sql, jobId: string, submissionId: string) {
       and pf.file_name = jf.file_name
     order by jf.ordinal
   `;
-}
-
-function localPathOf(driveRoot: string, submissionId: string, fileName: string): string {
-  return path.join(driveRoot, INBOX_FOLDER, submissionId, ORIGINALS_FOLDER, fileName);
 }
 
 async function checksumStateOf(filePath: string, expected: string): Promise<string> {
@@ -109,7 +104,16 @@ async function list(options: LocalDraftOptions): Promise<void> {
       console.log("  (manifest rỗng hoặc không còn khớp public_files — chạy lại `enqueue`)");
     }
     for (const file of files) {
-      const filePath = localPathOf(options.driveRoot, job.submission_id, file.file_name);
+      let filePath: string;
+      try {
+        filePath = resolveManifestFilePath(options.driveRoot, job.submission_id, file.file_name);
+      } catch (error) {
+        console.log(`  [REJECTED] fileId=${file.file_id}`);
+        console.log(
+          `           ${error instanceof Error ? error.message : "Đường dẫn không hợp lệ."}`,
+        );
+        continue;
+      }
       console.log(
         `  [${await checksumStateOf(filePath, file.checksum_sha256)}] fileId=${file.file_id}`,
       );
@@ -187,6 +191,26 @@ async function enqueue(options: LocalDraftOptions): Promise<void> {
   console.log(`Đã có job ${jobId}. Chạy \`list\` để lấy đường dẫn ảnh.`);
 }
 
+/** Đối chiếu lại từng ảnh trong manifest với bản trên đĩa; lệch một file là dừng, không ghi gì. */
+async function verifyLocalImages(sql: Sql, options: LocalDraftOptions): Promise<void> {
+  const jobs = await sql<{ submission_id: string | null }[]>`
+    select submission_id from public.ai_extraction_jobs where job_id = ${options.jobId}
+  `;
+  const submissionId = jobs[0]?.submission_id;
+  if (!submissionId) throw new Error("Không tìm thấy job AI tương ứng.");
+  const files = await selectManifestFiles(sql, options.jobId, submissionId);
+  if (files.length === 0) {
+    throw new Error("Manifest rỗng hoặc không còn khớp public_files; chạy lại `enqueue`.");
+  }
+  for (const file of files) {
+    const filePath = resolveManifestFilePath(options.driveRoot, submissionId, file.file_name);
+    const state = await checksumStateOf(filePath, file.checksum_sha256);
+    if (state !== "OK") {
+      throw new Error(`Ảnh ${file.file_id} đang ở trạng thái ${state}; không ghi kết quả.`);
+    }
+  }
+}
+
 interface SubmitOutcome {
   readonly kind: "STALE" | "REPLAY" | "SUCCESS";
   readonly resultId: string;
@@ -197,7 +221,15 @@ interface SubmitOutcome {
 }
 
 async function submit(options: LocalDraftOptions): Promise<void> {
-  const parsedFile: unknown = JSON.parse(await readFile(options.resultPath, "utf8"));
+  // PowerShell trên Windows ghi UTF-8 kèm BOM; không bỏ thì `JSON.parse` báo lỗi khó hiểu và agent
+  // sẽ đi sửa nội dung JSON vốn đã đúng.
+  const resultText = (await readFile(options.resultPath, "utf8")).replace(/^﻿/, "");
+  let parsedFile: unknown;
+  try {
+    parsedFile = JSON.parse(resultText);
+  } catch {
+    throw new Error("File kết quả không phải JSON hợp lệ; kiểm tra lại dấu phẩy và ngoặc.");
+  }
   const issues = validateAiResultPayload(parsedFile);
   if (issues.some((issue) => issue.code === "CITIZEN_ID_LIKE_VALUE")) {
     throw new Error("Kết quả có chuỗi giống số CCCD nên không được ghi.");
@@ -207,24 +239,45 @@ async function submit(options: LocalDraftOptions): Promise<void> {
     throw new Error("Kết quả không đúng schema đọc GCN được phép.");
   }
   const payload: AiExtractionPayload = parsed.data;
+  const personalInfoFields = findPersonalInfoInFreeText(payload);
+  if (personalInfoFields.length > 0) {
+    throw new Error(
+      `Ghi chú có dấu hiệu chứa thông tin định danh cá nhân (${personalInfoFields.join(", ")}); ` +
+        "viết lại ghi chú chỉ mô tả chất lượng ảnh rồi chạy lại.",
+    );
+  }
   const resultFingerprint = computeResultFingerprint(options.jobId, payload);
   const idempotencyKey = `AI_LOCAL_RESULT:${options.jobId}:${resultFingerprint}`;
   const mutationHash = createHash("sha256")
     .update(JSON.stringify({ jobId: options.jobId, resultFingerprint, model: options.modelName }))
     .digest("hex");
   const requestId = `local-station-${randomUUID()}`;
+  const database = getDatabase();
 
-  const outcome = await getDatabase().begin<SubmitOutcome>(async (transaction) => {
+  // Đọc lại ảnh trên đĩa **trước** khi mở transaction: `list` chỉ đối chiếu checksum lúc phát việc,
+  // giữa lúc đó và lúc ghi thì Drive vẫn có thể đồng bộ đè một bản khác. Kiểm ở đây không chứng minh
+  // được agent đã nhìn đúng file — điều đó nằm ngoài tầm của script — nhưng chặn được việc ghi kết
+  // quả gắn với một bộ ảnh đã đổi.
+  await verifyLocalImages(database, options);
+
+  const outcome = await database.begin<SubmitOutcome>(async (transaction) => {
     await transaction`select pg_advisory_xact_lock(hashtextextended(${idempotencyKey}, 0))`;
-    const cached = await transaction<{ response_json: unknown }[]>`
-      select response_json from public.request_log where idempotency_key = ${idempotencyKey}
+    const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+      select mutation_hash, response_json from public.request_log
+      where idempotency_key = ${idempotencyKey} and kind = 'AI_LOCAL_RESULT'
     `;
     if (cached[0]) {
-      const replay = (
-        typeof cached[0].response_json === "string"
-          ? JSON.parse(cached[0].response_json)
-          : cached[0].response_json
-      ) as SubmitOutcome;
+      // Cùng khóa nghĩa là cùng job và cùng payload, nên `mutation_hash` lệch chỉ có thể do `--model`
+      // khác lần ghi trước. Im lặng trả kết quả cũ sẽ ghi sai truy nguyên ai đã đọc ảnh.
+      if (cached[0].mutation_hash !== mutationHash) {
+        throw new Error(
+          "Job này đã được ghi bằng model khác với cùng nội dung kết quả; kiểm tra lại --model.",
+        );
+      }
+      const replay = parseStoredLocalResult(cached[0].response_json);
+      if (!replay) {
+        throw new Error("Bản ghi chống trùng cũ không đọc được; dừng để người dùng kiểm tra.");
+      }
       return { ...replay, kind: "REPLAY" };
     }
 

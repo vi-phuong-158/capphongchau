@@ -43,6 +43,8 @@ dấu mức chắc chắn**. Đọc sai mà khai là chắc chắn mới là l�
    kể cả khi nó nằm cùng thư mục với ảnh bạn được phép mở.
 2. **Không đọc mã QR** dưới bất kỳ hình thức nào.
 3. **Không ghi ra họ tên, ngày sinh, giới tính, địa chỉ, số CCCD** vào bất kỳ trường nào của kết quả.
+   Kể cả trong ghi chú. Script quét các nhãn này trong `quality.note`, `evidence.pageLabel` và
+   `evidence.note`, gặp là từ chối ghi. Ghi chú chỉ để mô tả **chất lượng ảnh**.
 4. **Không mở file ngoài danh sách** mà `npm run ai:list-jobs` in ra.
 5. **Không sửa, đổi tên, di chuyển, xóa** bất kỳ file nào trong thư mục Drive.
 6. **Không viết SQL tay.** Mọi thao tác ghi đi qua lệnh `npm run ai:submit-draft`. Không dùng `psql`,
@@ -437,24 +439,34 @@ Kết quả thật khi chạy: `BLOCKED`, 1 lỗi chặn `UNEXPECTED_DOCUMENT_TY
 
 ### 9.1. Lỗi khi chạy lệnh
 
-| Thông báo                                                                 | Nguyên nhân                                     | Bạn phải làm gì                                                                |
-| ------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------ |
-| `Thiếu thư mục Drive cục bộ`                                              | Chưa có `AI_LOCAL_DRIVE_ROOT`                   | Thêm vào `.env.local` (mục 3)                                                  |
-| `Không tìm thấy job AI tương ứng`                                         | Sai `--job=`                                    | Chạy lại `list`, chép lại đúng mã job                                          |
-| `Job đang ở trạng thái COMPLETED, không nhận kết quả mới`                 | Job này đã xử lý xong rồi                       | Bỏ qua, chuyển job khác                                                        |
-| `Kết quả không đúng schema đọc GCN được phép`                             | File JSON sai cấu trúc                          | Đối chiếu lại mục 7.2 và 7.3                                                   |
-| `Kết quả có chuỗi giống số CCCD nên không được ghi`                       | Có chuỗi 12 chữ số liên tiếp trong file         | Tìm và bỏ chuỗi đó. Số vào sổ 12 chữ số cũng bị chặn → để `MANUAL_REQUIRED`    |
-| `Ảnh GCN, dữ liệu nguồn hoặc manifest đã thay đổi; job bị đánh dấu STALE` | Ảnh hoặc dữ liệu hồ sơ đã đổi kể từ lúc tạo job | Chạy `npm run ai:enqueue -- --submission=<id>`, rồi `list`, rồi đọc lại từ đầu |
-| `Đã ghi trước đó: result …`                                               | Bạn chạy lại đúng file JSON cũ                  | Không sao — hệ thống chống trùng. Không có bản ghi thứ hai được tạo            |
-| `Hồ sơ chưa có ảnh GCN gốc nào ở trạng thái UPLOADED`                     | Hồ sơ này chưa upload ảnh GCN                   | Không làm gì được, bỏ qua                                                      |
+| Thông báo                                                                 | Nguyên nhân                                                                   | Bạn phải làm gì                                                                       |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Thiếu thư mục Drive cục bộ`                                              | Chưa có `AI_LOCAL_DRIVE_ROOT`                                                 | Thêm vào `.env.local` (mục 3)                                                         |
+| `Không tìm thấy job AI tương ứng`                                         | Sai `--job=`                                                                  | Chạy lại `list`, chép lại đúng mã job                                                 |
+| `Job đang ở trạng thái COMPLETED, không nhận kết quả mới`                 | Job này đã xử lý xong rồi                                                     | Bỏ qua, chuyển job khác                                                               |
+| `Kết quả không đúng schema đọc GCN được phép`                             | File JSON sai cấu trúc                                                        | Đối chiếu lại mục 7.2 và 7.3                                                          |
+| `Kết quả có chuỗi giống số CCCD nên không được ghi`                       | Có chuỗi 12 chữ số liên tiếp trong file                                       | Tìm và bỏ chuỗi đó. Số vào sổ 12 chữ số cũng bị chặn → để `MANUAL_REQUIRED`           |
+| `Ảnh GCN, dữ liệu nguồn hoặc manifest đã thay đổi; job bị đánh dấu STALE` | Ảnh hoặc dữ liệu hồ sơ đã đổi kể từ lúc tạo job                               | Chạy `npm run ai:enqueue -- --submission=<id>`, rồi `list`, rồi đọc lại từ đầu        |
+| `Đã ghi trước đó: result …`                                               | Bạn chạy lại đúng file JSON cũ                                                | Không sao — hệ thống chống trùng. Không có bản ghi thứ hai được tạo                   |
+| `Hồ sơ chưa có ảnh GCN gốc nào ở trạng thái UPLOADED`                     | Hồ sơ này chưa upload ảnh GCN                                                 | Không làm gì được, bỏ qua                                                             |
+| `File kết quả không phải JSON hợp lệ`                                     | Sai dấu phẩy, ngoặc hoặc thiếu ngoặc kép                                      | Sửa cú pháp JSON, đối chiếu mẫu ở mục 7.1                                             |
+| `Ghi chú có dấu hiệu chứa thông tin định danh cá nhân (…)`                | Ghi chú có nhãn kiểu "họ tên", "địa chỉ", "ngày sinh", "CCCD", "số định danh" | Viết lại ghi chú, chỉ mô tả chất lượng ảnh. Không nhắc tới người hay giấy tờ tùy thân |
+| `Ảnh <fileId> đang ở trạng thái MISSING/CHECKSUM_MISMATCH`                | Ảnh trên đĩa đã đổi hoặc biến mất sau lúc chạy `list`                         | Chạy lại `list`. Vẫn không `OK` thì dừng và báo người dùng                            |
+| `Manifest rỗng hoặc không còn khớp public_files`                          | Danh sách ảnh của job không còn hợp lệ                                        | Chạy `enqueue` cho hồ sơ đó rồi làm lại từ `list`                                     |
+| `Job này đã được ghi bằng model khác với cùng nội dung kết quả`           | Cùng job, cùng JSON đã được ghi bằng model khác                               | Không ghi đè. Kiểm tra `--model`; nếu đúng thì job đã có người làm, bỏ qua            |
+| `Bản ghi chống trùng cũ không đọc được`                                   | Dòng chống ghi trùng trong cơ sở dữ liệu hỏng                                 | Dừng và báo người dùng, không chạy lại                                                |
 
 ### 9.2. Trạng thái file trong bản in `list`
 
-| Trạng thái          | Nghĩa                              | Bạn phải làm gì                                                                           |
-| ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| `OK`                | File khớp cơ sở dữ liệu            | Mở được                                                                                   |
-| `MISSING`           | Không thấy file trên đĩa           | Không mở. Thường do Google Drive chưa tải file về máy — chờ sync xong rồi chạy lại `list` |
-| `CHECKSUM_MISMATCH` | File trên đĩa khác bản đã ghi nhận | **Không mở.** Dừng job này và báo người dùng — đây là dấu hiệu bất thường                 |
+| Trạng thái          | Nghĩa                               | Bạn phải làm gì                                                                                         |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `OK`                | File khớp cơ sở dữ liệu             | Mở được                                                                                                 |
+| `MISSING`           | Không thấy file trên đĩa            | Không mở. Thường do Google Drive chưa tải file về máy — chờ sync xong rồi chạy lại `list`               |
+| `CHECKSUM_MISMATCH` | File trên đĩa khác bản đã ghi nhận  | **Không mở.** Dừng job này và báo người dùng — đây là dấu hiệu bất thường                               |
+| `REJECTED`          | Tên tệp hoặc đường dẫn không hợp lệ | **Không mở.** Dừng và báo người dùng — tên tệp trong kho luôn do máy chủ đặt, gặp dạng lạ là bất thường |
+
+`submit` kiểm lại checksum của **toàn bộ** ảnh trong job một lần nữa ngay trước khi ghi. Nếu giữa lúc
+bạn đọc ảnh và lúc ghi mà có file đổi, lệnh sẽ dừng và không ghi gì.
 
 ### 9.3. Kết quả sau khi submit
 
@@ -477,7 +489,7 @@ Cả ba đều là kết quả hợp lệ và đều hiển thị cho cán bộ.
 - [ ] Mọi trường `CLEAR` đều có `evidence.fileId`, và `fileId` đó có trong bản in `list` của **đúng
       job này**?
 - [ ] `issueDate.value` đúng định dạng `YYYY-MM-DD` (hoặc `null`)?
-- [ ] Không có họ tên, địa chỉ, ngày sinh, số CCCD ở bất kỳ đâu trong file?
+- [ ] Không có họ tên, địa chỉ, ngày sinh, số CCCD ở bất kỳ đâu trong file, kể cả trong ghi chú?
 - [ ] Không có chuỗi 12 chữ số liên tiếp?
 - [ ] Không có khóa nào ngoài danh sách ở mục 7.2?
 - [ ] Trường nào `status` khác `CLEAR` mà vẫn có `value` thì đã liệt kê trong `unreadableFields`?

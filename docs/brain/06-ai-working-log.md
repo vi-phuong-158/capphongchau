@@ -1,5 +1,31 @@
 # 06 — AI Working Log
 
+## [2026-07-31] Gia cố trạm AI cục bộ sau review
+
+- **Agent:** Claude Code.
+- **Lỗi thật đã sửa:** `submit` tính `mutation_hash` rồi **không so lại lúc replay** — bê thiếu so
+  với `POST /api/ai/results`. Hậu quả: cùng job + cùng JSON nhưng `--model` khác thì im lặng trả kết
+  quả cũ và ghi sai truy nguyên model. Nay so `mutation_hash`, lọc thêm `kind = 'AI_LOCAL_RESULT'`,
+  và validate `response_json` qua `parseStoredLocalResult` thay vì ép kiểu.
+- **Gia cố thêm:** `submit` đọc lại và đối chiếu sha256 toàn bộ ảnh trong manifest ngay trước khi
+  ghi; `resolveManifestFilePath` chặn đường dẫn thoát khỏi `01_INBOX/{submissionId}/originals` và
+  giới hạn đuôi ảnh; quét nhãn thông tin định danh cá nhân trong `quality.note`,
+  `evidence.pageLabel`, `evidence.note` → từ chối ghi.
+- **Sửa lỗi dùng thật:** file JSON có BOM (PowerShell ghi mặc định) làm `JSON.parse` báo lỗi khó
+  hiểu. Nay bỏ BOM và trả thông báo rõ ràng.
+- **Không làm theo review:** không kiểm `expires_at` (bỏ qua hàng hết hạn sẽ tạo `result_version`
+  thứ hai — tệ hơn); không chuyển sang stored procedure `SECURITY DEFINER` (phải viết lại guard bằng
+  plpgsql, mất tính chất dùng chung code với route API); không đổi note sang enum mã lý do (mất công
+  dụng chính là giải thích cho cán bộ vì sao AI không đọc được).
+- **File đã sửa:** `scripts/ai/local-draft.ts`, `src/modules/ai-extraction/local-draft-support.ts`,
+  `tests/ai-local-draft-support.test.ts`, `agent/AGENTS.md` (+ bản trên Drive).
+- **Kiểm tra:** typecheck đạt; `npm test` **834 pass / 28 skip / 0 fail** (+17 test, trước là 817);
+  lint 0 lỗi / 5 warning có sẵn. Chạy thật: cùng model → replay đúng result cũ; đổi `--model` → báo
+  lỗi, exit 1, không ghi; ghi chú chứa "Ho va ten" → từ chối ghi; JSON hỏng → thông báo rõ; `list`
+  vẫn liệt kê đúng.
+- **Chưa có bằng chứng thực nghiệm:** nhánh `submit` từ chối khi checksum lệch (không cố ý sửa ảnh
+  thật trên Drive để thử); chỉ có unit test cho `resolveManifestFilePath`.
+
 ## [2026-07-31] Bỏ yêu cầu xuất `CHATGPT_HANDOFF.md`
 
 - **Agent:** Claude Code.
