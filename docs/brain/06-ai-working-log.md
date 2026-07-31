@@ -1,5 +1,20 @@
 # 06 — AI Working Log
 
+## [2026-08-01] Đọc nháp GCN cho 8 job AI cục bộ bằng Gemini 3.6 Flash
+
+- **Agent:** Antigravity (Gemini 3.6 Flash).
+- **Công việc:** Đọc ảnh Giấy chứng nhận quyền sử dụng đất và ghi nháp bằng `scripts/ai/local-draft.ts` theo đúng chỉ dẫn tự chứa `agent/AGENTS.md`.
+- **Job đã hoàn thành:** 8/8 job (100% job đang chờ trong hệ thống):
+  1. `aijob_a5175e7d-e4b3-4822-806a-8a5bf1c1105d`: `CLEAR` số phát hành `DĐ 950679`, `MANUAL_REQUIRED` ngày cấp & số vào sổ (chữ viết tay). Result `aires_32bcf502-bfe4-484f-abf8-616df6c7cb46`.
+  2. `aijob_020c7135-ca19-4039-b1d9-d17b2563a76f`: `CLEAR` số phát hành `AA 01620535`, `MANUAL_REQUIRED` ngày cấp & số vào sổ (chữ viết tay). Result `aires_d6883118-3d62-4718-870d-be4355ac3895`.
+  3. `aijob_ba1e2edb-9688-41c1-8811-8828a160d5c8`: `CLEAR` số phát hành `CA 299413`, `MANUAL_REQUIRED` ngày cấp & số vào sổ (chữ viết tay). Result `aires_99861fe2-86dd-4fa9-ad08-369aa804ef7c`.
+  4. `aijob_5e94d276-5fa7-49e3-be8d-4b5c795be764`: `CLEAR` số phát hành `AA 07726090`, `CLEAR` ngày cấp `2026-03-17`, `MANUAL_REQUIRED` số vào sổ (chữ viết tay). Result `aires_bc5336e9-363d-4d09-a729-a9c65f458e15`.
+  5. `aijob_7443d276-9cba-4168-a7ae-453ce820af9e`: `MANUAL_REQUIRED` cả 3 trường (GCN cũ năm 1998, chữ viết tay). Result `aires_70075dfc-ef5b-4104-ada3-a187e7a4bf57`.
+  6. `aijob_54f438c9-0935-4922-8636-3f6edcd6fe02`: `MANUAL_REQUIRED` cả 3 trường (GCN cũ năm 1998, chữ viết tay). Result `aires_a2c1c960-34d6-4e46-a962-4656bb92ce7f`.
+  7. `aijob_2d78338e-5b6c-4802-a0ab-6659df0a4687`: `CLEAR` số phát hành `CH 952721`, `MANUAL_REQUIRED` ngày cấp & số vào sổ (chữ viết tay). Result `aires_549dcfcb-f952-4a08-9bab-5e0bb7594bdf`.
+  8. `aijob_bcc43913-e511-441a-b37f-1524b8ac5b5a`: `CLEAR` số phát hành `CA 299413`, `MANUAL_REQUIRED` ngày cấp & số vào sổ (chữ viết tay). Result `aires_ec0b8f2f-dd35-452c-ba4b-156a2b0e7a0d`.
+- **Kiểm tra:** `npm run ai:list-jobs` báo "Không có job AI nào đang chờ." 100% job đã hoàn tất. Không có lỗi chặn, không rò rỉ PII/QR/CCCD.
+
 ## [2026-07-31] Gia cố trạm AI cục bộ sau review
 
 - **Agent:** Claude Code.
@@ -3314,8 +3329,10 @@ SUBMISSION_DECISION_ROLES)` + `verifyCsrfToken` + `mayStaffEdit` (đang giữ h�
   **Chưa chạy được bất kỳ migration nào thật** — cần bạn tự chạy theo runbook, hoặc cấp credential
   Preview cho một phiên có thể thực thi.
 - **Chưa merge, chưa deploy.**
+
 ## 2026-07-30: Fix Integration Tests for Officer File Mutations
 
-- Cập nhật \src/modules/public-intake/repository.ts\: Thay thế \JSON.stringify(summary)::jsonb\ bằng \	ransaction.json(summary)\ để fix lỗi parse JSON của \postgres.js\ khi lấy dữ liệu từ các cột \jsonb\ (\equest_log.response_json\ và \public_submissions.file_summary_json\).
-- Đã verify 11/11 tests trong \	ests/officer-file-mutations.integration.test.ts\ pass an toàn. Lỗi \summaries.map is not a function\ và lỗi \undefined.fileId\ do Postgres.js trả về string nguyên bản đã được khắc phục.
+- Cập nhật \src/modules/public-intake/repository.ts\: Thay thế \JSON.stringify(summary)::jsonb\ bằng \ ransaction.json(summary)\ để fix lỗi parse JSON của \postgres.js\ khi lấy dữ liệu từ các cột \jsonb\ (\
+  equest_log.response_json\ và \public_submissions.file_summary_json\).
+- Đã verify 11/11 tests trong \ ests/officer-file-mutations.integration.test.ts\ pass an toàn. Lỗi \summaries.map is not a function\ và lỗi \undefined.fileId\ do Postgres.js trả về string nguyên bản đã được khắc phục.
 - Đã bổ sung script \scripts/add-missing-col.js\ để patch cột \internal_notes\ lên Rehearsal DB.
