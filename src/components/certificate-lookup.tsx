@@ -229,10 +229,14 @@ export function CertificateLookup() {
                 disabled={scan.step === "decoding"}
                 onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
               />
-              <span className="text-center font-semibold">Chạm để chụp ảnh / Chọn ảnh CCCD có mã QR</span>
+              <span className="text-center font-semibold">
+                Chạm để chụp ảnh / Chọn ảnh CCCD có mã QR
+              </span>
             </label>
           ) : null}
-          {scan.step === "decoding" ? <p className="text-sm">Đang đọc mã QR trên thiết bị…</p> : null}
+          {scan.step === "decoding" ? (
+            <p className="text-sm">Đang đọc mã QR trên thiết bị…</p>
+          ) : null}
           {scan.step === "decoded" || scan.step === "checking" ? (
             <>
               <p className="text-sm">Đã đọc mã QR. Hoàn thành xác minh rồi nhấn kiểm tra.</p>
@@ -273,7 +277,9 @@ export function CertificateLookup() {
               }}
               placeholder="Ví dụ: CH 012-345"
             />
-            <span className="pc-field-hint">Khoảng trắng, dấu gạch và chữ hoa/thường được tự chuẩn hóa khi đối chiếu.</span>
+            <span className="pc-field-hint">
+              Khoảng trắng, dấu gạch và chữ hoa/thường được tự chuẩn hóa khi đối chiếu.
+            </span>
           </label>
           <div>
             <span className="pc-field-label">Ngày cấp GCN</span>

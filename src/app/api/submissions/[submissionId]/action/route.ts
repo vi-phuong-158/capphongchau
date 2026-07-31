@@ -18,7 +18,6 @@ import {
   newTimelineEvent,
   publicActorName,
   SUPPLEMENT_REASON_CODES,
-  type SupplementRequest,
 } from "@/modules/public-intake/workflow";
 import {
   isClaimedBy,
@@ -26,7 +25,6 @@ import {
   mayForceClaim,
   mayReject,
   mayRelease,
-  mayRequestSupplement,
   mayTransfer,
   SUBMISSION_DECISION_ROLES,
   SUBMISSION_READ_ROLES,
@@ -103,6 +101,15 @@ export async function POST(
     }
 
     const action = body.data.action;
+    if (action === "REQUEST_SUPPLEMENT") {
+      return fail(
+        "VALIDATION_FAILED",
+        "Yêu cầu bổ sung đã ngừng sử dụng. Cán bộ chỉnh sửa trực tiếp thông tin hồ sơ và liên hệ " +
+          "người dân khi cần xác minh thêm, rồi bấm Hoàn thành xử lý.",
+        requestId,
+        400,
+      );
+    }
     const roles =
       action === "CLAIM" ||
       action === "FORCE_CLAIM" ||
@@ -384,7 +391,7 @@ export async function POST(
       );
     }
 
-    // 5. REQUEST_SUPPLEMENT & REJECT
+    // 5. REJECT — REQUEST_SUPPLEMENT đã bị chặn ở đầu hàm (2026-07-29, luồng mới bỏ yêu cầu bổ sung).
     if (
       !isClaimedBy(record, user.email) &&
       !user.roles.includes(UserRole.WARD_ADMIN) &&
@@ -392,63 +399,19 @@ export async function POST(
     ) {
       return fail("ACCESS_DENIED", "Bạn cần nhận xử lý hồ sơ trước khi thao tác.", requestId, 403);
     }
-    const allowed =
-      action === "REQUEST_SUPPLEMENT"
-        ? mayRequestSupplement(record, user.email) || mayForceClaim(user.roles)
-        : mayReject(record, user.email) || mayForceClaim(user.roles);
-    if (!allowed)
+    if (!(mayReject(record, user.email) || mayForceClaim(user.roles))) {
       return fail("VALIDATION_FAILED", "Hồ sơ không ở trạng thái có thể xử lý.", requestId, 400);
-
-    if (
-      action === "REQUEST_SUPPLEMENT" &&
-      (!body.data.reasonCode || !body.data.message || !body.data.items?.length)
-    ) {
-      return fail(
-        "VALIDATION_FAILED",
-        "Cần nêu lý do, hướng dẫn và ít nhất một trường hoặc tài liệu phải bổ sung.",
-        requestId,
-        400,
-      );
     }
 
-    const status = action === "REQUEST_SUPPLEMENT" ? "NEEDS_SUPPLEMENT" : "REJECTED";
-    let supplementRequest: SupplementRequest | undefined;
-    if (action === "REQUEST_SUPPLEMENT") {
-      const supplementRequestId = randomUUID();
-      const createdAt = new Date().toISOString();
-      supplementRequest = {
-        requestId: supplementRequestId,
-        status: "OPEN",
-        reasonCode: body.data.reasonCode!,
-        message: body.data.message!,
-        requestedByDisplayName: publicActorName(user.displayName),
-        createdAt,
-        resolvedAt: "",
-        items: body.data.items!.map((item) => ({
-          itemId: randomUUID(),
-          requestId: supplementRequestId,
-          itemType: item.itemType,
-          targetEntityType: item.targetEntityType,
-          targetEntityId: item.targetEntityId,
-          fieldPath: item.fieldPath,
-          documentType: item.documentType,
-          reasonCode: body.data.reasonCode!,
-          instruction: item.instruction,
-          status: "OPEN",
-        })),
-      };
-    }
     const updated = await repository.commitStaffAction({
       record,
       expectedVersion: body.data.version,
-      status,
-      supplementRequest,
+      status: "REJECTED",
       actorEmail: user.email,
-      auditAction:
-        action === "REQUEST_SUPPLEMENT" ? "SUBMISSION_NEEDS_SUPPLEMENT" : "SUBMISSION_REJECTED",
+      auditAction: "SUBMISSION_REJECTED",
       timelineEvent: newTimelineEvent({
-        eventType: status,
-        label: status === "NEEDS_SUPPLEMENT" ? "Cần bổ sung" : "Không tiếp nhận",
+        eventType: "REJECTED",
+        label: "Không tiếp nhận",
         actorDisplayName: publicActorName(user.displayName),
         message: body.data.message,
       }),

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CERTIFICATE_ROLE_OPTIONS } from "@/modules/public-intake/reference";
+import type { PublicStatus } from "@/modules/public-intake/repository";
 import { formatDateTime } from "@/modules/public-intake/vietnamese-date";
-import { isOwnerIdentityQrConfirmed } from "@/modules/submissions/review";
+import { isOwnerIdentityQrConfirmed, mayClaim } from "@/modules/submissions/review";
 import { SubmissionClaimBanner } from "@/components/admin/submission-claim-banner";
 import { AiDraftPanel } from "@/components/admin/ai-draft-panel";
 import {
@@ -14,22 +15,43 @@ import {
 } from "@/components/admin/working-payload-editor";
 import { useWorkingPayload } from "@/components/admin/use-working-payload";
 import { DocumentViewer } from "@/components/admin/document-viewer";
-import {
-  assignedOfficerAccount,
-  assignedOfficerLabel,
-} from "@/modules/submissions/assigned-officer";
+import { OfficerFileUpload } from "@/components/admin/officer-file-upload";
+import { requiresCitizenId, type OwnerType } from "@/modules/public-intake/types";
+import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
 import type { StaffSubmissionDetail } from "@/modules/submissions/detail-types";
 
-const labels: Record<string, string> = {
-  SUBMITTED: "Chờ tiếp nhận",
-  UNDER_REVIEW: "Đang xử lý",
-  NEEDS_SUPPLEMENT: "Cần bổ sung",
-  RESUBMITTED: "Đã gửi lại",
-  REJECTED: "Từ chối",
-  ACCEPTING: "Đang tiếp nhận",
-  ACCEPTED: "Đã tiếp nhận",
-  DRAFT: "Nháp",
-  EXPIRED: "Hết hạn",
+/**
+ * Hình dạng dữ liệu hồ sơ do server quy định (`StaffSubmissionDetail`) — dùng lại thay vì khai lại
+ * ở đây. Cùng một kiểu cho cả dữ liệu nạp sẵn từ trang server và dữ liệu tải lại qua
+ * `GET /api/submissions/:id`, nên thêm/bớt trường chỉ phải sửa một nơi.
+ */
+type Submission = StaffSubmissionDetail;
+
+/**
+ * Giao diện cán bộ chỉ hiển thị đúng ba trạng thái nghiệp vụ: Chờ tiếp nhận, Đang xử lý,
+ * Đã hoàn thành. Hồ sơ cũ ở trạng thái bổ sung/gửi lại được ánh xạ an toàn về "Chờ tiếp nhận" —
+ * không phát sinh luồng yêu cầu bổ sung mới, backend vẫn giữ nguyên các trạng thái kỹ thuật.
+ * Từ chối/Nháp/Hết hạn là trạng thái ngoại lệ, giữ nhãn riêng để cán bộ nhận biết đúng.
+ */
+const STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
+  SUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  RESUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  NEEDS_SUPPLEMENT: {
+    label: "Chờ tiếp nhận",
+    color: "bg-amber-100 text-amber-900 border-amber-300",
+  },
+  UNDER_REVIEW: { label: "Đang xử lý", color: "bg-sky-100 text-sky-900 border-sky-300" },
+  ACCEPTING: {
+    label: "Đang xử lý",
+    color: "bg-sky-100 text-sky-900 border-sky-300 animate-pulse",
+  },
+  ACCEPTED: {
+    label: "Đã hoàn thành",
+    color: "bg-emerald-100 text-emerald-900 border-emerald-300",
+  },
+  REJECTED: { label: "Từ chối", color: "bg-rose-100 text-rose-900 border-rose-300" },
+  DRAFT: { label: "Nháp", color: "bg-stone-100 text-stone-700 border-stone-300" },
+  EXPIRED: { label: "Hết hạn", color: "bg-stone-100 text-stone-600 border-stone-300" },
 };
 
 async function csrfToken() {
@@ -38,10 +60,10 @@ async function csrfToken() {
   return ((await response.json()) as { csrfToken: string }).csrfToken;
 }
 
-async function loadSubmission(id: string): Promise<StaffSubmissionDetail> {
+async function loadSubmission(id: string): Promise<Submission> {
   const response = await fetch(`/api/submissions/${id}`, { cache: "no-store" });
   if (!response.ok) throw new Error();
-  return ((await response.json()) as { submission: StaffSubmissionDetail }).submission;
+  return ((await response.json()) as { submission: Submission }).submission;
 }
 
 type EditableOwner = {
@@ -93,31 +115,25 @@ const EDITABLE_OWNER_FIELDS = [
 ] as const;
 
 export function SubmissionDetail({
-  initialSubmission,
+  submissionId,
   currentUserEmail,
   isAdministrator,
+  initialSubmission = null,
 }: {
-  readonly initialSubmission: StaffSubmissionDetail;
+  readonly submissionId: string;
   readonly currentUserEmail: string;
   readonly isAdministrator: boolean;
+  /** Dữ liệu nạp sẵn trên server. `null` khi nạp sẵn lỗi — lúc đó client tự fetch như trước. */
+  readonly initialSubmission?: Submission | null;
 }) {
-  const [submission, setSubmission] = useState<StaffSubmissionDetail>(initialSubmission);
+  const [submission, setSubmission] = useState<Submission | null>(initialSubmission);
   const [message, setMessage] = useState<string | null>(null);
   const [acceptanceIssues, setAcceptanceIssues] = useState<AcceptanceBlockingIssue[]>([]);
   const [busy, setBusy] = useState(false);
-  const [supplementReason, setSupplementReason] = useState("MISSING_INFORMATION");
-  const [supplementMessage, setSupplementMessage] = useState("");
-  const [supplementKind, setSupplementKind] = useState<"FIELD" | "FILE">("FIELD");
-  const [supplementTarget, setSupplementTarget] = useState("");
-  const [supplementDocument, setSupplementDocument] = useState<
-    "" | "CITIZEN_ID_FRONT" | "CITIZEN_ID_BACK" | "CERTIFICATE"
-  >("");
-  const [supplementInstruction, setSupplementInstruction] = useState("");
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [newAccessSecret, setNewAccessSecret] = useState("");
+  /** Modal "Điều chỉnh chính thức" — chỉ mở được khi hồ sơ đã `ACCEPTED`, luôn bắt buộc lý do. */
   const [editOpen, setEditOpen] = useState(false);
-  /** Bật khi mở chế độ điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức — buộc nhập lý do trước khi lưu. */
-  const [amendMode, setAmendMode] = useState(false);
   const [amendmentReason, setAmendmentReason] = useState("");
   const [editCertificate, setEditCertificate] = useState({
     issueNumber: "",
@@ -126,20 +142,52 @@ export function SubmissionDetail({
   });
   const [editOwners, setEditOwners] = useState<EditableOwner[]>([]);
   const [workingPayloadTab, setWorkingPayloadTab] = useState<WorkingPayloadEditorTab>("all");
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   /** Giữ nguyên qua các lần bấm lại để saga tiếp tục từ checkpoint, không tạo hồ sơ chính thức mới. */
   const acceptKeyRef = useRef("");
   const isClaimedByMe =
-    (submission.claimedBy || "").trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
+    (submission?.claimedBy || "").trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
   const workingPayload = useWorkingPayload(
-    submission.submissionId,
-    submission.draft,
-    submission.version,
+    submissionId,
+    submission?.draft ?? null,
+    submission?.version ?? 0,
     isClaimedByMe,
   );
-  function openEdit(mode: "EDIT" | "AMEND" = "EDIT") {
+  /** Ghi chú nội bộ (Đợt 2A-2) — một ô tự do, đồng bộ lại khi hồ sơ tải/tải lại (như bàn làm việc). */
+  const [notesDraft, setNotesDraft] = useState("");
+  const [syncedNotes, setSyncedNotes] = useState<string | null>(null);
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSaveError, setNotesSaveError] = useState<string | null>(null);
+  const currentNotes = submission?.internalNotes ?? null;
+  if (currentNotes !== null && currentNotes !== syncedNotes) {
+    setSyncedNotes(currentNotes);
+    setNotesDraft(currentNotes);
+  }
+  const notesDirty = submission !== null && notesDraft !== submission.internalNotes;
+  /**
+   * Chỉ fetch khi trang server **không** nạp sẵn được hồ sơ. Có dữ liệu nạp sẵn thì bỏ hẳn vòng
+   * fetch sau hydrate — nếu vẫn fetch thì mất luôn cái lợi của server-priming và ghi thêm một dòng
+   * audit "đã xem dữ liệu nhạy cảm" cho cùng một lần mở trang.
+   */
+  useEffect(() => {
+    if (initialSubmission) return;
+    loadSubmission(submissionId)
+      .then(setSubmission)
+      .catch(() => setMessage("Không thể tải hồ sơ."));
+    // `initialSubmission` cố định trong suốt vòng đời trang (đến từ server render), không đưa vào
+    // danh sách phụ thuộc để tránh fetch lại vô ích.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submissionId]);
+  /** Cảnh báo rời trang khi bàn làm việc hoặc ghi chú nội bộ còn thay đổi chưa lưu (§3.2). */
+  useEffect(() => {
+    if (!workingPayload.isDirty && !notesDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [workingPayload.isDirty, notesDirty]);
+  function openAmendModal() {
     if (!submission?.draft) return;
-    setAmendMode(mode === "AMEND");
     setAmendmentReason("");
     setEditCertificate({ ...submission.draft.certificate });
     setEditOwners(
@@ -187,7 +235,7 @@ export function SubmissionDetail({
       setMessage("Không có thay đổi nào để lưu.");
       return;
     }
-    if (amendMode && amendmentReason.trim().length < 10) {
+    if (amendmentReason.trim().length < 10) {
       setMessage("Điều chỉnh hồ sơ đã tiếp nhận phải có lý do ít nhất 10 ký tự.");
       return;
     }
@@ -206,7 +254,7 @@ export function SubmissionDetail({
           version: submission.version,
           ...(Object.keys(certificatePatch).length ? { certificate: certificatePatch } : {}),
           ...(ownersPatch.length ? { owners: ownersPatch } : {}),
-          ...(amendMode ? { amendmentReason: amendmentReason.trim() } : {}),
+          amendmentReason: amendmentReason.trim(),
         }),
       });
       const data = (await response.json()) as {
@@ -219,9 +267,7 @@ export function SubmissionDetail({
       setSubmission(refreshed);
       setEditOpen(false);
       setMessage(
-        amendMode
-          ? "Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới."
-          : "Đã lưu thông tin chỉnh sửa.",
+        "Đã điều chỉnh hồ sơ chính thức. Dữ liệu chính thức đã được ghi lại theo bản mới.",
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể lưu thay đổi.");
@@ -264,7 +310,7 @@ export function SubmissionDetail({
       setBusy(false);
     }
   }
-  async function action(action: "CLAIM" | "REQUEST_SUPPLEMENT" | "REJECT") {
+  async function action(action: "CLAIM" | "REJECT") {
     if (!submission) return;
     setBusy(true);
     setMessage(null);
@@ -277,35 +323,11 @@ export function SubmissionDetail({
           "x-csrf-token": token,
           "idempotency-key": crypto.randomUUID(),
         },
-        body: JSON.stringify({
-          action,
-          version: submission.version,
-          ...(action === "REQUEST_SUPPLEMENT"
-            ? {
-                reasonCode: supplementReason || "MISSING_INFORMATION",
-                message: supplementMessage.trim() || "Yêu cầu bổ sung thông tin hồ sơ",
-                items: [
-                  {
-                    itemType: supplementKind || "FIELD",
-                    targetEntityType: "SUBMISSION",
-                    targetEntityId: "",
-                    fieldPath:
-                      supplementKind === "FIELD" ? supplementTarget.trim() || "certificate" : "",
-                    documentType:
-                      supplementKind === "FILE" ? supplementDocument || "CERTIFICATE" : "",
-                    instruction:
-                      supplementInstruction.trim() ||
-                      supplementMessage.trim() ||
-                      "Vui lòng kiểm tra và bổ sung hồ sơ theo hướng dẫn.",
-                  },
-                ],
-              }
-            : {}),
-        }),
+        body: JSON.stringify({ action, version: submission.version }),
       });
       const data = (await response.json()) as {
         submission?: {
-          status: string;
+          status: PublicStatus;
           version: number;
           claimedBy?: string;
           claimedByDisplayName?: string;
@@ -326,17 +348,40 @@ export function SubmissionDetail({
             }
           : current,
       );
-      setMessage(
-        action === "CLAIM"
-          ? "Đã nhận xử lý hồ sơ."
-          : action === "REJECT"
-            ? "Đã từ chối hồ sơ."
-            : "Đã chuyển sang trạng thái cần bổ sung.",
-      );
+      setMessage(action === "CLAIM" ? "Đã tiếp nhận hồ sơ." : "Đã từ chối hồ sơ.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ.");
     } finally {
       setBusy(false);
+    }
+  }
+  async function saveInternalNotes() {
+    if (!submission) return;
+    setNotesSaving(true);
+    setNotesSaveError(null);
+    try {
+      const token = await csrfToken();
+      const response = await fetch(`/api/submissions/${submission.submissionId}/internal-notes`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ expectedVersion: submission.version, internalNotes: notesDraft }),
+      });
+      const data = (await response.json()) as {
+        submission?: { version: number };
+        error?: { message: string };
+      };
+      if (!response.ok || !data.submission) {
+        throw new Error(data.error?.message ?? "Không thể lưu ghi chú.");
+      }
+      setSubmission(await loadSubmission(submission.submissionId));
+    } catch (error) {
+      setNotesSaveError(error instanceof Error ? error.message : "Không thể lưu ghi chú.");
+    } finally {
+      setNotesSaving(false);
     }
   }
   /**
@@ -371,7 +416,7 @@ export function SubmissionDetail({
         body: JSON.stringify({ version: submission.version }),
       });
       const data = (await response.json()) as {
-        submission?: { officialCaseId: string; status: string; version: number };
+        submission?: { officialCaseId: string; status: PublicStatus; version: number };
         error?: { message?: string; details?: unknown };
       };
       if (!response.ok || !data.submission) {
@@ -438,28 +483,8 @@ export function SubmissionDetail({
       </main>
     );
   const draft = submission.draft;
-  const statusLabels: Record<string, { label: string; color: string }> = {
-    SUBMITTED: { label: "Chờ tiếp nhận", color: "bg-amber-100 text-amber-900 border-amber-300" },
-    UNDER_REVIEW: { label: "Đang xử lý", color: "bg-sky-100 text-sky-900 border-sky-300" },
-    NEEDS_SUPPLEMENT: {
-      label: "Cần bổ sung",
-      color: "bg-orange-100 text-orange-900 border-orange-300",
-    },
-    RESUBMITTED: { label: "Đã gửi lại", color: "bg-blue-100 text-blue-900 border-blue-300" },
-    REJECTED: { label: "Từ chối", color: "bg-rose-100 text-rose-900 border-rose-300" },
-    ACCEPTING: {
-      label: "Đang tiếp nhận",
-      color: "bg-emerald-100 text-emerald-900 border-emerald-300 animate-pulse",
-    },
-    ACCEPTED: {
-      label: "Đã tiếp nhận",
-      color: "bg-emerald-100 text-emerald-900 border-emerald-300",
-    },
-    DRAFT: { label: "Nháp", color: "bg-stone-100 text-stone-700 border-stone-300" },
-    EXPIRED: { label: "Hết hạn", color: "bg-stone-100 text-stone-600 border-stone-300" },
-  };
-  const statusBadge = statusLabels[submission.status] || {
-    label: labels[submission.status] ?? submission.status,
+  const statusBadge = STATUS_DISPLAY[submission.status] ?? {
+    label: submission.status,
     color: "bg-stone-100 text-stone-700 border-stone-300",
   };
 
@@ -481,7 +506,6 @@ export function SubmissionDetail({
         <SubmissionClaimBanner
           submissionId={submission.submissionId}
           version={submission.version}
-          status={submission.status}
           claimedBy={submission.claimedBy || ""}
           claimedAt={submission.claimedAt || undefined}
           currentUserEmail={currentUserEmail}
@@ -521,9 +545,27 @@ export function SubmissionDetail({
             </p>
           </div>
 
-          {/* Action Toolbar */}
+          {/* Action Toolbar — thanh thao tác chính chỉ còn đúng ba thao tác nghiệp vụ: Tiếp nhận,
+              Lưu (trong Bàn làm việc bên dưới), Hoàn thành xử lý.
+
+              "Từ chối" đã chuyển vào "Thao tác khác" (2026-07-30, review PR #11). Nó là thao tác
+              **không hoàn tác được** và trên thực tế rất ít dùng, mà lại nằm ngay cạnh "Hoàn thành
+              xử lý" — hai nút đối nghịch nhau đặt sát nhau là chỗ bấm nhầm. Vào menu phụ thì vẫn
+              làm được, nhưng phải mở menu rồi mới bấm, cộng thêm một lần xác nhận như trước.
+
+              Thao tác quản trị ngoại lệ (điều chỉnh hồ sơ chính thức) cũng nằm trong menu đó. */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Primary Workflow Action: Official Acceptance */}
+            {mayClaim(submission.status as PublicStatus) && (
+              <button
+                className="rounded-lg border border-emerald-700 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                disabled={busy}
+                onClick={() => action("CLAIM")}
+                type="button"
+              >
+                Tiếp nhận
+              </button>
+            )}
+
             <button
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50 transition"
               disabled={
@@ -537,7 +579,7 @@ export function SubmissionDetail({
                 submission.officialCaseId
                   ? `Đã có mã hồ sơ chính thức ${submission.officialCaseId}`
                   : submission.status === "ACCEPTING"
-                    ? "Lần tiếp nhận trước đang dở — bấm để chạy tiếp từ bước dở dang"
+                    ? "Lần hoàn thành trước đang dở — bấm để chạy tiếp từ bước dở dang"
                     : "Sinh mã hồ sơ, chuyển ảnh sang 02_CASES và ghi dữ liệu chính thức"
               }
               type="button"
@@ -550,20 +592,9 @@ export function SubmissionDetail({
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              {submission.status === "ACCEPTING" ? "Tiếp tục tiếp nhận" : "Tiếp nhận chính thức"}
+              {submission.status === "ACCEPTING" ? "Tiếp tục hoàn thành" : "Hoàn thành xử lý"}
             </button>
 
-            {/* Secondary Actions */}
-            {submission.status !== "UNDER_REVIEW" && (
-              <button
-                className="rounded-lg border border-stone-300 bg-stone-50 px-3.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50"
-                disabled={busy}
-                onClick={() => action("CLAIM")}
-                type="button"
-              >
-                Nhận xử lý
-              </button>
-            )}
             <button
               className="rounded-lg border border-sky-700 bg-sky-50 px-3.5 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
               disabled={busy || submission.status !== "UNDER_REVIEW" || !workingPayload.draft}
@@ -577,52 +608,46 @@ export function SubmissionDetail({
             >
               Mở tab Chủ sử dụng
             </button>
-            {submission.status === "ACCEPTED" && (
-              <button
-                className="rounded-lg border border-orange-700 bg-orange-50 px-3.5 py-2 text-xs font-semibold text-orange-800 hover:bg-orange-100 disabled:opacity-50"
-                disabled={busy || !submission.draft}
-                onClick={() => openEdit("AMEND")}
-                title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
-                type="button"
-              >
-                Điều chỉnh chính thức
-              </button>
-            )}
 
-            {/* Exceptions */}
-            <button
-              className="rounded-lg border border-amber-700 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW"}
-              onClick={() => {
-                setSupplementMessage("");
-                setSupplementInstruction("");
-                const promptMsg = window.prompt(
-                  "Nhập nội dung thông báo yêu cầu bổ sung gửi người dân:",
-                );
-                if (promptMsg && promptMsg.trim()) {
-                  setSupplementMessage(promptMsg.trim());
-                  setSupplementInstruction(promptMsg.trim());
-                  void action("REQUEST_SUPPLEMENT");
-                }
-              }}
-              type="button"
-            >
-              Yêu cầu bổ sung
-            </button>
-            <button
-              className="rounded-lg border border-rose-700 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-50"
-              disabled={busy || submission.status !== "UNDER_REVIEW"}
-              onClick={() => {
-                if (
-                  window.confirm("Xác nhận TỪ CHỐI hồ sơ này? Thao tác này không thể hoàn tác.")
-                ) {
-                  void action("REJECT");
-                }
-              }}
-              type="button"
-            >
-              Từ chối
-            </button>
+            {(submission.status === "ACCEPTED" || submission.status === "UNDER_REVIEW") && (
+              <details className="ml-1">
+                <summary className="cursor-pointer list-none rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-100">
+                  ⋯ Thao tác khác
+                </summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {submission.status === "ACCEPTED" && (
+                    <button
+                      className="rounded-lg border border-orange-700 bg-orange-50 px-3.5 py-2 text-xs font-semibold text-orange-800 hover:bg-orange-100 disabled:opacity-50"
+                      disabled={busy || !submission.draft}
+                      onClick={openAmendModal}
+                      title="Sửa hồ sơ đã tiếp nhận chính thức — cần lý do, và dữ liệu chính thức sẽ được ghi lại"
+                      type="button"
+                    >
+                      Điều chỉnh chính thức
+                    </button>
+                  )}
+                  {submission.status === "UNDER_REVIEW" && (
+                    <button
+                      className="rounded-lg border border-rose-700 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            "Xác nhận TỪ CHỐI hồ sơ này? Thao tác này không thể hoàn tác.",
+                          )
+                        ) {
+                          void action("REJECT");
+                        }
+                      }}
+                      title="Từ chối hồ sơ — không hoàn tác được"
+                      type="button"
+                    >
+                      Từ chối
+                    </button>
+                  )}
+                </div>
+              </details>
+            )}
           </div>
         </div>
 
@@ -665,7 +690,83 @@ export function SubmissionDetail({
             submissionId={submission.submissionId}
             files={submission.files}
             ownerIds={draft?.owners.map((owner) => owner.id) ?? []}
+            /*
+             * Cùng điều kiện với `mayStaffEdit` ở server. Không truyền hàm = viewer không hiện nút,
+             * nên quyền nằm đúng một nơi ở client và vẫn được server kiểm lại.
+             */
+            onDeleteFile={
+              isClaimedByMe && submission.status === "UNDER_REVIEW"
+                ? async (fileId) => {
+                    const token = await csrfToken();
+                    const response = await fetch(
+                      `/api/submissions/${submission.submissionId}/files/${fileId}`,
+                      { method: "DELETE", headers: { "x-csrf-token": token } },
+                    );
+                    if (!response.ok) {
+                      const data = (await response.json().catch(() => null)) as {
+                        error?: { message?: string };
+                      } | null;
+                      throw new Error(data?.error?.message ?? "Không gỡ được ảnh khỏi hồ sơ.");
+                    }
+                    setSubmission(await loadSubmission(submission.submissionId));
+                  }
+                : undefined
+            }
+            reassignableOwners={
+              draft?.owners
+                .filter((owner) => requiresCitizenId(owner.ownerType as OwnerType))
+                .map((owner) => ({ id: owner.id, fullName: owner.fullName })) ?? []
+            }
+            /*
+             * Vá lỗ mà thay ảnh/gỡ ảnh không vá được: ảnh CCCD tải vào đúng ô nhưng gán nhầm người.
+             * Cùng điều kiện `mayStaffEdit` với `onDeleteFile` — server tự kiểm lại.
+             */
+            onReassignOwner={
+              isClaimedByMe && submission.status === "UNDER_REVIEW"
+                ? async (fileId, newOwnerId) => {
+                    const token = await csrfToken();
+                    const response = await fetch(
+                      `/api/submissions/${submission.submissionId}/files/${fileId}`,
+                      {
+                        method: "PATCH",
+                        headers: {
+                          "content-type": "application/json",
+                          "x-csrf-token": token,
+                        },
+                        body: JSON.stringify({ ownerId: newOwnerId }),
+                      },
+                    );
+                    if (!response.ok) {
+                      const data = (await response.json().catch(() => null)) as {
+                        error?: { message?: string };
+                      } | null;
+                      throw new Error(data?.error?.message ?? "Không gán lại được chủ sử dụng.");
+                    }
+                    setSubmission(await loadSubmission(submission.submissionId));
+                  }
+                : undefined
+            }
           />
+          {/*
+            Cùng điều kiện với `mayStaffEdit` ở server (đang giữ hồ sơ + `UNDER_REVIEW`). Ẩn nút chỉ
+            là phép lịch sự với cán bộ không đủ điều kiện; hai route `uploads/*` vẫn tự kiểm lại.
+          */}
+          {isClaimedByMe && submission.status === "UNDER_REVIEW" && (
+            <OfficerFileUpload
+              submissionId={submission.submissionId}
+              files={submission.files}
+              owners={
+                draft?.owners.map((owner) => ({
+                  id: owner.id,
+                  ownerType: owner.ownerType,
+                  fullName: owner.fullName,
+                })) ?? []
+              }
+              onUploaded={async () => {
+                setSubmission(await loadSubmission(submission.submissionId));
+              }}
+            />
+          )}
         </div>
 
         {/* Right Column: Information & Working Payload Editor (7 Cols on large screen) */}
@@ -693,6 +794,33 @@ export function SubmissionDetail({
               </strong>
             </div>
           </div>
+
+          {/* Ghi chú nội bộ (Đợt 2A-2) — chỉ cán bộ thấy, không thuộc hồ sơ kê khai. */}
+          <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-bold text-stone-900">Ghi chú nội bộ</h2>
+            <p className="mt-0.5 text-xs text-stone-500">
+              Chỉ cán bộ nhìn thấy, không hiển thị cho người dân.
+            </p>
+            <textarea
+              className="pc-textarea mt-2"
+              maxLength={4000}
+              onChange={(event) => setNotesDraft(event.target.value)}
+              placeholder="Ví dụ: hồ sơ này từng nộp trùng do thiếu ảnh GCN mặt sau."
+              rows={3}
+              value={notesDraft}
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                className="pc-button-quiet text-xs"
+                disabled={notesSaving || !notesDirty}
+                onClick={() => void saveInternalNotes()}
+                type="button"
+              >
+                {notesSaving ? "Đang lưu…" : "Lưu ghi chú"}
+              </button>
+              {notesSaveError && <span className="text-xs text-rose-700">{notesSaveError}</span>}
+            </div>
+          </section>
 
           {/* Working Payload Editor (Full 49 PL3 columns tabbed) */}
           {submission.status === "UNDER_REVIEW" && workingPayload.draft ? (
@@ -773,37 +901,16 @@ export function SubmissionDetail({
             </div>
           ) : null}
 
-          <section className="rounded-xl border border-stone-200 bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-bold text-stone-900">Đối chiếu AI</h2>
-                <p className="mt-1 text-xs text-stone-600">
-                  Chỉ tải kết quả AI khi cán bộ mở phần này.
-                </p>
-              </div>
-              <button
-                className="pc-button-quiet text-xs"
-                type="button"
-                aria-expanded={aiPanelOpen}
-                onClick={() => setAiPanelOpen((current) => !current)}
-              >
-                {aiPanelOpen ? "Đóng đối chiếu AI" : "Mở đối chiếu AI"}
-              </button>
-            </div>
-            {aiPanelOpen && (
-              <div className="mt-4">
-                <AiDraftPanel
-                  submissionId={submission.submissionId}
-                  version={submission.version}
-                  mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
-                  onApplied={async () => {
-                    const refreshed = await loadSubmission(submission.submissionId);
-                    setSubmission(refreshed);
-                  }}
-                />
-              </div>
-            )}
-          </section>
+          {/* AI Extraction Panel */}
+          <AiDraftPanel
+            submissionId={submission.submissionId}
+            version={submission.version}
+            mayApply={submission.status === "UNDER_REVIEW" && isClaimedByMe}
+            onApplied={async () => {
+              const refreshed = await loadSubmission(submission.submissionId);
+              setSubmission(refreshed);
+            }}
+          />
 
           {/* Reset Access Secret Section */}
           {submission.canResetAccessSecret && (
@@ -847,9 +954,7 @@ export function SubmissionDetail({
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-10">
           <div className="w-full max-w-2xl rounded-xl bg-white p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
-              <h2 className="text-xl font-bold">
-                {amendMode ? "Điều chỉnh hồ sơ chính thức" : "Chỉnh sửa thông tin hồ sơ"}
-              </h2>
+              <h2 className="text-xl font-bold">Điều chỉnh hồ sơ chính thức</h2>
               <button
                 className="text-sm font-semibold text-stone-500"
                 onClick={() => setEditOpen(false)}
@@ -858,38 +963,30 @@ export function SubmissionDetail({
                 Đóng
               </button>
             </div>
-            {amendMode ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-orange-300 bg-orange-50 p-4">
-                <p className="text-sm text-orange-900">
-                  Hồ sơ đã tiếp nhận chính thức
-                  {submission.officialCaseId ? ` (${submission.officialCaseId})` : ""}. Lưu thay đổi
-                  sẽ <strong>ghi lại luôn dữ liệu chính thức</strong> — giấy chứng nhận, chủ sử
-                  dụng, thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive giữ
-                  nguyên.
-                </p>
-                <label className="block">
-                  <span className="pc-field-label">
-                    Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)
-                  </span>
-                  <textarea
-                    className="pc-input"
-                    onChange={(event) => setAmendmentReason(event.target.value)}
-                    placeholder="Ví dụ: Đối chiếu lại bìa gốc, số vào sổ ghi nhầm CS00123 thành CS00132."
-                    rows={3}
-                    value={amendmentReason}
-                  />
-                </label>
-                <p className="text-xs text-orange-800">
-                  Lý do được ghi vào nhật ký kiểm toán cùng danh sách trường đã đổi. Đây là dấu vết
-                  duy nhất giải thích vì sao dữ liệu chính thức khác lúc tiếp nhận.
-                </p>
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-stone-600">
-                Chỉ sửa lỗi gõ nhỏ giúp người dân. Nếu cần người dân nộp lại giấy tờ, dùng nút “Yêu
-                cầu bổ sung”.
+            <div className="mt-3 space-y-3 rounded-lg border border-orange-300 bg-orange-50 p-4">
+              <p className="text-sm text-orange-900">
+                Hồ sơ đã tiếp nhận chính thức
+                {submission.officialCaseId ? ` (${submission.officialCaseId})` : ""}. Lưu thay đổi
+                sẽ <strong>ghi lại luôn dữ liệu chính thức</strong> — giấy chứng nhận, chủ sử dụng,
+                thửa đất và tài sản của hồ sơ này. Mã hồ sơ chính thức và ảnh trên Drive giữ nguyên.
               </p>
-            )}
+              <label className="block">
+                <span className="pc-field-label">
+                  Lý do điều chỉnh (bắt buộc, tối thiểu 10 ký tự)
+                </span>
+                <textarea
+                  className="pc-input"
+                  onChange={(event) => setAmendmentReason(event.target.value)}
+                  placeholder="Ví dụ: Đối chiếu lại bìa gốc, số vào sổ ghi nhầm CS00123 thành CS00132."
+                  rows={3}
+                  value={amendmentReason}
+                />
+              </label>
+              <p className="text-xs text-orange-800">
+                Lý do được ghi vào nhật ký kiểm toán cùng danh sách trường đã đổi. Đây là dấu vết
+                duy nhất giải thích vì sao dữ liệu chính thức khác lúc tiếp nhận.
+              </p>
+            </div>
             <section className="mt-5">
               <h3 className="font-semibold">Giấy chứng nhận</h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -1046,16 +1143,12 @@ export function SubmissionDetail({
                 Hủy
               </button>
               <button
-                className={
-                  amendMode
-                    ? "rounded-lg bg-orange-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
-                    : "rounded-lg bg-emerald-800 px-4 py-2 font-semibold text-white disabled:opacity-50"
-                }
-                disabled={busy || (amendMode && amendmentReason.trim().length < 10)}
+                className="rounded-lg bg-orange-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+                disabled={busy || amendmentReason.trim().length < 10}
                 onClick={() => void saveEdit()}
                 type="button"
               >
-                {amendMode ? "Lưu điều chỉnh chính thức" : "Lưu thay đổi"}
+                Lưu điều chỉnh chính thức
               </button>
             </div>
           </div>

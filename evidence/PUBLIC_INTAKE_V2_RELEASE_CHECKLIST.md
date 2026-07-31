@@ -22,9 +22,9 @@ migration ở bất kỳ môi trường nào.**
 
 ## 2. Cấu hình môi trường
 
-| Biến | Giá trị khi phát hành | Ghi chú |
-|---|---|---|
-| `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED` | `false` | Chỉ bật sau khi qua bộ kiểm chất lượng ảnh |
+| Biến                                             | Giá trị khi phát hành | Ghi chú                                    |
+| ------------------------------------------------ | --------------------- | ------------------------------------------ |
+| `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED` | `false`               | Chỉ bật sau khi qua bộ kiểm chất lượng ảnh |
 
 Chế độ cán bộ hỗ trợ hiện dùng `OFFICER_ASSISTED_INTAKE_ENABLED` ở server, mặc định `false`, độc lập
 với `ASSISTED_INTAKE_ROLES`. Cờ client không bao giờ là hàng rào bảo mật.
@@ -64,12 +64,12 @@ với `ASSISTED_INTAKE_ROLES`. Cờ client không bao giờ là hàng rào bảo
 
 ## 5. Rollback
 
-| Vấn đề | Cách xử lý | Mất gì |
-|---|---|---|
-| Ảnh sau chuẩn hóa mờ/mất góc | Đặt cờ `false`, deploy lại | Không mất gì; HEIC vẫn chuyển JPEG như cũ |
-| Wizard V2 có lỗi nghiêm trọng | `git revert` commit `fe3e2e3` | Quay lại 7 bước; dữ liệu nháp vẫn tương thích |
-| Chế độ cán bộ có vấn đề | `git revert` commit `7345090`; giữ migration | Cột thừa vô hại |
-| Cần rollback toàn bộ | Revert code trước, migration sau | Mất tên cán bộ đã nhận + nhãn nguồn của hồ sơ tạo sau deploy. **Không** mất dữ liệu kê khai, ảnh hay hồ sơ chính thức |
+| Vấn đề                        | Cách xử lý                                   | Mất gì                                                                                                                |
+| ----------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Ảnh sau chuẩn hóa mờ/mất góc  | Đặt cờ `false`, deploy lại                   | Không mất gì; HEIC vẫn chuyển JPEG như cũ                                                                             |
+| Wizard V2 có lỗi nghiêm trọng | `git revert` commit `fe3e2e3`                | Quay lại 7 bước; dữ liệu nháp vẫn tương thích                                                                         |
+| Chế độ cán bộ có vấn đề       | `git revert` commit `7345090`; giữ migration | Cột thừa vô hại                                                                                                       |
+| Cần rollback toàn bộ          | Revert code trước, migration sau             | Mất tên cán bộ đã nhận + nhãn nguồn của hồ sơ tạo sau deploy. **Không** mất dữ liệu kê khai, ảnh hay hồ sơ chính thức |
 
 ## 6. Việc còn nợ, đã ghi rõ ở `docs/brain/04-current-tasks.md`
 
@@ -93,14 +93,14 @@ một dòng chủ sử dụng là tổ chức chỉ cần mã số thuế và đ
 Từ PR #7, mô hình dữ liệu tách đúng theo PL3: cột **F/G là tổ chức**, cột **H–L là người đại diện
 theo pháp luật**. Vì vậy một dòng tổ chức nay **bắt buộc** phải có đủ:
 
-| Cột | Trường | Ghi chú |
-|---|---|---|
-| F | Tên tổ chức | Mới — trước đây nằm chung ô họ tên |
-| G | Số định danh tổ chức | Mã số thuế 10 số (hoặc kèm 3 số đơn vị trực thuộc) |
-| H | Họ tên người đại diện | **Mới bắt buộc** |
-| I | Ngày sinh người đại diện | **Mới bắt buộc** |
-| J | Giới tính người đại diện | **Mới bắt buộc** |
-| L | Địa chỉ thường trú | Trước là địa chỉ trụ sở, nay là của người đại diện |
+| Cột | Trường                   | Ghi chú                                            |
+| --- | ------------------------ | -------------------------------------------------- |
+| F   | Tên tổ chức              | Mới — trước đây nằm chung ô họ tên                 |
+| G   | Số định danh tổ chức     | Mã số thuế 10 số (hoặc kèm 3 số đơn vị trực thuộc) |
+| H   | Họ tên người đại diện    | **Mới bắt buộc**                                   |
+| I   | Ngày sinh người đại diện | **Mới bắt buộc**                                   |
+| J   | Giới tính người đại diện | **Mới bắt buộc**                                   |
+| L   | Địa chỉ thường trú       | Trước là địa chỉ trụ sở, nay là của người đại diện |
 
 **Tác động:** mọi hồ sơ tổ chức đang chờ tiếp nhận sẽ bị chặn cho tới khi cán bộ bổ sung thông tin
 người đại diện. Đây là **chủ ý**, không phải lỗi — PL3 đòi các cột này.
@@ -122,7 +122,7 @@ Ngoại lệ có chủ ý: đổi cột M từ tổ chức sang cá nhân thì *
 Ba ô lý do ghi đè (cột B, cột V của từng thửa, cột AX) đi thẳng vào nhật ký audit, nên hệ thống
 **từ chối lưu** nếu phát hiện chuỗi 12 số giống số định danh cá nhân (kể cả khi viết cách nhau bằng
 dấu cách, chấm hoặc gạch). Cán bộ chỉ ghi lý do nghiệp vụ ngắn, ví dụ
-*"Theo bản đồ địa chính đã đối chiếu"*.
+_"Theo bản đồ địa chính đã đối chiếu"_.
 
 Hồ sơ đã lưu trước khi có luật này cũng bị chặn ở bước tiếp nhận, kèm thông báo chỉ rõ ô nào.
 
@@ -130,7 +130,7 @@ Hồ sơ đã lưu trước khi có luật này cũng bị chặn ở bước ti
 
 Xóa một thửa đang có tài sản gắn vào thì tài sản tự về trạng thái chưa chọn thửa và **vẫn lưu được**
 bản làm việc. Bước **tiếp nhận chính thức** sẽ chặn, kèm thông báo gọi đúng tên tài sản, ví dụ
-*"Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất"*.
+_"Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất"_.
 
 ### 7.5. File PL3 xuất ra thay đổi khi một thửa có nhiều tài sản
 
@@ -148,10 +148,10 @@ Sheet **"Canh bao"** có một dòng nhắc mỗi thửa như vậy. Hồ sơ c�
 
 ### 7.6. Migration phải áp theo thứ tự
 
-| Migration | Nội dung | Bắt buộc |
-|---|---|---|
-| `202607290002_full_pl3_editor.sql` | Thêm cột PL3 cho owner/parcel/asset + projection chính thức | Áp trước khi deploy code |
-| `202607290003_drop_working_payload_override_columns.sql` | Gỡ 4 cột ghi đè song song trên `public_submissions` | Áp cùng đợt; idempotent, chạy được dù `202607290002` đã áp hay chưa |
+| Migration                                                | Nội dung                                                    | Bắt buộc                                                            |
+| -------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------- |
+| `202607290002_full_pl3_editor.sql`                       | Thêm cột PL3 cho owner/parcel/asset + projection chính thức | Áp trước khi deploy code                                            |
+| `202607290003_drop_working_payload_override_columns.sql` | Gỡ 4 cột ghi đè song song trên `public_submissions`         | Áp cùng đợt; idempotent, chạy được dù `202607290002` đã áp hay chưa |
 
 Sau khi áp, chạy `npm run preflight:public-intake-v2-migrations` — script kiểm cả hai chiều: cột
 PL3 phải **có**, và 4 cột ghi đè song song phải **không còn**.
@@ -178,11 +178,11 @@ Cả hai idempotent nên nếu sau này chuyển sang Supabase CLI, `db push` ch
 
 ### 7.7. Rà soát tác động của §7.1 trên dữ liệu thật (2026-07-29)
 
-| Chỉ số | Số lượng |
-|---|---|
-| Hồ sơ ở trạng thái chờ tiếp nhận | 13 |
-| Trong đó có chủ sử dụng là **tổ chức** | **0** |
-| **Sẽ bị chặn theo §7.1** | **0** |
+| Chỉ số                                 | Số lượng |
+| -------------------------------------- | -------- |
+| Hồ sơ ở trạng thái chờ tiếp nhận       | 13       |
+| Trong đó có chủ sử dụng là **tổ chức** | **0**    |
+| **Sẽ bị chặn theo §7.1**               | **0**    |
 
 Toàn bộ 13 dòng chủ sử dụng đều là `CA_NHAN`. Đã kiểm chứng ngược để loại trừ lỗi đọc payload:
 13/13 hồ sơ parse được payload, 0 payload rỗng/hỏng.

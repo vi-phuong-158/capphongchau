@@ -1,4 +1,5 @@
 # KẾ HOẠCH THI CÔNG CHI TIẾT CHO CLAUDE CODE
+
 ## Tối giản luồng kê khai công khai, tăng tốc tải ảnh Google Drive và bổ sung chế độ cán bộ hỗ trợ
 
 **Dự án:** CAP Phong Châu — Hệ thống thu thập, kiểm tra hồ sơ đất đai
@@ -339,6 +340,7 @@ Hiển thị:
 Thông điệp:
 
 > Chụp rõ toàn bộ giấy tờ, không che góc, không lóa sáng.
+
 ### Bước 3 — Thông tin thửa đất nếu biết
 
 Hiển thị ngắn gọn:
@@ -496,9 +498,9 @@ flowchart TD
 Tạo ba tầng rõ tên:
 
 ```ts
-validateDraftStructure(draft)
-validateCitizenSubmitDraft(draft)
-completionChecks(record, effectivePayload)
+validateDraftStructure(draft);
+validateCitizenSubmitDraft(draft);
+completionChecks(record, effectivePayload);
 ```
 
 Không dùng tên chung mơ hồ `validateDraftForSubmit` cho cả hai mục đích.
@@ -533,9 +535,9 @@ Ví dụ:
     code: "PHONE_INVALID",
     fieldPath: "phone",
     message: "Nhập số điện thoại gồm 10 chữ số, bắt đầu bằng 0.",
-    severity: "BLOCKING"
-  }
-]
+    severity: "BLOCKING",
+  },
+];
 ```
 
 ### `completionChecks`
@@ -666,10 +668,10 @@ export async function normalizeIntakeImage(
 
 Thông số ban đầu:
 
-| Loại | Cạnh dài tối đa | JPEG quality | Điều kiện giữ nguyên |
-|---|---:|---:|---|
-| CCCD | 2400 px | 0.88 | ≤ 4 MiB và cạnh dài ≤ 2400 |
-| GCN | 3000 px | 0.88 | ≤ 4 MiB và cạnh dài ≤ 3000 |
+| Loại | Cạnh dài tối đa | JPEG quality | Điều kiện giữ nguyên       |
+| ---- | --------------: | -----------: | -------------------------- |
+| CCCD |         2400 px |         0.88 | ≤ 4 MiB và cạnh dài ≤ 2400 |
+| GCN  |         3000 px |         0.88 | ≤ 4 MiB và cạnh dài ≤ 3000 |
 
 Quy tắc:
 
@@ -1113,18 +1115,18 @@ Tìm toàn repo các đường gọi acceptance và test mọi đường.
 
 ## Test matrix
 
-| Trường hợp | Public submit | Official accept |
-|---|---|---|
-| Chỉ phone + name + đủ ảnh | Pass | Block |
-| Thiếu CCCD mặt sau | Block | Block |
-| Thiếu GCN | Block | Block |
-| GCN fields trống | Pass | Block |
-| Số tờ/số thửa trống | Pass | Block nếu chính sách official yêu cầu |
-| Loại đất chỉ raw `LUC` | Pass | Block cho tới khi cán bộ chuẩn hóa |
-| Đầy đủ PL3 | Pass | Pass |
-| CCCD text trống nhưng đủ ảnh | Pass | Block |
-| CCCD text sai 11 số | Block nếu đã nhập | Block |
-| Assets trống | Pass | Theo chính sách official; không block nếu tài sản là “nếu có” |
+| Trường hợp                   | Public submit     | Official accept                                               |
+| ---------------------------- | ----------------- | ------------------------------------------------------------- |
+| Chỉ phone + name + đủ ảnh    | Pass              | Block                                                         |
+| Thiếu CCCD mặt sau           | Block             | Block                                                         |
+| Thiếu GCN                    | Block             | Block                                                         |
+| GCN fields trống             | Pass              | Block                                                         |
+| Số tờ/số thửa trống          | Pass              | Block nếu chính sách official yêu cầu                         |
+| Loại đất chỉ raw `LUC`       | Pass              | Block cho tới khi cán bộ chuẩn hóa                            |
+| Đầy đủ PL3                   | Pass              | Pass                                                          |
+| CCCD text trống nhưng đủ ảnh | Pass              | Block                                                         |
+| CCCD text sai 11 số          | Block nếu đã nhập | Block                                                         |
+| Assets trống                 | Pass              | Theo chính sách official; không block nếu tài sản là “nếu có” |
 
 ## Acceptance
 
@@ -1205,7 +1207,7 @@ const STEPS = [
 Tạo helper cùng semantics server:
 
 ```ts
-validatePublicWizardStep(step, draft, uploadTasks, uploadedFiles)
+validatePublicWizardStep(step, draft, uploadTasks, uploadedFiles);
 ```
 
 Không copy logic rời rạc nhiều nơi.
@@ -1425,13 +1427,13 @@ Dọn tài nguyên:
 Khi initiate/complete, client giữ:
 
 ```ts
-sourceSizeBytes
-sourceMimeType
-sourceWidth
-sourceHeight
-uploadWidth
-uploadHeight
-normalizationVersion
+sourceSizeBytes;
+sourceMimeType;
+sourceWidth;
+sourceHeight;
+uploadWidth;
+uploadHeight;
+normalizationVersion;
 ```
 
 Không tin hoàn toàn client:
@@ -1715,7 +1717,7 @@ Cách an toàn:
    - file chưa được dùng làm replacement thành công.
 5. Thêm helper:
    ```ts
-   repository.isDriveFileAdopted(submissionId, driveFileId)
+   repository.isDriveFileAdopted(submissionId, driveFileId);
    ```
 6. Trong catch:
    ```ts
@@ -1919,8 +1921,8 @@ createIntakeSubmission({
   phone,
   consentVersion,
   requestId,
-  idempotencyKey
-})
+  idempotencyKey,
+});
 ```
 
 Public route gọi với `SELF_SERVICE`.
@@ -2001,9 +2003,9 @@ tests/public-status.test.ts
 Khi `CLAIM`/`FORCE_CLAIM`/`TRANSFER`:
 
 ```ts
-claimedBy = user.email
-claimedByDisplayName = user.displayName
-claimedAt = now
+claimedBy = user.email;
+claimedByDisplayName = user.displayName;
+claimedAt = now;
 ```
 
 Khi `RELEASE`:
@@ -2467,12 +2469,12 @@ Cập nhật:
 
 ## 17.4. Mobile manual matrix
 
-| Thiết bị/trình duyệt | Wi-Fi | 4G | HEIC | Multi-photo |
-|---|---:|---:|---:|---:|
-| Android Chrome | Có | Có | Nếu hỗ trợ | Có |
-| Samsung Internet | Có | Có | Nếu hỗ trợ | Có |
-| iPhone Safari | Có | Có | Có | Có |
-| Desktop Chrome | Có | Không bắt buộc | Fixture | Có |
+| Thiết bị/trình duyệt | Wi-Fi |             4G |       HEIC | Multi-photo |
+| -------------------- | ----: | -------------: | ---------: | ----------: |
+| Android Chrome       |    Có |             Có | Nếu hỗ trợ |          Có |
+| Samsung Internet     |    Có |             Có | Nếu hỗ trợ |          Có |
+| iPhone Safari        |    Có |             Có |         Có |          Có |
+| Desktop Chrome       |    Có | Không bắt buộc |    Fixture |          Có |
 
 Kiểm:
 
@@ -2660,19 +2662,23 @@ Claude phải báo cáo theo mẫu:
 # PUBLIC INTAKE V2 — IMPLEMENTATION REPORT
 
 ## Repo
+
 - Branch:
 - Base commit:
 - Final commit:
 - Working tree:
 
 ## Đã thực hiện
+
 - ...
 
 ## Migration
+
 - ...
 - Chưa chạy production.
 
 ## Upload benchmark
+
 - Source median:
 - Upload median:
 - Reduction:
@@ -2681,6 +2687,7 @@ Claude phải báo cáo theo mẫu:
 - Retry/failure:
 
 ## Test
+
 - lint:
 - typecheck:
 - unit:
@@ -2688,15 +2695,18 @@ Claude phải báo cáo theo mẫu:
 - build:
 
 ## Security
+
 - PII logging:
 - official gate:
 - assisted auth:
 - orphan cleanup:
 
 ## Chưa làm / rủi ro còn lại
+
 - ...
 
 ## Evidence
+
 - ...
 ```
 

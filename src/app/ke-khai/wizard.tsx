@@ -568,9 +568,8 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
   const [recentReceipts, setRecentReceipts] = useState<string[]>([]);
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
   const [existingResults, setExistingResults] = useState<Record<string, ExistingLookupResult>>({});
-  const [certificateDuplicate, setCertificateDuplicate] = useState<CertificateDuplicateState | null>(
-    null,
-  );
+  const [certificateDuplicate, setCertificateDuplicate] =
+    useState<CertificateDuplicateState | null>(null);
 
   const [csrfToken, setCsrfToken] = useState("");
   /** Version PostgreSQL gần nhất đã nhận từ GET/PATCH, gửi lại để phát hiện thiết bị sửa song song. */
@@ -964,7 +963,8 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           return (await response.json()) as CertificateDuplicateResult;
         })
         .then((result) => {
-          if (!cancelled) setCertificateDuplicate({ issueNumber, issueDate, checking: false, result });
+          if (!cancelled)
+            setCertificateDuplicate({ issueNumber, issueDate, checking: false, result });
         })
         .catch((error: unknown) => {
           if (!cancelled) {
@@ -1008,7 +1008,6 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
     },
     [saveDraft],
   );
-
 
   useEffect(() => {
     let recovery: {
@@ -1427,7 +1426,8 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
               [documentType]: { file: prepared, fileId, name: prepared.name },
             },
           }));
-          const identitySource = draft.owners.find((owner) => owner.id === ownerId)?.identitySource ?? "";
+          const identitySource =
+            draft.owners.find((owner) => owner.id === ownerId)?.identitySource ?? "";
           if (!shouldAutoReadCitizenIdQr(identitySource)) {
             setUploadNote(`Đã tải ảnh CCCD ${sideLabel}.`);
             return;
@@ -1835,12 +1835,13 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
           ? "/api/staff/assisted-submissions/current/submit"
           : "/api/public/submissions/current/submit",
         {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          draft: withCertificateMetadata(draft, certificatePhotos),
-        }),
-      });
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            draft: withCertificateMetadata(draft, certificatePhotos),
+          }),
+        },
+      );
 
       if (!response.ok) {
         submitIdempotencyKey.current = null;
@@ -1887,7 +1888,9 @@ export function IntakeWizard({ assisted }: { assisted?: AssistedModeConfig } = {
    */
   const startNextSubmission = useCallback(() => {
     setRecentReceipts((current) =>
-      receipt ? [receipt.code, ...current.filter((code) => code !== receipt.code)].slice(0, 10) : current,
+      receipt
+        ? [receipt.code, ...current.filter((code) => code !== receipt.code)].slice(0, 10)
+        : current,
     );
 
     // Xóa sạch PII của hộ trước. Không giữ lại ảnh, CCCD hay số điện thoại nào.

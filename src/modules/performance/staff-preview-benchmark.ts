@@ -55,7 +55,11 @@ export function validateStaffBenchmarkTarget(input: StaffBenchmarkTargetInput): 
   }
 
   const expectedHost = input.expectedHost.trim().toLowerCase();
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(expectedHost)) {
+  if (
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+      expectedHost,
+    )
+  ) {
     throw new Error("PERF_BENCHMARK_EXPECTED_HOST không hợp lệ.");
   }
 
@@ -75,10 +79,17 @@ export function validateStaffBenchmarkTarget(input: StaffBenchmarkTargetInput): 
     url.search ||
     url.hash
   ) {
-    throw new Error("PERF_BENCHMARK_BASE_URL phải là origin HTTPS Preview, không có thông tin xác thực hay path.");
+    throw new Error(
+      "PERF_BENCHMARK_BASE_URL phải là origin HTTPS Preview, không có thông tin xác thực hay path.",
+    );
   }
-  if (!url.hostname.endsWith(".vercel.app") || PRODUCTION_BENCHMARK_HOSTS.has(url.hostname.toLowerCase())) {
-    throw new Error("PERF_BENCHMARK_BASE_URL phải trỏ tới Vercel Preview rehearsal, không phải Production.");
+  if (
+    !url.hostname.endsWith(".vercel.app") ||
+    PRODUCTION_BENCHMARK_HOSTS.has(url.hostname.toLowerCase())
+  ) {
+    throw new Error(
+      "PERF_BENCHMARK_BASE_URL phải trỏ tới Vercel Preview rehearsal, không phải Production.",
+    );
   }
   if (url.hostname.toLowerCase() !== expectedHost) {
     throw new Error("PERF_BENCHMARK_BASE_URL không khớp PERF_BENCHMARK_EXPECTED_HOST.");
@@ -86,7 +97,9 @@ export function validateStaffBenchmarkTarget(input: StaffBenchmarkTargetInput): 
   return url;
 }
 
-export function buildStaffBenchmarkRequests(input: StaffBenchmarkRequestInput): readonly StaffBenchmarkRequest[] {
+export function buildStaffBenchmarkRequests(
+  input: StaffBenchmarkRequestInput,
+): readonly StaffBenchmarkRequest[] {
   const queuePath = (params: Readonly<Record<string, string>>): string => {
     const search = new URLSearchParams(params);
     return `/api/submissions?${search.toString()}`;
@@ -121,7 +134,9 @@ export interface BenchmarkSummary {
   readonly p95Ms: number;
   readonly errorRate: number;
   readonly statuses: Readonly<Record<string, number>>;
-  readonly serverTiming: Readonly<Record<string, { readonly p50Ms: number; readonly p95Ms: number }>>;
+  readonly serverTiming: Readonly<
+    Record<string, { readonly p50Ms: number; readonly p95Ms: number }>
+  >;
   readonly runtimeRegions: readonly string[];
 }
 
@@ -147,7 +162,9 @@ export function safeVercelRegion(header: string | null): string | null {
   return /^[a-z]{3}\d$/.test(region) ? region : null;
 }
 
-export function summarizeStaffBenchmark(samples: readonly BenchmarkSample[]): readonly BenchmarkSummary[] {
+export function summarizeStaffBenchmark(
+  samples: readonly BenchmarkSample[],
+): readonly BenchmarkSummary[] {
   const grouped = new Map<StaffBenchmarkRoute, BenchmarkSample[]>();
   for (const sample of samples) {
     grouped.set(sample.route, [...(grouped.get(sample.route) ?? []), sample]);

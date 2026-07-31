@@ -95,8 +95,7 @@ export async function createIntakeSubmission(
 
   const submissionId = deriveSubmissionId(input.sessionSecret, input.rawIdempotencyKey);
   const receiptCode = deriveReceiptCode(input.sessionSecret, input.rawIdempotencyKey);
-  const lazyDriveFolderCreation =
-    loadPublicIntakeEnvironment().LAZY_DRIVE_FOLDER_CREATION_ENABLED;
+  const lazyDriveFolderCreation = loadPublicIntakeEnvironment().LAZY_DRIVE_FOLDER_CREATION_ENABLED;
   const driveFolderId = lazyDriveFolderCreation
     ? null
     : await getPublicIntakeStorage().createSubmissionFolder(submissionId);

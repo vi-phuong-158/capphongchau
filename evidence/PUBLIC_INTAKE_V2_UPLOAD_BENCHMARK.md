@@ -2,7 +2,7 @@
 
 ## Trạng thái: ĐÃ BẬT THEO QUYẾT ĐỊNH CHỦ DỰ ÁN, CHƯA CÓ SỐ ĐO TRƯỚC/SAU
 
-Kế hoạch §0.2 mục 12: *"Không tuyên bố tăng tốc nếu chưa có số đo trước/sau."*
+Kế hoạch §0.2 mục 12: _"Không tuyên bố tăng tốc nếu chưa có số đo trước/sau."_
 
 Phiên thi công này **không đo được** thời gian tải thật, vì cần:
 
@@ -29,20 +29,20 @@ Không có thứ nào trong ba thứ đó ở môi trường phát triển này.
 `tests/image-normalization.test.ts` (23 test) khóa các bất biến sau bằng cách giả lập
 `createImageBitmap` và `canvas`:
 
-| Bất biến | Vì sao quan trọng |
-|---|---|
-| Không bao giờ phóng to | Phóng to chỉ tăng dung lượng, không thêm thông tin |
-| Giữ đúng tỷ lệ (sai số < 1%) | Ảnh méo làm sai tỷ lệ sơ đồ thửa trên GCN |
-| Ảnh nhỏ sẵn giữ nguyên | Mã hóa lại ảnh đã gọn chỉ thêm một lượt mất chất lượng |
-| Kết quả to hơn nguồn thì dùng nguồn | Không bao giờ làm chậm đi |
-| `imageOrientation: "from-image"` | Thiếu nó thì ảnh chụp dọc bị xoay ngang sau khi vẽ lại canvas |
-| Ảnh dọc vẫn dọc sau khi thu nhỏ | Cán bộ không phải tự xoay từng tờ |
-| Giải mã lỗi → trả tệp nguồn | Trình duyệt lạ không được làm người dân kê khai không nổi |
-| Kích thước 0 → trả tệp nguồn | canvas lớn trên iOS đôi khi trả ảnh rỗng |
-| Canvas được đặt về 0×0 sau khi dùng | Giữ nhiều canvas lớn là đường ngắn nhất tới tab bị kill trên iOS |
-| Tên tệp tải lên là `cccd.jpg` / `gcn.jpg` | Tên gốc thường mang số CCCD, tên người, ngày giờ |
+| Bất biến                                  | Vì sao quan trọng                                                |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| Không bao giờ phóng to                    | Phóng to chỉ tăng dung lượng, không thêm thông tin               |
+| Giữ đúng tỷ lệ (sai số < 1%)              | Ảnh méo làm sai tỷ lệ sơ đồ thửa trên GCN                        |
+| Ảnh nhỏ sẵn giữ nguyên                    | Mã hóa lại ảnh đã gọn chỉ thêm một lượt mất chất lượng           |
+| Kết quả to hơn nguồn thì dùng nguồn       | Không bao giờ làm chậm đi                                        |
+| `imageOrientation: "from-image"`          | Thiếu nó thì ảnh chụp dọc bị xoay ngang sau khi vẽ lại canvas    |
+| Ảnh dọc vẫn dọc sau khi thu nhỏ           | Cán bộ không phải tự xoay từng tờ                                |
+| Giải mã lỗi → trả tệp nguồn               | Trình duyệt lạ không được làm người dân kê khai không nổi        |
+| Kích thước 0 → trả tệp nguồn              | canvas lớn trên iOS đôi khi trả ảnh rỗng                         |
+| Canvas được đặt về 0×0 sau khi dùng       | Giữ nhiều canvas lớn là đường ngắn nhất tới tab bị kill trên iOS |
+| Tên tệp tải lên là `cccd.jpg` / `gcn.jpg` | Tên gốc thường mang số CCCD, tên người, ngày giờ                 |
 
-**Cái này *không* chứng minh:** chữ trên GCN còn đọc được, góc giấy không mất, QR CCCD còn quét
+**Cái này _không_ chứng minh:** chữ trên GCN còn đọc được, góc giấy không mất, QR CCCD còn quét
 được. Không unit test nào chứng minh được những điều đó.
 
 ---
@@ -89,23 +89,23 @@ Mở ảnh nguồn và ảnh sau chuẩn hóa cạnh nhau (trình xem ảnh hai 
 ở đúng 100% zoom trên ảnh sau chuẩn hóa. Điền một dòng cho mỗi ảnh trong bộ kiểm — không chỉ ảnh
 đại diện.
 
-| Ảnh | Ảnh nguồn (đường dẫn/tên) | Ảnh sau chuẩn hóa | Kích thước nguồn (W×H) | Kích thước sau (W×H) | Dung lượng nguồn | Dung lượng sau | Hướng ảnh đúng? | Chữ nhỏ còn đọc? | QR còn quét? | Thời gian tải (ms) |
-|---|---|---|---:|---:|---:|---:|:---:|:---:|:---:|---:|
-| GCN-01 | | | | | | | | | | |
-| GCN-02 | | | | | | | | | | |
-| … | | | | | | | | | | |
+| Ảnh    | Ảnh nguồn (đường dẫn/tên) | Ảnh sau chuẩn hóa | Kích thước nguồn (W×H) | Kích thước sau (W×H) | Dung lượng nguồn | Dung lượng sau | Hướng ảnh đúng? | Chữ nhỏ còn đọc? | QR còn quét? | Thời gian tải (ms) |
+| ------ | ------------------------- | ----------------- | ---------------------: | -------------------: | ---------------: | -------------: | :-------------: | :--------------: | :----------: | -----------------: |
+| GCN-01 |                           |                   |                        |                      |                  |                |                 |                  |              |                    |
+| GCN-02 |                           |                   |                        |                      |                  |                |                 |                  |              |                    |
+| …      |                           |                   |                        |                      |                  |                |                 |                  |              |                    |
 
 ### 3. Kiểm chất lượng — mọi mục phải PASS
 
-| # | Kiểm | Đạt khi | Cột tương ứng ở bảng trên |
-|---|---|---|---|
-| Q1 | Mở ảnh sau chuẩn hóa ở 100% | Đọc được toàn bộ chữ, kể cả dòng nhỏ nhất | "Chữ nhỏ còn đọc?" |
-| Q2 | So góc ảnh trước/sau | Không mất góc, không cắt cạnh | "Kích thước sau (W×H)" khớp tỷ lệ nguồn |
-| Q3 | Hướng ảnh | Ảnh dọc vẫn dọc, ảnh ngang vẫn ngang | "Hướng ảnh đúng?" |
-| Q4 | Quét QR CCCD | Tỷ lệ đọc được **không thấp hơn** trước khi bật cờ | "QR còn quét?" |
-| Q5 | Dung lượng | Ảnh > 6 MiB: median giảm ≥ 50% | "Dung lượng nguồn"/"Dung lượng sau" |
-| Q6 | Dung lượng | Sau chuẩn hóa không ảnh nào > 5 MiB (trừ ca giữ nguồn) | "Dung lượng sau" |
-| Q7 | Lỗi giải mã | Không ảnh nào rơi vào nhánh `UNCHANGED` vì decode lỗi | — kiểm bằng log console, không có cột riêng |
+| #   | Kiểm                        | Đạt khi                                                | Cột tương ứng ở bảng trên                   |
+| --- | --------------------------- | ------------------------------------------------------ | ------------------------------------------- |
+| Q1  | Mở ảnh sau chuẩn hóa ở 100% | Đọc được toàn bộ chữ, kể cả dòng nhỏ nhất              | "Chữ nhỏ còn đọc?"                          |
+| Q2  | So góc ảnh trước/sau        | Không mất góc, không cắt cạnh                          | "Kích thước sau (W×H)" khớp tỷ lệ nguồn     |
+| Q3  | Hướng ảnh                   | Ảnh dọc vẫn dọc, ảnh ngang vẫn ngang                   | "Hướng ảnh đúng?"                           |
+| Q4  | Quét QR CCCD                | Tỷ lệ đọc được **không thấp hơn** trước khi bật cờ     | "QR còn quét?"                              |
+| Q5  | Dung lượng                  | Ảnh > 6 MiB: median giảm ≥ 50%                         | "Dung lượng nguồn"/"Dung lượng sau"         |
+| Q6  | Dung lượng                  | Sau chuẩn hóa không ảnh nào > 5 MiB (trừ ca giữ nguồn) | "Dung lượng sau"                            |
+| Q7  | Lỗi giải mã                 | Không ảnh nào rơi vào nhánh `UNCHANGED` vì decode lỗi  | — kiểm bằng log console, không có cột riêng |
 
 Một mục Q1–Q4 trượt là **điều kiện dừng** theo §0.3 — không bật cờ, báo cáo lại.
 
@@ -113,18 +113,18 @@ Một mục Q1–Q4 trượt là **điều kiện dừng** theo §0.3 — không
 
 Cùng thiết bị, cùng mạng, đo lần lượt cờ tắt rồi cờ bật.
 
-| Fixture | Thiết bị | Mạng | Cờ | Dung lượng nguồn | Dung lượng tải | Chuẩn bị (ms) | Initiate (ms) | Truyền (ms) | Complete (ms) | Retry |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| GCN-01 (JPEG 2 MiB) | | | tắt | | | | | | | |
-| GCN-01 (JPEG 2 MiB) | | | bật | | | | | | | |
-| GCN-02 (JPEG 8 MiB) | | | tắt | | | | | | | |
-| GCN-02 (JPEG 8 MiB) | | | bật | | | | | | | |
-| GCN-03 (JPEG 12 MiB) | | | tắt | | | | | | | |
-| GCN-03 (JPEG 12 MiB) | | | bật | | | | | | | |
-| GCN-04 (HEIC) | | | tắt | | | | | | | |
-| GCN-04 (HEIC) | | | bật | | | | | | | |
-| 3 ảnh GCN liên tiếp | | | tắt | | | | | | | |
-| 3 ảnh GCN liên tiếp | | | bật | | | | | | | |
+| Fixture              | Thiết bị | Mạng | Cờ  | Dung lượng nguồn | Dung lượng tải | Chuẩn bị (ms) | Initiate (ms) | Truyền (ms) | Complete (ms) | Retry |
+| -------------------- | -------- | ---- | --- | ---------------: | -------------: | ------------: | ------------: | ----------: | ------------: | ----: |
+| GCN-01 (JPEG 2 MiB)  |          |      | tắt |                  |                |               |               |             |               |       |
+| GCN-01 (JPEG 2 MiB)  |          |      | bật |                  |                |               |               |             |               |       |
+| GCN-02 (JPEG 8 MiB)  |          |      | tắt |                  |                |               |               |             |               |       |
+| GCN-02 (JPEG 8 MiB)  |          |      | bật |                  |                |               |               |             |               |       |
+| GCN-03 (JPEG 12 MiB) |          |      | tắt |                  |                |               |               |             |               |       |
+| GCN-03 (JPEG 12 MiB) |          |      | bật |                  |                |               |               |             |               |       |
+| GCN-04 (HEIC)        |          |      | tắt |                  |                |               |               |             |               |       |
+| GCN-04 (HEIC)        |          |      | bật |                  |                |               |               |             |               |       |
+| 3 ảnh GCN liên tiếp  |          |      | tắt |                  |                |               |               |             |               |       |
+| 3 ảnh GCN liên tiếp  |          |      | bật |                  |                |               |               |             |               |       |
 
 Ghi kèm: commit SHA trước/sau, tên trình duyệt và phiên bản, kết luận, và **giới hạn của phép
 đo** (mạng di động dao động lớn; ít nhất 3 lần đo mỗi ô, lấy trung vị).

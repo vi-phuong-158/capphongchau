@@ -5,12 +5,12 @@
 
 ## Danh sách, theo đúng thứ tự chạy
 
-| # | File | Nội dung | Loại |
-|---|---|---|---|
-| 1 | `202607280001_assigned_officer_display_name.sql` | `public_submissions.claimed_by_display_name` | Additive |
-| 2 | `202607280002_officer_assisted_intake.sql` | `intake_channel` (NOT NULL DEFAULT), `assisted_by_*`, 2 CHECK, 1 index | Additive |
-| 3 | `202607280003_upload_attempt_metrics.sql` | Bảng mới `public_upload_attempts`, 6 CHECK, 3 index | Bảng mới |
-| 4 | `202607280004_public_file_normalization_metadata.sql` | 7 cột trên `public_files` | Additive |
+| #   | File                                                  | Nội dung                                                               | Loại     |
+| --- | ----------------------------------------------------- | ---------------------------------------------------------------------- | -------- |
+| 1   | `202607280001_assigned_officer_display_name.sql`      | `public_submissions.claimed_by_display_name`                           | Additive |
+| 2   | `202607280002_officer_assisted_intake.sql`            | `intake_channel` (NOT NULL DEFAULT), `assisted_by_*`, 2 CHECK, 1 index | Additive |
+| 3   | `202607280003_upload_attempt_metrics.sql`             | Bảng mới `public_upload_attempts`, 6 CHECK, 3 index                    | Bảng mới |
+| 4   | `202607280004_public_file_normalization_metadata.sql` | 7 cột trên `public_files`                                              | Additive |
 
 Migration mới nhất trước đợt này: `202607260002_harden_antigravity_ai_jobs.sql`. Bốn số
 `202607280001`–`202607280004` chưa ai dùng; `tests/migration-versions.test.ts` xanh.
@@ -30,18 +30,18 @@ Migration mới nhất trước đợt này: `202607260002_harden_antigravity_ai
 
 **Migration TRƯỚC, code SAU. Không có ngoại lệ.**
 
-| Tình huống | Hậu quả |
-|---|---|
+| Tình huống                        | Hậu quả                                      |
+| --------------------------------- | -------------------------------------------- |
 | Migration trước, code cũ còn chạy | An toàn. Cột và bảng thừa không ảnh hưởng gì |
-| **Code trước, migration sau** | **500 hàng loạt** — xem bảng dưới |
+| **Code trước, migration sau**     | **500 hàng loạt** — xem bảng dưới            |
 
 Chính xác code mới hỏng ở đâu nếu thiếu migration:
 
-| Thiếu | Vỡ ở đâu | Biểu hiện |
-|---|---|---|
-| MIG 1+2 | `SUBMISSION_SELECT` chọn 5 cột chưa tồn tại | **Mọi** màn hình hồ sơ 500: hàng đợi, chi tiết, tra cứu công khai, tạo hồ sơ mới. Nặng nhất |
-| MIG 3 | `appendUploadAttempt` insert vào bảng chưa có | **Không hỏng gì thấy được.** Lời gọi đã bọc `.catch(() => undefined)` ở cả hai đường; chỉ mất số đo |
-| MIG 4 | `appendFile` insert 7 cột chưa có | **Mọi lượt tải ảnh hỏng ở bước cuối.** Tệp lên Drive xong rồi bị `discardIfOrphan` xóa đúng theo thiết kế; người dân thấy "Ảnh tải lên không hợp lệ" |
+| Thiếu   | Vỡ ở đâu                                      | Biểu hiện                                                                                                                                            |
+| ------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MIG 1+2 | `SUBMISSION_SELECT` chọn 5 cột chưa tồn tại   | **Mọi** màn hình hồ sơ 500: hàng đợi, chi tiết, tra cứu công khai, tạo hồ sơ mới. Nặng nhất                                                          |
+| MIG 3   | `appendUploadAttempt` insert vào bảng chưa có | **Không hỏng gì thấy được.** Lời gọi đã bọc `.catch(() => undefined)` ở cả hai đường; chỉ mất số đo                                                  |
+| MIG 4   | `appendFile` insert 7 cột chưa có             | **Mọi lượt tải ảnh hỏng ở bước cuối.** Tệp lên Drive xong rồi bị `discardIfOrphan` xóa đúng theo thiết kế; người dân thấy "Ảnh tải lên không hợp lệ" |
 
 Nói cách khác: MIG 1, 2, 4 là bắt buộc trước khi deploy code. MIG 3 có thể chậm hơn mà không ai
 thấy — nhưng chậm ngày nào là mất số liệu ngày đó, và số liệu đó là điều kiện để bật chuẩn hóa ảnh.
@@ -60,13 +60,13 @@ MIG 3 thì đã tự an toàn sẵn — không phải nhờ cờ mà nhờ metri
 
 ## Khóa và index
 
-| Thao tác | Rủi ro khóa | Ghi chú |
-|---|---|---|
-| `add column` có DEFAULT hằng | Thấp | PostgreSQL 11+ không rewrite bảng |
-| `add column` nullable | Thấp | Chỉ sửa catalog |
-| `add constraint check` (MIG 2) | **Trung bình** | Quét toàn bảng dưới `ACCESS EXCLUSIVE`. Với vài chục nghìn hàng là dưới một giây; vẫn nên chạy ngoài giờ cao điểm |
-| `create index` (MIG 2, 3) | Thấp/Trung bình | Không dùng `concurrently` — bảng metric mới rỗng nên vô hại; index ở MIG 2 khóa ghi trong lúc dựng. Bảng vài chục nghìn hàng thì rất ngắn |
-| `create table` (MIG 3) | Không | Bảng mới |
+| Thao tác                       | Rủi ro khóa     | Ghi chú                                                                                                                                   |
+| ------------------------------ | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `add column` có DEFAULT hằng   | Thấp            | PostgreSQL 11+ không rewrite bảng                                                                                                         |
+| `add column` nullable          | Thấp            | Chỉ sửa catalog                                                                                                                           |
+| `add constraint check` (MIG 2) | **Trung bình**  | Quét toàn bảng dưới `ACCESS EXCLUSIVE`. Với vài chục nghìn hàng là dưới một giây; vẫn nên chạy ngoài giờ cao điểm                         |
+| `create index` (MIG 2, 3)      | Thấp/Trung bình | Không dùng `concurrently` — bảng metric mới rỗng nên vô hại; index ở MIG 2 khóa ghi trong lúc dựng. Bảng vài chục nghìn hàng thì rất ngắn |
+| `create table` (MIG 3)         | Không           | Bảng mới                                                                                                                                  |
 
 Nếu `public_submissions` đã lớn hơn dự kiến, tách CHECK của MIG 2 thành `not valid` rồi
 `validate constraint` sau. Chưa làm vì quy mô hiện tại không cần và thêm bước là thêm chỗ sai.

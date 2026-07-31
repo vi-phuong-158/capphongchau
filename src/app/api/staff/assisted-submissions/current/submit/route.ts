@@ -22,11 +22,7 @@ import {
   validateCitizenRequiredFiles,
   validateCitizenSubmitDraft,
 } from "@/modules/public-intake/validation";
-import {
-  identityHmac,
-  newTimelineEvent,
-  publicActorName,
-} from "@/modules/public-intake/workflow";
+import { identityHmac, newTimelineEvent, publicActorName } from "@/modules/public-intake/workflow";
 import { ASSISTED_INTAKE_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
@@ -51,7 +47,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         request.headers.get("x-csrf-token"),
       )
     ) {
-      return publicError("ACCESS_DENIED", "Yêu cầu bảo mật không hợp lệ hoặc đã hết hạn.", requestId);
+      return publicError(
+        "ACCESS_DENIED",
+        "Yêu cầu bảo mật không hợp lệ hoặc đã hết hạn.",
+        requestId,
+      );
     }
 
     const context = await resolvePublicRequest(request, { requireCsrf: false });
@@ -83,8 +83,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       record.status === "NEEDS_SUPPLEMENT" || record.status === "RESUBMITTED"
         ? "RESUBMITTED"
         : "SUBMITTED";
-    const idempotencyKey =
-      `ASSISTED_SUBMIT:${record.submissionId}:${rawIdempotencyKey.toLowerCase()}`;
+    const idempotencyKey = `ASSISTED_SUBMIT:${record.submissionId}:${rawIdempotencyKey.toLowerCase()}`;
     const mutationHash = createHash("sha256")
       .update(JSON.stringify({ submissionId: record.submissionId, status, draft }))
       .digest("hex");
@@ -103,9 +102,14 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const issues = validateCitizenSubmitDraft(draft);
     if (issues.length > 0) {
-      return publicError("VALIDATION_FAILED", "Bản kê khai còn thiếu thông tin bắt buộc.", requestId, {
-        issues: issues.map(({ code, fieldPath, message }) => ({ code, fieldPath, message })),
-      });
+      return publicError(
+        "VALIDATION_FAILED",
+        "Bản kê khai còn thiếu thông tin bắt buộc.",
+        requestId,
+        {
+          issues: issues.map(({ code, fieldPath, message }) => ({ code, fieldPath, message })),
+        },
+      );
     }
     const files = await repository.listFiles(record.submissionId);
     const fileIssues = validateCitizenRequiredFiles(draft, files);

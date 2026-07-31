@@ -148,9 +148,16 @@ export async function GET(
 }
 
 /**
- * Cán bộ sửa lỗi gõ nhỏ (số phát hành/ngày cấp GCN, họ tên/địa chỉ) thay vì bắt người dân nộp lại.
- * Đảo quyết định [2026-07-21] "không sửa draft_json gốc" — xem `03-decisions.md` [2026-07-24].
- * Trường định danh của chủ đã `QR_CONFIRMED` (đọc từ chip CCCD) bị khóa cứng, không nhận sửa.
+ * Chỉ còn hai nhánh: xác nhận định danh thủ công (`manualIdentityConfirmation`) và điều chỉnh hồ
+ * sơ ĐÃ tiếp nhận chính thức (`amendmentReason`, hồ sơ `ACCEPTED`). Trường định danh của chủ đã
+ * `QR_CONFIRMED` (đọc từ chip CCCD) bị khóa cứng, không nhận sửa nếu thiếu lý do ghi đè.
+ *
+ * **[2026-07-29] Đóng nhánh `STAFF_DRAFT_EDIT`** (sửa GCN/chủ sử dụng khi `UNDER_REVIEW`, không
+ * kèm `amendmentReason`). Nhánh đó ghi vào `draft_json`, còn `WorkingPayloadEditor` ghi vào
+ * `working_payload_json` qua `PUT .../working-payload`; `effectivePayload()` luôn ưu tiên
+ * `working_payload_json` nếu có, nên một lần lưu qua nhánh này từng bị **bàn làm việc che khuất
+ * hoàn toàn** ở lần tải hồ sơ kế tiếp — cán bộ tưởng đã lưu nhưng dữ liệu hiển thị vẫn là bản cũ.
+ * Sửa GCN/chủ sử dụng khi đang xử lý giờ đi duy nhất qua bàn làm việc.
  */
 export async function PATCH(
   request: NextRequest,
@@ -359,6 +366,16 @@ export async function PATCH(
       );
     }
 
+    if (!isAmendment) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Sửa Giấy chứng nhận và Chủ sử dụng khi đang xử lý dùng Bàn làm việc PL3 " +
+          "(PUT /working-payload), không dùng đường này nữa.",
+        requestId,
+        400,
+      );
+    }
+
     const draft: IntakeDraft = structuredClone(record.draft);
     const changes: Record<string, string> = {};
     /** Chủ có trường định danh đọc từ chip CCCD bị cán bộ ghi đè — đánh dấu riêng trong audit. */
@@ -526,46 +543,30 @@ export async function PATCH(
       identityHmac(environment.DATA_HASH_PEPPER, identityNumber),
     );
 
-    const updated = isAmendment
-      ? await repository.commitOfficialAmendment({
-          record,
-          expectedVersion: body.data.version,
-          draft,
-          actorEmail: user.email,
-          amendmentReason: body.data.amendmentReason ?? "",
-          auditMetadata,
-          timelineEvent: newTimelineEvent({
-            eventType: "OFFICIAL_RECORD_AMENDED",
-            label: "Cán bộ điều chỉnh hồ sơ đã tiếp nhận",
-            actorDisplayName: publicActorName(user.displayName),
-          }),
-          requestId,
-          idempotencyKey: scopedIdempotencyKey,
-          mutationHash,
-          pendingIdentityHmacs,
-        })
-      : await repository.commitStaffDraftEdit({
-          record,
-          expectedVersion: body.data.version,
-          draft,
-          actorEmail: user.email,
-          auditMetadata,
-          timelineEvent: newTimelineEvent({
-            eventType: "STAFF_EDITED",
-            label: "Cán bộ cập nhật thông tin hồ sơ",
-            actorDisplayName: publicActorName(user.displayName),
-          }),
-          requestId,
-          idempotencyKey: scopedIdempotencyKey,
-          mutationHash,
-          pendingIdentityHmacs,
-        });
+    // Chỉ còn đường điều chỉnh hồ sơ chính thức tới đây — nhánh STAFF_DRAFT_EDIT đã return ở trên.
+    const updated = await repository.commitOfficialAmendment({
+      record,
+      expectedVersion: body.data.version,
+      draft,
+      actorEmail: user.email,
+      amendmentReason: body.data.amendmentReason ?? "",
+      auditMetadata,
+      timelineEvent: newTimelineEvent({
+        eventType: "OFFICIAL_RECORD_AMENDED",
+        label: "Cán bộ điều chỉnh hồ sơ đã tiếp nhận",
+        actorDisplayName: publicActorName(user.displayName),
+      }),
+      requestId,
+      idempotencyKey: scopedIdempotencyKey,
+      mutationHash,
+      pendingIdentityHmacs,
+    });
 
     return NextResponse.json(
       {
         submission: { version: updated.version },
-        amended: isAmendment,
-        officialCaseId: isAmendment ? updated.officialCaseId : undefined,
+        amended: true,
+        officialCaseId: updated.officialCaseId,
         requestId,
       },
       { headers: { "cache-control": "no-store" } },

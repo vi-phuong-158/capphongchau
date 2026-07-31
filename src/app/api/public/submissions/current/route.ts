@@ -16,6 +16,7 @@ import {
   PUBLIC_STATUS_LABELS,
   unauthorizedSupplementChanges,
 } from "@/modules/public-intake/workflow";
+import { publicHasAssignedOfficer } from "@/modules/submissions/assigned-officer";
 
 export const runtime = "nodejs";
 
@@ -74,6 +75,9 @@ export async function GET(request: Request): Promise<NextResponse> {
       uploadedAt: file.createdAt,
     })),
     checklist: completionChecklist(record.draft, storedFiles),
+    // Chỉ cờ boolean, không kèm email/tên cán bộ: giao diện dùng nó để ẩn nút "Bổ sung hồ sơ" khi
+    // cán bộ đang giữ hồ sơ, khớp với chốt chặn `isEditable` phía máy chủ (2026-07-29, Đợt 2A-3).
+    hasAssignedOfficer: publicHasAssignedOfficer(record),
     supplementRequest,
     timeline,
   });

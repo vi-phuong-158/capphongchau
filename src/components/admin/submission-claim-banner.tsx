@@ -13,7 +13,6 @@ async function csrfToken(): Promise<string> {
 interface SubmissionClaimBannerProps {
   submissionId: string;
   version: number;
-  status: string;
   claimedBy: string;
   claimedAt?: string;
   currentUserEmail: string;
@@ -24,7 +23,6 @@ interface SubmissionClaimBannerProps {
 export function SubmissionClaimBanner({
   submissionId,
   version,
-  status,
   claimedBy,
   claimedAt,
   currentUserEmail,
@@ -38,7 +36,6 @@ export function SubmissionClaimBanner({
   const [error, setError] = useState<string | null>(null);
 
   const isClaimedByMe = claimedBy.trim().toLowerCase() === currentUserEmail.trim().toLowerCase();
-  const isAvailableForClaim = status === "SUBMITTED" || status === "RESUBMITTED";
 
   const handleAction = async (action: string, payload: Record<string, string | boolean> = {}) => {
     setLoading(true);
@@ -90,47 +87,42 @@ export function SubmissionClaimBanner({
           {error && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</div>}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {isAvailableForClaim && !claimedBy && (
-            <button
-              disabled={loading}
-              onClick={() => handleAction("CLAIM")}
-              className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              Nhận xử lý
-            </button>
-          )}
+        {/* Nút "Tiếp nhận" chính đã chuyển lên thanh thao tác chính của trang hồ sơ. Ở đây chỉ còn
+            các thao tác xử lý ngoại lệ khi có tranh chấp claim, gom vào "Thao tác khác". */}
+        {claimedBy && (isClaimedByMe || isAdministrator) && (
+          <details>
+            <summary className="cursor-pointer list-none rounded bg-white px-3 py-1.5 text-xs font-medium text-blue-800 hover:bg-blue-100 dark:bg-gray-800 dark:text-blue-200">
+              ⋯ Thao tác khác
+            </summary>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                disabled={loading}
+                onClick={() => setShowModal("RELEASE")}
+                className="rounded bg-gray-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+              >
+                Trả lại hàng chờ
+              </button>
 
-          {(isClaimedByMe || isAdministrator) && claimedBy && (
-            <button
-              disabled={loading}
-              onClick={() => setShowModal("RELEASE")}
-              className="rounded bg-gray-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
-            >
-              Trả lại hàng chờ
-            </button>
-          )}
+              <button
+                disabled={loading}
+                onClick={() => setShowModal("TRANSFER")}
+                className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                Chuyển giao
+              </button>
 
-          {(isClaimedByMe || isAdministrator) && claimedBy && (
-            <button
-              disabled={loading}
-              onClick={() => setShowModal("TRANSFER")}
-              className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-            >
-              Chuyển giao
-            </button>
-          )}
-
-          {isAdministrator && claimedBy && !isClaimedByMe && (
-            <button
-              disabled={loading}
-              onClick={() => setShowModal("FORCE_CLAIM")}
-              className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              Mở khóa cưỡng chế
-            </button>
-          )}
-        </div>
+              {isAdministrator && !isClaimedByMe && (
+                <button
+                  disabled={loading}
+                  onClick={() => setShowModal("FORCE_CLAIM")}
+                  className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  Mở khóa cưỡng chế
+                </button>
+              )}
+            </div>
+          </details>
+        )}
       </div>
 
       {showModal && (

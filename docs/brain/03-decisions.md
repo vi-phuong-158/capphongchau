@@ -1,11 +1,269 @@
 # 03 — Technical Decisions
 
+## [2026-07-30] Review PR #11: gộp `main`, giải xung đột migration `005`, nguyên tử hóa thao tác ảnh
+
+Bảy phát hiện của vòng review PR #11 (`REQUEST CHANGES`) đã được xử lý trên nhánh
+`claude/pr-11-review-issues-e1qykd` — nhánh dựng từ `main` mới nhất rồi merge nội dung PR vào, thay
+vì đẩy tiếp lên nhánh PR đã chậm 8 commit.
+
+### 1. Trùng mã migration `202607290005` — P0, đã giải quyết
+
+- **Quyết định:** `202607290005` **giữ cho `202607290005_lazy_drive_folder_creation.sql`** (bản trên
+  `main`, Phase 3). Ghi chú nội bộ chuyển sang `202607290006_submission_internal_notes.sql` — số lớn
+  hơn toàn bộ migration hiện có, nên thứ tự áp dụng không phụ thuộc nhánh nào merge trước.
+- **Lý do chọn hướng này:** `main` là nhánh đích và bản `005` của nó có thể đã được áp ở môi trường
+  rehearsal; đổi số của bản trên `main` là buộc mọi database đã áp phải sửa lịch sử. Đổi số của bản
+  chưa merge thì chỉ ảnh hưởng database đã áp bản PR — số ít, và runbook có quy trình xử lý.
+- **Preflight gộp:** `scripts/preflight-public-intake-v2-migrations.ts` giờ kiểm **cả hai** —
+  `drive_folder_id` cho phép NULL + ba cột `drive_folder_*` + CHECK + index (`005`), **và**
+  `internal_notes` (`006`).
+- **Runbook:** `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_005_RUNBOOK.md` đổi tên thành
+  `..._002_006_RUNBOOK.md`, phủ năm migration `202607290002`–`006` theo đúng thứ tự, thêm mục kiểm
+  **lịch sử migration của từng database** (một database rehearsal có thể đã ghi `005` cho nội dung
+  cũ) kèm câu SQL sửa `supabase_migrations.schema_migrations` mà **không xóa cột dữ liệu**.
+- **Trip-wire đã có sẵn:** `tests/migration-versions.test.ts` bắt trùng số hiệu. Nó đỏ ngay khi hai
+  nhánh gặp nhau — đúng việc của nó.
+
+### 2. Đổi dữ liệu và ghi audit phải cùng transaction — P1, đã sửa
+
+- **Quyết định:** ba thao tác ảnh của cán bộ chuyển thành ba **repository method nghiệp vụ**, mỗi
+  cái là một transaction duy nhất: `commitOfficerFileUpload`, `commitOfficerFileDelete`,
+  `commitOfficerFileOwnerReassign`. Route chỉ còn xác thực, xác minh tệp trên Drive và dịch lỗi.
+- **Lỗi đã đóng:** bản đầu gọi `appendFile()` commit ảnh rồi `appendAudit()` riêng. Audit lỗi → API
+  trả 500 **nhưng ảnh đã vào hồ sơ**; client gọi lại thì nhánh replay trả thành công và dòng audit
+  thiếu đó không bao giờ được ghi. Ảnh nằm trong hồ sơ mà nhật ký không biết ai thêm. DELETE và
+  PATCH gán chủ có cùng lỗi.
+- **Nhánh replay nằm TRONG transaction**, không phải một lượt `findStoredMutation` trước đó — không
+  còn khoảng nào để hai lượt gọi cùng đi qua.
+- **`appendFile` không còn nhận `kind`:** tham số đó chỉ tồn tại để đường cán bộ ghi
+  `request_log.kind = OFFICER_UPLOAD_COMPLETE`; nay đường cán bộ không đi qua `appendFile` nữa.
+
+### 3. Race với tiếp nhận hồ sơ và với trần ảnh — P1, đã sửa
+
+- **Quyết định:** mọi transaction thao tác ảnh **khóa hàng `public_submissions` `FOR UPDATE`** rồi
+  mới kiểm lại quyền/trạng thái, và kiểm lại trần số ảnh + trần dung lượng bằng **dữ liệu thật**
+  trong cùng transaction (`lockSubmissionForStaffEdit` + `lockActiveFiles`).
+- **Luật quyền về một nguồn:** `mayStaffEditState({status, claimedBy}, email)` là phần thuần của
+  `mayStaffEdit`; route và repository gọi **cùng một hàm**. Không chép lại điều kiện ở nơi thứ ba.
+- **Khóa hồ sơ cũng là cái tuần tự hóa hai lượt tải đồng thời:** lượt thứ hai chờ lượt thứ nhất
+  commit rồi mới đếm lại, nên không thể cùng thấy "còn chỗ" rồi cùng vượt trần 10 ảnh GCN/150 MB.
+- **Trần dung lượng tính bằng `verified.sizeBytes`** — byte thật trên Drive, không phải `sizeBytes`
+  client khai lúc `initiate`.
+- **Thứ tự khóa luôn là hồ sơ trước, ảnh sau** ở cả ba method. Đổi thứ tự ở một chỗ là mở đường
+  deadlock giữa chúng.
+- **Giới hạn CÒN LẠI, chưa đóng (có từ trước đợt này):** đường công khai vẫn chỉ kiểm trần ở
+  `initiate`; `appendFile` không khóa hàng hồ sơ. Hai lượt tải của **người dân** đồng thời vẫn có thể
+  cùng qua `initiate`. Không sửa trong đợt này vì đó là đường của người dân, ngoài phạm vi PR #11 —
+  ghi lại ở đây để không bị coi là đã đóng.
+
+### 4. Tương thích Phase lazy Drive folder của `main` — P1, đã sửa
+
+- **Quyết định:** cả `initiate` và `complete` của cán bộ đi qua `ensureSubmissionFolderReady(record)`
+  như đường công khai, và trả `503 SERVICE_UNAVAILABLE` + `Retry-After` cho
+  `SubmissionFolderBusyError`/`SubmissionFolderUnavailableError`.
+- **Lý do:** trên `main` `driveFolderId` đã là `string | null`. Truyền thẳng nó vào
+  `createUploadSession`/`verifyUploadedFile` là lỗi TypeScript, và nếu ép kiểu cho qua build thì tạo
+  phiên upload không có thư mục đích.
+- **Thứ tự ở `complete`:** `ensureSubmissionFolderReady` **trước** `verifyUploadedFile`; nhánh 503
+  **không** dọn tệp nào — `discardIfOrphan` cần biết thư mục của hồ sơ mới dám xóa.
+- `discardIfOrphan` nhận `driveFolderId: string | null` và không làm gì khi `null`.
+
+### 5. Giữ implementation tải chi tiết hồ sơ của `main` — P2, đã sửa
+
+- **Quyết định:** giữ `src/modules/submissions/detail.ts` + `detail-types.ts` của `main`
+  (`Promise.all` + `Server-Timing`), **gỡ** `detail-view.ts` mà PR thêm vào, và bổ sung
+  `internalNotes` vào `StaffSubmissionDetail`.
+- **Lý do:** hai service cùng chức năng thì chắc chắn lệch nhau; bản của PR đọc **nối tiếp**
+  `findById` → `listFiles`, mất đúng phần Phase 2 vừa tối ưu.
+- `detail-types.ts` được siết kiểu (`PublicStatus`, `IntakeChannel`, `PayloadLayer`) để component
+  dùng trực tiếp làm kiểu prop, không cần khai lại.
+- **`document-viewer.tsx` gộp hai phía:** giữ cache blob của PR (một object URL dùng chung cho khung
+  nhỏ và khung toàn màn hình → không tải ảnh hai lần) **và** giữ cửa "bấm Xem ảnh mới tải" của
+  `main`. Bản PR tự tải ảnh đang chọn khi mở hồ sơ — nghe như nhỏ nhưng là một lượt Drive + một dòng
+  audit cho **mọi** lần mở hồ sơ.
+- **Panel AI:** giữ bản của PR (lazy nằm trong chính `ai-draft-panel.tsx` với state `open`), bỏ
+  wrapper accordion của `main` trong `submission-detail.tsx` — hai lớp gating cùng lúc là dư.
+
+### 6. Test hành vi thay cho test đọc chuỗi mã nguồn — P2, đã sửa
+
+- **Quyết định:** ba bộ test `officer-file-{upload,delete,reassign-owner}.test.ts` viết lại thành
+  test **hành vi**: gọi thật route handler với repository/storage giả, kiểm mã HTTP, kiểm có/không
+  ghi, kiểm dọn tệp mồ côi. Bỏ hẳn kiểu `expect(source).toContain(...)` cho các route này.
+- **Thêm `tests/officer-file-mutations.integration.test.ts`** (Postgres thật, tự SKIP khi thiếu
+  `ACCEPTANCE_SAGA_TEST_DATABASE_URL`) — 11 ca cho đúng những thứ mock không thấy được: audit lỗi ⇒
+  ảnh không vào hồ sơ và **không** để lại `request_log`; replay không ghi audit lần hai; hai upload
+  đồng thời không vượt trần; trần dung lượng theo byte thật; tiếp nhận chính thức đồng thời ⇒ gỡ ảnh
+  bị từ chối; chuyển hồ sơ đồng thời ⇒ gán lại chủ bị từ chối; `file_summary_json` làm mới trong
+  cùng transaction.
+- **Mô phỏng "audit lỗi"** bằng trigger tạm trên `public.audit_logs` — cách duy nhất kiểm được tính
+  nguyên tử mà không phải sửa mã sản phẩm.
+- `tests/submission-detail-performance.test.ts` (của `main`) được cập nhật theo implementation đã
+  gộp, và thêm một ca khóa "chỉ có MỘT service đọc chi tiết".
+- **Vẫn còn test đọc chuỗi mã nguồn** ở các hợp đồng **liên tệp** (`submission-detail-performance`,
+  vị trí nút Từ chối): đó là quan hệ giữa nhiều tệp, không quan sát được qua API, nên đọc mã nguồn là
+  công cụ đúng ở đó — khác với việc dùng nó thay cho test hành vi của một route.
+
+### 7. "Từ chối" chuyển vào "Thao tác khác" — đã sửa
+
+- **Quyết định:** thanh thao tác chính chỉ còn **Tiếp nhận / Lưu / Hoàn thành xử lý**. "Từ chối" vào
+  menu `⋯ Thao tác khác` (menu này giờ hiện cả ở `UNDER_REVIEW`, không chỉ `ACCEPTED`), vẫn giữ một
+  lần `window.confirm`.
+- **Lý do:** thao tác không hoàn tác được, thực tế rất ít dùng, mà lại nằm ngay cạnh "Hoàn thành xử
+  lý" — hai nút đối nghịch đặt sát nhau là chỗ bấm nhầm. **Không xóa** chức năng: hồ sơ trùng/nộp sai
+  địa bàn vẫn cần đường từ chối, và quyết định [2026-07-29] Đợt 2A-1 đã chốt giữ nút này.
+- Khóa vị trí bằng `tests/submission-action-request-supplement-disabled.test.ts`.
+
+### Điều kiện triển khai (không đổi so với kết luận review)
+
+**Bắt buộc chạy `202607290006` trước khi deploy code.** `internal_notes` nằm trong
+`SUBMISSION_SELECT` dùng chung, nên thiếu migration làm **mọi** truy vấn đọc hồ sơ lỗi, không chỉ
+hỏng chức năng ghi chú. Quy trình đầy đủ: `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_006_RUNBOOK.md`.
+
 ## [2026-07-29] Phase 4: pool Supavisor nhỏ, A/B Preview và region cấu hình rõ ràng
 
 - **Quyết định:** bỏ hard-code `max: 1` bằng `SUPABASE_POOL_MAX` server-only, allowlist 1–3 và default 1. Mỗi deployment/instance tạo singleton client một lần nên pool không được đổi động trong process.
 - **Lý do:** tăng pool theo từng lambda có thể nhân số kết nối toàn hệ thống. Chỉ chọn 2 hoặc 3 khi cùng workload Preview cho P95 tốt hơn ít nhất 10%, không lỗi/timeout/deadlock và peak connection dưới 70% quota Supabase; ngoài ra giữ 1.
 - **Runner rehearsal:** benchmark không có route bỏ audit vì sẽ làm sai contract đọc nhạy cảm. Mỗi request SSR detail, API detail hoặc preview thành công vẫn append audit; runner bắt buộc HTTPS Vercel Preview rehearsal/synthetic, exact expected host và literal `PERF_BENCHMARK_CONFIRM_REHEARSAL=REHEARSAL_ONLY` trước khi đọc/gửi cookie. Một lượt đầy đủ (10 warm-up + 40 đo) có thể thêm tối đa 150 audit rows từ ba route này; chuẩn bị reset/dọn dữ liệu rehearsal sau đo, không chạy Production.
 - **Region/đo lường:** đặt `regions: ["sin1"]` trong `vercel.json`; xác minh qua deployment settings và nhãn region của `x-vercel-id`, không tin riêng biến môi trường. Benchmark chỉ tổng hợp duration/status/metric allowlist, không log session, URL/query, ID hoặc PII.
+
+## [2026-07-30] Đợt 2B: hiệu năng màn duyệt hồ sơ — nạp sẵn trên server, tải ảnh/AI theo yêu cầu
+
+- **Server-priming trang `/submissions/[submissionId]`:** trang nạp hồ sơ ngay trên server và
+  truyền `initialSubmission` xuống component client, thay vì để client fetch sau khi hydrate. Bỏ
+  một vòng chờ (HTML → JS → hydrate → fetch → hiện dữ liệu) và bỏ một lần xác thực + một lần đọc
+  hồ sơ trùng lặp. `SubmissionDetail` **chỉ** fetch khi nạp sẵn thất bại — fetch cả khi đã có dữ
+  liệu thì vừa mất lợi ích vừa ghi thêm một dòng audit cho cùng một lần mở trang.
+- **Hai điều kiện phải giữ khi làm việc này** (viết vào doc-comment của cả hai file, đừng gỡ):
+  1. **Audit không được mất.** `loadStaffSubmissionDetail()` (`src/modules/submissions/detail.ts`
+     — bản `detail-view.ts` của đợt 2B đã gỡ ở review PR #11, xem quyết định [2026-07-30])
+     ghi `SUBMISSION_SENSITIVE_DETAIL_VIEWED`; audit đặt trong hàm dùng chung chứ không ở route,
+     nên đường server và đường API không thể lệch nhau. Nếu trang tự dựng DTO thì dấu vết "ai đã
+     xem hồ sơ nào" sẽ mất im lặng — đây là dữ liệu nhạy cảm (SĐT/CCCD/địa chỉ), dấu vết là bắt
+     buộc.
+  2. **HTML giờ chứa PII.** Trước đây PII chỉ nằm trong phản hồi JSON (`no-store` sẵn); nạp sẵn
+     đưa PII vào chính tài liệu HTML. `src/proxy.ts` gắn `cache-control: private, no-store` cho
+     **toàn bộ** matcher cán bộ (`/profile`, `/users`, `/submissions`, `/ke-khai-ho`,
+     `/api/staff`) để không phụ thuộc vào mặc định của Next hay của proxy đứng trước.
+- **Kiểu dữ liệu về một nguồn:** `StaffSubmissionDetail` (`detail-types.ts`) là hình dạng duy nhất;
+  `submission-detail.tsx` dùng `type Submission = StaffSubmissionDetail` thay vì khai lại. Trước 2B hình dạng bị khai hai
+  lần và **đã lệch thật** — 2A-2 phải thêm `internalNotes` ở cả route lẫn component.
+- **`findActiveFile` — một truy vấn cho một ảnh:** route phục vụ ảnh trước đây gọi `listFiles` rồi
+  `.find(...)`, kéo toàn bộ ảnh của hồ sơ về để lấy một tệp. Giữ nguyên điều kiện
+  `status = 'UPLOADED'` để không lệch ngữ nghĩa `listFiles`. **Không** dùng cho DELETE công khai:
+  route đó cần cả trạng thái `DELETED` để trả về idempotent.
+- **Tải ảnh theo yêu cầu, giữ blob trong bộ nhớ trang:** không để `<img src>` tự tải nữa. Vì route
+  ảnh trả `cache-control: private, no-store` — đúng, ảnh giấy tờ là PII, không được nằm trong cache
+  đĩa — nên mỗi lần thẻ `<img>` mount lại là một lần tải lại từ Drive kèm một dòng audit. Hệ quả
+  trước 2B: **mở toàn màn hình tải đúng ảnh đó hai lần**, chuyển qua lại giữa các tab ảnh thì lần
+  nào cũng tải lại. Nay fetch một lần/ảnh thành blob, dùng chung object URL cho cả hai khung, và
+  `revokeObjectURL` khi rời trang để không giữ ảnh PII trong bộ nhớ lâu hơn mức cần. **Không nới
+  `no-store`** — cache đĩa của trình duyệt vẫn không được giữ ảnh giấy tờ.
+- **Panel AI thành accordion thu gọn:** chỉ gọi API khi cán bộ mở. Trước đó panel fetch ngay khi
+  render **và** fetch lại mỗi lần `version` đổi — mỗi lần lưu bàn làm việc hay lưu ghi chú nội bộ
+  cũng kéo theo một lần tải kết quả AI, dù phần lớn hồ sơ không có kết quả AI nào và panel render
+  ra rỗng. Vẫn tải lại khi `version` đổi **nếu panel đang mở**, vì cột "Hiện có" so sánh với dữ
+  liệu hồ sơ hiện tại.
+- **Đánh đổi đã nhận:** panel AI giờ **luôn hiện một dòng thu gọn**, kể cả hồ sơ không có kết quả
+  AI (trước đây ẩn hoàn toàn) — vì không fetch thì không biết có kết quả hay không. Chấp nhận: cán
+  bộ biết chức năng tồn tại, và mở ra thì được trả lời rõ "Hồ sơ này chưa có kết quả đọc tự động".
+- **Không có migration.** Thuần code.
+
+## [2026-07-29] Đợt 2A-3: cán bộ ưu tiên khi tranh chấp, mở claim hồ sơ `NEEDS_SUPPLEMENT` cũ
+
+- **Quyết định (người dùng chọn "Chặn — cán bộ ưu tiên"):** Khi hồ sơ đã có cán bộ cầm
+  (`claimed_by` khác rỗng), **mọi đường ghi công khai của người dân bị chặn**. Cài ở
+  `isEditable()` (`route-context.ts`) — chốt duy nhất mà cả bảy route
+  `/api/public/submissions/current/*` đều đi qua, nên không route nào có thể quên; thêm
+  `isHeldByOfficer()` để route `submit` trả đúng lý do ("cán bộ đang xử lý") thay vì thông báo sai
+  "bản kê khai đã được gửi".
+- **Lỗi thật đã đóng:** `repository.submit()` đặt `claimed_by = null, claimed_by_display_name =
+null, claimed_at = null` mỗi lần người dân gửi lại, trong khi luồng "yêu cầu bổ sung" cũ (bỏ ở
+  2A-1) **giữ nguyên** `claimed_by` khi chuyển sang `NEEDS_SUPPLEMENT`. Nghĩa là một lần bấm "Bổ
+  sung hồ sơ" của người dân **âm thầm cướp hồ sơ khỏi tay cán bộ đang xử lý** — và không có cơ chế
+  nào chặn, vì `version` vẫn khớp nên optimistic concurrency không coi đó là xung đột. Khóa phiên
+  bản chỉ bắt được va chạm **đồng thời**, không bắt được "hai bên đều hợp lệ nhưng một bên xóa
+  quyền của bên kia".
+- **`mayClaim` thêm `NEEDS_SUPPLEMENT`:** bắt buộc phải đi kèm, không phải tính năng rời. Sau khi
+  chặn người dân gửi lại, hồ sơ `NEEDS_SUPPLEMENT` cũ sẽ **kẹt vĩnh viễn**: cán bộ không claim được
+  (`mayClaim` cũ từ chối), không sửa được (`mayStaffEdit` đòi `UNDER_REVIEW`), và đường thoát duy
+  nhất trước đây — người dân gửi lại — vừa bị đóng. Cho claim đưa chúng về đúng luồng mới: Tiếp
+  nhận → sửa trực tiếp ở Bàn làm việc → Hoàn thành xử lý. Không mở thêm lối vào nào: route CLAIM
+  vẫn trả 403 `Hồ sơ đang do cán bộ khác nhận xử lý` nếu người khác đang giữ, admin vẫn phải dùng
+  FORCE_CLAIM.
+- **Giao diện phải khớp máy chủ, không được đoán:** `GET /api/public/submissions/current` trả thêm
+  `hasAssignedOfficer` (**chỉ boolean**, không kèm tên/email cán bộ — giữ đúng cam kết không lộ
+  email công vụ ra cổng công khai, xem `assigned-officer.ts`) để `/tra-cuu` ẩn nút "Bổ sung hồ sơ"
+  thay vì để người dân bấm rồi nhận lỗi. Hàng chờ cán bộ bỏ bản sao luật
+  (`status === "SUBMITTED" || status === "RESUBMITTED"`) và gọi thẳng `mayClaim` — ô đếm mang nhãn
+  "Chờ tiếp nhận" nên phải khớp đúng định nghĩa của máy chủ.
+- **Đánh đổi:** cán bộ đang làm luồng nhập hộ (`/ke-khai-ho`) cũng bị chặn nếu hồ sơ do cán bộ khác
+  giữ — đúng ý đồ (không ai cướp hồ sơ của ai), nhưng là thay đổi hành vi so với trước; muốn lấy hồ
+  sơ thì dùng Chuyển giao hoặc FORCE_CLAIM. Người dân sau khi cán bộ đã nhận hồ sơ **không còn tự
+  sửa được nữa** — đây chính là mô hình đã chốt ở 2A-1 (cán bộ sửa trực tiếp, không bắt dân gửi
+  lại), không phải hồi quy.
+- **Không có migration.** Thuần code.
+
+## [2026-07-29] Đợt 2A-2: một ô ghi chú nội bộ, tách khỏi PATCH chính
+
+- **Quyết định:** Thêm đúng một trường ghi chú nội bộ tự do (`internal_notes`, tối đa 4000 ký tự)
+  theo yêu cầu người dùng "không cần thiết lắm, để 1 ô thôi". Không gộp vào
+  `PATCH /api/submissions/:id` — route đó vừa đóng nhánh `STAFF_DRAFT_EDIT` ở 2A-1 và chỉ còn nhận
+  `manualIdentityConfirmation`/`amendmentReason` (yêu cầu hồ sơ `ACCEPTED`); ghi chú nội bộ phải sửa
+  được ở **bất kỳ trạng thái nào** kể cả trước khi claim hoặc sau khi đã `ACCEPTED`/`REJECTED`, nên
+  gộp vào sẽ tái tạo đúng bug staleness vừa đóng. Endpoint mới `PUT
+/api/submissions/:id/internal-notes` theo mẫu `PUT /working-payload` (version guard +
+  idempotency-key, không canonical projection vì không chạm dữ liệu PL3, không sinh timeline vì
+  người dân không bao giờ thấy trường này).
+- **Quyền:** `SUBMISSION_DECISION_ROLES` (không bắt buộc đang claim hồ sơ) — ghi chú là kênh trao
+  đổi giữa các cán bộ (ví dụ "hồ sơ này từng nộp trùng do..."), khác với sửa `draft`/PL3 vốn chỉ
+  người đang giữ hồ sơ mới được sửa.
+- **Bảo mật/PII:** Audit log `SUBMISSION_INTERNAL_NOTE_UPDATED` chỉ ghi `noteLength`, không lưu lại
+  nội dung ghi chú — cán bộ có thể gõ số điện thoại/tên người dân vào ô tự do này, không cần thêm
+  một bản sao PII nữa nằm ngoài `public_submissions.internal_notes`.
+- **Migration:** `202607290006_submission_internal_notes.sql` (đổi từ `202607290005` ở review
+  PR #11 vì `main` đã cấp số đó cho lazy Drive folder) — additive
+  (`add column ... default ''`), rollback là `drop column`. **Chưa chạy trên Preview/Production.**
+  Đã thêm bước kiểm cột này vào `scripts/preflight-public-intake-v2-migrations.ts` (bị
+  `tests/pr6-review-round-two.test.ts` bắt lỗi ngay khi thiếu — test đó quét mọi migration
+  `202607280*`/`202607290*` và đòi preflight phải nhắc tới từng migration).
+- **Chưa làm:** 2A-3 (chặn dân gửi lại khi cán bộ đang giữ hồ sơ), 2B (hiệu năng), 2C (cán bộ tự
+  tải ảnh bổ sung).
+
+## [2026-07-29] Đợt 2A-1: bỏ luồng yêu cầu bổ sung, gộp về một đường ghi PL3
+
+- **Quyết định:** Chốt sau góp ý người dùng — coi mỗi hồ sơ là một bản nộp hoàn chỉnh; cán bộ đối
+  chiếu, chỉnh sửa trực tiếp, lưu và hoàn thành, không còn luồng "yêu cầu bổ sung"/"gửi lại". Chỉ
+  làm Đợt 2A-1 (dọn nút + gộp đường ghi); chưa cho tiếp nhận hồ sơ cũ `NEEDS_SUPPLEMENT` (2A-3),
+  chưa thêm ghi chú nội bộ (2A-2). Giữ nút **Từ chối** theo yêu cầu người dùng (hồ sơ trùng/nộp sai
+  nhiều lần vẫn cần một lối thoát ngoài "hoàn thành").
+- **API:** `POST /api/submissions/:id/action` chặn `action: "REQUEST_SUPPLEMENT"` ngay đầu hàm,
+  trả `400 VALIDATION_FAILED` trước khi chạm CSDL/audit/idempotency. Không xóa enum trạng thái
+  `NEEDS_SUPPLEMENT` khỏi `PUBLIC_STATUSES` (workflow.ts) — hồ sơ lịch sử vẫn đọc được, chỉ không
+  còn đường tạo mới.
+- **`PATCH /api/submissions/:id` đóng nhánh `STAFF_DRAFT_EDIT`:** trước đây route có 3 nhánh
+  (`manualIdentityConfirmation` / `OFFICIAL_AMENDMENT` / `STAFF_DRAFT_EDIT` mặc định khi
+  `UNDER_REVIEW` không kèm `amendmentReason`). Nhánh `STAFF_DRAFT_EDIT` ghi vào `draft_json` qua
+  `commitStaffDraftEdit`, trong khi `WorkingPayloadEditor` ghi vào `working_payload_json` qua
+  `PUT .../working-payload`, và `effectivePayload()` (payload-layers.ts) luôn ưu tiên
+  `working_payload_json` nếu tồn tại — nghĩa là một lần lưu qua modal "Chỉnh sửa" cũ **bị bàn làm
+  việc che khuất hoàn toàn** ở lần tải hồ sơ kế tiếp: cán bộ tưởng đã lưu nhưng dữ liệu hiển thị
+  vẫn là bản cũ. Route giờ chỉ nhận hai nhánh còn lại; mọi request rơi vào trường hợp cũ nhận
+  `400` kèm hướng dẫn dùng Bàn làm việc. `commitStaffDraftEdit` **không bị xóa khỏi repository**
+  (vẫn được `tests/staging-rehearsal-acceptance-saga.integration.test.ts` gọi trực tiếp — test
+  đó cần `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, đang skip) — chỉ đóng đường gọi từ route.
+- **UI:** Modal "Chỉnh sửa"/"Điều chỉnh chính thức" gộp còn một (chế độ điều chỉnh chính thức —
+  chế độ "sửa thường" trước đó không có nút nào gọi tới trong UI hiện tại, xác nhận bằng grep
+  trước khi xóa). Đổi tên cho hết trùng nghĩa: "Nhận xử lý" → **Tiếp nhận**; "Tiếp nhận chính
+  thức" → **Hoàn thành xử lý** (đúng góp ý §11.2 gốc: không để hai nút gần nghĩa). Trạng thái hiển
+  thị rút về 3 nhóm nghiệp vụ (`SUBMITTED`/`RESUBMITTED`/`NEEDS_SUPPLEMENT` → "Chờ tiếp nhận";
+  `UNDER_REVIEW`/`ACCEPTING` → "Đang xử lý"; `ACCEPTED` → "Đã hoàn thành"); `REJECTED`/`DRAFT`/
+  `EXPIRED` giữ nhãn riêng vì là trạng thái ngoại lệ, không thuộc luồng chính.
+- **Thao tác quản trị (Release/Transfer/ForceClaim/Amend):** gom vào `<details>` "Thao tác khác"
+  ở cả `SubmissionClaimBanner` và `SubmissionDetail`, đóng mặc định — theo yêu cầu người dùng giữ
+  cả 4 nút này (không bỏ, vì hồ sơ sẽ kẹt vĩnh viễn nếu cán bộ giữ nó nghỉ việc, và sai sót sau khi
+  hoàn thành sẽ không sửa được nếu bỏ Điều chỉnh chính thức).
+- **Đánh đổi/rủi ro còn lại:** Chưa chặn được race "cán bộ đang xử lý mà dân bấm gửi lại xóa mất
+  claim" (2A-3, chưa làm). Chưa có ô ghi chú nội bộ (2A-2, chưa làm).
 
 ## [2026-07-29] PR #8: server là nguồn chuyển trạng thái định danh
 
@@ -108,7 +366,7 @@
 ## [2026-07-29] Tra cứu bằng số phát hành Giấy chứng nhận, không lộ dữ liệu hồ sơ
 
 - **Quyết định:** Màn hình tra cứu công khai cho chọn QR CCCD hoặc `Số phát hành GCN` + `Ngày cấp
-  GCN`. Khi tra số, chuẩn hóa bỏ mọi khoảng trắng/dấu gạch và viết hoa trước so sánh; repository
+GCN`. Khi tra số, chuẩn hóa bỏ mọi khoảng trắng/dấu gạch và viết hoa trước so sánh; repository
   tìm `public_certificates` của hồ sơ active, `certificates` chính thức và bản cuối `VERIFIED` của
   `existing_certificates`. Kết quả chỉ có `found`, `IN_PROCESSING`/`OFFICIALLY_RECEIVED` và hướng
   dẫn cố định — không trả số GCN, ID, họ tên, CCCD, điện thoại, địa chỉ hoặc ảnh. QR CCCD vẫn decode
@@ -119,7 +377,7 @@
   riêng để kiểm trùng nền khi nhập đủ hai trường; nó loại trừ bản nháp hiện tại và chỉ cảnh báo, không
   chặn. `REJECTED`/`EXPIRED` không được coi là active.
 - **Không migration:** `public_certificates.issue_number/issue_date`, `certificates.issue_number/
-  issue_date` và `existing_certificates.issue_number/issue_date` đã đáp ứng; không thêm bảng/cột.
+issue_date` và `existing_certificates.issue_number/issue_date` đã đáp ứng; không thêm bảng/cột.
 - **Đánh đổi:** Rate-limit bền vững cần một aggregate query vào `audit_logs` thay vì cache tiến trình;
   lưu lượng pilot nhỏ nên chấp nhận, không tạo thêm nơi lưu dữ liệu.
 
@@ -1618,6 +1876,7 @@ làm yếu điều đang được kiểm.
 nhận). Không có Postgres/Drive thật trong môi trường CI hiện tại; tách phần thuần ra là cách duy
 nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nhóm, tính tỷ lệ nén trên mẫu thiếu số
 đo) mà không cần hạ tầng đó. Phần chạm DB/Drive trong hai script gốc không đổi hành vi.
+
 ## [2026-07-29] Hiển thị điều kiện chặn tiếp nhận cho cán bộ
 
 - **Quyết định:** Giữ nguyên toàn bộ `completionChecks` ở server; khi còn lỗi `BLOCKING`, route
@@ -1701,6 +1960,7 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Giới hạn:** concurrency luôn 2, không migration, worker/background task hay resume đa phiên.
   Phase 5B/work-unit chỉ được lập riêng nếu benchmark sau 5A không đạt mục tiêu; key ở tab không là
   cam kết resume phiên mới.
+
 ## [2026-07-29] Phase 2 dùng SSR initial detail, lazy preview và lazy AI
 
 - **Quyết định:** Trang chi tiết cán bộ tự kiểm quyền rồi gọi `loadStaffSubmissionDetail` ở Server Component; `SubmissionDetail` nhận `initialSubmission` và không fetch detail khi mount. GET detail giữ nguyên contract để refresh sau mutation/direct access.
@@ -1750,3 +2010,109 @@ nhất kiểm được logic dễ sai nhất (percentile lệch, gộp nhầm nh
 - **Điều kiện bắt buộc:** file `tests/staging-rehearsal-acceptance-saga.integration.test.ts` phải
   chạy với database rehearsal thật trước khi bật cờ ở bất kỳ môi trường nào. Không unit test nào
   chạm tới đường lease thật — toàn bộ đều mock repository.
+
+## [2026-07-30] Đợt 2C — cán bộ tải ảnh giấy tờ qua endpoint riêng, cửa quyền `mayStaffEdit`
+
+- **Quyết định:** thêm `POST /api/submissions/:id/uploads/initiate|complete` thay vì nới đường của
+  hộ dân. Cửa vào là `mayStaffEdit(record, email)` — **đang giữ hồ sơ và hồ sơ `UNDER_REVIEW`** —
+  cộng `SUBMISSION_DECISION_ROLES` và CSRF của bề mặt cán bộ.
+- **Lý do không dùng lại đường hộ dân:** `resolvePublicRequest` xác thực bằng cookie phiên kê khai
+  ẩn danh, và `isEditable` đòi `DRAFT`/`NEEDS_SUPPLEMENT` **và** chưa ai nhận xử lý. Đúng lúc cán bộ
+  cần thêm ảnh thì cả ba điều kiện đều sai. Nới `isEditable` để chứa trường hợp này là mở lại đường
+  ghi cho hộ dân trong khi cán bộ đang làm — đúng thứ Đợt 2A-3 vừa đóng.
+- **Vì sao `mayStaffEdit` chứ không phải một khái niệm quyền mới:** ảnh giấy tờ là dữ liệu của hồ sơ,
+  nên đi đúng cửa đang dùng cho dữ liệu của hồ sơ (`PATCH /:id`, Bàn làm việc PL3). Nghiệp vụ đổi thì
+  sửa một hằng số, không phải ba route.
+- **Không migration.** `request_log.kind` và `audit_logs.action` đều là `text` không có check
+  constraint, nên loại mới (`OFFICER_UPLOAD_COMPLETE`, `SUBMISSION_OFFICER_FILE_UPLOADED`) dùng được
+  ngay. Không thêm bảng, không thêm cột.
+- **`request_log.kind` phải tách khỏi `PUBLIC_UPLOAD_COMPLETE`.** `findStoredMutation` lọc theo cả
+  khóa **và** loại; dùng chung một loại là hai đường đọc được replay của nhau — cán bộ gửi lại một
+  khóa hộ dân đã dùng sẽ nhận về `fileId` của hộ dân. `appendFile` nhận thêm `kind` (danh mục đóng
+  hai giá trị), mặc định giữ nguyên đường hộ dân để mọi bên gọi cũ không đổi hành vi.
+- **KHÔNG nới `API_ERROR_CODES`.** Bề mặt công khai có `SIZE_BUDGET_EXCEEDED`/`INVALID_STATE` riêng
+  nhưng đó là **mở rộng cục bộ** (`PublicErrorCode`), không nới bộ mã chung. Hai route mới quy về mã
+  có sẵn: trần dung lượng → `VALIDATION_FAILED`, vướng do trạng thái ảnh → `VERSION_CONFLICT`. Nới bộ
+  mã chung là đổi hợp đồng API cho mọi client cán bộ đang `switch` theo mã, mà ở đây không cần —
+  client chỉ hiển thị `error.message`.
+- **Thay ảnh CCCD phải tường minh.** `appendFile` tự đánh `REPLACED` cho ảnh cùng chủ + cùng mặt, nên
+  route đòi `replaceFileId` khớp đúng ảnh đang có; thiếu thì 409. Không có bước này thì một lần bấm
+  nhầm đẩy bằng chứng đang dùng xuống lịch sử mà cán bộ không biết. Ảnh cũ **không** bị xóa khỏi
+  Drive.
+- **Trần số ảnh/dung lượng chuyển sang `upload-commit.ts` dùng chung.** Hai đường ghi vào cùng thư
+  mục Drive nên trần là trần của **hồ sơ**; để mỗi route giữ hằng số riêng là sửa một bên thành hai
+  bên lệch nhau. `discardIfOrphan` chuyển cùng, vì bất biến "không bao giờ xóa tệp đã nhận" phải
+  giống nhau ở cả hai đường.
+- **Không chuẩn hóa/nén ảnh ở client như luồng hộ dân.** Bên đó nén để hộ dân dùng 3G tải được; cán
+  bộ ngồi máy có dây và cần giữ nét để đọc số GCN. Trần `MAX_UPLOAD_MB` của server vẫn áp.
+- **Chưa làm, biết trước:** không có `DELETE` ảnh cho cán bộ, nên gỡ hẳn một ảnh sai vẫn phải thay
+  bằng ảnh khác. Cũng chưa mở cho hồ sơ đã `ACCEPTED` (đường đó là `mayAmendOfficialRecord`, đòi lý
+  do điều chỉnh — chưa gộp vào đợt này).
+
+## [2026-07-30] Đợt 2C — gỡ ảnh là XÓA MỀM, chỉ ảnh GCN, và gỡ được cả ảnh do hộ dân tải lên
+
+- **Quyết định:** `DELETE /api/submissions/:id/files/:fileId` đổi `status` sang `DELETED` và **không
+  bao giờ** xóa tệp trên Drive. Sao y hợp đồng của đường hộ dân
+  (`DELETE /api/public/submissions/current/files/:fileId`) đã có từ trước, không phát minh cái mới.
+- **Vì sao xóa mềm:** bất biến ở đây không đối xứng. Giữ lại một ảnh đáng gỡ thì cán bộ bấm lại, mất
+  vài giây; xóa thật một ảnh giấy tờ là bằng chứng của hộ dân mất vĩnh viễn và không ai biết cho tới
+  lúc cần tra lại. `isDriveFileAdopted` không lọc theo `status` nên
+  `scripts/audit-orphan-public-files.ts` vẫn coi tệp là "đã có hồ sơ nhận" và không dọn nó.
+- **Hệ quả đã chấp nhận:** ảnh `DELETED`/`REPLACED` tích lại trên Drive **vĩnh viễn**, không có script
+  nào dọn. Nếu dung lượng Drive thành vấn đề thật thì bàn **chính sách lưu trữ** (chuyển ảnh của hồ sơ
+  đã `ACCEPTED` quá N tháng sang thư mục lưu trữ), KHÔNG giải quyết bằng cách cho xóa thật.
+- **Chỉ ảnh `CERTIFICATE`.** `completionChecks.checkFiles` chặn tiếp nhận khi một chủ sử dụng thiếu
+  CCCD mặt trước/mặt sau, nên "gỡ một ảnh CCCD" chỉ tạo ra trạng thái không tiếp nhận được mà cán bộ
+  phải sửa ngay. Luồng đúng cho CCCD là **thay ảnh** (`uploads/*` kèm `replaceFileId`) — một bước,
+  không có khoảng thời gian hồ sơ bị hổng. Đây cũng đúng luật của đường hộ dân.
+- **Gỡ được cả ảnh do hộ dân tự tải lên,** không chỉ ảnh chính cán bộ vừa bổ sung. Người dùng chốt
+  ngày 2026-07-30. Lý do: cán bộ là người quyết định hồ sơ gồm những gì (cùng tinh thần quyết định
+  `[2026-07-25] Q2`), xóa mềm không mất dữ liệu, và audit ghi rõ ai làm. Chặn lại thì một trang GCN
+  hộ dân chụp nhầm nằm trong hồ sơ vĩnh viễn.
+- **KHÔNG đòi `idempotency-key`,** khác đường hộ dân ở đúng điểm này. `markFileStatus` khóa dòng
+  (`for update`) rồi mới chuyển trạng thái và **không làm gì** nếu đã ở `DELETED`, nên gọi lại là
+  no-op tự nhiên; route cũng chỉ ghi audit trong nhánh `status === "UPLOADED"` nên không có dòng audit
+  trùng. Thêm một khóa không dùng tới chỉ là hình thức.
+- **KHÔNG chặn khi đây là ảnh GCN cuối cùng.** Việc đó thuộc `completionChecks`
+  (`FILES_CERTIFICATE_MISSING`) lúc tiếp nhận. Chặn ngay ở route là bắt cán bộ muốn thay cả bộ ảnh
+  phải làm ngược thứ tự (tải mới trước, gỡ sau) và có thể vượt trần 10 ảnh giữa đường.
+- **Không migration.** `DELETED` đã có trong check constraint của `public_files.status` từ
+  `202607230001`, và `repository.markFileDeleted` đã tồn tại. `listFiles` mặc định lọc
+  `status = 'UPLOADED'` nên khung xem ảnh tự ẩn ảnh đã gỡ, không sửa read path.
+- **Chưa làm:** "gán lại ảnh CCCD sang chủ khác" — đây là lỗ thật mà thay ảnh không vá được (tải CCCD
+  của chủ 2 vào ô của chủ 1 khi chủ 1 chưa có ảnh nào). Cách vá đúng là một thao tác đổi `owner_id`,
+  KHÔNG phải mở cửa gỡ cho CCCD. Chờ tới khi vận hành gặp ca thật.
+
+## [2026-07-30] Đợt 2C bổ sung — gán lại chủ sử dụng ảnh CCCD, KHÔNG tự động ghi đè ô đích
+
+- **Quyết định:** thêm `PATCH /api/submissions/:id/files/:fileId` — đổi `owner_id` của một ảnh CCCD
+  đang hiệu lực sang chủ sử dụng khác trong cùng hồ sơ. Đây là lỗ đã nêu ở quyết định Đợt 2C trước:
+  cán bộ tải nhầm ảnh CCCD của chủ 2 vào ô mặt trước của chủ 1. Nếu chủ 1 chưa có ảnh nào khác thì
+  "thay ảnh" không có gì để thay; "gỡ ảnh" chỉ để lại một ô trống, ảnh của chủ 2 biến mất và phải tải
+  lại dù ảnh vốn đã đúng, chỉ sai nhãn.
+- **KHÔNG tự động đánh `REPLACED` ảnh đang có ở ô đích,** khác hẳn `appendFile` lúc thay ảnh. Thay
+  ảnh là "tôi vừa chụp ảnh mới cho đúng người" — ghi đè có chủ ý. Gán lại là "tôi sửa nhãn của một
+  ảnh cũ" — ảnh đang chiếm ô đích có thể đang **đúng**, và tự động đẩy nó xuống lịch sử là im lặng
+  phá một dữ liệu đúng để sửa một dữ liệu sai. Route ném `FileOwnerReassignConflictError` → 409
+  `VERSION_CONFLICT`, bắt cán bộ tự xử lý ảnh đang chiếm chỗ trước (gỡ hoặc thay) rồi mới gán lại.
+- **Chỉ ảnh CCCD** (`CITIZEN_ID_FRONT`/`CITIZEN_ID_BACK`). `CERTIFICATE` luôn ghi `owner_id = ''` từ
+  lúc tải lên — không gắn với một chủ cụ thể, nên "gán lại chủ" không có nghĩa với loại này.
+- **Gán đúng chủ đang có là `NOOP` thành công, không phải lỗi, không ghi audit.** Cho phép gọi lại
+  route này an toàn sau khi mất mạng giữa chừng mà không cần thêm `idempotency-key` — khác `DELETE`
+  ở cùng file chỉ vì lý do kỹ thuật giống nhau (đọc-khóa-rồi-so-sánh trước khi ghi), không phải một
+  quy ước mới.
+- **An toàn CÓ ĐIỀU KIỆN, không phải mặc định.** `commitOfficerFileOwnerReassign` (tên cũ
+  `reassignFileOwner`, đổi ở review PR #11) khóa **cả hai** hàng ảnh trong cùng transaction — hàng
+  nguồn (`for update` ngay khi đọc) và hàng đích (kiểm tra xung đột cũng `for update`). Thiếu khóa
+  hàng đích thì hai yêu cầu gán lại đồng thời vào cùng một ô có thể cùng thấy "còn trống" rồi cùng
+  ghi đè lên nhau — mất tính đúng đắn của kiểm tra xung đột.
+  **[CẬP NHẬT 2026-07-30, review PR #11]** Method này giờ khóa thêm **hàng `public_submissions`
+  `FOR UPDATE` trước tiên** và kiểm lại `mayStaffEditState` bên trong transaction, và **ghi audit
+  trong cùng transaction**. Trước đó quyền được kiểm ở route rồi audit ghi sau khi transaction đã
+  commit — hai khoảng trống thật: hồ sơ có thể đã `ACCEPTED`/đổi tay giữa hai bước, và audit lỗi thì
+  ảnh đã đổi chủ mà nhật ký không biết ai đổi.
+- **Chủ đích đọc từ `effectivePayload(record).owners`,** cùng quy tắc với các route `uploads/*` —
+  chủ do cán bộ thêm ở Bàn làm việc chỉ tồn tại ở `working_payload`.
+- **Không migration.** Chỉ đổi giá trị một cột đã có (`owner_id`), không đổi schema.
+- **Đã giải quyết:** lỗ "ảnh CCCD gán sai chủ" nêu trong quyết định Đợt 2C trước đây, giờ chuyển
+  trạng thái từ "chưa làm" sang "đã có".

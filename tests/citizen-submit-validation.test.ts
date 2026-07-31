@@ -128,6 +128,7 @@ function recordWith(draft: IntakeDraft, fileSummaries: PublicFileSummary[]): Sub
     accessVersion: 1,
     fileSummaries,
     rowIndex: 1,
+    internalNotes: "",
   } as SubmissionRecord;
 }
 

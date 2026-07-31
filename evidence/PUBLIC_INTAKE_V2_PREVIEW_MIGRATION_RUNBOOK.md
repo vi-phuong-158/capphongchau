@@ -122,13 +122,13 @@ nếu có bất kỳ điều gì không đạt — dùng làm gate tự động 
 
 ## 4. Dấu hiệu phải rollback
 
-| Dấu hiệu | Mức độ | Diễn giải |
-|---|---|---|
-| `preflight` báo FAIL ở bất kỳ dòng nào | **Dừng ngay** | Migration chưa áp đủ hoặc áp sai — đừng deploy code, đừng chạy migration tiếp theo |
-| `GET /api/health/database` trả lỗi sau khi migrate | **Dừng ngay** | Kết nối hoặc schema tối thiểu hỏng |
+| Dấu hiệu                                           | Mức độ                   | Diễn giải                                                                                                                                            |
+| -------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preflight` báo FAIL ở bất kỳ dòng nào             | **Dừng ngay**            | Migration chưa áp đủ hoặc áp sai — đừng deploy code, đừng chạy migration tiếp theo                                                                   |
+| `GET /api/health/database` trả lỗi sau khi migrate | **Dừng ngay**            | Kết nối hoặc schema tối thiểu hỏng                                                                                                                   |
 | CHECK constraint fail lúc `db push` (202607280002) | Thấp nhưng phải điều tra | Chỉ xảy ra nếu preview đã có hàng `intake_channel='OFFICER_ASSISTED'` từ trước migration — không nên tồn tại. Kiểm bằng câu SQL ở mục "hàng cũ" trên |
-| `db push` báo lỗi khóa bảng / timeout | Trung bình | Bảng `public_submissions` đang bị khóa bởi truy vấn khác — thử lại ngoài giờ ít traffic, không ép chạy |
-| Code đã deploy nhưng màn hình hồ sơ 500 hàng loạt | **Khẩn** | Dấu hiệu kinh điển của "code trước, migration sau" — xem mục 6 |
+| `db push` báo lỗi khóa bảng / timeout              | Trung bình               | Bảng `public_submissions` đang bị khóa bởi truy vấn khác — thử lại ngoài giờ ít traffic, không ép chạy                                               |
+| Code đã deploy nhưng màn hình hồ sơ 500 hàng loạt  | **Khẩn**                 | Dấu hiệu kinh điển của "code trước, migration sau" — xem mục 6                                                                                       |
 
 ## 5. Cách rollback
 

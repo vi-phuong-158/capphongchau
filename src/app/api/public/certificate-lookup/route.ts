@@ -110,7 +110,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         source: "PUBLIC",
         requestId,
       });
-      return NextResponse.json({ ...result, requestId }, { headers: { "cache-control": "no-store" } });
+      return NextResponse.json(
+        { ...result, requestId },
+        { headers: { "cache-control": "no-store" } },
+      );
     } catch (error) {
       if (error instanceof CertificateLookupRateLimitError) {
         return publicError("RATE_LIMITED", error.message, requestId);
@@ -145,7 +148,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     requestId,
     metadata: {
       found: matches.length > 0 || pendingWarning,
-      status: matches.length > 0 ? "OFFICIALLY_RECEIVED" : pendingWarning ? "IN_PROCESSING" : "NOT_FOUND",
+      status:
+        matches.length > 0 ? "OFFICIALLY_RECEIVED" : pendingWarning ? "IN_PROCESSING" : "NOT_FOUND",
     },
   });
 

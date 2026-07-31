@@ -322,7 +322,12 @@ function checkAutomaticOverrides(payload: IntakeDraft, block: Blocker): void {
     );
   }
 
-  const check = (value: string | undefined, reason: string | undefined, code: string, label: string) => {
+  const check = (
+    value: string | undefined,
+    reason: string | undefined,
+    code: string,
+    label: string,
+  ) => {
     if (value?.trim() && (reason?.trim().length ?? 0) < 10) {
       block(code, label, `${label} phải có lý do ghi đè từ 10 ký tự.`);
     }

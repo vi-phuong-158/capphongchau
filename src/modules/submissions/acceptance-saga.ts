@@ -344,7 +344,10 @@ export async function runOfficialAcceptance(input: AcceptanceInput): Promise<Acc
 
       for (const chunk of chunkOfficialAcceptanceFiles(pendingFiles)) {
         const settled = await settleOfficialAcceptanceMoveChunk(chunk, async ({ file, index }) => {
-          const metadata = await drive.files.get({ fileId: file.driveFileId, fields: "id,parents" });
+          const metadata = await drive.files.get({
+            fileId: file.driveFileId,
+            fields: "id,parents",
+          });
           const currentParents = metadata.data.parents || [];
           const needsMove = !currentParents.includes(currentSaga.originals_folder_id);
           const newName = originalFileNames[index];

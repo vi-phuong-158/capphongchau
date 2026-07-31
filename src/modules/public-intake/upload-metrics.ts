@@ -59,7 +59,9 @@ export const clientUploadTelemetrySchema = z
   .object({
     attemptId: z.string().uuid().optional(),
     sourceSizeBytes: z.number().optional(),
-    sourceMimeType: z.enum(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]).optional(),
+    sourceMimeType: z
+      .enum(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"])
+      .optional(),
     sourceWidth: z.number().optional(),
     sourceHeight: z.number().optional(),
     uploadWidth: z.number().optional(),

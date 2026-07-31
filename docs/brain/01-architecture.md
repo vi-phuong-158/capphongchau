@@ -1,5 +1,58 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-30 — thao tác ảnh của cán bộ là NGUYÊN TỬ (review PR #11)
+
+```text
+src/modules/submissions/review.ts
+├── mayStaffEditState({status, claimedBy}, email) — PHẦN THUẦN của luật "được sửa hồ sơ"
+│   └── mayStaffEdit(record, email) chỉ gọi lại hàm này
+│       ⚠️ Một định nghĩa duy nhất, dùng ở CẢ route (chặn sớm) LẪN repository (kiểm lại trong
+│       transaction). Chép lại điều kiện `status === "UNDER_REVIEW" && claimedBy === actor` ở nơi
+│       thứ ba là mở đường cho hai nơi lệch nhau.
+
+src/modules/public-intake/repository.ts
+├── lockSubmissionForStaffEdit(tx, submissionId, actorEmail)  [private]
+│   ├── select ... from public_submissions where submission_id = $1 FOR UPDATE
+│   ├── mayStaffEditState → không đạt thì ném OfficerFileMutationRejectedError("FORBIDDEN")
+│   ├── ⚠️ ĐÂY là hàng rào chống race: giữa lần kiểm ở route và lúc ghi, hồ sơ có thể đã ACCEPTED,
+│   │   đã chuyển cho cán bộ khác, hay đã trả về hàng chờ.
+│   └── ⚠️ Khóa hàng này CŨNG là cái tuần tự hóa hai lượt tải ảnh đồng thời: lượt thứ hai chờ lượt
+│       thứ nhất commit rồi mới đếm lại ảnh/dung lượng, nên không cùng thấy "còn chỗ".
+├── lockActiveFiles(tx, submissionId)  [private] — public_files status='UPLOADED' FOR UPDATE
+│   ⚠️ THỨ TỰ KHÓA LUÔN LÀ HỒ SƠ TRƯỚC, ẢNH SAU ở cả ba phương thức. Đổi thứ tự ở một chỗ là mở
+│   đường deadlock giữa chúng.
+├── commitOfficerFileUpload(...)  — MỘT transaction:
+│   advisory lock idempotency → replay request_log (trả nguyên summary cũ) → lock hồ sơ + quyền →
+│   lock ảnh → kiểm replaceFileId / ô CCCD / trần 10 ảnh GCN / trần 150 MB bằng sizeBytes ĐÃ XÁC
+│   MINH trên Drive → REPLACED ảnh cũ → insert public_files → refreshFileSummaries →
+│   audit SUBMISSION_OFFICER_FILE_UPLOADED → insert request_log kind OFFICER_UPLOAD_COMPLETE
+├── commitOfficerFileDelete(...)  — MỘT transaction: lock hồ sơ + quyền → lock ảnh → chỉ CERTIFICATE
+│   → no-op khi đã DELETED → status='DELETED' → refreshFileSummaries → audit
+└── commitOfficerFileOwnerReassign(...) — MỘT transaction: lock hồ sơ + quyền → lock ảnh nguồn →
+    chủ đích từ effectivePayload + requiresCitizenId → lock ô đích (chống tranh chấp) → update
+    owner_id → refreshFileSummaries → audit
+
+OfficerFileMutationRejectedError(reason, message)
+└── reason: NOT_FOUND | FORBIDDEN | OWNER_INVALID | REPLACE_TARGET_INVALID | SLOT_CONFLICT |
+    CERTIFICATE_LIMIT | BYTE_BUDGET | FILE_NOT_FOUND | FILE_INACTIVE | DOCUMENT_TYPE_INVALID
+    ├── NÉM (không trả kết quả) là cố ý: mọi nhánh từ chối phải làm transaction rollback
+    └── route dịch reason → (code, status) bằng bảng REJECTION_HTTP; repository không biết gì về HTTP
+```
+
+**Vì sao phải nguyên tử** (review PR #11): bản đầu gọi `appendFile()` commit ảnh xong rồi mới
+`appendAudit()` riêng. Audit lỗi → API trả 500 **nhưng ảnh đã vào hồ sơ**; client gọi lại thì nhánh
+replay trả thành công và dòng audit thiếu đó không bao giờ được ghi. Kết quả: ảnh nằm trong hồ sơ mà
+nhật ký không biết cán bộ nào thêm. DELETE và PATCH gán chủ có cùng lỗi này.
+
+Tính nguyên tử được khóa bằng `tests/officer-file-mutations.integration.test.ts` (Postgres thật, tự
+SKIP khi thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL`): audit lỗi ⇒ ảnh không vào; hai upload đồng thời
+không vượt trần; tiếp nhận đồng thời với gỡ ảnh ⇒ gỡ bị từ chối.
+
+**Giới hạn còn lại (chưa đóng, có từ trước đợt này):** đường công khai
+`/api/public/submissions/current/uploads/*` vẫn chỉ kiểm trần ở `initiate`; `appendFile` không khóa
+hàng hồ sơ. Hai lượt tải của **người dân** đồng thời vẫn có thể cùng qua `initiate`. Đường cán bộ thì
+không thể vượt trần nữa vì nó đếm lại trong transaction.
+
 ## Cập nhật Code Graph 2026-07-29 — Phase 4 pool Supabase/region
 
 ```text
@@ -146,11 +199,23 @@ supabase/migrations/
 ├── 202607250008_payload_history_layer_official.sql          thêm 'OFFICIAL' vào layer check
 ├── 202607290002_full_pl3_editor.sql                         cột PL3 còn thiếu cho owner/parcel/
 │   asset + official projection + override B/V/AX
-└── 202607290003_drop_working_payload_override_columns.sql   GỠ 4 cột ward_admin_code_override*/
-    scanned_file_names_override* trên public_submissions. `working_payload_json` là nguồn sự thật
-    DUY NHẤT cho ghi đè cột B và AX — 4 cột đó chỉ từng được ghi, không có đường đọc.
-    `drop column if exists` nên chạy được dù 202607290002 đã áp hay chưa; KHÔNG sửa 202607290002
-    vì file đó có thể đã chạy ở local/preview. Preflight kiểm cả hai chiều.
+├── 202607290003_drop_working_payload_override_columns.sql   GỠ 4 cột ward_admin_code_override*/
+│   scanned_file_names_override* trên public_submissions. `working_payload_json` là nguồn sự thật
+│   DUY NHẤT cho ghi đè cột B và AX — 4 cột đó chỉ từng được ghi, không có đường đọc.
+│   `drop column if exists` nên chạy được dù 202607290002 đã áp hay chưa; KHÔNG sửa 202607290002
+│   vì file đó có thể đã chạy ở local/preview. Preflight kiểm cả hai chiều.
+├── 202607290004_queue_search_performance.sql                pg_trgm + 2 generated column + 5 index
+├── 202607290005_lazy_drive_folder_creation.sql              drive_folder_id cho phép NULL +
+│   drive_folder_state/lease/attempts + CHECK + partial index (Phase 3)
+└── 202607290006_submission_internal_notes.sql               internal_notes text not null default ''
+    ⚠️ Số 202607290005 TỪNG BỊ CẤP CHO HAI NỘI DUNG: `main` dùng cho lazy Drive folder, nhánh PR #11
+    dùng cho internal notes. Đã giải quyết ở review PR #11 — `005` giữ cho lazy Drive folder (bản
+    trên `main` là nguồn chính thức), internal notes chuyển sang `006`. Một database rehearsal có
+    thể đã ghi nhận `005` cho nội dung cũ; xử lý theo mục 0 của
+    evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_006_RUNBOOK.md trước khi push.
+    ⚠️ `internal_notes` nằm trong `SUBMISSION_SELECT` DÙNG CHUNG → thiếu migration `006` làm MỌI
+    truy vấn đọc hồ sơ lỗi, không chỉ hỏng chức năng ghi chú. Đây là điều kiện chặn deploy.
+    tests/migration-versions.test.ts là trip-wire chống trùng số hiệu — nó bắt được đúng lỗi này.
     (202607250001 hiện TỰ DO — file untracked từng chiếm số này đã bị xóa 2026-07-25, xem
      03-decisions.md; 202607250006 chưa cấp, dành cho Phase 12 — đổi quy ước `-1/-2` → `-01/-02`
      ĐÃ làm ở file-naming.ts nhưng CHƯA có migration đổi tên file cũ đã có trên Drive)
@@ -173,6 +238,17 @@ src/modules/ai-extraction/                   fingerprints.ts, prompt-safety.ts, 
 src/modules/users/supabase-user-repository.ts allowlist/roles Supabase
 src/modules/submissions/acceptance-saga.ts   saga tiếp nhận chính thức resumable
 src/modules/public-intake/file-naming.ts     quy ước tên file gốc GCN/GT (thuần, dùng chung)
+src/modules/public-intake/upload-commit.ts   DÙNG CHUNG cho hai đường tải ảnh (hộ dân + cán bộ):
+                                              MAX_CERTIFICATE_PHOTOS, SUBMISSION_BYTE_BUDGET và
+                                              discardIfOrphan. Trần là trần của HỒ SƠ, không của
+                                              một đường — hai đường ghi vào cùng thư mục Drive
+                                              (2026-07-30, Đợt 2C)
+src/components/admin/officer-file-upload.tsx  ô tải ảnh của cán bộ trên màn duyệt; hiện khi
+                                              isClaimedByMe + UNDER_REVIEW (2026-07-30, Đợt 2C)
+src/components/admin/document-viewer.tsx      prop `onDeleteFile` (gỡ ảnh GCN) và
+                                              `onReassignOwner`+`reassignableOwners` (gán lại chủ
+                                              ảnh CCCD) — không truyền = không hiện nút tương ứng,
+                                              quyền nằm ở bên gọi (2026-07-30, Đợt 2C)
 src/modules/drive/                           StorageRepository Google Drive
 src/modules/public-intake/storage.ts         resumable upload + verify Drive + findOrCreateFolder
                                               (cache trong tiến trình + PostgreSQL advisory lock
@@ -257,18 +333,77 @@ src/app/ke-khai/wizard.tsx — PUBLIC INTAKE V2 (2026-07-29): 4 BƯỚC, không 
 │   ├── src/modules/public-intake/upload-metrics.ts (thuần) — Zod strict, danh mục ĐÓNG,
 │   │   kẹp giá trị; KHÔNG có ô văn bản tự do nào để CCCD/tên tệp lọt vào
 │   ├── appendUploadAttempt(...).catch(() => undefined) — metric hỏng KHÔNG phá lượt tải
-│   └── discardIfOrphan → isDriveFileAdopted(...).catch(() => true)
+│   └── discardIfOrphan (src/modules/public-intake/upload-commit.ts — DÙNG CHUNG với đường cán
+│       bộ từ Đợt 2C) → isDriveFileAdopted(...).catch(() => true)
 │       ⚠️ hỏi DB không được thì mặc định ĐÃ NHẬN, tức là KHÔNG xóa. Sót tệp thừa thì
 │       scripts/audit-orphan-public-files.ts dọn được; xóa nhầm là mất ảnh vĩnh viễn.
 ├── POST .../uploads/metrics → số đo cho lượt HỎNG (lượt hỏng không có complete để bám vào);
 │   luôn trả 204, vẫn đòi phiên + CSRF
+│
+├── POST /api/submissions/:id/uploads/initiate|complete — ĐƯỜNG CÁN BỘ (2026-07-30, Đợt 2C)
+│   ├── requireActiveUser(SUBMISSION_DECISION_ROLES) + verifyCsrfToken + mayStaffEdit
+│   │   ⚠️ `/api/submissions/*` KHÔNG nằm trong matcher của src/proxy.ts → ba lớp này là lớp
+│   │   chặn DUY NHẤT. Không dùng lại resolvePublicRequest được: phiên kê khai của hộ dân đã
+│   │   khóa đúng lúc cán bộ cần thêm ảnh (isEditable đòi DRAFT/NEEDS_SUPPLEMENT + chưa ai giữ).
+│   ├── chủ sử dụng đọc từ effectivePayload(record).owners, KHÔNG từ record.draft — chủ do cán bộ
+│   │   thêm ở Bàn làm việc chỉ tồn tại ở working_payload
+│   ├── initiate: ensureSubmissionFolderReady(record) — Phase 3 lazy folder, driveFolderId có thể
+│   │   NULL. Busy/Unavailable → 503 SERVICE_UNAVAILABLE + Retry-After, đúng như đường công khai.
+│   │   ⚠️ KHÔNG truyền thẳng record.driveFolderId (lỗi kiểu string|null; ép kiểu qua build là tạo
+│   │   phiên upload không có thư mục đích).
+│   ├── complete: ensureSubmissionFolderReady TRƯỚC verifyUploadedFile — chưa có thư mục thì chưa
+│   │   xác minh được, và cũng KHÔNG được dọn tệp nào (discardIfOrphan cần biết thư mục hồ sơ)
+│   └── complete: TOÀN BỘ phần quyết định + ghi nằm trong repository.commitOfficerFileUpload
+│       (MỘT transaction) — xem mục "Thao tác ảnh của cán bộ" bên dưới. Route chỉ còn xác thực,
+│       xác minh tệp trên Drive, và dịch OfficerFileMutationRejectedError.reason → mã HTTP.
+│       ⚠️ appendFile KHÔNG còn nhận `kind`: đường cán bộ không đi qua appendFile nữa.
+│
+├── DELETE /api/submissions/:id/files/:fileId — CÁN BỘ GỠ ẢNH GCN (2026-07-30, Đợt 2C)
+│   ├── cùng ba lớp chặn với uploads/* (mayStaffEdit); không đòi idempotency-key
+│   ├── repository.commitOfficerFileDelete — MỘT transaction: khóa hồ sơ (for update) + kiểm lại
+│   │   mayStaffEditState + khóa hàng ảnh (for update) + no-op khi đã DELETED + refreshFileSummaries
+│   │   + audit. (completionChecks đọc `fileSummaries`, không refresh là hồ sơ thiếu ảnh vẫn tiếp
+│   │   nhận được.) Trước review PR #11 route gọi markFileDeleted rồi appendAudit rời nhau.
+│   ├── ⚠️ XÓA MỀM. Tuyệt đối KHÔNG discardFile/drive.files.delete ở đây. isDriveFileAdopted
+│   │   không lọc status nên audit-orphan-public-files.ts vẫn coi tệp là đã có hồ sơ nhận →
+│   │   ảnh đã gỡ tra lại được. Hệ quả đã chấp nhận: ảnh DELETED/REPLACED tích trên Drive vĩnh viễn.
+│   ├── CHỈ `CERTIFICATE` — CCCD là ràng buộc bắt buộc của completionChecks.checkFiles, gỡ nó chỉ
+│   │   tạo trạng thái không tiếp nhận được; luồng đúng là THAY ảnh
+│   ├── KHÔNG chặn ảnh GCN cuối cùng — việc đó của completionChecks (FILES_CERTIFICATE_MISSING)
+│   └── audit SUBMISSION_OFFICER_FILE_DELETED (documentType/fileId/sizeBytes)
+│
+├── PATCH /api/submissions/:id/files/:fileId — CÁN BỘ GÁN LẠI CHỦ SỬ DỤNG ẢNH CCCD
+│   (2026-07-30, Đợt 2C bổ sung thứ hai)
+│   ├── repository.commitOfficerFileOwnerReassign: MỘT transaction khóa hồ sơ (for update) + kiểm
+│   │   lại mayStaffEditState + khóa CẢ hàng nguồn LẪN hàng đích cùng owner_id + document_type +
+│   │   status='UPLOADED' (for update) — chống hai gán lại đồng thời cùng thấy "còn trống" rồi cùng
+│   │   ghi vào một ô. Audit nằm trong cùng transaction, không phải một lượt ghi sau.
+│   ├── ⚠️ owner_id trùng chủ đích → trả "NOOP", không lỗi, route KHÔNG ghi audit (an toàn khi
+│   │   gọi lại sau mất mạng, không cần idempotency-key)
+│   ├── ⚠️ chủ đích ĐÃ có ảnh cùng mặt → ném FileOwnerReassignConflictError → 409 VERSION_CONFLICT.
+│   │   KHÔNG tự động đánh REPLACED như appendFile lúc thay ảnh — reassign là "sửa nhãn ảnh cũ",
+│   │   không phải "vừa chụp ảnh mới"; ảnh đang chiếm ô đích có thể đang đúng
+│   ├── CHỈ CITIZEN_ID_FRONT/BACK — CERTIFICATE không gắn với một chủ cụ thể (luôn ownerId='')
+│   ├── chủ đích đọc từ effectivePayload(record).owners + requiresCitizenId, cùng quy tắc uploads/*
+│   └── audit SUBMISSION_OFFICER_FILE_OWNER_REASSIGNED (documentType/fileId, không ownerId)
 └── POST /api/public/submissions/current/submit (PUBLIC_SUBMIT idempotency)
+    ├── isHeldByOfficer(record) → 409 INVALID_STATE NGAY, TRƯỚC Turnstile (2026-07-29, Đợt 2A-3)
     ├── validateCitizenSubmitDraft + validateCitizenRequiredFiles → CitizenSubmitIssue[]
     │   (code + fieldPath, trả trong error.details.issues)
     ├── citizenIdsForLookup — CHỈ băm CCCD khớp 12 số; không bao giờ băm chuỗi rỗng
     └── PublicIntakeRepository.submit
+        ├── ⚠️ XÓA claimed_by/claimed_by_display_name/claimed_at mỗi lần gửi lại. Đây là lý do
+        │   isEditable phải chặn khi có cán bộ đang giữ: version vẫn khớp nên optimistic
+        │   concurrency KHÔNG coi đó là xung đột, hồ sơ bị cướp khỏi cán bộ mà không ai biết.
         └── transaction: public_submissions + normalized children
             + public_status_events + audit_logs + public_lookup_index + request_log
+
+src/modules/public-intake/route-context.ts — CHỐT CHẶN DUY NHẤT của mọi route công khai
+├── resolvePublicRequest — phiên từ cookie đã ký (không bao giờ nhận submission_id từ URL/body)
+├── isHeldByOfficer(record) — claimed_by khác rỗng sau trim (2026-07-29, Đợt 2A-3)
+└── isEditable(record) — (DRAFT | NEEDS_SUPPLEMENT) VÀ không có cán bộ đang giữ
+    ⚠️ Cả 7 route /api/public/submissions/current/* + staff/assisted-submissions đều đi qua đây;
+    sửa hàm này là sửa toàn bộ bề mặt ghi công khai cùng lúc — cả theo hướng tốt lẫn hướng xấu.
 
 src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-07-28)
 ├── requireActiveUser(ASSISTED_INTAKE_ROLES) TRƯỚC, rồi mới đọc kill switch (thứ tự cố ý — giữ
@@ -289,6 +424,54 @@ src/app/ke-khai-ho/page.tsx — CHẾ ĐỘ CÁN BỘ HỖ TRỢ KÊ KHAI (2026-
     │   consentAccepted/consentVersion/intakeChannel
     └── đặt CÙNG cookie phiên công khai → wizard/upload/submit dùng lại y nguyên
 
+src/modules/submissions/detail.ts + detail-types.ts — ĐƯỜNG ĐỌC DUY NHẤT của màn duyệt hồ sơ
+(2026-07-30, Đợt 2B + review PR #11)
+├── StaffSubmissionDetail (detail-types.ts) — kiểu dữ liệu DUY NHẤT cho màn duyệt.
+│   `submission-detail.tsx` lấy luôn kiểu này (`type Submission = StaffSubmissionDetail`) thay vì
+│   khai lại, nên thêm/bớt trường chỉ sửa một nơi. Trước 2B hình dạng bị khai hai lần và đã lệch
+│   thật (2A-2 phải thêm `internalNotes` ở cả route lẫn component). `internalNotes` nằm ở đây.
+└── loadStaffSubmissionDetail({submissionId, actorEmail, canResetAccessSecret, auditDetailView,
+    requestId}) — Promise.all([findById, listFiles]) → appendAudit → DTO
+    ⚠️ CÓ GHI AUDIT `SUBMISSION_SENSITIVE_DETAIL_VIEWED` khi `auditDetailView`. Audit nằm TRONG hàm
+    dùng chung chứ không ở route, để server-priming của trang không làm mất dấu vết "ai đã xem hồ sơ
+    nào". Cả `GET /api/submissions/:id` (kèm Server-Timing) và
+    `src/app/submissions/[submissionId]/page.tsx` đều gọi hàm này; khóa bằng
+    tests/submission-detail-load.test.ts (gồm cả ca "đọc song song, không nối tiếp").
+    ⚠️ ĐỪNG dựng lại một service đọc chi tiết thứ hai. `detail-view.ts` từng là bản song song đọc
+    NỐI TIẾP; đã gỡ ở review PR #11 vì hai đường đọc cùng chức năng chắc chắn lệch nhau.
+
+src/app/submissions/[submissionId]/page.tsx — SERVER-PRIMING (2026-07-30, Đợt 2B)
+├── loadStaffSubmissionDetail ngay trên server → truyền `initialSubmission` xuống SubmissionDetail.
+│   Trước 2B component tự fetch sau hydrate: HTML → tải JS → hydrate → fetch → mới thấy dữ liệu.
+├── SubmissionDetail chỉ fetch khi `initialSubmission` là null (nạp sẵn lỗi tạm) — nếu fetch cả khi
+│   đã có dữ liệu thì mất lợi ích VÀ ghi thêm một dòng audit cho cùng một lần mở trang.
+├── record không tồn tại → notFound(); lỗi tạm (DB) → vẫn render, để client tự fetch và tự báo lỗi
+└── ⚠️ HTML giờ CHỨA PII (SĐT/CCCD/địa chỉ), không còn là khung rỗng → `src/proxy.ts` gắn
+    `cache-control: private, no-store` cho toàn bộ matcher cán bộ. Gỡ header đó = để PII của hộ dân
+    nằm lại trong cache của proxy trung gian.
+
+src/components/admin/document-viewer.tsx — TẢI ẢNH THEO YÊU CẦU (2026-07-30, Đợt 2B)
+├── usePreviewImages(submissionId) — fetch ảnh thành blob MỘT lần/ảnh, giữ object URL trong Map ref
+│   ⚠️ Vì sao không để `<img src>` tự tải: route ảnh trả `cache-control: private, no-store` (đúng —
+│   ảnh giấy tờ là PII), nên mỗi lần `<img>` mount lại là MỘT lần tải lại từ Drive + MỘT dòng audit.
+│   Trước 2B khung toàn màn hình render thêm `<img>` cùng `src` → tải đúng ảnh đó HAI lần; chuyển
+│   qua lại giữa các tab ảnh cũng tải lại từ đầu.
+├── Chỉ tải ảnh khi cán bộ BẤM "Xem ảnh" cho đúng tệp đó (`revealedFileIds`) — mở hồ sơ không kéo
+│   byte ảnh nào. Tải ngầm "ảnh đang chọn" nghe như nhỏ nhưng là một lượt Drive + một dòng audit cho
+│   MỌI lần mở hồ sơ, mà phần lớn lượt mở là để đọc/sửa dữ liệu chứ không soi ảnh.
+├── Nút toàn màn hình bị vô hiệu hóa cho tới khi ảnh đã tải; khung nhỏ và khung toàn màn hình dùng
+│   chung đúng một object URL nên mở toàn màn hình KHÔNG tải lại
+└── revokeObjectURL khi rời trang — không giữ ảnh PII trong bộ nhớ lâu hơn mức cần
+
+src/components/admin/ai-draft-panel.tsx — ACCORDION, LAZY (2026-07-30, Đợt 2B)
+├── Thu gọn mặc định; chỉ gọi `GET /api/submissions/:id/ai-draft` khi cán bộ MỞ panel.
+│   Trước 2B panel fetch ngay khi render VÀ fetch lại mỗi lần `version` đổi — tức mỗi lần lưu bàn
+│   làm việc/ghi chú nội bộ cũng kéo một lần tải kết quả AI, dù phần lớn hồ sơ không có kết quả AI
+│   và panel render ra rỗng (`return null`).
+├── Vẫn tải lại khi `version` đổi NẾU panel đang mở — cột "Hiện có" so với dữ liệu hồ sơ hiện tại
+└── `loading` là giá trị SUY RA (`open && loadedVersion !== version`), không phải state — quy tắc
+    eslint react-hooks/set-state-in-effect cấm setState đồng bộ trong thân effect
+
 src/app/submissions/page.tsx / [submissionId]
 └── PublicIntakeRepository
     ├── listQueuePage — hàng chờ SQL keyset; không đọc toàn bảng/draft_json
@@ -299,7 +482,9 @@ src/app/submissions/page.tsx / [submissionId]
     │   │   `and ($force = true or claimed_by is null or claimed_by = '' or claimed_by = $actor)`
     │   │   — không phải kiểu SELECT-rồi-UPDATE bị cấm ở review; version conflict + claim conflict
     │   │   phân biệt được bằng SubmissionAlreadyClaimedError → 409 ALREADY_CLAIMED
-    │   ├── mayClaim (review.ts) — CHỈ SUBMITTED/RESUBMITTED (đã bỏ UNDER_REVIEW so với thiết kế cũ)
+    │   ├── mayClaim (review.ts) — SUBMITTED/RESUBMITTED/NEEDS_SUPPLEMENT (đã bỏ UNDER_REVIEW so
+    │   │   với thiết kế cũ; NEEDS_SUPPLEMENT thêm ở Đợt 2A-3 để hồ sơ cũ của luồng "yêu cầu bổ
+    │   │   sung" đã bỏ không kẹt vĩnh viễn sau khi chặn người dân gửi lại)
     │   ├── mayForceClaim/mayRelease/mayTransfer — WARD_ADMIN/SYSTEM_ADMIN mới force được
     │   ├── nếu claim lần đầu (working_payload_json is null) → khởi tạo
     │   │   working_payload_json = coalesce(citizen_payload_json, draft_json), ghi history WORKING
@@ -345,6 +530,20 @@ src/app/submissions/page.tsx / [submissionId]
     │       land_uses → parcels → owners → certificates → assets
     │       (thứ tự code đã đúng; migration 202607250007 thêm `on delete cascade` làm lưới an toàn
     │        tầng DB — đã CHẠY THẬT và PASS trên Postgres rehearsal, xem 03-decisions.md)
+    ├── commitInternalNotes (transaction) — PUT /api/submissions/:id/internal-notes (2026-07-29, Đợt 2A-2)
+    │   ├── Không kiểm tra claimedBy/status — bất kỳ SUBMISSION_DECISION_ROLES nào cũng ghi được,
+    │   │   ở bất kỳ trạng thái nào (kể cả ACCEPTED/REJECTED) — ghi chú không phải dữ liệu PL3
+    │   ├── Chỉ update internal_notes + version + updated_at, KHÔNG chạm draft_json/canonical
+    │   │   projection, KHÔNG sinh timeline (người dân không bao giờ thấy trường này)
+    │   └── audit SUBMISSION_INTERNAL_NOTE_UPDATED chỉ ghi noteLength, không ghi nội dung ghi chú
+    │       (ô tự do — cán bộ có thể gõ SĐT/tên người dân vào đây)
+    ├── findActiveFile(submissionId, fileId) — MỘT truy vấn cho MỘT ảnh (2026-07-30, Đợt 2B)
+    │   Các route phục vụ ảnh trước đây gọi `listFiles` rồi `.find(...)`: kéo toàn bộ ảnh của hồ sơ
+    │   về chỉ để lấy một tệp. Điều kiện `status = 'UPLOADED'` giữ đúng ngữ nghĩa mặc định của
+    │   `listFiles` để hai đường không lệch. Dùng ở GET /api/submissions/:id/files/:fileId và ở
+    │   nhánh dự phòng của GET /api/public/submissions/current/files/:fileId (nhánh nhanh vẫn là
+    │   `record.fileSummaries`). KHÔNG dùng cho DELETE công khai — route đó cần cả trạng thái
+    │   DELETED để trả về idempotent.
     ├── commitAccessSecretReset (transaction)
     └── appendAudit / appendExportJob
 
@@ -507,20 +706,71 @@ GET /api/health/google
 GET /api/security/csrf
 POST/GET/PATCH /api/users
 POST /api/public/submissions
-GET/PATCH /api/public/submissions/current
-POST /api/public/submissions/current/submit
+GET/PATCH /api/public/submissions/current              (GET trả thêm `hasAssignedOfficer` — CHỈ
+                                                        boolean, không kèm tên/email cán bộ;
+                                                        2026-07-29, Đợt 2A-3)
+POST /api/public/submissions/current/submit           (2026-07-29, Đợt 2A-3 — 409 INVALID_STATE
+                                                        khi hồ sơ đang có cán bộ giữ: gửi lại sẽ
+                                                        xóa mất claim của cán bộ)
 POST /api/public/submissions/current/uploads/initiate
 POST /api/public/submissions/current/uploads/complete
 POST /api/public/submissions/current/uploads/metrics   (2026-07-28, Phase 5 — số đo lượt hỏng,
                                                         best-effort, luôn 204)
 GET /api/submissions
 GET /api/submissions/:submissionId
-PATCH /api/submissions/:submissionId                         (sửa hẹp; `manualIdentityConfirmation`
-                                                        xác nhận CCCD thủ công vào working payload)
+PATCH /api/submissions/:submissionId                         (2026-07-29, Đợt 2A-1 — chỉ còn hai
+                                                        nhánh: `manualIdentityConfirmation` xác
+                                                        nhận CCCD thủ công vào working payload, và
+                                                        `amendmentReason` điều chỉnh hồ sơ đã
+                                                        `ACCEPTED`. Nhánh `STAFF_DRAFT_EDIT` sửa
+                                                        GCN/chủ sử dụng khi `UNDER_REVIEW` đã ĐÓNG
+                                                        — dùng PUT .../working-payload, tránh ghi
+                                                        vào `draft_json` bị `working_payload_json`
+                                                        che khuất)
 PUT /api/submissions/:submissionId/working-payload   (2026-07-25, Phase 6 — sửa đầy đủ bản làm
                                                         việc: thửa đất, mục đích sử dụng)
-POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/
-                                                        REQUEST_SUPPLEMENT/REJECT)
+PUT /api/submissions/:submissionId/internal-notes     (2026-07-29, Đợt 2A-2 — ô ghi chú nội bộ tự
+                                                        do ≤ 4000 ký tự, tách khỏi PATCH chính vì
+                                                        sửa được ở BẤT KỲ trạng thái nào, không cần
+                                                        đang claim. Quyền SUBMISSION_DECISION_ROLES,
+                                                        không sinh timeline, audit chỉ ghi độ dài
+                                                        không ghi nội dung)
+POST /api/submissions/:submissionId/action            (CLAIM/FORCE_CLAIM/RELEASE/TRANSFER/REJECT.
+                                                        `REQUEST_SUPPLEMENT` đã bị chặn server-side
+                                                        2026-07-29, Đợt 2A-1 — luồng mới không còn
+                                                        yêu cầu bổ sung, cán bộ sửa trực tiếp)
+PATCH /api/submissions/:submissionId/files/:fileId    (2026-07-30, Đợt 2C bổ sung — cán bộ gán
+                                                        lại chủ sử dụng của một ảnh CCCD. Vá lỗ
+                                                        "tải ảnh CCCD vào đúng ô nhưng gán nhầm
+                                                        người" mà cả thay ảnh lẫn gỡ ảnh đều không
+                                                        vá được. CHỈ ảnh CCCD (không áp dụng
+                                                        CERTIFICATE). KHÔNG tự động đánh REPLACED
+                                                        ảnh đang có ở ô đích — ném VERSION_CONFLICT
+                                                        bắt cán bộ xử lý trước, khác hẳn appendFile
+                                                        lúc thay ảnh. Gán đúng chủ đang có = NOOP
+                                                        thành công, không lỗi, không audit. Audit
+                                                        SUBMISSION_OFFICER_FILE_OWNER_REASSIGNED)
+DELETE /api/submissions/:submissionId/files/:fileId   (2026-07-30, Đợt 2C — cán bộ gỡ ảnh GCN.
+                                                        XÓA MỀM `status = DELETED`, KHÔNG chạm
+                                                        Drive. CHỈ `CERTIFICATE`: CCCD là ràng buộc
+                                                        của completionChecks, luồng đúng là thay
+                                                        ảnh. Gỡ được cả ảnh do hộ dân tải lên.
+                                                        Không đòi idempotency-key —
+                                                        `markFileStatus` khóa dòng và no-op khi đã
+                                                        `DELETED`. Audit
+                                                        `SUBMISSION_OFFICER_FILE_DELETED`)
+POST /api/submissions/:submissionId/uploads/initiate  (2026-07-30, Đợt 2C — cán bộ tự tải ảnh
+POST /api/submissions/:submissionId/uploads/complete    giấy tờ bổ sung. Cửa quyền `mayStaffEdit`
+                                                        (đang giữ hồ sơ + `UNDER_REVIEW`) +
+                                                        SUBMISSION_DECISION_ROLES + CSRF; KHÔNG
+                                                        dùng `resolvePublicRequest` được vì phiên
+                                                        kê khai của hộ dân đã khóa đúng lúc đó.
+                                                        `request_log.kind` =
+                                                        `OFFICER_UPLOAD_COMPLETE`, tách khỏi
+                                                        `PUBLIC_UPLOAD_COMPLETE` để hai đường
+                                                        không đọc replay của nhau. Ghi audit
+                                                        `SUBMISSION_OFFICER_FILE_UPLOADED`.
+                                                        Không migration)
 POST /api/submissions/:submissionId/accept             (chạy completionChecks trước khi mở saga)
 POST /api/submissions/:submissionId/reset-access-secret
 POST /api/exports

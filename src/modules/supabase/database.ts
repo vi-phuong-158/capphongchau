@@ -22,7 +22,10 @@ export function getDatabase(): Sql {
   if (globalDatabase.__landOcrSupabaseSql) return globalDatabase.__landOcrSupabaseSql;
 
   const environment = loadSupabaseEnvironment();
-  const database = postgres(environment.SUPABASE_DATABASE_URL, supabaseDatabaseOptions(environment));
+  const database = postgres(
+    environment.SUPABASE_DATABASE_URL,
+    supabaseDatabaseOptions(environment),
+  );
 
   globalDatabase.__landOcrSupabaseSql = database;
   return database;

@@ -135,7 +135,10 @@ export async function verifyTurnstileToken(input: {
   // không cung cấp hai trường đó nên chỉ kiểm với khóa thật.
   if (!CLOUDFLARE_TESTING_SECRETS.has(input.secretKey)) {
     if (payload.action !== input.action) {
-      reportRejection("action-mismatch", `expected=${input.action} got=${payload.action ?? "none"}`);
+      reportRejection(
+        "action-mismatch",
+        `expected=${input.action} got=${payload.action ?? "none"}`,
+      );
       return REJECTED;
     }
     if (!input.expectedHostnames.includes(payload.hostname ?? "")) {

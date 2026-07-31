@@ -60,7 +60,7 @@ Tên chính thức lúc tiếp nhận (`buildOriginalFileNames`) không đổi.
 ### H-02 — Chế độ cán bộ hỗ trợ dùng chung quyền đọc hàng đợi
 
 `/ke-khai-ho` và `/api/staff/assisted-submissions` dùng `SUBMISSION_READ_ROLES`. Đó là quyền
-*xem* hồ sơ, còn đây là quyền *tạo dữ liệu mới mang dấu vết "cán bộ đã nhập hộ"* — hồ sơ do cán bộ
+_xem_ hồ sơ, còn đây là quyền _tạo dữ liệu mới mang dấu vết "cán bộ đã nhập hộ"_ — hồ sơ do cán bộ
 nhập được coi là đáng tin hơn hồ sơ hộ dân tự khai.
 
 **Đã sửa.** `ASSISTED_INTAKE_ROLES` = `INTAKE_OFFICER`, `WARD_ADMIN`, `SYSTEM_ADMIN`.
@@ -164,29 +164,29 @@ Kế hoạch §12 có; chưa làm. Không chặn gì, chỉ là thao tác thừa
 
 ## Đối chiếu 14 điểm bắt buộc
 
-| # | Nội dung | Kết luận |
-|---|---|---|
-| 1 | Public minimal validation | Đạt. `validateCitizenSubmitDraft` chỉ bắt buộc phone + đồng ý + tên chủ sử dụng + ảnh; mọi ô đã nhập vẫn phải đúng định dạng |
-| 2 | Official `completionChecks` | Đạt — **siết chặt hơn** trước V2. Sáu nhóm thiếu sót trước đây lọt qua, nay chặn |
-| 3 | Mọi route tiếp nhận chính thức | Chỉ có `POST /api/submissions/[id]/accept`; đã gọi `completionChecks` và chặn theo `BLOCKING` |
-| 4 | HMAC tra cứu CCCD | Đạt. `citizenIdsForLookup` lọc theo `CITIZEN_ID_PATTERN`, không còn băm chuỗi rỗng |
-| 5 | Vietnamese decimal | Đạt. `parseVietnameseDecimal` dùng ở cả client lẫn server |
-| 6 | Resumable, retry, offset, idempotency | Đạt, trừ **M-01** |
-| 7 | Upload queue concurrency | Đạt, trừ **M-02**. Một việc hỏng không kéo theo việc khác |
-| 8 | Chuẩn hóa ảnh và bộ nhớ | Đạt. `decoded.release()` trong `finally`, canvas về 0×0 ngay sau `toBlob`; mọi đường hỏng trả tệp nguồn |
-| 9 | Public status lộ email/dữ liệu nội bộ | **H-04 — đã sửa** |
-| 10 | Public forge được assisted không | Không. Cổng công khai gán cứng `SELF_SERVICE`, không đọc `channel` từ body; CHECK ở DB bắt buộc đủ dấu vết |
-| 11 | Tên tệp trung tính, Drive metadata | **H-01 — đã sửa** |
-| 12 | Tương thích migration | Đạt — xem `PUBLIC_INTAKE_V2_MIGRATION_REVIEW_V2.md` |
-| 13 | Nháp cũ có tài sản | Không mất. Schema giữ `assets`, wizard spread nguyên bản nháp lấy về. Khóa bằng test |
-| 14 | Hồ sơ tối thiểu lọt tiếp nhận chính thức | Không, qua bất kỳ route nào. Ma trận §6 ở `PUBLIC_INTAKE_V2_TEST_MATRIX.md` |
+| #   | Nội dung                                 | Kết luận                                                                                                                     |
+| --- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Public minimal validation                | Đạt. `validateCitizenSubmitDraft` chỉ bắt buộc phone + đồng ý + tên chủ sử dụng + ảnh; mọi ô đã nhập vẫn phải đúng định dạng |
+| 2   | Official `completionChecks`              | Đạt — **siết chặt hơn** trước V2. Sáu nhóm thiếu sót trước đây lọt qua, nay chặn                                             |
+| 3   | Mọi route tiếp nhận chính thức           | Chỉ có `POST /api/submissions/[id]/accept`; đã gọi `completionChecks` và chặn theo `BLOCKING`                                |
+| 4   | HMAC tra cứu CCCD                        | Đạt. `citizenIdsForLookup` lọc theo `CITIZEN_ID_PATTERN`, không còn băm chuỗi rỗng                                           |
+| 5   | Vietnamese decimal                       | Đạt. `parseVietnameseDecimal` dùng ở cả client lẫn server                                                                    |
+| 6   | Resumable, retry, offset, idempotency    | Đạt, trừ **M-01**                                                                                                            |
+| 7   | Upload queue concurrency                 | Đạt, trừ **M-02**. Một việc hỏng không kéo theo việc khác                                                                    |
+| 8   | Chuẩn hóa ảnh và bộ nhớ                  | Đạt. `decoded.release()` trong `finally`, canvas về 0×0 ngay sau `toBlob`; mọi đường hỏng trả tệp nguồn                      |
+| 9   | Public status lộ email/dữ liệu nội bộ    | **H-04 — đã sửa**                                                                                                            |
+| 10  | Public forge được assisted không         | Không. Cổng công khai gán cứng `SELF_SERVICE`, không đọc `channel` từ body; CHECK ở DB bắt buộc đủ dấu vết                   |
+| 11  | Tên tệp trung tính, Drive metadata       | **H-01 — đã sửa**                                                                                                            |
+| 12  | Tương thích migration                    | Đạt — xem `PUBLIC_INTAKE_V2_MIGRATION_REVIEW_V2.md`                                                                          |
+| 13  | Nháp cũ có tài sản                       | Không mất. Schema giữ `assets`, wizard spread nguyên bản nháp lấy về. Khóa bằng test                                         |
+| 14  | Hồ sơ tối thiểu lọt tiếp nhận chính thức | Không, qua bất kỳ route nào. Ma trận §6 ở `PUBLIC_INTAKE_V2_TEST_MATRIX.md`                                                  |
 
 ---
 
 ## Cờ
 
-| Cờ | Giá trị | Ghi chú |
-|---|---|---|
+| Cờ                                               | Giá trị | Ghi chú                                                            |
+| ------------------------------------------------ | ------- | ------------------------------------------------------------------ |
 | `NEXT_PUBLIC_INTAKE_IMAGE_NORMALIZATION_ENABLED` | `false` | Giữ nguyên. Điều kiện bật ở `PUBLIC_INTAKE_V2_UPLOAD_BENCHMARK.md` |
 
 Snapshot này không phản ánh feature flag hiện tại. Hiện tại proxy Edge, `requireActiveUser`, CSRF và

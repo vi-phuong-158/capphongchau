@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PublicFileMutationRejectedError } from "@/modules/public-intake/repository";
 
 const mocks = vi.hoisted(() => ({
   createUploadSession: vi.fn(),
@@ -8,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   isDriveFileAdopted: vi.fn(),
   isFileInFolder: vi.fn(),
   resolvePublicRequest: vi.fn(),
+  commitPublicFileUpload: vi.fn(),
+  verifyUploadedFile: vi.fn().mockResolvedValue({ driveFileId: "drive-file-test" }),
 }));
 
 vi.mock("@/modules/common/env", () => ({
@@ -15,10 +18,18 @@ vi.mock("@/modules/common/env", () => ({
 }));
 
 vi.mock("@/modules/public-intake/repository", () => ({
+  SubmissionIdempotencyConflictError: class extends Error {},
+  PublicFileMutationRejectedError: class extends Error {
+    constructor(public reason: string, message: string) {
+      super(message);
+    }
+  },
   getPublicIntakeRepository: () => ({
     listFiles: mocks.listFiles,
     findStoredMutation: mocks.findStoredMutation,
     isDriveFileAdopted: mocks.isDriveFileAdopted,
+    commitPublicFileUpload: mocks.commitPublicFileUpload,
+    findCompletedUploadReplay: vi.fn().mockResolvedValue(null),
   }),
 }));
 
@@ -33,6 +44,7 @@ vi.mock("@/modules/public-intake/storage", () => ({
     createUploadSession: mocks.createUploadSession,
     discardFile: mocks.discardFile,
     isFileInFolder: mocks.isFileInFolder,
+    verifyUploadedFile: mocks.verifyUploadedFile,
   }),
   UploadVerificationError: class UploadVerificationError extends Error {},
 }));
@@ -96,6 +108,9 @@ describe("public upload với nháp legacy thiếu owners", () => {
       record: malformedRecord,
       requestId: "request-test",
     });
+    mocks.commitPublicFileUpload.mockRejectedValue(
+      new PublicFileMutationRejectedError("INVALID_STATE", "Dữ liệu hồ sơ cũ không tương thích")
+    );
   });
 
   it("không trả 500 hoặc tạo phiên Drive khi initiate gặp nháp sai shape", async () => {

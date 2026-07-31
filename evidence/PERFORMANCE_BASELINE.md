@@ -82,12 +82,12 @@ Migration cần áp trước code:
 - Chèn 20.000 hồ sơ synthetic trong transaction, chạy `EXPLAIN (ANALYZE, BUFFERS)`, sau đó `ROLLBACK`;
   không có dữ liệu benchmark tồn tại.
 
-| Truy vấn | Plan/index chính | Execution time |
-| --- | --- | ---: |
-| Trang status (101 dòng) | `public_submissions_status_updated_idx` + top-N sort | 17.99 ms |
-| Tìm owner chọn lọc | `public_submissions_queue_owner_trgm_idx` (Bitmap) | 4.95 ms |
-| Tìm receipt (20.000 match) | `public_submissions_queue_receipt_trgm_idx` (Bitmap) | 47.22 ms |
-| Tìm issue chọn lọc | status index + filter (planner không chọn trigram) | 62.60 ms |
+| Truy vấn                   | Plan/index chính                                     | Execution time |
+| -------------------------- | ---------------------------------------------------- | -------------: |
+| Trang status (101 dòng)    | `public_submissions_status_updated_idx` + top-N sort |       17.99 ms |
+| Tìm owner chọn lọc         | `public_submissions_queue_owner_trgm_idx` (Bitmap)   |        4.95 ms |
+| Tìm receipt (20.000 match) | `public_submissions_queue_receipt_trgm_idx` (Bitmap) |       47.22 ms |
+| Tìm issue chọn lọc         | status index + filter (planner không chọn trigram)   |       62.60 ms |
 
 Kết quả là warm-cache, single connection, không phải P50/P95 HTTP; cần lặp lại trên Preview deployment
 để đo `queue_db_ms`/`queue_total_ms` thực tế.

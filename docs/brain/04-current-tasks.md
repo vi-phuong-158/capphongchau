@@ -9,6 +9,55 @@
 
 ---
 
+## [2026-07-30] Xử lý review PR #11 — ĐÃ LÀM TRONG CODE, chưa merge/deploy/chạy migration
+
+Nhánh `claude/pr-11-review-issues-e1qykd`: dựng từ `main` mới nhất rồi **merge nội dung PR #11 vào**
+(nhánh PR cũ đang chậm `main` 8 commit và `mergeable: false`). Bảy phát hiện của vòng review đã xử lý
+xong; chi tiết quyết định ở `03-decisions.md` [2026-07-30], Code Graph ở `01-architecture.md`.
+
+- **Migration `202607290005` trùng số — ĐÃ GIẢI QUYẾT.** `005` giữ cho
+  `lazy_drive_folder_creation.sql` của `main`; ghi chú nội bộ chuyển sang
+  `202607290006_submission_internal_notes.sql`. Preflight kiểm **cả hai**. Runbook đổi tên thành
+  `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_006_RUNBOOK.md`, phủ `202607290002`–`006`.
+- **Thao tác ảnh của cán bộ giờ NGUYÊN TỬ.** Ba repository method mới
+  (`commitOfficerFileUpload`/`Delete`/`OwnerReassign`) gói quyền + trạng thái + trần + cập nhật ảnh +
+  `file_summary_json` + audit + `request_log` trong **một** transaction, khóa hàng
+  `public_submissions` `FOR UPDATE` trước.
+- **Đường cán bộ tương thích lazy Drive folder:** `initiate` và `complete` đi qua
+  `ensureSubmissionFolderReady`, trả `503` + `Retry-After` khi thư mục đang được tạo.
+- **Giữ `detail.ts`/`detail-types.ts` của `main`** (`Promise.all` + `Server-Timing`); **gỡ**
+  `detail-view.ts` mà PR thêm. `internalNotes` vào `StaffSubmissionDetail`.
+- **Test:** ba bộ test route của Đợt 2C viết lại thành test hành vi (57 ca), thêm
+  `tests/officer-file-mutations.integration.test.ts` (11 ca, Postgres thật, tự SKIP).
+- **UI:** "Từ chối" chuyển vào menu `⋯ Thao tác khác`.
+
+### Bắt buộc trước khi deploy
+
+1. **Chạy `202607290002`–`202607290006`** trên Preview trước, Production sau, **đúng thứ tự và trước
+   khi deploy code**, theo `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_006_RUNBOOK.md`. Mục 0 của
+   runbook có bước kiểm lịch sử migration của từng database — số `005` từng bị cấp cho hai nội dung.
+   `internal_notes` (`006`) nằm trong `SUBMISSION_SELECT` dùng chung: thiếu nó là **mọi** truy vấn
+   đọc hồ sơ lỗi, không chỉ hỏng chức năng ghi chú.
+2. `npx tsx scripts/preflight-public-intake-v2-migrations.ts` PASS toàn bộ.
+3. **Chạy `tests/officer-file-mutations.integration.test.ts` trên một Postgres thử nghiệm** —
+   `ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run tests/officer-file-mutations.integration.test.ts`.
+   Chưa chạy lần nào trong phiên này (không có database thử nghiệm). Đây là bộ test duy nhất chứng
+   minh tính nguyên tử; không coi mục "audit cùng transaction" là đã nghiệm thu tới khi nó xanh.
+4. **Smoke test Preview có đăng nhập:** mở một hồ sơ `UNDER_REVIEW`, bấm "Xem ảnh", tải thêm một ảnh
+   GCN, gỡ nó, gán lại chủ một ảnh CCCD, lưu ghi chú nội bộ, rồi Hoàn thành xử lý.
+
+### Còn lại, biết trước (chưa đóng)
+
+- **Đường công khai vẫn chỉ kiểm trần ảnh/dung lượng ở `initiate`.** `appendFile` không khóa hàng hồ
+  sơ, nên hai lượt tải của **người dân** đồng thời vẫn có thể cùng qua `initiate`. Có từ trước PR
+  #11, ngoài phạm vi đợt này — đừng coi là đã đóng.
+- Chưa mở tải/gỡ/gán lại ảnh cho hồ sơ đã `ACCEPTED` (cần chính sách riêng qua
+  `mayAmendOfficialRecord`).
+- Chưa có test render UI cho `OfficerFileUpload`/`DocumentViewer` (cần thêm devDependency
+  `@testing-library/react` + `jsdom` — thay đổi stack, phải duyệt riêng).
+
+---
+
 ## [2026-07-29] Phase 4 pool Supabase và region — code sẵn sàng, chờ Preview benchmark
 
 - Code có `SUPABASE_POOL_MAX` 1–3 (default 1), `vercel.json` khóa `sin1` và benchmark runner không xuất dữ liệu nhạy cảm.
@@ -17,6 +66,58 @@
 - Chạy lần lượt 1/2/3 với warm-up 10, đo 40 lượt/route, 4 worker; chọn giá trị cao hơn chỉ khi P95 tốt hơn ≥10%, error rate 0 và peak connection <70% quota. Không thao tác Production trong phase này.
 
 ---
+
+## [2026-07-29] Redesign màn duyệt hồ sơ — Đợt 2A (đang làm theo yêu cầu người dùng)
+
+Kế hoạch chốt: coi mỗi hồ sơ là một bản nộp hoàn chỉnh, bỏ luồng "yêu cầu bổ sung"/"gửi lại", chỉ
+giữ 3-4 nút chính (Tiếp nhận/Lưu/Hoàn thành xử lý/Từ chối). Chi tiết quyết định ở `03-decisions.md`
+cùng ngày; Code Graph ở `01-architecture.md`.
+
+- **2A-1 — ĐÃ LÀM (code, chưa merge/push/deploy):** bỏ nút/luồng "yêu cầu bổ sung"
+  (`action: REQUEST_SUPPLEMENT` bị chặn 400), đóng nhánh `STAFF_DRAFT_EDIT` của
+  `PATCH /api/submissions/:id` (chỉ còn `manualIdentityConfirmation`/`amendmentReason`), gộp UI
+  toolbar còn 4 nút chính + `<details>` "Thao tác khác" cho Release/Transfer/ForceClaim/Amend.
+- **2A-2 — ĐÃ LÀM (code, chưa merge/push/deploy):** thêm một ô ghi chú nội bộ tự do
+  (`internal_notes`, endpoint riêng `PUT /internal-notes`, không thuộc PL3/draft, không timeline).
+  **Chưa chạy migration** `202607290006_submission_internal_notes.sql` trên Preview/Production
+  (đổi số từ `202607290005` ở review PR #11 — xem entry [2026-07-30] đầu file) — bắt buộc chạy trước
+  khi deploy, xác nhận bằng `npx tsx scripts/preflight-public-intake-v2-migrations.ts`. Quy trình đầy
+  đủ (thứ tự, kiểm tra sau từng bước, rollback SQL) ở
+  `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_006_RUNBOOK.md`.
+- **2A-3 — ĐÃ LÀM (code, chưa merge/push/deploy):** cán bộ ưu tiên — `isEditable()` chặn mọi đường
+  ghi công khai của người dân khi hồ sơ đã có cán bộ cầm (đóng lỗi "người dân gửi lại thì
+  `repository.submit()` xóa sạch `claimed_by`", mà khóa phiên bản không bắt được vì version vẫn
+  khớp). `mayClaim` mở thêm `NEEDS_SUPPLEMENT` để hồ sơ cũ không kẹt vĩnh viễn sau khi chặn.
+  `GET /current` trả thêm cờ boolean `hasAssignedOfficer` cho `/tra-cuu` ẩn nút "Bổ sung hồ sơ".
+  Không migration.
+- **2B — ĐÃ LÀM (code, chưa merge/push/deploy):** hiệu năng màn duyệt. (a) server-priming trang
+  `/submissions/[submissionId]` qua `loadStaffSubmissionDetail` (review PR #11 gộp về service của
+  `main`; bản `detail-view.ts` của đợt này đã gỡ) dùng chung với `GET /api/submissions/:id`
+  — audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` giữ nguyên, `src/proxy.ts` thêm
+  `cache-control: private, no-store` vì HTML giờ chứa PII; (b) `findActiveFile` truy vấn một ảnh
+  thay cho `listFiles` + `.find`; (c) viewer tải ảnh theo yêu cầu và giữ blob trong bộ nhớ trang —
+  bỏ việc mở toàn màn hình tải lại ảnh lần hai; (d) panel AI thành accordion thu gọn, chỉ gọi API
+  khi mở. Không migration.
+  **Nhân đây đã sửa 12 lỗi typecheck tồn từ 2A-2** (fixture test thiếu `internalNotes` — báo cáo
+  2A-2 nói "typecheck 0 lỗi" là SAI vì `npm run typecheck` có bao gồm `tests/`).
+  **Chưa đo P50/P95 thật** trên Preview — không tuyên bố đạt mục tiêu hiệu năng nào cho tới khi có
+  số đo. Phần client (lazy ảnh, accordion) **không có test tự động** vì repo chưa có hạ tầng test
+  component React; xác minh bằng typecheck + build + đọc code.
+- **2C — ĐÃ TRIỂN KHAI TRONG CODE [2026-07-30]:** cán bộ tự tải ảnh giấy tờ cá nhân/GCN bổ sung.
+  Hai endpoint mới `POST /api/submissions/:id/uploads/initiate|complete` (đúng như dự đoán: không
+  dùng lại được đường của hộ dân vì nó khóa theo cookie phiên kê khai + `isEditable`). Cửa quyền
+  `mayStaffEdit` — đang giữ hồ sơ + `UNDER_REVIEW`. **Không migration** (`request_log.kind` và
+  `audit_logs.action` là `text` không có check constraint). Ô tải ảnh ở
+  `src/components/admin/officer-file-upload.tsx`, hiện cùng điều kiện với server.
+  **Chưa kiểm thủ công trên môi trường thật** — cần đăng nhập Google + Drive thật. Bộ test đọc mã
+  nguồn của đợt này **đã được thay bằng test hành vi** ở review PR #11 (xem entry [2026-07-30]).
+  **Bổ sung cùng ngày:** đã có `DELETE /api/submissions/:id/files/:fileId` — **xóa mềm**
+  (`status = DELETED`, không chạm Drive), **chỉ ảnh GCN**, gỡ được cả ảnh do hộ dân tải lên (người
+  dùng chốt). Nút gỡ nằm ở thanh công cụ khung xem ảnh, xác nhận hai bước. Không migration.
+  **Bổ sung cùng ngày (lần hai):** đã có `PATCH /api/submissions/:id/files/:fileId` — gán lại
+  `owner_id` của ảnh CCCD sang chủ khác, **không** tự động ghi đè ảnh đang đúng ở ô đích (409 nếu
+  chủ đích đã có ảnh cùng mặt). Chỉ ảnh CCCD, không áp dụng GCN. Không migration.
+  **Còn thiếu, biết trước:** chưa mở tải/gỡ/gán lại cho hồ sơ đã `ACCEPTED`.
 
 ## [2026-07-29] Phase 1 hiệu năng hàng chờ — đã triển khai trong code
 
@@ -66,16 +167,16 @@ production.**
 
 ### Đã xong (7 commit)
 
-| Phase | Nội dung | Commit |
-|---|---|---|
-| 0 | Baseline + test characterization khóa lỗ hổng `completionChecks` | `1cc7d93` |
-| 1 | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức) | `e938bab` |
-| 2 | Wizard 7 bước → 4 bước | `fe3e2e3` |
-| 3 | Chuẩn hóa ảnh trên thiết bị (source default TẮT; Vercel Preview/Production đã BẬT 2026-07-29) | `814eee7` |
-| 4 | Tiến độ tải thật qua XHR + hàng đợi 2 luồng | `bdbf180` |
-| 6 | Màn hình thành công + kê khai hồ sơ tiếp theo | `ee30ee8` |
-| 8 | Lưu và hiển thị tên cán bộ tiếp nhận | `ea3f716` |
-| 7 | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho` | `7345090` |
+| Phase | Nội dung                                                                                      | Commit    |
+| ----- | --------------------------------------------------------------------------------------------- | --------- |
+| 0     | Baseline + test characterization khóa lỗ hổng `completionChecks`                              | `1cc7d93` |
+| 1     | Tách MỨC A (người dân gửi) khỏi MỨC C (tiếp nhận chính thức)                                  | `e938bab` |
+| 2     | Wizard 7 bước → 4 bước                                                                        | `fe3e2e3` |
+| 3     | Chuẩn hóa ảnh trên thiết bị (source default TẮT; Vercel Preview/Production đã BẬT 2026-07-29) | `814eee7` |
+| 4     | Tiến độ tải thật qua XHR + hàng đợi 2 luồng                                                   | `bdbf180` |
+| 6     | Màn hình thành công + kê khai hồ sơ tiếp theo                                                 | `ee30ee8` |
+| 8     | Lưu và hiển thị tên cán bộ tiếp nhận                                                          | `ea3f716` |
+| 7     | Chế độ cán bộ hỗ trợ kê khai `/ke-khai-ho`                                                    | `7345090` |
 
 | 5 | Số đo tải ảnh, dọn tệp mồ côi an toàn, hai script vận hành | vòng rà soát |
 
@@ -110,8 +211,8 @@ render và E2E chưa chạy lần nào.
    `SYSTEM_ADMIN`) đúng nghiệp vụ. `REVIEW_OFFICER` bị loại có chủ đích — không để một người vừa
    nhập hộ dân vừa thẩm định chính hồ sơ đó.
 7. **Chạy hai test integration còn skip** (`ACCEPTANCE_SAGA_TEST_DATABASE_URL=... npx vitest run
-   tests/staging-rehearsal-acceptance-saga.integration.test.ts
-   tests/canonical-projection.integration.test.ts`) trên một Postgres thử nghiệm — bảo vệ đúng
+tests/staging-rehearsal-acceptance-saga.integration.test.ts
+tests/canonical-projection.integration.test.ts`) trên một Postgres thử nghiệm — bảo vệ đúng
    luồng "official acceptance guard" và "idempotent replay". Danh sách đầy đủ 10 test đang skip:
    `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
 8. **Sau mỗi đợt E2E, dọn dữ liệu**: `npm run cleanup:e2e-preview-data -- --apply --confirm=...`
@@ -478,6 +579,7 @@ Theo thứ tự mốc trong `PLAN.md`:
 - [2026-07-21] Khởi tạo bộ não dự án AI dùng chung: `CLAUDE.md`, `docs/brain/00-06` (merge với `AGENTS.md` hiện có, không ghi đè).
 
 - [2026-07-23] PR #1: code sửa import ngày sinh, backfill append-only, staff action atomic và reset idempotent đã hoàn tất; còn dry-run/backup/apply Google Sheet và xác nhận Preview.
+
 # Phase 2 hiệu năng chi tiết hồ sơ — đã thi công, chờ nghiệm thu Preview
 
 - Không có migration. Cần kiểm tra server-prime detail, ảnh/AI lazy, `findActiveFile` scope, audit và `Server-Timing` trên Preview bằng session cán bộ hợp lệ.

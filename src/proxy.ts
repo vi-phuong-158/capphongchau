@@ -12,7 +12,16 @@ const { auth } = NextAuth(authConfig);
  */
 export default auth((request) => {
   if (request.auth?.user?.email) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    /*
+     * Mọi đường dẫn trong `matcher` bên dưới đều là bề mặt của cán bộ và đều mang PII (số điện
+     * thoại, CCCD, địa chỉ hộ dân). Từ khi trang `/submissions/[submissionId]` nạp sẵn hồ sơ trên
+     * server, PII nằm ngay trong HTML chứ không còn chỉ trong phản hồi JSON (các route JSON tự gắn
+     * `no-store` riêng). Gắn ở đây để không phụ thuộc vào mặc định của Next hay của proxy đứng
+     * trước — không có trang nào trong danh sách này được phép nằm lại trong bất kỳ cache nào.
+     */
+    response.headers.set("cache-control", "private, no-store");
+    return response;
   }
 
   return NextResponse.redirect(new URL("/", request.url));

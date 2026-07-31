@@ -12,7 +12,11 @@ import {
   type QueueCursor,
 } from "@/modules/submissions/queue-pagination";
 
-import type { IntakeDraft } from "./types";
+import { mayStaffEditState } from "@/modules/submissions/review";
+
+import { effectivePayload } from "./payload-layers";
+import { requiresCitizenId, type IntakeDraft } from "./types";
+import { MAX_CERTIFICATE_PHOTOS, SUBMISSION_BYTE_BUDGET } from "./upload-commit";
 import {
   certificateLookupAuditMetadata,
   certificateLookupResult,
@@ -105,6 +109,8 @@ export interface SubmissionRecord {
   readonly fileSummaries: readonly PublicFileSummary[];
   /** Locator ổn định, giữ tên cũ để cookie phiên v2 tiếp tục tương thích sau migration. */
   readonly rowIndex: number;
+  /** Ghi chú nội bộ của cán bộ. Chỉ hiển thị trong màn duyệt hồ sơ, không lộ ra cổng công khai. */
+  readonly internalNotes: string;
 }
 
 export interface SubmissionSummary {
@@ -250,6 +256,7 @@ interface SubmissionRow {
   readonly access_version: number;
   readonly file_summary_json: PublicFileSummary[] | null;
   readonly legacy_row_index: string | number;
+  readonly internal_notes: string | null;
 }
 
 interface FileRow {
@@ -287,7 +294,8 @@ const SUBMISSION_SELECT = `
   created_at, updated_at, draft_json, access_version, file_summary_json, legacy_row_index,
   citizen_payload_json, citizen_payload_version, citizen_payload_at,
   working_payload_json, working_payload_at, working_payload_by,
-  official_payload_json, official_payload_at, official_payload_by
+  official_payload_json, official_payload_at, official_payload_by,
+  internal_notes
 `;
 
 function asIso(value: Date | null | undefined): string {
@@ -367,6 +375,7 @@ function mapSubmission(row: SubmissionRow): SubmissionRecord {
     accessVersion: row.access_version,
     fileSummaries: decodeFileSummaries(row.file_summary_json),
     rowIndex: Number(row.legacy_row_index),
+    internalNotes: row.internal_notes ?? "",
   };
 }
 
@@ -589,6 +598,29 @@ export class PublicIntakeRepository {
       receiptCode: row.response_json.receiptCode,
       mutationHash: row.mutation_hash,
     };
+  }
+
+  /**
+   * Tìm kết quả replay đã hoàn tất trong `request_log` **NGOÀI** transaction.
+   *
+   * Route upload-complete gọi phương thức này TRƯỚC khi xác minh Drive: nếu server đã commit
+   * nhưng response mất, retry phải trả kết quả cũ mà không đụng Drive. Advisory lock bên trong
+   * `commitPublicFileUpload` vẫn giữ nguyên để xử lý hai request đồng thời.
+   */
+  async findCompletedUploadReplay(
+    idempotencyKey: string,
+    mutationHash: string,
+  ): Promise<{ readonly summary: PublicFileSummary; readonly replayed: true } | null> {
+    const database = getDatabase();
+    const rows = await database<{ mutation_hash: string; response_json: unknown }[]>`
+      select mutation_hash, response_json from public.request_log
+      where idempotency_key = ${idempotencyKey}
+    `;
+    if (!rows[0]) return null;
+    if (rows[0].mutation_hash !== mutationHash) {
+      throw new SubmissionIdempotencyConflictError();
+    }
+    return { summary: rows[0].response_json as PublicFileSummary, replayed: true };
   }
 
   async findById(submissionId: string): Promise<SubmissionRecord | null> {
@@ -1107,6 +1139,70 @@ export class PublicIntakeRepository {
     });
   }
 
+  /**
+   * Ghi chú nội bộ của cán bộ — một ô tự do, không thuộc `draft_json`/PL3, không sinh timeline
+   * (người dân không bao giờ thấy). Tách khỏi `commitStaffDraftEdit`/`commitOfficialAmendment` vì
+   * không gắn với trạng thái hồ sơ hay quyền "đang nhận xử lý": bất kỳ cán bộ nào có quyền quyết
+   * định hồ sơ cũng ghi được, ở bất kỳ trạng thái nào (kể cả đã `ACCEPTED`/`REJECTED`).
+   */
+  async commitInternalNotes(input: {
+    record: SubmissionRecord;
+    expectedVersion: number;
+    internalNotes: string;
+    actorEmail: string;
+    requestId: string;
+    idempotencyKey: string;
+    mutationHash: string;
+  }): Promise<SubmissionRecord> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string }[]>`
+        select mutation_hash from public.request_log where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash)
+          throw new SubmissionIdempotencyConflictError();
+        const replayRows = await transaction.unsafe<SubmissionRow[]>(
+          `select ${SUBMISSION_SELECT} from public.public_submissions where submission_id = $1`,
+          [input.record.submissionId],
+        );
+        if (!replayRows[0]) throw new Error("Không tìm thấy bản kê khai khi phát lại thao tác.");
+        return mapSubmission(replayRows[0]);
+      }
+
+      const rows = await transaction.unsafe<SubmissionRow[]>(
+        `update public.public_submissions set
+           internal_notes = $3, version = version + 1, updated_at = now()
+         where submission_id = $1 and version = $2
+         returning ${SUBMISSION_SELECT}`,
+        [input.record.submissionId, input.expectedVersion, input.internalNotes],
+      );
+      if (!rows[0]) throw new SubmissionVersionConflictError();
+      const next = mapSubmission(rows[0]);
+
+      // Không lưu nội dung ghi chú vào audit — đây là chỗ cán bộ có thể gõ số điện thoại, tên
+      // người dân khi diễn giải; audit chỉ cần biết AI đã sửa và độ dài, không cần bản sao PII.
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_INTERNAL_NOTE_UPDATED",
+        entityId: input.record.submissionId,
+        requestId: input.requestId,
+        metadata: { noteLength: input.internalNotes.length },
+      });
+      await transaction`
+        insert into public.request_log
+          (idempotency_key, request_id, kind, mutation_hash, response_json, expires_at)
+        values (
+          ${input.idempotencyKey}, ${input.requestId}, 'INTERNAL_NOTES_EDIT', ${input.mutationHash},
+          ${JSON.stringify({ version: next.version })}::jsonb,
+          now() + interval '24 hours'
+        )
+      `;
+      return next;
+    });
+  }
+
   async commitWorkingPayload(input: {
     record: SubmissionRecord;
     expectedVersion: number;
@@ -1337,11 +1433,11 @@ export class PublicIntakeRepository {
       const next = mapSubmission(rows[0]);
 
       await this.refreshCanonicalProjection(
-          transaction,
-          input.record.submissionId,
-          input.draft,
-          input.pendingIdentityHmacs,
-        );
+        transaction,
+        input.record.submissionId,
+        input.draft,
+        input.pendingIdentityHmacs,
+      );
 
       const counts = await syncOfficialRecord(transaction, {
         caseId: next.officialCaseId,
@@ -2047,6 +2143,11 @@ export class PublicIntakeRepository {
     return rows.map(mapFile);
   }
 
+  /**
+   * Lấy đúng một ảnh còn hiệu lực. Các route phục vụ ảnh chỉ cần một tệp nhưng trước đây gọi
+   * `listFiles` rồi `.find(...)` — kéo toàn bộ ảnh của hồ sơ về chỉ để bỏ đi gần hết. Điều kiện
+   * `status = 'UPLOADED'` giữ đúng ngữ nghĩa mặc định của `listFiles` để hai đường không lệch nhau.
+   */
   async findActiveFile(submissionId: string, fileId: string): Promise<StoredFile | null> {
     const database = getDatabase();
     const rows = await database<FileRow[]>`
@@ -2068,6 +2169,679 @@ export class PublicIntakeRepository {
   async markFileDeleted(submissionId: string, fileId: string): Promise<void> {
     await this.markFileStatus(submissionId, fileId, "DELETED");
   }
+
+  /**
+   * Sửa `owner_id` của một ảnh CCCD đang hiệu lực — vá lỗ "tải ảnh CCCD vào đúng ô nhưng gán nhầm
+   * chủ sử dụng" mà cả thay ảnh lẫn gỡ ảnh đều không vá được (ô đích nếu chưa có ảnh nào thì không
+   * có gì để "thay", còn "gỡ" chỉ để lại một ô trống, không đưa ảnh sang đúng chủ).
+   *
+   * Không dùng cho `CERTIFICATE`: ảnh GCN không gắn với một chủ sử dụng cụ thể (luôn ghi
+   * `owner_id = ''` từ lúc tải lên), nên "gán lại chủ" không có nghĩa với loại này.
+   *
+   * Trả `"NOOP"` khi `newOwnerId` trùng chủ hiện tại — coi là thành công, không phải lỗi, để việc gọi
+   * lại sau khi mất mạng giữa chừng không cần thêm cơ chế chống gửi trùng riêng.
+   *
+   * Ném `FileOwnerReassignConflictError` khi chủ đích đã có sẵn một ảnh cùng mặt đang hiệu lực. Cố
+   * tình KHÔNG tự động đánh `REPLACED` ảnh đó như `appendFile` làm khi thay ảnh: ảnh đang có ở ô đích
+   * có thể đang đúng, và đây là thao tác sửa nhãn chứ không phải "tôi vừa chụp ảnh mới". Bắt cán bộ
+   * xử lý ảnh đang chiếm chỗ trước (gỡ hoặc thay) thay vì âm thầm đẩy nó xuống lịch sử.
+   */
+  /**
+   * Khóa hồ sơ rồi kiểm lại quyền sửa của cán bộ **bên trong transaction**.
+   *
+   * `for update` ở đây là hàng rào chính của cả ba thao tác ảnh của cán bộ (tải thêm, gỡ, gán lại
+   * chủ). Không có nó thì mọi lượt ghi chỉ dựa vào lần kiểm ở route — và giữa lần kiểm đó với lúc
+   * ghi thật, hồ sơ có thể đã `ACCEPTED`, đã chuyển cho cán bộ khác hay đã trả về hàng chờ.
+   *
+   * Khóa hàng này cũng là cái **tuần tự hóa hai lượt tải ảnh đồng thời** của cán bộ: lượt thứ hai
+   * chờ lượt thứ nhất commit rồi mới đếm lại ảnh và dung lượng, nên không thể cùng nhìn thấy "còn
+   * chỗ" rồi cùng vượt trần.
+   *
+   * Thứ tự khóa **luôn là hồ sơ trước, ảnh sau** ở cả ba phương thức — đổi thứ tự ở một chỗ là mở
+   * đường cho deadlock giữa chúng.
+   */
+  private async lockSubmissionForStaffEdit(
+    transaction: Sql,
+    submissionId: string,
+    actorEmail: string,
+  ): Promise<SubmissionRecord> {
+    const rows = await transaction.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions
+       where submission_id = $1 for update`,
+      [submissionId],
+    );
+    if (!rows[0]) {
+      throw new OfficerFileMutationRejectedError("NOT_FOUND", "Không tìm thấy bản kê khai.");
+    }
+    const record = mapSubmission(rows[0]);
+    if (!mayStaffEditState(record, actorEmail)) {
+      throw new OfficerFileMutationRejectedError(
+        "FORBIDDEN",
+        "Hồ sơ không còn do bạn nhận xử lý ở trạng thái Đang kiểm tra. Hãy tải lại trang.",
+      );
+    }
+    return record;
+  }
+
+  /** Ảnh còn hiệu lực của hồ sơ, đã khóa hàng — dùng để kiểm lại trần và ô CCCD trong transaction. */
+  private async lockActiveFiles(transaction: Sql, submissionId: string): Promise<StoredFile[]> {
+    const rows = await transaction<FileRow[]>`
+      select file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+        size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      from public.public_files
+      where submission_id = ${submissionId} and status = 'UPLOADED'
+      order by created_at, file_id
+      for update
+    `;
+    return rows.map(mapFile);
+  }
+
+  /**
+   * Cán bộ nhận một ảnh vừa tải lên Drive vào hồ sơ — **một transaction duy nhất** cho toàn bộ:
+   * replay idempotency, kiểm quyền/trạng thái, kiểm trần số ảnh và dung lượng bằng dữ liệu thật,
+   * ghi ảnh, làm mới `file_summary_json`, ghi audit và ghi `request_log`.
+   *
+   * Vì sao phải cùng một transaction (trước đây route gọi `appendFile` rồi `appendAudit` riêng):
+   * `appendFile` commit ảnh xong, nếu ghi audit lỗi thì route trả 500 **nhưng ảnh đã vào hồ sơ**;
+   * client gọi lại thì nhánh replay trả thành công và dòng audit thiếu đó không bao giờ được ghi
+   * lại. Kết quả là ảnh có trong hồ sơ mà nhật ký không biết cán bộ nào thêm.
+   *
+   * Trần dung lượng tính bằng `file.sizeBytes` **đã xác minh trên Drive**, không phải `sizeBytes`
+   * client khai lúc `initiate` — client khai bao nhiêu cũng được, chỉ byte thật mới tính.
+   */
+  async commitOfficerFileUpload(input: {
+    readonly submissionId: string;
+    readonly actorEmail: string;
+    readonly requestId: string;
+    readonly idempotencyKey: string;
+    readonly mutationHash: string;
+    readonly documentType: StoredFile["documentType"];
+    readonly ownerId: string;
+    readonly replaceFileId: string;
+    readonly file: {
+      readonly fileId: string;
+      readonly driveFileId: string;
+      readonly mimeType: string;
+      readonly sizeBytes: number;
+      readonly checksum: string;
+      readonly fileName: string;
+    };
+  }): Promise<{ readonly summary: PublicFileSummary; readonly replayed: boolean }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+        select mutation_hash, response_json from public.request_log
+        where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return { summary: cached[0].response_json as PublicFileSummary, replayed: true };
+      }
+
+      const record = await this.lockSubmissionForStaffEdit(
+        transaction,
+        input.submissionId,
+        input.actorEmail,
+      );
+      const files = await this.lockActiveFiles(transaction, input.submissionId);
+
+      const replaceTarget = input.replaceFileId
+        ? files.find((file) => file.fileId === input.replaceFileId)
+        : undefined;
+      if (input.replaceFileId && !replaceTarget) {
+        throw new OfficerFileMutationRejectedError(
+          "REPLACE_TARGET_INVALID",
+          "Ảnh cần thay không còn hợp lệ. Hãy tải lại trang.",
+        );
+      }
+      if (replaceTarget && replaceTarget.documentType !== input.documentType) {
+        throw new OfficerFileMutationRejectedError(
+          "REPLACE_TARGET_INVALID",
+          "Ảnh cần thay không cùng loại giấy tờ.",
+        );
+      }
+
+      if (input.documentType === "CERTIFICATE") {
+        if (input.ownerId !== "") {
+          throw new OfficerFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Ảnh Giấy chứng nhận không được gắn với cá nhân.",
+          );
+        }
+        const certificateCount = files.filter((file) => file.documentType === "CERTIFICATE").length;
+        if (!replaceTarget && certificateCount >= MAX_CERTIFICATE_PHOTOS) {
+          throw new OfficerFileMutationRejectedError(
+            "CERTIFICATE_LIMIT",
+            `Tối đa ${MAX_CERTIFICATE_PHOTOS} ảnh Giấy chứng nhận.`,
+          );
+        }
+      } else {
+        /*
+         * Chủ sử dụng đọc từ **lớp dữ liệu đang có hiệu lực** của bản ghi vừa khóa, không từ
+         * `draft_json`: khi hồ sơ đã được nhận xử lý thì cán bộ làm việc trên `working_payload`, và
+         * chủ sử dụng cán bộ vừa thêm ở Bàn làm việc chỉ tồn tại ở lớp đó.
+         */
+        const owners = effectivePayload(record)?.owners;
+        const owner = Array.isArray(owners)
+          ? owners.find((candidate) => candidate.id === input.ownerId)
+          : undefined;
+        if (!owner || !requiresCitizenId(owner.ownerType)) {
+          throw new OfficerFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Chủ sử dụng của ảnh CCCD không hợp lệ.",
+          );
+        }
+        const existing = files.find(
+          (file) => file.ownerId === input.ownerId && file.documentType === input.documentType,
+        );
+        /*
+         * Mỗi chủ chỉ một ảnh cho từng mặt CCCD. Đòi `replaceFileId` khớp đúng ảnh đang có thay vì
+         * im lặng cho ghi đè: câu `update ... REPLACED` bên dưới tự đẩy ảnh cùng chủ + cùng mặt
+         * xuống lịch sử, nên một lần bấm nhầm sẽ mất bằng chứng đang dùng mà cán bộ không hề biết.
+         */
+        if (
+          (existing && existing.fileId !== input.replaceFileId) ||
+          (!existing && input.replaceFileId)
+        ) {
+          throw new OfficerFileMutationRejectedError(
+            "SLOT_CONFLICT",
+            "Trạng thái ảnh CCCD của chủ sử dụng này đã thay đổi. Hãy tải lại trang.",
+          );
+        }
+      }
+
+      const usedBytes =
+        files.reduce((sum, file) => sum + file.sizeBytes, 0) - (replaceTarget?.sizeBytes ?? 0);
+      if (usedBytes + input.file.sizeBytes > SUBMISSION_BYTE_BUDGET) {
+        throw new OfficerFileMutationRejectedError(
+          "BYTE_BUDGET",
+          "Tổng dung lượng hồ sơ đã vượt giới hạn.",
+        );
+      }
+
+      if (input.replaceFileId) {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${input.submissionId} and file_id = ${input.replaceFileId}
+            and status = 'UPLOADED'
+        `;
+      }
+      if (input.documentType !== "CERTIFICATE") {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${input.submissionId} and owner_id = ${input.ownerId}
+            and document_type = ${input.documentType} and status = 'UPLOADED'
+        `;
+      }
+
+      const rows = await transaction<FileRow[]>`
+        insert into public.public_files (
+          file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name
+        ) values (
+          ${input.file.fileId}, ${input.submissionId}, ${input.ownerId}, ${input.documentType},
+          ${input.file.driveFileId}, ${input.file.mimeType}, ${input.file.sizeBytes},
+          ${input.file.checksum}, ${input.file.fileName}
+        ) returning file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      const summary = this.fileSummary(mapFile(rows[0]));
+
+      /*
+       * Dấu vết ai bổ sung ảnh nào. Metadata chỉ gồm danh mục đóng và số — `documentType`,
+       * `fileId`, `sizeBytes` và có thay ảnh hay không. Không ghi tên tệp, không ghi `driveFileId`,
+       * không ghi `ownerId` kèm bất cứ thông tin định danh nào (02-coding-rules).
+       */
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_OFFICER_FILE_UPLOADED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          documentType: input.documentType,
+          fileId: summary.fileId,
+          sizeBytes: input.file.sizeBytes,
+          replaced: Boolean(input.replaceFileId),
+        },
+      });
+
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, 'OFFICER_UPLOAD_COMPLETE', ${input.requestId},
+          ${input.mutationHash}, ${transaction.json(serializeFileSummary(summary))}, now() + interval '24 hours'
+        )
+      `;
+
+      return { summary, replayed: false };
+    });
+  }
+
+  /**
+   * Cán bộ gỡ một ảnh Giấy chứng nhận khỏi hồ sơ (xóa mềm) — quyền, trạng thái, đổi trạng thái ảnh,
+   * làm mới `file_summary_json` và audit trong **một** transaction.
+   *
+   * Không cần `idempotency-key`: gọi lại khi ảnh đã `DELETED` là no-op và **không ghi audit lần
+   * hai**, nhưng lần đầu thì audit không thể thiếu — trước đây audit nằm ngoài transaction nên ảnh
+   * có thể đã bị gỡ mà nhật ký không ghi ai gỡ.
+   */
+  async commitOfficerFileDelete(input: {
+    readonly submissionId: string;
+    readonly fileId: string;
+    readonly actorEmail: string;
+    readonly requestId: string;
+  }): Promise<{ readonly alreadyDeleted: boolean }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await this.lockSubmissionForStaffEdit(transaction, input.submissionId, input.actorEmail);
+
+      const current = await transaction<
+        {
+          document_type: StoredFile["documentType"];
+          status: StoredFile["status"];
+          size_bytes: number;
+        }[]
+      >`
+        select document_type, status, size_bytes from public.public_files
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+        for update
+      `;
+      if (!current[0]) {
+        throw new OfficerFileMutationRejectedError("FILE_NOT_FOUND", "Không tìm thấy ảnh cần gỡ.");
+      }
+      if (current[0].document_type !== "CERTIFICATE") {
+        throw new OfficerFileMutationRejectedError(
+          "DOCUMENT_TYPE_INVALID",
+          "Chỉ gỡ được ảnh Giấy chứng nhận. Ảnh CCCD dùng chức năng thay ảnh.",
+        );
+      }
+      // `REPLACED` đã ra khỏi bộ ảnh hiệu lực bằng luồng thay ảnh — không phải việc của đây.
+      if (current[0].status === "REPLACED") {
+        throw new OfficerFileMutationRejectedError("FILE_INACTIVE", "Ảnh không còn hiệu lực.");
+      }
+      if (current[0].status === "DELETED") return { alreadyDeleted: true };
+
+      await transaction`
+        update public.public_files set status = 'DELETED', updated_at = now()
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      // Metadata chỉ danh mục đóng và số, không tên tệp / Drive ID / ownerId.
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_OFFICER_FILE_DELETED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          documentType: current[0].document_type,
+          fileId: input.fileId,
+          sizeBytes: current[0].size_bytes,
+        },
+      });
+      return { alreadyDeleted: false };
+    });
+  }
+
+  /**
+   * Cán bộ gán lại chủ sử dụng cho một ảnh CCCD — quyền, trạng thái, chủ đích, chống tranh chấp ô
+   * đích, cập nhật ảnh, làm mới `file_summary_json` và audit trong **một** transaction.
+   */
+  async commitOfficerFileOwnerReassign(input: {
+    readonly submissionId: string;
+    readonly fileId: string;
+    readonly newOwnerId: string;
+    readonly actorEmail: string;
+    readonly requestId: string;
+  }): Promise<"REASSIGNED" | "NOOP"> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      const record = await this.lockSubmissionForStaffEdit(
+        transaction,
+        input.submissionId,
+        input.actorEmail,
+      );
+
+      const current = await transaction<
+        {
+          owner_id: string;
+          document_type: StoredFile["documentType"];
+          status: StoredFile["status"];
+        }[]
+      >`
+        select owner_id, document_type, status from public.public_files
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+        for update
+      `;
+      if (!current[0]) {
+        throw new OfficerFileMutationRejectedError(
+          "FILE_NOT_FOUND",
+          "Không tìm thấy ảnh cần gán lại.",
+        );
+      }
+      if (current[0].status !== "UPLOADED") {
+        throw new OfficerFileMutationRejectedError("FILE_INACTIVE", "Ảnh không còn hiệu lực.");
+      }
+      if (current[0].document_type === "CERTIFICATE") {
+        throw new OfficerFileMutationRejectedError(
+          "DOCUMENT_TYPE_INVALID",
+          "Chỉ gán lại chủ sử dụng cho ảnh CCCD. Ảnh Giấy chứng nhận không gắn với một chủ cụ thể.",
+        );
+      }
+      if (current[0].owner_id === input.newOwnerId) return "NOOP";
+
+      // Chủ đích đọc từ lớp dữ liệu đang có hiệu lực của bản ghi vừa khóa — cùng quy tắc với đường
+      // tải ảnh: chủ do cán bộ thêm ở Bàn làm việc chỉ tồn tại ở `working_payload`.
+      const owners = effectivePayload(record)?.owners;
+      const targetOwner = Array.isArray(owners)
+        ? owners.find((candidate) => candidate.id === input.newOwnerId)
+        : undefined;
+      if (!targetOwner || !requiresCitizenId(targetOwner.ownerType)) {
+        throw new OfficerFileMutationRejectedError(
+          "OWNER_INVALID",
+          "Chủ sử dụng đích không hợp lệ.",
+        );
+      }
+
+      // Khóa luôn hàng của chủ đích trong cùng transaction — hai yêu cầu gán lại đồng thời vào cùng
+      // một ô không được cùng thấy "còn trống" rồi cùng ghi đè lên nhau.
+      const collision = await transaction<{ file_id: string }[]>`
+        select file_id from public.public_files
+        where submission_id = ${input.submissionId} and owner_id = ${input.newOwnerId}
+          and document_type = ${current[0].document_type} and status = 'UPLOADED'
+        for update
+      `;
+      if (collision[0]) throw new FileOwnerReassignConflictError();
+
+      await transaction`
+        update public.public_files set owner_id = ${input.newOwnerId}, updated_at = now()
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      // Metadata chỉ danh mục đóng và số, không ownerId (cùng quy tắc với các audit khác của 2C).
+      await this.insertAudit(transaction, {
+        actorEmail: input.actorEmail,
+        action: "SUBMISSION_OFFICER_FILE_OWNER_REASSIGNED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: { documentType: current[0].document_type, fileId: input.fileId },
+      });
+      return "REASSIGNED";
+    });
+  }
+
+  private async lockSubmissionForPublicEdit(
+    transaction: Sql,
+    submissionId: string,
+  ): Promise<SubmissionRecord> {
+    const rows = await transaction.unsafe<SubmissionRow[]>(
+      `select ${SUBMISSION_SELECT} from public.public_submissions
+       where submission_id = $1 for update`,
+      [submissionId],
+    );
+    if (!rows[0]) {
+      throw new PublicFileMutationRejectedError("NOT_FOUND", "Không tìm thấy bản kê khai.");
+    }
+    const record = mapSubmission(rows[0]);
+    if (
+      record.claimedBy.trim().length > 0 ||
+      (record.status !== "DRAFT" && record.status !== "NEEDS_SUPPLEMENT")
+    ) {
+      throw new PublicFileMutationRejectedError(
+        "INVALID_STATE",
+        "Bản kê khai đang bị khóa hoặc không ở trạng thái cho phép sửa.",
+      );
+    }
+    return record;
+  }
+
+  async commitPublicFileUpload(input: {
+    readonly submissionId: string;
+    readonly requestId: string;
+    readonly idempotencyKey: string;
+    readonly mutationHash: string;
+    readonly documentType: StoredFile["documentType"];
+    readonly ownerId: string;
+    readonly replaceFileId: string;
+    readonly file: {
+      readonly fileId: string;
+      readonly driveFileId: string;
+      readonly mimeType: string;
+      readonly sizeBytes: number;
+      readonly checksum: string;
+      readonly fileName: string;
+    };
+    readonly normalization?: FileNormalizationMetadata;
+  }): Promise<{ readonly summary: PublicFileSummary; readonly replayed: boolean }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+        select mutation_hash, response_json from public.request_log
+        where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return { summary: cached[0].response_json as PublicFileSummary, replayed: true };
+      }
+
+      const record = await this.lockSubmissionForPublicEdit(transaction, input.submissionId);
+      if (!record.driveFolderId) {
+        throw new PublicFileMutationRejectedError(
+          "INVALID_STATE",
+          "Thư mục tải ảnh chưa sẵn sàng. Vui lòng tải lại ảnh từ đầu.",
+        );
+      }
+      const files = await this.lockActiveFiles(transaction, input.submissionId);
+
+      const replaceTarget = input.replaceFileId
+        ? files.find((file) => file.fileId === input.replaceFileId)
+        : undefined;
+      if (input.replaceFileId && !replaceTarget) {
+        throw new PublicFileMutationRejectedError(
+          "REPLACE_TARGET_INVALID",
+          "Ảnh cần thay không còn hợp lệ. Hãy tải lại trang.",
+        );
+      }
+      if (replaceTarget && replaceTarget.documentType !== input.documentType) {
+        throw new PublicFileMutationRejectedError(
+          "REPLACE_TARGET_INVALID",
+          "Ảnh cần thay không cùng loại giấy tờ.",
+        );
+      }
+
+      if (input.documentType === "CERTIFICATE") {
+        if (input.ownerId !== "") {
+          throw new PublicFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Ảnh Giấy chứng nhận không được gắn với cá nhân.",
+          );
+        }
+        const certificateCount = files.filter((file) => file.documentType === "CERTIFICATE").length;
+        if (!replaceTarget && certificateCount >= MAX_CERTIFICATE_PHOTOS) {
+          throw new PublicFileMutationRejectedError(
+            "CERTIFICATE_LIMIT",
+            `Tối đa ${MAX_CERTIFICATE_PHOTOS} ảnh Giấy chứng nhận.`,
+          );
+        }
+      } else {
+        const owners = record.draft?.owners;
+        const owner = Array.isArray(owners)
+          ? owners.find((candidate) => candidate.id === input.ownerId)
+          : undefined;
+        if (!owner || !requiresCitizenId(owner.ownerType)) {
+          throw new PublicFileMutationRejectedError(
+            "OWNER_INVALID",
+            "Chủ sử dụng của ảnh CCCD không hợp lệ.",
+          );
+        }
+        const existing = files.find(
+          (file) => file.ownerId === input.ownerId && file.documentType === input.documentType,
+        );
+        if (
+          (existing && existing.fileId !== input.replaceFileId) ||
+          (!existing && input.replaceFileId)
+        ) {
+          throw new PublicFileMutationRejectedError(
+            "SLOT_CONFLICT",
+            "Trạng thái thay ảnh CCCD không còn hợp lệ.",
+          );
+        }
+      }
+
+      const usedBytes =
+        files.reduce((sum, file) => sum + file.sizeBytes, 0) - (replaceTarget?.sizeBytes ?? 0);
+      if (usedBytes + input.file.sizeBytes > SUBMISSION_BYTE_BUDGET) {
+        throw new PublicFileMutationRejectedError(
+          "BYTE_BUDGET",
+          "Tổng dung lượng hồ sơ đã vượt giới hạn.",
+        );
+      }
+
+      if (input.replaceFileId) {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${input.submissionId} and file_id = ${input.replaceFileId}
+            and status = 'UPLOADED'
+        `;
+      }
+      if (input.documentType !== "CERTIFICATE") {
+        await transaction`
+          update public.public_files set status = 'REPLACED', updated_at = now()
+          where submission_id = ${input.submissionId} and owner_id = ${input.ownerId}
+            and document_type = ${input.documentType} and status = 'UPLOADED'
+        `;
+      }
+
+      const rows = await transaction<FileRow[]>`
+        insert into public.public_files (
+          file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name,
+          source_size_bytes, source_mime_type, source_width, source_height,
+          upload_width, upload_height, normalization_version
+        ) values (
+          ${input.file.fileId}, ${input.submissionId}, ${input.ownerId}, ${input.documentType},
+          ${input.file.driveFileId}, ${input.file.mimeType}, ${input.file.sizeBytes},
+          ${input.file.checksum}, ${input.file.fileName},
+          ${input.normalization?.sourceSizeBytes ?? null}, ${input.normalization?.sourceMimeType ?? null},
+          ${input.normalization?.sourceWidth ?? null}, ${input.normalization?.sourceHeight ?? null},
+          ${input.normalization?.uploadWidth ?? null}, ${input.normalization?.uploadHeight ?? null},
+          ${input.normalization?.normalizationVersion ?? ""}
+        ) returning file_id, submission_id, owner_id, document_type, drive_file_id, mime_type,
+          size_bytes, checksum_sha256, file_name, status, created_at, updated_at
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      const summary = this.fileSummary(mapFile(rows[0]));
+
+      await this.insertAudit(transaction, {
+        actorEmail: "PUBLIC",
+        action: "PUBLIC_FILE_UPLOADED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          documentType: input.documentType,
+          fileId: summary.fileId,
+          sizeBytes: input.file.sizeBytes,
+          replaced: Boolean(input.replaceFileId),
+        },
+      });
+
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, 'PUBLIC_UPLOAD_COMPLETE', ${input.requestId},
+          ${input.mutationHash}, ${JSON.stringify(summary)}::jsonb, now() + interval '24 hours'
+        )
+      `;
+
+      return { summary, replayed: false };
+    });
+  }
+
+  async commitPublicFileDelete(input: {
+    readonly submissionId: string;
+    readonly fileId: string;
+    readonly requestId: string;
+    readonly idempotencyKey: string;
+    readonly mutationHash: string;
+  }): Promise<{ readonly alreadyDeleted: boolean }> {
+    const database = getDatabase();
+    return database.begin(async (transaction) => {
+      await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+      const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
+        select mutation_hash, response_json from public.request_log
+        where idempotency_key = ${input.idempotencyKey}
+      `;
+      if (cached[0]) {
+        if (cached[0].mutation_hash !== input.mutationHash) {
+          throw new SubmissionIdempotencyConflictError();
+        }
+        return { alreadyDeleted: true };
+      }
+
+      await this.lockSubmissionForPublicEdit(transaction, input.submissionId);
+
+      const current = await transaction<
+        {
+          document_type: StoredFile["documentType"];
+          status: StoredFile["status"];
+          size_bytes: number;
+        }[]
+      >`
+        select document_type, status, size_bytes from public.public_files
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+        for update
+      `;
+      if (!current[0]) {
+        throw new PublicFileMutationRejectedError("FILE_NOT_FOUND", "Không tìm thấy ảnh cần xóa.");
+      }
+      if (current[0].document_type !== "CERTIFICATE") {
+        throw new PublicFileMutationRejectedError(
+          "DOCUMENT_TYPE_INVALID",
+          "Chỉ xóa được ảnh Giấy chứng nhận.",
+        );
+      }
+      if (current[0].status === "REPLACED") {
+        throw new PublicFileMutationRejectedError("FILE_INACTIVE", "Ảnh không còn hiệu lực.");
+      }
+      if (current[0].status === "DELETED") return { alreadyDeleted: true };
+
+      await transaction`
+        update public.public_files set status = 'DELETED', updated_at = now()
+        where submission_id = ${input.submissionId} and file_id = ${input.fileId}
+      `;
+      await this.refreshFileSummaries(transaction, input.submissionId);
+      await this.insertAudit(transaction, {
+        actorEmail: "PUBLIC",
+        action: "PUBLIC_FILE_DELETED",
+        entityId: input.submissionId,
+        requestId: input.requestId,
+        metadata: {
+          documentType: current[0].document_type,
+          fileId: input.fileId,
+          sizeBytes: current[0].size_bytes,
+        },
+      });
+
+      await transaction`
+        insert into public.request_log (
+          idempotency_key, kind, request_id, mutation_hash, response_json, expires_at
+        ) values (
+          ${input.idempotencyKey}, 'PUBLIC_FILE_DELETE', ${input.requestId},
+          ${input.mutationHash}, '{"alreadyDeleted":true}'::jsonb, now() + interval '24 hours'
+        )
+      `;
+      return { alreadyDeleted: false };
+    });
+  }
+
   async submit(input: {
     record: SubmissionRecord;
     draft: IntakeDraft;
@@ -2279,7 +3053,7 @@ export class PublicIntakeRepository {
     const summaries = rows.map((row) => this.fileSummary(mapFile(row)));
     await sql`
       update public.public_submissions
-      set file_summary_json = ${JSON.stringify(summaries)}::jsonb, updated_at = now()
+      set file_summary_json = ${sql.json(summaries.map(serializeFileSummary))}, updated_at = now()
       where submission_id = ${submissionId}
     `;
   }
@@ -2424,4 +3198,79 @@ export class SubmissionAlreadyClaimedError extends Error {
     super("Hồ sơ đang do cán bộ khác nhận xử lý.");
     this.name = "SubmissionAlreadyClaimedError";
   }
+}
+
+export class FileOwnerReassignConflictError extends Error {
+  constructor() {
+    super("Chủ sử dụng đích đã có ảnh cho mặt CCCD này.");
+    this.name = "FileOwnerReassignConflictError";
+  }
+}
+
+/**
+ * Vì sao một lượt thao tác ảnh của cán bộ bị từ chối **bên trong transaction**.
+ *
+ * Route dịch `reason` sang mã lỗi HTTP; repository không biết gì về HTTP. Ném lỗi (chứ không trả
+ * kết quả) là cố ý: mọi nhánh từ chối phải làm transaction rollback, không để lại nửa thay đổi.
+ */
+export type OfficerFileRejectionReason =
+  | "NOT_FOUND"
+  | "FORBIDDEN"
+  | "OWNER_INVALID"
+  | "REPLACE_TARGET_INVALID"
+  | "SLOT_CONFLICT"
+  | "CERTIFICATE_LIMIT"
+  | "BYTE_BUDGET"
+  | "FILE_NOT_FOUND"
+  | "FILE_INACTIVE"
+  | "DOCUMENT_TYPE_INVALID";
+
+export class OfficerFileMutationRejectedError extends Error {
+  constructor(
+    readonly reason: OfficerFileRejectionReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "OfficerFileMutationRejectedError";
+  }
+}
+
+export type PublicFileRejectionReason =
+  | "NOT_FOUND"
+  | "INVALID_STATE"
+  | "OWNER_INVALID"
+  | "REPLACE_TARGET_INVALID"
+  | "SLOT_CONFLICT"
+  | "CERTIFICATE_LIMIT"
+  | "BYTE_BUDGET"
+  | "FILE_NOT_FOUND"
+  | "FILE_INACTIVE"
+  | "DOCUMENT_TYPE_INVALID";
+
+export class PublicFileMutationRejectedError extends Error {
+  constructor(
+    readonly reason: PublicFileRejectionReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PublicFileMutationRejectedError";
+  }
+}
+
+type JsonScalar = string | number | boolean | null;
+type JsonRecord = Record<string, JsonScalar>;
+
+function serializeFileSummary(summary: PublicFileSummary): JsonRecord {
+  return {
+    fileId: summary.fileId,
+    ownerId: summary.ownerId,
+    documentType: summary.documentType,
+    status: summary.status,
+    sizeBytes: summary.sizeBytes,
+    checksum: summary.checksum,
+    createdAt: summary.createdAt,
+    updatedAt: summary.updatedAt,
+    driveFileId: summary.driveFileId ?? null,
+    mimeType: summary.mimeType ?? null,
+  };
 }
