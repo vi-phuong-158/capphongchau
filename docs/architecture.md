@@ -1,5 +1,12 @@
 # Kiến trúc hệ thống
 
+> Cập nhật post-merge PR #12 (2026-07-31): upload-complete có hai lớp replay. Route đọc replay đã
+> hoàn tất bằng `findCompletedFileUploadReplay` trước mọi thao tác hồ sơ/Drive; helper lọc cả
+> `idempotency_key` + danh mục đóng `kind` và validate runtime `response_json`. Replay trong
+> transaction vẫn giữ sau advisory lock cho request đồng thời. Early conflict trả 409 và không
+> cleanup `driveFileId` chưa xác minh. API công khai chứa hồ sơ/session dùng
+> `publicPrivateJson` (`private, no-store`, `Pragma: no-cache`, `Expires: 0`), kể cả lỗi.
+
 > Cập nhật Phase 4 (2026-07-29): Vercel Function được cấu hình `regions: ["sin1"]`; kết nối
 > Supavisor vẫn `prepare: false`, SSL và singleton, còn `max` lấy từ biến server-only
 > `SUPABASE_POOL_MAX` (1–3, mặc định 1) tại lúc runtime instance tạo client. Đổi pool phải qua

@@ -39,6 +39,7 @@ const mockVerifyCsrf = vi.hoisted(() => vi.fn());
 const mockFindById = vi.hoisted(() => vi.fn());
 const mockListFiles = vi.hoisted(() => vi.fn());
 const mockCommitOfficerFileUpload = vi.hoisted(() => vi.fn());
+const mockFindCompletedFileUploadReplay = vi.hoisted(() => vi.fn());
 const mockAppendAudit = vi.hoisted(() => vi.fn());
 const mockAppendFile = vi.hoisted(() => vi.fn());
 const mockCreateUploadSession = vi.hoisted(() => vi.fn());
@@ -107,6 +108,8 @@ vi.mock("@/modules/public-intake/repository", () => ({
     findById: (...args: unknown[]) => mockFindById(...args),
     listFiles: (...args: unknown[]) => mockListFiles(...args),
     commitOfficerFileUpload: (...args: unknown[]) => mockCommitOfficerFileUpload(...args),
+    findCompletedFileUploadReplay: (...args: unknown[]) =>
+      mockFindCompletedFileUploadReplay(...args),
     appendAudit: (...args: unknown[]) => mockAppendAudit(...args),
     appendFile: (...args: unknown[]) => mockAppendFile(...args),
     isDriveFileAdopted: vi.fn().mockResolvedValue(true),
@@ -134,12 +137,10 @@ vi.mock("@/modules/public-intake/upload-commit", async (importOriginal) => {
   return { ...actual, discardIfOrphan: (...args: unknown[]) => mockDiscardIfOrphan(...args) };
 });
 
-const { POST: initiate } = await import(
-  "@/app/api/submissions/[submissionId]/uploads/initiate/route"
-);
-const { POST: complete } = await import(
-  "@/app/api/submissions/[submissionId]/uploads/complete/route"
-);
+const { POST: initiate } =
+  await import("@/app/api/submissions/[submissionId]/uploads/initiate/route");
+const { POST: complete } =
+  await import("@/app/api/submissions/[submissionId]/uploads/complete/route");
 
 function makeDraft(): IntakeDraft {
   return {
@@ -255,6 +256,7 @@ beforeEach(() => {
     summary: { fileId: "file_new" },
     replayed: false,
   });
+  mockFindCompletedFileUploadReplay.mockResolvedValue(null);
   mockDiscardIfOrphan.mockResolvedValue(undefined);
 });
 
@@ -383,6 +385,56 @@ describe("hồ sơ chưa có thư mục Drive (Phase 3 lazy folder)", () => {
 });
 
 describe("mọi quyết định ghi nằm trong một transaction", () => {
+  it("replay đã commit trả trước mọi đọc hồ sơ và thao tác Drive", async () => {
+    mockFindCompletedFileUploadReplay.mockResolvedValue({
+      summary: { fileId: "file_replayed" },
+      replayed: true,
+    });
+
+    const response = await complete(completeRequest(CERTIFICATE_BODY), context);
+
+    expect(response.status).toBe(200);
+    expect(await payload(response)).toMatchObject({ ok: true, fileId: "file_replayed" });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mockFindCompletedFileUploadReplay).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "OFFICER_UPLOAD_COMPLETE" }),
+    );
+    expect(mockFindById).not.toHaveBeenCalled();
+    expect(mockEnsureFolderReady).not.toHaveBeenCalled();
+    expect(mockVerifyUploadedFile).not.toHaveBeenCalled();
+    expect(mockCommitOfficerFileUpload).not.toHaveBeenCalled();
+    expect(mockDiscardIfOrphan).not.toHaveBeenCalled();
+  });
+
+  it("early replay conflict trả 409 mà không chạm hoặc dọn tệp Drive chưa xác minh", async () => {
+    mockFindCompletedFileUploadReplay.mockRejectedValue(new SubmissionIdempotencyConflictError());
+
+    const response = await complete(completeRequest(CERTIFICATE_BODY), context);
+
+    expect(response.status).toBe(409);
+    expect(mockFindById).not.toHaveBeenCalled();
+    expect(mockVerifyUploadedFile).not.toHaveBeenCalled();
+    expect(mockCommitOfficerFileUpload).not.toHaveBeenCalled();
+    expect(mockDiscardIfOrphan).not.toHaveBeenCalled();
+  });
+
+  it("replay JSON hỏng trả lỗi nội bộ an toàn mà không chạm Drive", async () => {
+    mockFindCompletedFileUploadReplay.mockRejectedValue(
+      new Error('response_json hỏng: {"driveFileId":"không-được-lộ"}'),
+    );
+
+    const response = await complete(completeRequest(CERTIFICATE_BODY), context);
+    const body = JSON.stringify(await payload(response));
+
+    expect(response.status).toBe(500);
+    expect(body).not.toContain("driveFileId");
+    expect(body).not.toContain("không-được-lộ");
+    expect(mockFindById).not.toHaveBeenCalled();
+    expect(mockVerifyUploadedFile).not.toHaveBeenCalled();
+    expect(mockCommitOfficerFileUpload).not.toHaveBeenCalled();
+    expect(mockDiscardIfOrphan).not.toHaveBeenCalled();
+  });
+
   it("complete gọi đúng commitOfficerFileUpload và KHÔNG ghi audit thành lượt riêng", async () => {
     const response = await complete(
       completeRequest({ ...CERTIFICATE_BODY, replaceFileId: "file_old" }),

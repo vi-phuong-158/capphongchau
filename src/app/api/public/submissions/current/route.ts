@@ -7,6 +7,7 @@ import {
 import {
   isEditable,
   publicError,
+  publicPrivateJson,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
 import type { IntakeDraft } from "@/modules/public-intake/types";
@@ -56,7 +57,7 @@ export async function GET(request: Request): Promise<NextResponse> {
           occurredAt: record.updatedAt || record.createdAt,
         },
       ];
-  return NextResponse.json({
+  return publicPrivateJson({
     receiptCode: record.receiptCode,
     status: record.status,
     statusLabel: PUBLIC_STATUS_LABELS[record.status],
@@ -183,5 +184,5 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     throw error;
   }
 
-  return NextResponse.json({ version: nextVersion, savedAt: new Date().toISOString() });
+  return publicPrivateJson({ version: nextVersion, savedAt: new Date().toISOString() });
 }

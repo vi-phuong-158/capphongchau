@@ -8,6 +8,7 @@ import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import {
   isEditable,
   publicError,
+  publicPrivateJson,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
 import { canonicalImageMimeType } from "@/modules/public-intake/image-format";
@@ -224,5 +225,5 @@ export async function POST(request: Request): Promise<NextResponse> {
   // URL phiên là bí mật: trả cho đúng trình duyệt đang giữ cookie, không ghi vào log hay audit.
   // Trả kèm loại đã chuẩn hóa: lệnh PUT của trình duyệt phải khai đúng loại đã đăng ký với phiên,
   // nếu không Google từ chối phần thân tệp.
-  return NextResponse.json({ uploadUrl: session.uploadUrl, mimeType });
+  return publicPrivateJson({ uploadUrl: session.uploadUrl, mimeType });
 }

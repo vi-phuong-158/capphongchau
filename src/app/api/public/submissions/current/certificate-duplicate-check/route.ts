@@ -14,7 +14,11 @@ import {
   CertificateLookupRateLimitError,
   getPublicIntakeRepository,
 } from "@/modules/public-intake/repository";
-import { publicError, resolvePublicRequest } from "@/modules/public-intake/route-context";
+import {
+  publicError,
+  publicPrivateJson,
+  resolvePublicRequest,
+} from "@/modules/public-intake/route-context";
 
 export const runtime = "nodejs";
 
@@ -64,7 +68,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       source: "SUBMISSION",
       requestId: context.requestId,
     });
-    return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
+    return publicPrivateJson(result);
   } catch (error) {
     if (error instanceof CertificateLookupRateLimitError) {
       return publicError("RATE_LIMITED", error.message, context.requestId);

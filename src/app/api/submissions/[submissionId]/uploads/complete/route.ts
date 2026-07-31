@@ -88,18 +88,17 @@ const REJECTION_HTTP: Record<
  * Cùng cửa quyền với `initiate` (`mayStaffEdit`) và cùng thứ tự xử lý với đường của người dân, kể
  * cả hai điểm dễ làm sai:
  *
- *   1. **Replay đứng trước mọi kiểm tra trạng thái.** Sau lần commit đầu, chính ảnh vừa nhận làm
- *      kiểm tra "đã có ảnh CCCD" thất bại; nếu để nhánh đó chạy trước thì lần gọi lại (response đầu
- *      bị mất mạng) sẽ đi vào cửa dọn dẹp và xóa mất tệp mà cơ sở dữ liệu đang trỏ. Ở đây nhánh
- *      replay nằm **trong cùng transaction** với phần ghi, nên không có khoảng nào để hai lượt gọi
- *      cùng đi qua.
- *   2. **Mọi nhánh thất bại đều qua `discardIfOrphan`,** không xóa thẳng: tệp đã nằm trên Drive
- *      nhưng chưa chắc chưa ai nhận, và xóa sai là mất bằng chứng vĩnh viễn.
+ *   1. **Replay đã hoàn tất đứng trước mọi đọc hồ sơ/kiểm tra Drive.** Sau lần commit đầu, trạng
+ *      thái hồ sơ hoặc tệp có thể đã đổi; retry cùng khóa vẫn phải trả đúng kết quả cũ. Replay
+ *      trong transaction vẫn giữ để tuần tự hóa hai request cùng chạy trước lần commit đầu.
+ *   2. **Chỉ cleanup sau trust boundary của Drive.** Early conflict chưa xác minh `driveFileId`
+ *      thuộc hồ sơ nên tuyệt đối không gọi `discardIfOrphan`; sau khi xác minh, mọi nhánh thất bại
+ *      mới qua helper này thay vì xóa thẳng.
  *
  * **Toàn bộ phần quyết định và ghi nằm trong `repository.commitOfficerFileUpload`** — một
  * transaction duy nhất: khóa hồ sơ (`for update`), kiểm lại quyền/trạng thái/trần dung lượng/trần
  * số ảnh bằng dữ liệu thật, ghi ảnh, làm mới `file_summary_json`, ghi audit, ghi `request_log`.
- * Route chỉ còn xác thực, xác minh tệp trên Drive và dịch lỗi sang HTTP.
+ * Route chỉ còn xác thực, replay nhanh, xác minh tệp trên Drive và dịch lỗi sang HTTP.
  *
  * Vì sao không thể để audit ngoài transaction như bản đầu: `appendFile` commit ảnh trước, nếu
  * `appendAudit` lỗi thì API trả 500 nhưng ảnh **đã** vào hồ sơ; client gọi lại thì nhánh replay trả
@@ -151,6 +150,31 @@ export async function POST(
         }),
       )
       .digest("hex");
+
+    let earlyReplay;
+    try {
+      earlyReplay = await repository.findCompletedFileUploadReplay({
+        idempotencyKey,
+        mutationHash,
+        kind: "OFFICER_UPLOAD_COMPLETE",
+      });
+    } catch (error) {
+      if (error instanceof SubmissionIdempotencyConflictError) {
+        return fail(
+          "IDEMPOTENCY_CONFLICT",
+          "KhÃ³a chá»‘ng gá»­i trÃ¹ng Ä‘Ã£ dÃ¹ng cho thao tÃ¡c khÃ¡c.",
+          requestId,
+          409,
+        );
+      }
+      throw error;
+    }
+    if (earlyReplay) {
+      return NextResponse.json(
+        { ok: true, fileId: earlyReplay.summary.fileId, requestId },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
 
     const record = await repository.findById(submissionId);
     if (!record) return fail("NOT_FOUND", "Không tìm thấy bản kê khai.", requestId, 404);

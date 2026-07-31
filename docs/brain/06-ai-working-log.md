@@ -1,5 +1,31 @@
 # 06 — AI Working Log
 
+## [2026-07-31] Post-merge hardening PR #12 — replay upload, cache riêng tư và Node 22
+
+- **Agent:** Codex.
+- **Baseline:** `main`/`origin/main` cùng tại `d898b7d`, working tree sạch; nhánh làm việc
+  `codex/post-merge-hardening-pr12`. `npm ci` đạt (22 advisory dependency có sẵn); lint 0 lỗi/5
+  warning; typecheck đạt; `npm test` **787 pass / 28 skip / 0 fail**; build đạt. Build đổi tệp sinh
+  `next-env.d.ts` và đã được hoàn nguyên.
+- **Replay upload:** thêm `findCompletedFileUploadReplay` dùng danh mục đóng public/officer, filter
+  cả khóa + `kind`, validate `response_json` qua `parseStoredUploadReplaySummary`; officer route
+  trả replay trước `findById`/lazy folder/Drive, public route trả trước folder/Drive. Early conflict
+  trả 409 không cleanup; replay trong hai transaction vẫn giữ.
+- **Cache:** thêm `publicPrivateJson`; `publicError` và response tạo/khôi phục/current hồ sơ công
+  khai dùng `private, no-store` + `Pragma: no-cache` + `Expires: 0`.
+- **Runtime/repository public:** `engines.node = 22.x`, `.nvmrc = 22`, `@types/node` major 22,
+  `.env.example` đổi email quản trị thành `admin@example.gov.vn`. Không đổi Vercel env thật.
+- **Test thêm:** route officer/public replay thành công, conflict và JSON hỏng; không gọi
+  Drive/commit/cleanup/metric; repository parser + filter `kind`; GET/PATCH/publicError cache.
+  Focused suite đầu tiên: **59/59 pass**. Ba integration suite thao tác ảnh/saga: **27 skip** vì
+  thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL`; `canonical-projection` thêm 1 skip. Không dùng
+  database/Drive thật.
+- **Mutation test:** vô hiệu early replay officer → test đỏ; bỏ filter `kind` → test đỏ; bypass
+  parser bằng cast → 6 test đỏ; bỏ `no-store` khỏi GET current → test đỏ. Đã hoàn nguyên cả bốn.
+- **Full suite sau thay đổi:** `npm test` **805 pass / 28 skip / 0 fail** (94 file pass, 4 file
+  skip); số skip và nguyên nhân được cập nhật ở `evidence/PUBLIC_INTAKE_V2_SKIPPED_TESTS.md`.
+- **Migration/deploy:** không tạo/sửa/chạy migration; không deploy Preview/Production.
+
 ## [2026-07-30] Xử lý 7 phát hiện review PR #11 — gộp `main` và nguyên tử hóa thao tác ảnh cán bộ
 
 - **Agent:** Claude Code
@@ -3216,11 +3242,8 @@ SUBMISSION_DECISION_ROLES)` + `verifyCsrfToken` + `mayStaffEdit` (đang giữ h�
   **Chưa chạy được bất kỳ migration nào thật** — cần bạn tự chạy theo runbook, hoặc cấp credential
   Preview cho một phiên có thể thực thi.
 - **Chưa merge, chưa deploy.**
-# #   2 0 2 6 - 0 7 - 3 0 :   F i x   I n t e g r a t i o n   T e s t s   f o r   O f f i c e r   F i l e   M u t a t i o n s 
- 
- -   C �p   n h �t   \ s r c / m o d u l e s / p u b l i c - i n t a k e / r e p o s i t o r y . t s \ :   T h a y   t h �  \ J S O N . s t r i n g i f y ( s u m m a r y ) : : j s o n b \   b �n g   \ 	 r a n s a c t i o n . j s o n ( s u m m a r y ) \   �  f i x   l �i   p a r s e   J S O N   c �a   \ p o s t g r e s . j s \   k h i   l �y   d �  l i �u   t �  c � c   c �t   \ j s o n b \   ( \  e q u e s t _ l o g . r e s p o n s e _ j s o n \   v �   \ p u b l i c _ s u b m i s s i o n s . f i l e _ s u m m a r y _ j s o n \ ) .   
- -   �   v e r i f y   1 1 / 1 1   t e s t s   t r o n g   \ 	 e s t s / o f f i c e r - f i l e - m u t a t i o n s . i n t e g r a t i o n . t e s t . t s \   p a s s   a n   t o � n .   L �i   \ s u m m a r i e s . m a p   i s   n o t   a   f u n c t i o n \   v �   l �i   \ u n d e f i n e d . f i l e I d \   d o   P o s t g r e s . j s   t r �  v �  s t r i n g   n g u y � n   b �n   �   ��c   k h �c   p h �c . 
- -   �   b �  s u n g   s c r i p t   \ s c r i p t s / a d d - m i s s i n g - c o l . j s \   �  p a t c h   c �t   \ i n t e r n a l _ n o t e s \   l � n   R e h e a r s a l   D B . 
- 
-  
- 
+## 2026-07-30: Fix Integration Tests for Officer File Mutations
+
+- Cập nhật \src/modules/public-intake/repository.ts\: Thay thế \JSON.stringify(summary)::jsonb\ bằng \	ransaction.json(summary)\ để fix lỗi parse JSON của \postgres.js\ khi lấy dữ liệu từ các cột \jsonb\ (\equest_log.response_json\ và \public_submissions.file_summary_json\).
+- Đã verify 11/11 tests trong \	ests/officer-file-mutations.integration.test.ts\ pass an toàn. Lỗi \summaries.map is not a function\ và lỗi \undefined.fileId\ do Postgres.js trả về string nguyên bản đã được khắc phục.
+- Đã bổ sung script \scripts/add-missing-col.js\ để patch cột \internal_notes\ lên Rehearsal DB.

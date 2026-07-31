@@ -5,12 +5,13 @@ import { emptyDraft } from "@/modules/public-intake/types";
 const mocks = vi.hoisted(() => ({
   resolvePublicRequest: vi.fn(),
   saveDraft: vi.fn(),
+  listFiles: vi.fn(),
+  listTimeline: vi.fn(),
+  getOpenSupplementRequest: vi.fn(),
 }));
 
 vi.mock("@/modules/public-intake/route-context", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@/modules/public-intake/route-context")
-  >();
+  const actual = await importOriginal<typeof import("@/modules/public-intake/route-context")>();
   return {
     ...actual,
     isEditable: vi.fn().mockReturnValue(true),
@@ -20,7 +21,9 @@ vi.mock("@/modules/public-intake/route-context", async (importOriginal) => {
 
 vi.mock("@/modules/public-intake/repository", () => ({
   getPublicIntakeRepository: vi.fn().mockReturnValue({
-    getOpenSupplementRequest: vi.fn(),
+    getOpenSupplementRequest: (...args: unknown[]) => mocks.getOpenSupplementRequest(...args),
+    listFiles: (...args: unknown[]) => mocks.listFiles(...args),
+    listTimeline: (...args: unknown[]) => mocks.listTimeline(...args),
     saveDraft: (...args: unknown[]) => mocks.saveDraft(...args),
   }),
 }));
@@ -35,11 +38,40 @@ vi.mock("@/modules/common/env", async (importOriginal) => {
   };
 });
 
-const { PATCH } = await import("@/app/api/public/submissions/current/route");
+const { GET, PATCH } = await import("@/app/api/public/submissions/current/route");
+const { publicError } = await import("@/modules/public-intake/route-context");
 
 describe("PATCH /api/public/submissions/current", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.listFiles.mockResolvedValue([]);
+    mocks.listTimeline.mockResolvedValue([]);
+    mocks.getOpenSupplementRequest.mockResolvedValue(null);
+  });
+
+  it("GET dữ liệu hồ sơ khóa cache riêng tư trên mọi proxy", async () => {
+    const draft = emptyDraft("owner-server", "parcel-server", "land-use-server");
+    mocks.resolvePublicRequest.mockResolvedValue({
+      requestId: "req-current-get",
+      record: {
+        submissionId: "submission-1",
+        receiptCode: "PC-KK-2026-ABCDEFGH",
+        status: "DRAFT",
+        version: 5,
+        draft,
+        officialCaseId: "",
+        updatedAt: "2026-07-31T08:00:00.000Z",
+        createdAt: "2026-07-31T08:00:00.000Z",
+        claimedBy: "",
+      },
+    });
+
+    const response = await GET(new Request("http://localhost/api/public/submissions/current"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(response.headers.get("pragma")).toBe("no-cache");
   });
 
   it("từ chối an toàn version quá cũ và không ghi đè snapshot server mới hơn", async () => {
@@ -103,5 +135,23 @@ describe("PATCH /api/public/submissions/current", () => {
     );
     expect(current.status).toBe(200);
     expect(mocks.saveDraft).toHaveBeenCalledWith(expect.anything(), draft, "DRAFT", 5);
+    expect(current.headers.get("cache-control")).toContain("private");
+    expect(current.headers.get("cache-control")).toContain("no-store");
+    expect(current.headers.get("pragma")).toBe("no-cache");
+  });
+
+  it("lỗi phiên/CSRF cũng không được cache", async () => {
+    mocks.resolvePublicRequest.mockResolvedValue(
+      publicError("UNAUTHENTICATED", "Phiên đã hết hạn.", "req-session"),
+    );
+
+    const response = await PATCH(
+      new Request("http://localhost/api/public/submissions/current", { method: "PATCH" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(response.headers.get("pragma")).toBe("no-cache");
   });
 });

@@ -20,7 +20,10 @@ vi.mock("@/modules/common/env", () => ({
 vi.mock("@/modules/public-intake/repository", () => ({
   SubmissionIdempotencyConflictError: class extends Error {},
   PublicFileMutationRejectedError: class extends Error {
-    constructor(public reason: string, message: string) {
+    constructor(
+      public reason: string,
+      message: string,
+    ) {
       super(message);
     }
   },
@@ -29,7 +32,7 @@ vi.mock("@/modules/public-intake/repository", () => ({
     findStoredMutation: mocks.findStoredMutation,
     isDriveFileAdopted: mocks.isDriveFileAdopted,
     commitPublicFileUpload: mocks.commitPublicFileUpload,
-    findCompletedUploadReplay: vi.fn().mockResolvedValue(null),
+    findCompletedFileUploadReplay: vi.fn().mockResolvedValue(null),
   }),
 }));
 
@@ -109,7 +112,7 @@ describe("public upload với nháp legacy thiếu owners", () => {
       requestId: "request-test",
     });
     mocks.commitPublicFileUpload.mockRejectedValue(
-      new PublicFileMutationRejectedError("INVALID_STATE", "Dữ liệu hồ sơ cũ không tương thích")
+      new PublicFileMutationRejectedError("INVALID_STATE", "Dữ liệu hồ sơ cũ không tương thích"),
     );
   });
 

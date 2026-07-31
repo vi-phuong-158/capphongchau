@@ -3,7 +3,11 @@ import { NextResponse } from "next/server";
 import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { isValidPublicIdempotencyKey } from "@/modules/public-intake/creation-idempotency";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
-import { publicError, resolvePublicRequest } from "@/modules/public-intake/route-context";
+import {
+  publicError,
+  publicPrivateJson,
+  resolvePublicRequest,
+} from "@/modules/public-intake/route-context";
 import {
   hasCompleteExistingRecordLookupIdentity,
   identityHmac,
@@ -49,7 +53,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     metadata: { ownerId: owner.id, matchCount: matches.length },
   });
 
-  return NextResponse.json({
+  return publicPrivateJson({
     ownerId: owner.id,
     matched: matches.length > 0,
     pendingWarning,

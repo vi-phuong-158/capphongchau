@@ -13,6 +13,7 @@ import {
   isEditable,
   isHeldByOfficer,
   publicError,
+  publicPrivateJson,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
 import {
@@ -95,7 +96,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
     const replayStatus = replay.response.status;
-    return NextResponse.json({
+    return publicPrivateJson({
       receiptCode: record.receiptCode,
       status: replayStatus === "RESUBMITTED" ? "RESUBMITTED" : "SUBMITTED",
     });
@@ -209,5 +210,5 @@ export async function POST(request: Request): Promise<NextResponse> {
     throw error;
   }
 
-  return NextResponse.json({ receiptCode: record.receiptCode, status });
+  return publicPrivateJson({ receiptCode: record.receiptCode, status });
 }

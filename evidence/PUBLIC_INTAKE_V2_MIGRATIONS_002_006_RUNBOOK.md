@@ -6,6 +6,14 @@
 `202607290005_lazy_drive_folder_creation.sql`,
 `202607290006_submission_internal_notes.sql`.
 
+## Trạng thái nguồn sự thật sau PR #12 (2026-07-31)
+
+| Phạm vi | Trạng thái |
+| --- | --- |
+| Repository / code | PR #12 đã merge vào `main` tại `d898b7d`; đúng năm file `002`–`006` tồn tại; task post-merge không thêm/sửa/chạy migration |
+| Rehearsal / Preview | Có log lịch sử cho project rehearsal cụ thể, nhưng phiên 2026-07-31 không có credential để xác minh project đang phục vụ Vercel Preview; phải chạy mục 0 trên đúng project trước khi kết luận |
+| Production | Chưa xác minh trong phiên 2026-07-31; không được ghi “migration đã chạy” hoặc “đã deploy” nếu thiếu project, lệnh/kết quả và thời điểm |
+
 > **Đổi số hiệu 2026-07-30 — đọc trước khi so với bản runbook cũ.** Bản đầu tiên của runbook này
 > ghi ghi chú nội bộ là `202607290005`, trong khi `main` đã cấp số đó cho
 > `202607290005_lazy_drive_folder_creation.sql` (Phase 3 lazy Drive folder). Hai nội dung khác nhau

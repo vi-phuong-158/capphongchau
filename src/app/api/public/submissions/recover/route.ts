@@ -7,7 +7,7 @@ import { loadPublicIntakeEnvironment } from "@/modules/common/env";
 import { isValidPublicIdempotencyKey } from "@/modules/public-intake/creation-idempotency";
 import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
-import { publicError } from "@/modules/public-intake/route-context";
+import { publicError, publicPrivateJson } from "@/modules/public-intake/route-context";
 import {
   accessSecretMatches,
   createPublicCsrfToken,
@@ -126,7 +126,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     },
   );
 
-  return NextResponse.json({
+  return publicPrivateJson({
     receiptCode: activeRecord.receiptCode,
     status: activeRecord.status,
     // Chỉ TÊN cán bộ, không bao giờ email: email công vụ đưa ra cổng công khai là địa chỉ thật

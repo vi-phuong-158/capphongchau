@@ -11,6 +11,7 @@ import {
 } from "@/modules/public-intake/repository";
 import {
   publicError,
+  publicPrivateJson,
   resolvePublicRequest,
   type PublicErrorCode,
 } from "@/modules/public-intake/route-context";
@@ -109,7 +110,7 @@ export async function DELETE(
       idempotencyKey,
       mutationHash,
     });
-    return NextResponse.json({ fileId, status: "DELETED" });
+    return publicPrivateJson({ fileId, status: "DELETED" });
   } catch (error) {
     if (error instanceof PublicFileMutationRejectedError) {
       const { code } = REJECTION_HTTP[error.reason];

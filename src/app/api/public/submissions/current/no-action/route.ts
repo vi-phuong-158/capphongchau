@@ -12,6 +12,7 @@ import {
 import {
   isEditable,
   publicError,
+  publicPrivateJson,
   resolvePublicRequest,
 } from "@/modules/public-intake/route-context";
 import {
@@ -94,7 +95,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       idempotencyKey,
       mutationHash,
     });
-    return NextResponse.json(result);
+    return publicPrivateJson(result);
   } catch (error) {
     if (error instanceof SubmissionVersionConflictError) {
       return publicError("VERSION_CONFLICT", "Bản kê khai đã bị thay đổi.", context.requestId);

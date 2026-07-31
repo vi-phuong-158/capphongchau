@@ -12,6 +12,7 @@ import {
 } from "@/modules/public-intake/repository";
 import {
   publicError,
+  publicPrivateJson,
   resolvePublicRequest,
   type PublicErrorCode,
 } from "@/modules/public-intake/route-context";
@@ -108,6 +109,35 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
     .digest("hex");
 
+  /* ── Replay nhanh TRƯỚC khi gọi Drive ──────────────────────────────────────
+   * Nếu server đã commit nhưng response mất, retry phải trả kết quả cũ trước
+   * mọi kiểm tra Drive hoặc trạng thái mới. Advisory lock bên trong
+   * `commitPublicFileUpload` vẫn xử lý hai request đồng thời.                */
+  let earlyReplay;
+  try {
+    earlyReplay = await repository.findCompletedFileUploadReplay({
+      idempotencyKey,
+      mutationHash,
+      kind: "PUBLIC_UPLOAD_COMPLETE",
+    });
+  } catch (error) {
+    if (error instanceof SubmissionIdempotencyConflictError) {
+      return publicError(
+        "IDEMPOTENCY_CONFLICT",
+        "Yêu cầu hoàn tất tải lên bị xung đột.",
+        requestId,
+      );
+    }
+    return publicError("INTERNAL_ERROR", "Không thể đọc kết quả tải ảnh đã lưu.", requestId);
+  }
+  if (earlyReplay) {
+    return publicPrivateJson({
+      ok: true,
+      fileId: earlyReplay.summary.fileId,
+      sizeBytes: earlyReplay.summary.sizeBytes,
+    });
+  }
+
   if (!record.driveFolderId) {
     return publicError(
       "INVALID_STATE",
@@ -116,19 +146,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
   const driveFolderId = record.driveFolderId;
-
-  /* ── Replay nhanh TRƯỚC khi gọi Drive ──────────────────────────────────────
-   * Nếu server đã commit nhưng response mất, retry phải trả kết quả cũ trước
-   * mọi kiểm tra Drive hoặc trạng thái mới. Advisory lock bên trong
-   * `commitPublicFileUpload` vẫn xử lý hai request đồng thời.                */
-  const earlyReplay = await repository.findCompletedUploadReplay(idempotencyKey, mutationHash);
-  if (earlyReplay) {
-    return NextResponse.json({
-      ok: true,
-      fileId: earlyReplay.summary.fileId,
-      sizeBytes: earlyReplay.summary.sizeBytes,
-    });
-  }
 
   let verified;
   try {
@@ -182,7 +199,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         .catch(reportUploadMetricFailure);
     }
 
-    return NextResponse.json({ ok: true, fileId: summary.fileId, sizeBytes: verified.sizeBytes });
+    return publicPrivateJson({
+      ok: true,
+      fileId: summary.fileId,
+      sizeBytes: verified.sizeBytes,
+    });
   } catch (error) {
     if (error instanceof PublicFileMutationRejectedError) {
       await discardIfOrphan(repository, record, verified.driveFileId);

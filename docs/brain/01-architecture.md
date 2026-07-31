@@ -1,5 +1,31 @@
 # 01 — Architecture
 
+## Cập nhật Code Graph 2026-07-31 — replay upload và cache API hồ sơ công khai
+
+```text
+POST officer/public .../uploads/complete
+├── parse + auth/session + CSRF + scoped idempotency key + mutation hash
+├── PublicIntakeRepository.findCompletedFileUploadReplay({ key, hash, kind })
+│   ├── SELECT request_log WHERE idempotency_key = ... AND kind = ...
+│   ├── hash khác → SubmissionIdempotencyConflictError → HTTP 409, KHÔNG cleanup Drive
+│   ├── response_json hỏng → StoredUploadReplayInvalidError → HTTP 500 an toàn, KHÔNG Drive/write
+│   └── hợp lệ → trả fileId cũ ngay, KHÔNG findById/folder/Drive/commit/audit/metric
+└── cache miss → luồng verify Drive + commit hiện tại
+    └── commitOfficerFileUpload / commitPublicFileUpload
+        └── advisory lock + replay trong transaction vẫn giữ, có filter kind
+
+src/modules/public-intake/route-context.ts
+├── publicPrivateJson(payload, init?)
+│   └── Cache-Control: private, no-store + Pragma: no-cache + Expires: 0
+└── publicError(...) → publicPrivateJson(...)
+
+src/app/api/public/submissions/**
+└── response tạo/khôi phục/session/current có dữ liệu hồ sơ hoặc upload URL → publicPrivateJson
+```
+
+Không đổi session/CSRF/origin guard, `mayStaffEditState`, giới hạn ảnh/dung lượng, soft-delete,
+lazy Drive folder, acceptance saga hoặc schema database.
+
 ## Cập nhật Code Graph 2026-07-30 — thao tác ảnh của cán bộ là NGUYÊN TỬ (review PR #11)
 
 ```text

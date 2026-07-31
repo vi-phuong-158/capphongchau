@@ -1,5 +1,14 @@
 # AGENTS.md
 
+## Bổ sung post-merge PR #12 — replay upload và cache công khai (2026-07-31)
+
+- Upload-complete public/officer phải đọc replay đã hoàn tất trước mọi thao tác hồ sơ/Drive. Query
+  replay lọc đồng thời `idempotency_key` và danh mục đóng `kind`; `response_json` phải validate
+  runtime. Conflict sớm trả 409 và không cleanup `driveFileId` chưa xác minh. Replay trong
+  transaction sau advisory lock vẫn bắt buộc cho request đồng thời.
+- Mọi response API công khai chứa dữ liệu hồ sơ, session, mã truy cập hoặc upload URL phải có
+  `Cache-Control: private, no-store` và `Pragma: no-cache`; `publicError` dùng cùng chính sách.
+
 ## Bổ sung PR #8 — luồng xác nhận định danh (2026-07-29)
 
 ## Bổ sung Phase 4 hiệu năng pool/region (2026-07-29)

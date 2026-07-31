@@ -1,5 +1,27 @@
 # 03 — Technical Decisions
 
+## [2026-07-31] Replay upload hoàn tất phải trả trước Drive; API hồ sơ công khai không được cache
+
+- **Hai lớp replay cùng tồn tại.** `findCompletedFileUploadReplay` là đường nhanh ngoài transaction
+  cho request trước đã commit nhưng mất response. `commitOfficerFileUpload` và
+  `commitPublicFileUpload` vẫn kiểm replay sau advisory lock trong transaction để xử lý hai request
+  cùng bắt đầu trước lần commit đầu.
+- **Phân miền bằng dữ liệu, không chỉ bằng tiền tố khóa.** Helper nhận danh mục đóng
+  `PUBLIC_UPLOAD_COMPLETE | OFFICER_UPLOAD_COMPLETE`; SQL lọc đồng thời `idempotency_key` và `kind`.
+  Hai nhánh replay trong transaction cũng lọc `kind` tương ứng.
+- **`response_json` là trust boundary.** Kết quả cache phải qua
+  `parseStoredUploadReplaySummary`; thiếu trường, sai enum, byte âm/không nguyên hoặc sai kiểu trường
+  optional sẽ ném `StoredUploadReplayInvalidError`. Route trả lỗi nội bộ an toàn, không gọi Drive,
+  không ghi lại database và không trả JSON hỏng.
+- **Early conflict không cleanup.** Trước `verifyUploadedFile`, `driveFileId` chỉ là dữ liệu client;
+  gọi `discardIfOrphan` ở đây có thể xóa tệp không thuộc hồ sơ. Conflict trả 409 trực tiếp.
+- **Cache response hồ sơ công khai là fail-closed.** `publicPrivateJson` đặt
+  `Cache-Control: private, no-store`, `Pragma: no-cache`, `Expires: 0`; `publicError` và các response
+  tạo/khôi phục/session/current dùng helper. Route tra cứu chứng thư không có session đã có
+  `no-store` riêng và không bị đổi hợp đồng.
+- **Không migration, không đổi nghiệp vụ/UI.** Thay đổi chỉ ở contract replay/cache và cấu hình
+  runtime Node 22.
+
 ## [2026-07-30] Review PR #11: gộp `main`, giải xung đột migration `005`, nguyên tử hóa thao tác ảnh
 
 Bảy phát hiện của vòng review PR #11 (`REQUEST CHANGES`) đã được xử lý trên nhánh

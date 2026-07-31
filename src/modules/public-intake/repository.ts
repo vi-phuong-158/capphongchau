@@ -47,6 +47,11 @@ export type { PublicStatus } from "./workflow";
  * của mình, làm mất luôn ý nghĩa của việc phân biệt nguồn.
  */
 export const INTAKE_CHANNELS = ["SELF_SERVICE", "OFFICER_ASSISTED"] as const;
+export const COMPLETED_FILE_UPLOAD_REPLAY_KINDS = [
+  "PUBLIC_UPLOAD_COMPLETE",
+  "OFFICER_UPLOAD_COMPLETE",
+] as const;
+export type CompletedFileUploadReplayKind = (typeof COMPLETED_FILE_UPLOAD_REPLAY_KINDS)[number];
 
 /**
  * Trần số bản ghi số đo tải ảnh cho MỘT hồ sơ.
@@ -605,22 +610,25 @@ export class PublicIntakeRepository {
    *
    * Route upload-complete gọi phương thức này TRƯỚC khi xác minh Drive: nếu server đã commit
    * nhưng response mất, retry phải trả kết quả cũ mà không đụng Drive. Advisory lock bên trong
-   * `commitPublicFileUpload` vẫn giữ nguyên để xử lý hai request đồng thời.
+   * `commitPublicFileUpload`/`commitOfficerFileUpload` vẫn giữ replay trong transaction để xử lý
+   * hai request đồng thời. `kind` là danh mục đóng và luôn nằm trong điều kiện SQL để hai đường
+   * public/officer không đọc kết quả của nhau.
    */
-  async findCompletedUploadReplay(
-    idempotencyKey: string,
-    mutationHash: string,
-  ): Promise<{ readonly summary: PublicFileSummary; readonly replayed: true } | null> {
+  async findCompletedFileUploadReplay(input: {
+    readonly idempotencyKey: string;
+    readonly mutationHash: string;
+    readonly kind: CompletedFileUploadReplayKind;
+  }): Promise<{ readonly summary: PublicFileSummary; readonly replayed: true } | null> {
     const database = getDatabase();
     const rows = await database<{ mutation_hash: string; response_json: unknown }[]>`
       select mutation_hash, response_json from public.request_log
-      where idempotency_key = ${idempotencyKey}
+      where idempotency_key = ${input.idempotencyKey} and kind = ${input.kind}
     `;
     if (!rows[0]) return null;
-    if (rows[0].mutation_hash !== mutationHash) {
+    if (rows[0].mutation_hash !== input.mutationHash) {
       throw new SubmissionIdempotencyConflictError();
     }
-    return { summary: rows[0].response_json as PublicFileSummary, replayed: true };
+    return { summary: parseStoredUploadReplaySummary(rows[0].response_json), replayed: true };
   }
 
   async findById(submissionId: string): Promise<SubmissionRecord | null> {
@@ -2272,13 +2280,16 @@ export class PublicIntakeRepository {
       await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
       const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
         select mutation_hash, response_json from public.request_log
-        where idempotency_key = ${input.idempotencyKey}
+        where idempotency_key = ${input.idempotencyKey} and kind = 'OFFICER_UPLOAD_COMPLETE'
       `;
       if (cached[0]) {
         if (cached[0].mutation_hash !== input.mutationHash) {
           throw new SubmissionIdempotencyConflictError();
         }
-        return { summary: cached[0].response_json as PublicFileSummary, replayed: true };
+        return {
+          summary: parseStoredUploadReplaySummary(cached[0].response_json),
+          replayed: true,
+        };
       }
 
       const record = await this.lockSubmissionForStaffEdit(
@@ -2622,13 +2633,16 @@ export class PublicIntakeRepository {
       await transaction`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
       const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
         select mutation_hash, response_json from public.request_log
-        where idempotency_key = ${input.idempotencyKey}
+        where idempotency_key = ${input.idempotencyKey} and kind = 'PUBLIC_UPLOAD_COMPLETE'
       `;
       if (cached[0]) {
         if (cached[0].mutation_hash !== input.mutationHash) {
           throw new SubmissionIdempotencyConflictError();
         }
-        return { summary: cached[0].response_json as PublicFileSummary, replayed: true };
+        return {
+          summary: parseStoredUploadReplaySummary(cached[0].response_json),
+          replayed: true,
+        };
       }
 
       const record = await this.lockSubmissionForPublicEdit(transaction, input.submissionId);
@@ -3193,6 +3207,13 @@ export class SubmissionIdempotencyConflictError extends Error {
   }
 }
 
+export class StoredUploadReplayInvalidError extends Error {
+  constructor() {
+    super("Káº¿t quáº£ upload Ä‘Ã£ lÆ°u khÃ´ng há»£p lá»‡.");
+    this.name = "StoredUploadReplayInvalidError";
+  }
+}
+
 export class SubmissionAlreadyClaimedError extends Error {
   constructor() {
     super("Hồ sơ đang do cán bộ khác nhận xử lý.");
@@ -3259,6 +3280,58 @@ export class PublicFileMutationRejectedError extends Error {
 
 type JsonScalar = string | number | boolean | null;
 type JsonRecord = Record<string, JsonScalar>;
+
+export function parseStoredUploadReplaySummary(value: unknown): PublicFileSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new StoredUploadReplayInvalidError();
+  }
+  const summary = value as Record<string, unknown>;
+  const documentTypes = new Set(["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK", "CERTIFICATE"]);
+  const statuses = new Set(["UPLOADED", "REPLACED", "DELETED"]);
+  const optionalStringsAreValid = ["driveFileId", "mimeType"].every(
+    (key) =>
+      summary[key] === undefined || summary[key] === null || typeof summary[key] === "string",
+  );
+  const rowIndexIsValid =
+    summary.rowIndex === undefined ||
+    (typeof summary.rowIndex === "number" &&
+      Number.isInteger(summary.rowIndex) &&
+      summary.rowIndex >= 0);
+
+  if (
+    typeof summary.fileId !== "string" ||
+    summary.fileId.trim().length === 0 ||
+    typeof summary.ownerId !== "string" ||
+    typeof summary.documentType !== "string" ||
+    !documentTypes.has(summary.documentType) ||
+    typeof summary.status !== "string" ||
+    !statuses.has(summary.status) ||
+    typeof summary.sizeBytes !== "number" ||
+    !Number.isInteger(summary.sizeBytes) ||
+    summary.sizeBytes < 0 ||
+    typeof summary.checksum !== "string" ||
+    typeof summary.createdAt !== "string" ||
+    typeof summary.updatedAt !== "string" ||
+    !optionalStringsAreValid ||
+    !rowIndexIsValid
+  ) {
+    throw new StoredUploadReplayInvalidError();
+  }
+
+  return {
+    fileId: summary.fileId,
+    ownerId: summary.ownerId,
+    documentType: summary.documentType as PublicFileSummary["documentType"],
+    status: summary.status as PublicFileSummary["status"],
+    sizeBytes: summary.sizeBytes,
+    checksum: summary.checksum,
+    createdAt: summary.createdAt,
+    updatedAt: summary.updatedAt,
+    ...(typeof summary.driveFileId === "string" ? { driveFileId: summary.driveFileId } : {}),
+    ...(typeof summary.mimeType === "string" ? { mimeType: summary.mimeType } : {}),
+    ...(typeof summary.rowIndex === "number" ? { rowIndex: summary.rowIndex } : {}),
+  };
+}
 
 function serializeFileSummary(summary: PublicFileSummary): JsonRecord {
   return {

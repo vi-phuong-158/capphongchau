@@ -9,11 +9,34 @@
 
 ---
 
-## [2026-07-30] Xử lý review PR #11 — ĐÃ LÀM TRONG CODE, chưa merge/deploy/chạy migration
+## [2026-07-31] Post-merge hardening sau PR #12
 
-Nhánh `claude/pr-11-review-issues-e1qykd`: dựng từ `main` mới nhất rồi **merge nội dung PR #11 vào**
-(nhánh PR cũ đang chậm `main` 8 commit và `mergeable: false`). Bảy phát hiện của vòng review đã xử lý
-xong; chi tiết quyết định ở `03-decisions.md` [2026-07-30], Code Graph ở `01-architecture.md`.
+| Hạng mục | Repository / code | Rehearsal / Preview | Production |
+| --- | --- | --- | --- |
+| PR #12 | **Đã merge** vào `main` tại `d898b7d` | Chỉ ghi nhận theo bằng chứng từng môi trường bên dưới | Không suy ra trạng thái deploy từ Git |
+| Upload public/officer | Đã nguyên tử trong transaction; đợt hardening thêm replay sớm có validate, lọc `kind` | Integration Postgres chưa chạy trong phiên 2026-07-31 vì thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` | Không chạy test và không thao tác dữ liệu Production |
+| Migration `002`–`006` | Năm file SQL đã có trong repository; task này không thêm/sửa migration | Phải xác minh đúng project bằng preflight/lịch sử migration trước khi kết luận | **Chưa xác minh trong phiên này**; không được ghi “đã chạy” nếu thiếu project, lệnh, thời điểm |
+| Deploy/smoke test | Không phải trạng thái của code | Chưa deploy/chưa smoke test trong phiên này | Không deploy |
+
+Việc đang thực hiện trên `codex/post-merge-hardening-pr12`:
+
+- Replay upload cán bộ được đọc ngay sau auth/CSRF + parse/hash, trước `findById`, lazy folder và
+  Drive. Replay public cũng chạy trước kiểm tra folder/Drive.
+- `findCompletedFileUploadReplay` nhận danh mục đóng `PUBLIC_UPLOAD_COMPLETE` hoặc
+  `OFFICER_UPLOAD_COMPLETE`, lọc SQL theo cả khóa lẫn `kind`, và parse runtime `response_json`.
+- Replay conflict sớm trả 409 và không cleanup `driveFileId` chưa qua trust boundary; replay trong
+  transaction vẫn giữ để chống hai request đồng thời.
+- Response có dữ liệu hồ sơ/session công khai đi qua `publicPrivateJson` với
+  `Cache-Control: private, no-store`, `Pragma: no-cache`, `Expires: 0`; `publicError` dùng cùng helper.
+- Runtime local được khóa Node `22.x`; `.env.example` dùng email placeholder.
+
+## [2026-07-30] Xử lý review PR #11 — ĐÃ MERGE QUA PR #12; chưa suy ra deploy/migration
+
+Nội dung nhánh `claude/pr-11-review-issues-e1qykd` đã được merge vào `main` bằng **PR #12**
+(`d898b7d`). PR #11 cũ đã bị thay thế và không được merge. Bảy phát hiện của vòng review đã xử lý
+trong code; trạng thái Preview/Production vẫn phải dựa trên bằng chứng môi trường, không dựa vào
+trạng thái Git. Chi tiết quyết định ở `03-decisions.md` [2026-07-30], Code Graph ở
+`01-architecture.md`.
 
 - **Migration `202607290005` trùng số — ĐÃ GIẢI QUYẾT.** `005` giữ cho
   `lazy_drive_folder_creation.sql` của `main`; ghi chú nội bộ chuyển sang
@@ -67,30 +90,30 @@ xong; chi tiết quyết định ở `03-decisions.md` [2026-07-30], Code Graph 
 
 ---
 
-## [2026-07-29] Redesign màn duyệt hồ sơ — Đợt 2A (đang làm theo yêu cầu người dùng)
+## [2026-07-29] Redesign màn duyệt hồ sơ — Đợt 2A (đã merge qua PR #12)
 
 Kế hoạch chốt: coi mỗi hồ sơ là một bản nộp hoàn chỉnh, bỏ luồng "yêu cầu bổ sung"/"gửi lại", chỉ
 giữ 3-4 nút chính (Tiếp nhận/Lưu/Hoàn thành xử lý/Từ chối). Chi tiết quyết định ở `03-decisions.md`
 cùng ngày; Code Graph ở `01-architecture.md`.
 
-- **2A-1 — ĐÃ LÀM (code, chưa merge/push/deploy):** bỏ nút/luồng "yêu cầu bổ sung"
+- **2A-1 — ĐÃ MERGE QUA PR #12; chưa xác minh deploy:** bỏ nút/luồng "yêu cầu bổ sung"
   (`action: REQUEST_SUPPLEMENT` bị chặn 400), đóng nhánh `STAFF_DRAFT_EDIT` của
   `PATCH /api/submissions/:id` (chỉ còn `manualIdentityConfirmation`/`amendmentReason`), gộp UI
   toolbar còn 4 nút chính + `<details>` "Thao tác khác" cho Release/Transfer/ForceClaim/Amend.
-- **2A-2 — ĐÃ LÀM (code, chưa merge/push/deploy):** thêm một ô ghi chú nội bộ tự do
+- **2A-2 — ĐÃ MERGE QUA PR #12; chưa xác minh deploy:** thêm một ô ghi chú nội bộ tự do
   (`internal_notes`, endpoint riêng `PUT /internal-notes`, không thuộc PL3/draft, không timeline).
-  **Chưa chạy migration** `202607290006_submission_internal_notes.sql` trên Preview/Production
+  **Chưa xác minh migration** `202607290006_submission_internal_notes.sql` trên Preview/Production
   (đổi số từ `202607290005` ở review PR #11 — xem entry [2026-07-30] đầu file) — bắt buộc chạy trước
   khi deploy, xác nhận bằng `npx tsx scripts/preflight-public-intake-v2-migrations.ts`. Quy trình đầy
   đủ (thứ tự, kiểm tra sau từng bước, rollback SQL) ở
   `evidence/PUBLIC_INTAKE_V2_MIGRATIONS_002_006_RUNBOOK.md`.
-- **2A-3 — ĐÃ LÀM (code, chưa merge/push/deploy):** cán bộ ưu tiên — `isEditable()` chặn mọi đường
+- **2A-3 — ĐÃ MERGE QUA PR #12; chưa xác minh deploy:** cán bộ ưu tiên — `isEditable()` chặn mọi đường
   ghi công khai của người dân khi hồ sơ đã có cán bộ cầm (đóng lỗi "người dân gửi lại thì
   `repository.submit()` xóa sạch `claimed_by`", mà khóa phiên bản không bắt được vì version vẫn
   khớp). `mayClaim` mở thêm `NEEDS_SUPPLEMENT` để hồ sơ cũ không kẹt vĩnh viễn sau khi chặn.
   `GET /current` trả thêm cờ boolean `hasAssignedOfficer` cho `/tra-cuu` ẩn nút "Bổ sung hồ sơ".
   Không migration.
-- **2B — ĐÃ LÀM (code, chưa merge/push/deploy):** hiệu năng màn duyệt. (a) server-priming trang
+- **2B — ĐÃ MERGE QUA PR #12; chưa xác minh deploy:** hiệu năng màn duyệt. (a) server-priming trang
   `/submissions/[submissionId]` qua `loadStaffSubmissionDetail` (review PR #11 gộp về service của
   `main`; bản `detail-view.ts` của đợt này đã gỡ) dùng chung với `GET /api/submissions/:id`
   — audit `SUBMISSION_SENSITIVE_DETAIL_VIEWED` giữ nguyên, `src/proxy.ts` thêm
@@ -125,7 +148,8 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   `PublicIntakeRepository.listQueuePage`; mỗi request chỉ lấy tối đa 101 dòng và dùng cursor
   `(updated_at, submission_id)`.
 - UI tìm kiếm debounce 350 ms, không gửi một ký tự và giữ bảng cũ khi đang tải.
-- **Chưa chạy migration:** áp `202607290004_queue_search_performance.sql` trên Preview sau các
+- **Chưa xác minh migration trong phiên 2026-07-31:** áp
+  `202607290004_queue_search_performance.sql` trên Preview sau các
   migration đang chờ theo đúng thứ tự, rồi chạy `EXPLAIN (ANALYZE, BUFFERS)` với 500/5.000/20.000
   hồ sơ giả. Không deploy code Phase 1 trước migration.
 - Chưa có P50/P95 Preview; không tuyên bố đạt mục tiêu ≤ 1,5 giây cho tới khi có số đo thật.
@@ -137,7 +161,8 @@ cùng ngày; Code Graph ở `01-architecture.md`.
   tối đa ba mục đích/thửa và tài sản AO–AW. B/V/AX hiện nguồn và bắt lý do khi ghi đè.
 - Payload JSON, Zod, projection repository, audit, official sync và PL3 export đã mở rộng tương ứng;
   test khóa đúng 49 nhãn và một dòng đủ 49 giá trị.
-- **Chưa chạy migration:** phải áp dụng `202607290002_full_pl3_editor.sql` trên preview rồi production
+- **Chưa xác minh migration trong phiên 2026-07-31:** phải áp dụng
+  `202607290002_full_pl3_editor.sql` trên preview rồi production
   trước khi deploy code. Sau migration cần lưu→tải lại→tiếp nhận→xuất một hồ sơ giả đủ B–AX.
 
 ## [2026-07-29] Review PR #6 vòng hai — đã sửa trong code

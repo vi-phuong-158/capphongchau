@@ -49,13 +49,21 @@ const PUBLIC_ERROR_STATUS: Readonly<Record<string, number>> = {
   SERVICE_UNAVAILABLE: 503,
 };
 
+export function publicPrivateJson<T>(payload: T, init: ResponseInit = {}): NextResponse<T> {
+  const headers = new Headers(init.headers);
+  headers.set("cache-control", "private, no-store");
+  headers.set("pragma", "no-cache");
+  headers.set("expires", "0");
+  return NextResponse.json(payload, { ...init, headers });
+}
+
 export function publicError(
   code: PublicErrorCode,
   message: string,
   requestId: string = randomUUID(),
   details?: ApiErrorDetails,
 ): NextResponse {
-  return NextResponse.json(
+  return publicPrivateJson(
     createApiErrorPayload({ code: code as ApiErrorCode, message, requestId, details }),
     { status: PUBLIC_ERROR_STATUS[code] ?? 500 },
   );

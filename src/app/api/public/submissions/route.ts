@@ -17,7 +17,7 @@ import {
 } from "@/modules/public-intake/create-submission";
 import { validateCreateSubmissionRequest } from "@/modules/public-intake/create-request";
 import { isTrustedEdgeRequest } from "@/modules/public-intake/edge-guard";
-import { publicError } from "@/modules/public-intake/route-context";
+import { publicError, publicPrivateJson } from "@/modules/public-intake/route-context";
 import {
   createPublicCsrfToken,
   createSessionToken,
@@ -203,7 +203,7 @@ async function createSuccessResponse(input: {
     },
   );
 
-  return NextResponse.json({
+  return publicPrivateJson({
     receiptCode: input.receiptCode,
     accessSecret: input.accessSecret,
     csrfToken: createPublicCsrfToken(input.sessionSecret, input.submissionId),

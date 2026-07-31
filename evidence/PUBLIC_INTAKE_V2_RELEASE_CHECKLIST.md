@@ -1,10 +1,22 @@
 # PUBLIC INTAKE V2 — RELEASE CHECKLIST
 
+## Trạng thái được xác minh sau PR #12 (2026-07-31)
+
+| Phạm vi | Trạng thái có bằng chứng | Không được suy ra |
+| --- | --- | --- |
+| Repository / code | PR #12 đã merge vào `main` tại `d898b7d`; code có migration `002`–`006` và integration suite thao tác ảnh public/officer | Không đồng nghĩa migration đã chạy hoặc deployment đã cập nhật |
+| Rehearsal / Preview | Phiên post-merge này không có `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, nên 4 file integration/28 ca bị skip; không deploy/smoke test | Không dùng log project rehearsal cũ để khẳng định Vercel Preview hiện tại |
+| Production | Không chạy test DB, migration, Drive hoặc deploy trong phiên này | Chưa xác minh migration/deployment/smoke test Production |
+
+Checklist lịch sử bên dưới vẫn hữu ích cho thao tác vận hành, nhưng mọi câu “đã chạy migration”
+phải đọc kèm **project/database cụ thể và thời điểm**. Không dùng nó để thay thế preflight đọc trên
+chính môi trường sắp deploy.
+
 > **SNAPSHOT LỊCH SỬ:** checklist này được lập trước khi thêm kill switch server-side. Không dùng
 > kết luận cũ về feature flag trong snapshot để suy ra trạng thái hiện tại; xem `docs/brain/03-decisions.md`.
 
-Nhánh `claude/land-declaration-process-feedback-126f2e`. **Chưa merge, chưa deploy, chưa chạy
-migration ở bất kỳ môi trường nào.**
+Phần bên dưới mô tả snapshot của nhánh `claude/land-declaration-process-feedback-126f2e`; trạng
+thái merge hiện tại phải lấy từ bảng trên, không lấy từ câu lịch sử này.
 
 ## 1. Trước khi merge
 
@@ -156,8 +168,9 @@ Sheet **"Canh bao"** có một dòng nhắc mỗi thửa như vậy. Hồ sơ c�
 Sau khi áp, chạy `npm run preflight:public-intake-v2-migrations` — script kiểm cả hai chiều: cột
 PL3 phải **có**, và 4 cột ghi đè song song phải **không còn**.
 
-**ĐÃ THỰC HIỆN 2026-07-29.** Cả hai migration đã áp lên database Supabase của dự án
-(project `vzouriblxzjlfwtwhnkx`), mỗi file trong một transaction riêng:
+**BẰNG CHỨNG LỊCH SỬ 2026-07-29.** Cả hai migration được ghi nhận đã áp lên Supabase project
+`vzouriblxzjlfwtwhnkx`, mỗi file trong một transaction riêng. Log này **không ghi rõ project đó là
+Rehearsal/Preview hay Production**, nên không được dùng để kết luận trạng thái Production:
 
 ```
 [OK] 202607290002_full_pl3_editor.sql — 1384 ms
