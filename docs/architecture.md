@@ -38,9 +38,8 @@ flowchart LR
     V --> D[Google My Drive]
     U --> Q[ZXing đọc QR client-side]
     Q --> V
-    D --> L[Antigravity local station]
-    L --> G[Gemini 3.6 Flash]
-    L --> V
+    D -.My Drive sync.-> L[Trạm AI cục bộ: coding agent đọc ảnh GCN]
+    L -->|scripts/ai/local-draft.ts| P
 ```
 
 Supabase thay Google Sheets cho dữ liệu cấu trúc. Google Drive vẫn là kho file để tránh đổi đồng thời cả database và object storage. Spreadsheet cũ không được dùng trong request runtime; chỉ `scripts/migrate-sheets-to-supabase.ts` và các script legacy được phép đọc nó.
@@ -56,8 +55,11 @@ Supabase thay Google Sheets cho dữ liệu cấu trúc. Google Drive vẫn là 
 ## AI draft GCN bằng Antigravity
 
 Khi người dân gửi đủ hồ sơ, transaction tạo job chỉ với file GCN đã xác minh và checksum.
-Antigravity local station poll/claim manifest, đọc đúng ảnh GCN gốc trong Drive, dùng Gemini 3.6
-Flash và trả JSON có bằng chứng. Vercel không gọi Gemini.
+Từ 2026-07-31, trạm cục bộ không còn poll/claim qua API: coding agent tại máy quản trị chạy
+`scripts/ai/local-draft.ts list`, tự mở đúng ảnh GCN đã đồng bộ trong My Drive (đối chiếu sha256
+trước khi mở), rồi ghi kết quả bằng `submit` trong một transaction. Vercel không gọi mô hình AI nào.
+Các ràng buộc `workerInstanceId`/lease dưới đây thuộc đường API cũ (`AI_EXTRACTION_ENABLED=false`);
+đường cục bộ giữ nguyên mọi guard còn lại và chống ghi trùng bằng `result_fingerprint`.
 
 Server kiểm tra schema v2, model/prompt, checksum và phiên bản payload trước khi lưu result cùng
 `ai_field_comparisons`/audit. Cán bộ thấy bảng đối chiếu rồi chỉ có thể nạp các trường `CLEAR` đang

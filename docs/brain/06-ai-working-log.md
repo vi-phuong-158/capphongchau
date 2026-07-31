@@ -1,5 +1,39 @@
 # 06 — AI Working Log
 
+## [2026-07-31] Trạm AI cục bộ: coding agent đọc ảnh GCN và ghi thẳng Supabase
+
+- **Agent:** Claude Code.
+- **Thay đổi:** thêm đường ghi nháp AI không qua `/api/ai/*`. `scripts/ai/local-draft.ts` có ba chế
+  độ: `list` (job đang chờ + đường dẫn ảnh cục bộ + đối chiếu sha256), `enqueue` (tạo job theo bộ
+  ảnh GCN hiện tại), `submit` (validate + ghi `ai_extraction_results` + `ai_field_comparisons` +
+  audit trong một transaction).
+- **File đã sửa:** `scripts/ai/local-draft.ts` (mới),
+  `src/modules/ai-extraction/local-draft-support.ts` (mới),
+  `tests/ai-local-draft-support.test.ts` (mới), `package.json` (3 npm script),
+  `.env.example` (`AI_LOCAL_DRIVE_ROOT`), `agent/AGENTS.md`, `agent/STATION_RUNBOOK.md`,
+  `AGENTS.md` §6.1, `docs/architecture.md`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`. Không sửa route API, không migration.
+- **Lý do:** chủ dự án chốt dùng chính coding agent tại máy quản trị làm mắt đọc GCN thay vì gọi
+  Gemini qua API worker. Xem `03-decisions.md` [2026-07-31].
+- **Kiểm tra:** `npm run typecheck` đạt; `npm test` **817 pass / 28 skip / 0 fail** (trước thay đổi
+  805 pass, +12 test mới); `npm run lint` 0 lỗi / 5 warning có sẵn; `prettier --check` đạt trên các
+  file đã sửa (32 file lỗi format là baseline sẵn có, không thuộc thay đổi này).
+- **Chạy thật trên dữ liệu thử nghiệm:** `list` phát hiện 5 job, checksum 11/11 file khớp Drive cục
+  bộ. Ghi hai kết quả: một `REVIEW_REQUIRED` (đọc được số phát hành GCN, `CLEAR` + evidence) và một
+  `BLOCKED`/`QUARANTINED` (ảnh không phải GCN → `UNEXPECTED_DOCUMENT_TYPE`). Chạy lại `submit` cùng
+  file JSON trả về đúng result cũ, không sinh `result_version` thứ hai. Một job cũ bị đánh `STALE`
+  đúng thiết kế vì cán bộ đã bổ sung ảnh GCN sau lúc gửi (fingerprint lệch); `enqueue` tạo job mới
+  phủ cả hai ảnh.
+- **Xác minh phía cán bộ:** gọi `AiExtractionRepository.getCurrentComparisons` cho hồ sơ đã ghi —
+  trả đúng ba dòng đối chiếu với `model_name = claude-opus-5`.
+- **Viết lại `agent/AGENTS.md` thành hướng dẫn tự chứa** (14 mục) theo yêu cầu chủ dự án: agent bậc
+  trung (Sonnet medium, GPT-5.6 Luna, Gemini 3.6 Flash) đọc một lượt là thao tác được, không cần suy
+  luận thêm. Gồm: 8 điều cấm, 6 bước có lệnh chính xác, vị trí 3 trường trên 4 trang GCN, bảng quyết
+  định `CLEAR`/`CHECK`/`MANUAL_REQUIRED`, schema JSON đầy đủ kèm bảng từng trường và giới hạn độ
+  dài, 2 ví dụ thật đã chạy, bảng lỗi → cách xử lý, checklist trước khi submit, bảng lỗi thường gặp.
+  Bản giống hệt được chép sang `01_INBOX/AGENTS.md` trên Drive; `agent/STATION_RUNBOOK.md` hạ xuống
+  thành bản rút gọn trỏ về `agent/AGENTS.md` để tránh hai nguồn mâu thuẫn.
+
 ## [2026-07-31] Post-merge hardening PR #12 — replay upload, cache riêng tư và Node 22
 
 - **Agent:** Codex.

@@ -897,6 +897,31 @@ PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/
   vào sổ dạng chữ đánh máy cùng bằng chứng. Ảnh mờ/chữ viết tay trả `MANUAL_REQUIRED`. Server quét toàn
   bộ JSON trước persist: chuỗi giống CCCD 12 số bị từ chối fail-closed, không được lưu raw/normalized JSON.
 
+### Đường ghi thứ hai: coding agent đọc ảnh tại máy trạm (2026-07-31)
+
+```text
+scripts/ai/local-draft.ts list   → job READY_FOR_AGENT/PROCESSING + đường dẫn ảnh trong My Drive đã sync
+                                   + đối chiếu sha256 từng file (OK / MISSING / CHECKSUM_MISMATCH)
+agent (Claude Code/Codex/Antigravity) tự mở ảnh có trạng thái OK → viết JSON schema v2
+scripts/ai/local-draft.ts submit → validator + findInvalidClearEvidence + fingerprint/manifest
+                                 → ai_extraction_results + ai_field_comparisons + audit (1 transaction)
+scripts/ai/local-draft.ts enqueue → tạo job theo bộ ảnh GCN hiện tại khi job cũ lệch fingerprint
+```
+
+- `src/modules/ai-extraction/local-draft-support.ts`: `parseLocalDraftOptions` và
+  `decideResultOutcome` — bậc thang `PASSED/REVIEW_REQUIRED/BLOCKED` → `COMPLETED/NEEDS_REVIEW/
+  QUARANTINED` dùng chung một định nghĩa với route API.
+- Đường này **thay chỗ ghi, không nới quyền**: cùng guard quét CCCD/prompt injection, cùng điều kiện
+  manifest join `public_files`, cùng kiểm `input_fingerprint`, cùng nhánh `STALE` + audit. Khác API ở
+  ba điểm: không có lease/`workerInstanceId`, idempotency lấy theo `result_fingerprint` thay vì header
+  (`request_log.kind = 'AI_LOCAL_RESULT'`), và `actor_email` audit là `AI_LOCAL_STATION`.
+- `model_name` ghi theo model thật đã đọc ảnh (ví dụ `claude-opus-5`), không cố định
+  `gemini-3.6-flash`; `worker_instance_id` là `LOCAL_AGENT:<model>`.
+- `enqueue` cần vì job chỉ được tạo trong transaction submit/resubmit: ảnh GCN cán bộ thêm sau đó
+  làm job cũ lệch fingerprint và không có job mới nào tự sinh.
+- Máy trạm phải có `SUPABASE_DATABASE_URL` (ghi được mọi bảng) và `AI_LOCAL_DRIVE_ROOT`. Đây là mở
+  rộng bề mặt so với `AI_WORKER_API_KEY` — xem đánh đổi trong `03-decisions.md`.
+
 ## Vận hành
 
 - Supabase project/compute nên ở Singapore gần Vercel `sin1`.

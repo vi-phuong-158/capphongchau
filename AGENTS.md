@@ -411,8 +411,15 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
 
 ### 6.1 Antigravity local station và AI draft GCN
 
-- Web app không gọi Gemini. Antigravity chạy trên máy quản trị, dùng `gemini-3.6-flash`, poll job và
-  trả JSON qua API worker có `AI_WORKER_API_KEY`.
+- Web app không gọi mô hình AI nào. Từ 2026-07-31, trạm chạy trên máy quản trị **không còn gọi
+  `/api/ai/*`**: coding agent (Claude Code/Codex/Antigravity) tự mở ảnh GCN đã đồng bộ trong My Drive
+  và ghi nháp bằng `scripts/ai/local-draft.ts` (`npm run ai:list-jobs` / `ai:enqueue` /
+  `ai:submit-draft`). Máy trạm cần `SUPABASE_DATABASE_URL` và `AI_LOCAL_DRIVE_ROOT`. Route
+  `/api/ai/*` và `AI_WORKER_API_KEY` vẫn còn trong mã nguồn nhưng bị tắt bằng
+  `AI_EXTRACTION_ENABLED=false`; các ràng buộc lease/claim ở mục dưới chỉ áp dụng cho đường API đó.
+  Script cục bộ dùng lại đúng các guard đó trừ lease, và chống ghi trùng bằng
+  `request_log` khóa `AI_LOCAL_RESULT:{jobId}:{result_fingerprint}`. Xem
+  `docs/brain/03-decisions.md` [2026-07-31] và `agent/STATION_RUNBOOK.md`.
 - Job chỉ chứa `PUBLIC_FILES.document_type = 'CERTIFICATE'`, checksum và manifest; không có CCCD,
   QR raw, Drive link/ID hoặc quyền ghi database/Drive. Không tạo bản sao GCN trong thư mục AI.
 - Server revalidate từng file manifest tại lúc claim: cùng submission, `CERTIFICATE`, `ORIGINAL`,

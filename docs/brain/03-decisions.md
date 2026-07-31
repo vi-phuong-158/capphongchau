@@ -1,5 +1,39 @@
 # 03 — Technical Decisions
 
+## [2026-07-31] Coding agent đọc ảnh GCN tại máy trạm và ghi thẳng Supabase, bỏ đường `/api/ai/*`
+
+- **Đảo quyết định [2026-07-26].** Quyết định cũ cấm local station kết nối Supabase, buộc đi qua
+  `GET /api/ai/jobs/ready` → `POST /api/ai/jobs/claim` → `POST /api/ai/results` với
+  `AI_WORKER_API_KEY`. Chủ dự án chốt hướng mới: chính coding agent (Claude Code/Codex/Antigravity)
+  mở ảnh GCN đã đồng bộ trong My Drive, tự đọc, rồi ghi nháp bằng script chạy tại máy trạm. Không
+  gọi Gemini API, không gọi HTTP endpoint nào.
+- **Lý do:** agent đang chạy tại máy quản trị vốn đã đọc được ảnh; thêm một vòng HTTP + worker key
+  chỉ để đưa dữ liệu về đúng cơ sở dữ liệu mà máy đó truy cập được là chi phí không đổi lấy được gì.
+- **Không nới guard.** `scripts/ai/local-draft.ts` gọi lại đúng các hàm mà route API dùng:
+  `validateAiResultPayload` (quét chuỗi giống CCCD → chặn ghi; quét prompt injection),
+  `findInvalidClearEvidence` (CLEAR phải trỏ `fileId` trong manifest đã join `public_files`),
+  `computeInputFingerprint` (lệch → job `STALE` + audit, không ghi result),
+  `buildAiFieldComparisons`. Bậc thang `PASSED/REVIEW_REQUIRED/BLOCKED` nằm trong
+  `decideResultOutcome` dùng chung một định nghĩa, có unit test.
+- **Bỏ lease, giữ idempotency.** Không còn `workerInstanceId`/`lease_expires_at` vì chỉ có một trạm
+  chạy tuần tự. Chống ghi trùng chuyển sang `request_log` khóa
+  `AI_LOCAL_RESULT:{jobId}:{result_fingerprint}`: chạy lại cùng file JSON trả về kết quả cũ, không
+  sinh `result_version` thứ hai.
+- **Thêm `enqueue`.** Job chỉ được tạo trong transaction submit/resubmit
+  (`enqueueAiDraftForSubmission`). Ảnh GCN cán bộ bổ sung sau đó làm job cũ lệch fingerprint và
+  **không** có job mới nào tự sinh — đo thực tế: 12 hồ sơ trong `01_INBOX` chỉ có 5 job. `enqueue`
+  tạo job theo bộ ảnh hiện tại; `list` so fingerprint để chỉ ra hồ sơ còn thiếu.
+- **`model_name` ghi model thật.** Cán bộ nhìn thấy `claude-opus-5` thay vì `gemini-3.6-flash` cố
+  định, để truy nguyên đúng ai đã đọc ảnh.
+- **Đánh đổi đã nhận (rủi ro chính).** Máy trạm phải giữ `SUPABASE_DATABASE_URL` — ghi được **mọi**
+  bảng, nặng hơn `AI_WORKER_API_KEY` vốn chỉ ghi được 3 bảng AI qua route đã kiểm. Chấp nhận vì máy
+  trạm đã là máy quản trị mang nhãn `ADMIN_BROAD_ACCESS`. Bù lại: script chỉ chạm
+  `ai_extraction_*`, `ai_field_comparisons`, `audit_logs`, `request_log`; không có đường nào từ
+  script ghi vào `public_submissions` hay dữ liệu chính thức.
+- **Không đổi ranh giới nghiệp vụ.** AI vẫn chỉ tạo nháp; cán bộ vẫn là người duy nhất nạp giá trị
+  qua `POST /ai-draft/apply`. Route `/api/ai/*` giữ nguyên, không xóa — `AI_EXTRACTION_ENABLED=false`
+  là đã tắt đường cũ.
+
 ## [2026-07-31] Replay upload hoàn tất phải trả trước Drive; API hồ sơ công khai không được cache
 
 - **Hai lớp replay cùng tồn tại.** `findCompletedFileUploadReplay` là đường nhanh ngoài transaction
