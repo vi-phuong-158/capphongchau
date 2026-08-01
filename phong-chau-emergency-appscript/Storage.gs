@@ -6,23 +6,25 @@ function getScriptProperties_() {
 
 function isSystemConfigured_() {
   const props = getScriptProperties_();
-  return Boolean(props.getProperty(PROPERTY_KEYS.ROOT_FOLDER_ID)) &&
-    Boolean(props.getProperty(PROPERTY_KEYS.SPREADSHEET_ID));
+  return (
+    Boolean(props.getProperty(PROPERTY_KEYS.ROOT_FOLDER_ID)) &&
+    Boolean(props.getProperty(PROPERTY_KEYS.SPREADSHEET_ID))
+  );
 }
 
 function assertSystemConfigured_() {
   if (!isSystemConfigured_()) {
-    throwPublicError_('Hệ thống dự phòng chưa được cài đặt.');
+    throwPublicError_("Hệ thống dự phòng chưa được cài đặt.");
   }
 }
 
 function isEmergencyEnabled_() {
-  return getScriptProperties_().getProperty(PROPERTY_KEYS.SYSTEM_ENABLED) === 'true';
+  return getScriptProperties_().getProperty(PROPERTY_KEYS.SYSTEM_ENABLED) === "true";
 }
 
 function assertEmergencyEnabled_() {
   if (!isEmergencyEnabled_()) {
-    throwPublicError_('Hệ thống kê khai dự phòng hiện chưa được kích hoạt.');
+    throwPublicError_("Hệ thống kê khai dự phòng hiện chưa được kích hoạt.");
   }
 }
 
@@ -33,20 +35,18 @@ function getRootFolder_() {
 
 function getSpreadsheet_() {
   assertSystemConfigured_();
-  return SpreadsheetApp.openById(
-    getScriptProperties_().getProperty(PROPERTY_KEYS.SPREADSHEET_ID)
-  );
+  return SpreadsheetApp.openById(getScriptProperties_().getProperty(PROPERTY_KEYS.SPREADSHEET_ID));
 }
 
 function getSubmissionsSheet_() {
   const sheet = getSpreadsheet_().getSheetByName(APP_CONFIG.SUBMISSIONS_SHEET_NAME);
-  if (!sheet) throw new Error('Không tìm thấy sheet hồ sơ.');
+  if (!sheet) throw new Error("Không tìm thấy sheet hồ sơ.");
   return sheet;
 }
 
 function getFilesSheet_() {
   const sheet = getSpreadsheet_().getSheetByName(APP_CONFIG.FILES_SHEET_NAME);
-  if (!sheet) throw new Error('Không tìm thấy sheet nhật ký tệp.');
+  if (!sheet) throw new Error("Không tìm thấy sheet nhật ký tệp.");
   return sheet;
 }
 
@@ -57,9 +57,9 @@ function getOrCreateChildFolder_(parent, name) {
 
 function createSubmissionFolder_(submissionId, fullName, now) {
   const root = getRootFolder_();
-  const dateName = Utilities.formatDate(now, APP_CONFIG.TIME_ZONE, 'yyyy-MM-dd');
+  const dateName = Utilities.formatDate(now, APP_CONFIG.TIME_ZONE, "yyyy-MM-dd");
   const dateFolder = getOrCreateChildFolder_(root, dateName);
-  return dateFolder.createFolder(submissionId + '_' + makeSafeFolderName_(fullName));
+  return dateFolder.createFolder(submissionId + "_" + makeSafeFolderName_(fullName));
 }
 
 function appendSubmission_(record) {
@@ -67,7 +67,7 @@ function appendSubmission_(record) {
   sheet.appendRow([
     safeCell_(record.id),
     record.startedAt,
-    '',
+    "",
     STATUS.UPLOADING,
     safeCell_(record.fullName),
     safeCell_(record.phone),
@@ -79,10 +79,10 @@ function appendSubmission_(record) {
     0,
     record.folderUrl,
     SYNC_STATUS.PENDING,
-    '',
-    '',
-    'Có',
-    'Có',
+    "",
+    "",
+    "Có",
+    "Có",
     safeCell_(record.deviceId),
     record.tokenHash,
     record.folderId,
@@ -90,7 +90,7 @@ function appendSubmission_(record) {
     record.startedEpoch,
     safeCell_(record.clientVersion),
     safeCell_(record.userAgent),
-    '',
+    "",
   ]);
   return sheet.getLastRow();
 }
@@ -109,28 +109,28 @@ function findSubmissionRow_(submissionId) {
 
 function readSubmission_(submissionId) {
   const row = findSubmissionRow_(submissionId);
-  if (!row) throwPublicError_('Không tìm thấy hồ sơ dự phòng.');
+  if (!row) throwPublicError_("Không tìm thấy hồ sơ dự phòng.");
   const values = getSubmissionsSheet_()
     .getRange(row, 1, 1, SUBMISSION_HEADERS.length)
     .getValues()[0];
   return {
     row: row,
-    id: String(values[SUB_COL.ID - 1] || ''),
+    id: String(values[SUB_COL.ID - 1] || ""),
     startedAt: values[SUB_COL.STARTED_AT - 1],
     completedAt: values[SUB_COL.COMPLETED_AT - 1],
-    status: String(values[SUB_COL.STATUS - 1] || ''),
-    fullName: String(values[SUB_COL.FULL_NAME - 1] || ''),
-    phone: String(values[SUB_COL.PHONE - 1] || ''),
-    citizenId: String(values[SUB_COL.CITIZEN_ID - 1] || ''),
-    address: String(values[SUB_COL.ADDRESS - 1] || ''),
+    status: String(values[SUB_COL.STATUS - 1] || ""),
+    fullName: String(values[SUB_COL.FULL_NAME - 1] || ""),
+    phone: String(values[SUB_COL.PHONE - 1] || ""),
+    citizenId: String(values[SUB_COL.CITIZEN_ID - 1] || ""),
+    address: String(values[SUB_COL.ADDRESS - 1] || ""),
     certificateCount: Number(values[SUB_COL.CERT_COUNT - 1] || 0),
-    note: String(values[SUB_COL.NOTE - 1] || ''),
+    note: String(values[SUB_COL.NOTE - 1] || ""),
     cccdImageCount: Number(values[SUB_COL.CCCD_IMAGE_COUNT - 1] || 0),
     gcnImageCount: Number(values[SUB_COL.GCN_IMAGE_COUNT - 1] || 0),
-    folderUrl: String(values[SUB_COL.FOLDER_LINK - 1] || ''),
-    deviceId: String(values[SUB_COL.DEVICE_ID - 1] || ''),
-    tokenHash: String(values[SUB_COL.TOKEN_HASH - 1] || ''),
-    folderId: String(values[SUB_COL.FOLDER_ID - 1] || ''),
+    folderUrl: String(values[SUB_COL.FOLDER_LINK - 1] || ""),
+    deviceId: String(values[SUB_COL.DEVICE_ID - 1] || ""),
+    tokenHash: String(values[SUB_COL.TOKEN_HASH - 1] || ""),
+    folderId: String(values[SUB_COL.FOLDER_ID - 1] || ""),
     startedEpoch: Number(values[SUB_COL.STARTED_EPOCH - 1] || 0),
     lastActivityEpoch: Number(values[SUB_COL.LAST_ACTIVITY_EPOCH - 1] || 0),
   };
@@ -145,29 +145,29 @@ function updateSubmissionCells_(row, updates) {
 }
 
 function nextSubmissionId_(now) {
-  const dateKey = Utilities.formatDate(now, APP_CONFIG.TIME_ZONE, 'yyyyMMdd');
-  const propertyKey = 'DAILY_COUNTER_' + dateKey;
+  const dateKey = Utilities.formatDate(now, APP_CONFIG.TIME_ZONE, "yyyyMMdd");
+  const propertyKey = "DAILY_COUNTER_" + dateKey;
   const props = getScriptProperties_();
   const current = Number(props.getProperty(propertyKey) || 0) + 1;
   props.setProperty(propertyKey, String(current));
-  return 'DP-' + dateKey + '-' + ('0000' + current).slice(-4);
+  return "DP-" + dateKey + "-" + ("0000" + current).slice(-4);
 }
 
 function buildSlotKey_(group, certificateIndex, imageIndex) {
-  if (group === 'CCCD_FRONT' || group === 'CCCD_BACK') return group;
-  return 'GCN-' + ('00' + certificateIndex).slice(-2) + '-' + ('00' + imageIndex).slice(-2);
+  if (group === "CCCD_FRONT" || group === "CCCD_BACK") return group;
+  return "GCN-" + ("00" + certificateIndex).slice(-2) + "-" + ("00" + imageIndex).slice(-2);
 }
 
 function buildStoredFileName_(submissionId, group, certificateIndex, imageIndex, extension) {
-  if (group === 'CCCD_FRONT') return submissionId + '_CCCD_MAT_TRUOC.' + extension;
-  if (group === 'CCCD_BACK') return submissionId + '_CCCD_MAT_SAU.' + extension;
+  if (group === "CCCD_FRONT") return submissionId + "_CCCD_MAT_TRUOC." + extension;
+  if (group === "CCCD_BACK") return submissionId + "_CCCD_MAT_SAU." + extension;
   return (
     submissionId +
-    '_GCN_' +
-    ('00' + certificateIndex).slice(-2) +
-    '_ANH_' +
-    ('00' + imageIndex).slice(-2) +
-    '.' +
+    "_GCN_" +
+    ("00" + certificateIndex).slice(-2) +
+    "_ANH_" +
+    ("00" + imageIndex).slice(-2) +
+    "." +
     extension
   );
 }
@@ -184,7 +184,7 @@ function findFileLogBySlot_(submissionId, group, certificateIndex, imageIndex) {
       String(row[1]) === group &&
       Number(row[2] || 0) === certificateIndex &&
       Number(row[3] || 0) === imageIndex &&
-      String(row[10]) === 'ĐÃ LƯU'
+      String(row[10]) === "ĐÃ LƯU"
     ) {
       return {
         row: i + 2,
@@ -201,7 +201,7 @@ function appendFileLog_(record) {
   getFilesSheet_().appendRow([
     safeCell_(record.submissionId),
     record.group,
-    record.certificateIndex || '',
+    record.certificateIndex || "",
     record.imageIndex,
     record.fileName,
     record.mimeType,
@@ -209,7 +209,7 @@ function appendFileLog_(record) {
     record.sha256,
     record.fileId,
     record.uploadedAt,
-    'ĐÃ LƯU',
+    "ĐÃ LƯU",
   ]);
 }
 
@@ -220,7 +220,7 @@ function listSubmissionFiles_(submissionId) {
   const values = sheet.getRange(2, 1, lastRow - 1, FILE_HEADERS.length).getValues();
   return values
     .filter(function (row) {
-      return String(row[0]) === submissionId && String(row[10]) === 'ĐÃ LƯU';
+      return String(row[0]) === submissionId && String(row[10]) === "ĐÃ LƯU";
     })
     .map(function (row) {
       const group = String(row[1]);
@@ -251,13 +251,13 @@ function countFileGroups_(files, certificateCount) {
   for (let i = 1; i <= certificateCount; i += 1) result.perCertificate[i] = 0;
 
   files.forEach(function (file) {
-    if (file.group === 'CCCD_FRONT') {
+    if (file.group === "CCCD_FRONT") {
       result.hasFront = true;
       result.cccdCount += 1;
-    } else if (file.group === 'CCCD_BACK') {
+    } else if (file.group === "CCCD_BACK") {
       result.hasBack = true;
       result.cccdCount += 1;
-    } else if (file.group === 'GCN') {
+    } else if (file.group === "GCN") {
       result.gcnCount += 1;
       if (result.perCertificate[file.certificateIndex] != null) {
         result.perCertificate[file.certificateIndex] += 1;
@@ -272,17 +272,18 @@ function createManifestFile_(submission, files, completedAt) {
   const lines = [
     APP_CONFIG.UNIT_NAME,
     APP_CONFIG.APP_NAME.toUpperCase(),
-    '',
-    'Mã hồ sơ: ' + submission.id,
-    'Thời gian hoàn tất: ' + Utilities.formatDate(completedAt, APP_CONFIG.TIME_ZONE, 'dd/MM/yyyy HH:mm:ss'),
-    'Họ và tên: ' + submission.fullName,
-    'Số điện thoại: ' + submission.phone,
-    'Số CCCD: ' + submission.citizenId,
-    'Địa chỉ liên hệ: ' + submission.address,
-    'Số lượng GCN: ' + submission.certificateCount,
-    'Ghi chú: ' + (submission.note || 'Không có'),
-    '',
-    'DANH SÁCH TỆP ĐÃ NHẬN:',
+    "",
+    "Mã hồ sơ: " + submission.id,
+    "Thời gian hoàn tất: " +
+      Utilities.formatDate(completedAt, APP_CONFIG.TIME_ZONE, "dd/MM/yyyy HH:mm:ss"),
+    "Họ và tên: " + submission.fullName,
+    "Số điện thoại: " + submission.phone,
+    "Số CCCD: " + submission.citizenId,
+    "Địa chỉ liên hệ: " + submission.address,
+    "Số lượng GCN: " + submission.certificateCount,
+    "Ghi chú: " + (submission.note || "Không có"),
+    "",
+    "DANH SÁCH TỆP ĐÃ NHẬN:",
   ];
   files
     .slice()
@@ -290,13 +291,13 @@ function createManifestFile_(submission, files, completedAt) {
       return a.fileName.localeCompare(b.fileName);
     })
     .forEach(function (file, index) {
-      lines.push((index + 1) + '. ' + file.fileName + ' (' + file.sizeBytes + ' byte)');
+      lines.push(index + 1 + ". " + file.fileName + " (" + file.sizeBytes + " byte)");
     });
-  lines.push('', 'Trạng thái đồng bộ: ' + SYNC_STATUS.PENDING);
+  lines.push("", "Trạng thái đồng bộ: " + SYNC_STATUS.PENDING);
 
-  const existing = folder.getFilesByName('THONG_TIN_HO_SO.txt');
+  const existing = folder.getFilesByName("THONG_TIN_HO_SO.txt");
   while (existing.hasNext()) existing.next().setTrashed(true);
-  folder.createFile('THONG_TIN_HO_SO.txt', lines.join('\n'), MimeType.PLAIN_TEXT);
+  folder.createFile("THONG_TIN_HO_SO.txt", lines.join("\n"), MimeType.PLAIN_TEXT);
 }
 
 function recordSubmissionError_(submissionId, message) {
@@ -308,6 +309,6 @@ function recordSubmissionError_(submissionId, message) {
     updates[SUB_COL.LAST_ACTIVITY_EPOCH] = Date.now();
     updateSubmissionCells_(row, updates);
   } catch (error) {
-    console.error('Unable to record submission error', error);
+    console.error("Unable to record submission error", error);
   }
 }

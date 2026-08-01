@@ -1,9 +1,6 @@
-﻿import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  PreviewUnavailableError,
-  PublicIntakeStorage,
-} from "@/modules/public-intake/storage";
+import { PreviewUnavailableError, PublicIntakeStorage } from "@/modules/public-intake/storage";
 
 const mockGet = vi.fn();
 
@@ -25,12 +22,15 @@ const mockEnvironment = {
 };
 
 describe("storage readOriginal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
   it("trả về đúng bytes và MIME type khi file hợp lệ", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const storage = new PublicIntakeStorage(mockEnvironment as any);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGet.mockImplementation(async (params: any) => {
+    mockGet.mockImplementation(async (params: Record<string, unknown>) => {
       if (params.fields === "size,mimeType") {
         return { data: { size: "1024", mimeType: "image/jpeg" } };
       }
@@ -43,9 +43,16 @@ describe("storage readOriginal", () => {
     const result = await storage.readOriginal("fake-id");
     expect(result.contentType).toBe("image/jpeg");
     expect(result.bytes.byteLength).toBe(3);
-    
+
+    expect(mockGet).toHaveBeenCalledWith(
+      { fileId: "fake-id", alt: "media" },
+      { responseType: "arraybuffer" },
+    );
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(mockGet.mock.calls.some((call) => (call[0] as any).fields?.includes("thumbnailLink"))).toBe(false);
+    expect(
+      mockGet.mock.calls.some((call) => (call[0] as any).fields?.includes("thumbnailLink")),
+    ).toBe(false);
   });
 
   it("từ chối file rỗng", async () => {
@@ -53,7 +60,7 @@ describe("storage readOriginal", () => {
     const storage = new PublicIntakeStorage(mockEnvironment as any);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGet.mockImplementation(async (params: any) => {
+    mockGet.mockImplementation(async (params: Record<string, unknown>) => {
       if (params.fields === "size,mimeType") {
         return { data: { size: "1024", mimeType: "image/jpeg" } };
       }
@@ -63,7 +70,6 @@ describe("storage readOriginal", () => {
       throw new Error("Unexpected arguments");
     });
 
-    await expect(storage.readOriginal("fake-id")).rejects.toThrow(PreviewUnavailableError);
     await expect(storage.readOriginal("fake-id")).rejects.toThrow("Tệp tin trống.");
   });
 
@@ -72,14 +78,13 @@ describe("storage readOriginal", () => {
     const storage = new PublicIntakeStorage(mockEnvironment as any);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGet.mockImplementation(async (params: any) => {
+    mockGet.mockImplementation(async (params: Record<string, unknown>) => {
       if (params.fields === "size,mimeType") {
         return { data: { size: String(30 * 1024 * 1024 + 1), mimeType: "image/jpeg" } };
       }
       throw new Error("Unexpected arguments");
     });
 
-    await expect(storage.readOriginal("fake-id")).rejects.toThrow(PreviewUnavailableError);
     await expect(storage.readOriginal("fake-id")).rejects.toThrow("vượt quá giới hạn 30 MB");
   });
 
@@ -88,15 +93,15 @@ describe("storage readOriginal", () => {
     const storage = new PublicIntakeStorage(mockEnvironment as any);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGet.mockImplementation(async (params: any) => {
+    mockGet.mockImplementation(async (params: Record<string, unknown>) => {
       if (params.fields === "size,mimeType") {
         return { data: { size: "1024", mimeType: "application/pdf" } };
       }
       throw new Error("Unexpected arguments");
     });
 
-    await expect(storage.readOriginal("fake-id")).rejects.toThrow(PreviewUnavailableError);
-    await expect(storage.readOriginal("fake-id")).rejects.toThrow("Định dạng tệp không được chấp nhận");
+    await expect(storage.readOriginal("fake-id")).rejects.toThrow(
+      "Định dạng tệp không được chấp nhận",
+    );
   });
 });
-

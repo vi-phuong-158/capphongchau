@@ -1,7 +1,7 @@
 /** Điểm vào Web App và API công khai gọi từ giao diện HTML. */
 
 function doGet(e) {
-  if (e && e.parameter && e.parameter.health === '1') {
+  if (e && e.parameter && e.parameter.health === "1") {
     return ContentService.createTextOutput(
       JSON.stringify({
         ok: true,
@@ -9,16 +9,16 @@ function doGet(e) {
         enabled: isSystemConfigured_() && isEmergencyEnabled_(),
         version: APP_CONFIG.CLIENT_VERSION,
         timestamp: new Date().toISOString(),
-      })
+      }),
     ).setMimeType(ContentService.MimeType.JSON);
   }
 
-  const template = HtmlService.createTemplateFromFile('Index');
-  template.publicConfigJson = JSON.stringify(getPublicConfig_()).replace(/<\//g, '<\\/');
+  const template = HtmlService.createTemplateFromFile("Index");
+  template.publicConfigJson = JSON.stringify(getPublicConfig_()).replace(/<\//g, "<\\/");
   return template
     .evaluate()
     .setTitle(APP_CONFIG.PAGE_TITLE)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+    .addMetaTag("viewport", "width=device-width, initial-scale=1, viewport-fit=cover");
 }
 
 function getPublicConfig_() {
@@ -88,10 +88,10 @@ function startSubmission(rawPayload) {
       try {
         folder.setTrashed(true);
       } catch (trashError) {
-        console.error('Unable to trash failed submission folder', trashError);
+        console.error("Unable to trash failed submission folder", trashError);
       }
     }
-    console.error('startSubmission failed', error);
+    console.error("startSubmission failed", error);
     throw error;
   } finally {
     lock.releaseLock();
@@ -133,14 +133,14 @@ function uploadSubmissionFile(rawRequest) {
       submission = readSubmission_(submissionId);
       verifySubmissionToken_(submission, upload.token);
       if (submission.status !== STATUS.UPLOADING) {
-        throwPublicError_('Hồ sơ không còn ở trạng thái tải ảnh.');
+        throwPublicError_("Hồ sơ không còn ở trạng thái tải ảnh.");
       }
 
       const existing = findFileLogBySlot_(
         submissionId,
         upload.group,
         upload.certificateIndex,
-        upload.imageIndex
+        upload.imageIndex,
       );
       if (existing) {
         return {
@@ -153,7 +153,7 @@ function uploadSubmissionFile(rawRequest) {
 
       const currentFiles = listSubmissionFiles_(submissionId);
       if (currentFiles.length >= APP_CONFIG.MAX_TOTAL_FILES) {
-        throwPublicError_('Hồ sơ đã đạt số lượng ảnh tối đa cho phép.');
+        throwPublicError_("Hồ sơ đã đạt số lượng ảnh tối đa cho phép.");
       }
 
       const folder = DriveApp.getFolderById(submission.folderId);
@@ -162,18 +162,13 @@ function uploadSubmissionFile(rawRequest) {
         upload.group,
         upload.certificateIndex,
         upload.imageIndex,
-        upload.extension
+        upload.extension,
       );
       let file = null;
       try {
         file = folder.createFile(Utilities.newBlob(upload.bytes, upload.mimeType, fileName));
         file.setDescription(
-          'Hồ sơ ' +
-            submissionId +
-            ' | ' +
-            upload.group +
-            ' | SHA-256 ' +
-            upload.sha256
+          "Hồ sơ " + submissionId + " | " + upload.group + " | SHA-256 " + upload.sha256,
         );
         appendFileLog_({
           submissionId: submissionId,
@@ -192,7 +187,7 @@ function uploadSubmissionFile(rawRequest) {
           try {
             file.setTrashed(true);
           } catch (trashError) {
-            console.error('Unable to trash failed file', trashError);
+            console.error("Unable to trash failed file", trashError);
           }
         }
         throw error;
@@ -200,7 +195,7 @@ function uploadSubmissionFile(rawRequest) {
 
       const updates = {};
       updates[SUB_COL.LAST_ACTIVITY_EPOCH] = Date.now();
-      updates[SUB_COL.LAST_ERROR] = '';
+      updates[SUB_COL.LAST_ERROR] = "";
       updateSubmissionCells_(submission.row, updates);
 
       return {
@@ -214,7 +209,7 @@ function uploadSubmissionFile(rawRequest) {
       lock.releaseLock();
     }
   } catch (error) {
-    console.error('uploadSubmissionFile failed', submissionId, error);
+    console.error("uploadSubmissionFile failed", submissionId, error);
     recordSubmissionError_(submissionId, error && error.message ? error.message : String(error));
     throw error;
   }
@@ -232,21 +227,21 @@ function finalizeSubmission(rawRequest) {
     const submission = readSubmission_(submissionId);
     verifySubmissionToken_(submission, token);
     if (submission.status !== STATUS.UPLOADING) {
-      throwPublicError_('Hồ sơ này đã được hoàn tất hoặc không còn hiệu lực.');
+      throwPublicError_("Hồ sơ này đã được hoàn tất hoặc không còn hiệu lực.");
     }
 
     const files = listSubmissionFiles_(submissionId);
     if (files.length > APP_CONFIG.MAX_TOTAL_FILES) {
-      throwPublicError_('Số lượng ảnh vượt quá giới hạn.');
+      throwPublicError_("Số lượng ảnh vượt quá giới hạn.");
     }
 
     const counts = countFileGroups_(files, submission.certificateCount);
     if (!counts.hasFront || !counts.hasBack) {
-      throwPublicError_('Cần tải đủ ảnh CCCD mặt trước và mặt sau.');
+      throwPublicError_("Cần tải đủ ảnh CCCD mặt trước và mặt sau.");
     }
     for (let i = 1; i <= submission.certificateCount; i += 1) {
       if (!counts.perCertificate[i]) {
-        throwPublicError_('Giấy chứng nhận số ' + i + ' chưa có ảnh.');
+        throwPublicError_("Giấy chứng nhận số " + i + " chưa có ảnh.");
       }
     }
 
@@ -259,22 +254,22 @@ function finalizeSubmission(rawRequest) {
     updates[SUB_COL.CCCD_IMAGE_COUNT] = counts.cccdCount;
     updates[SUB_COL.GCN_IMAGE_COUNT] = counts.gcnCount;
     updates[SUB_COL.SYNC_STATUS] = SYNC_STATUS.PENDING;
-    updates[SUB_COL.TOKEN_HASH] = '';
+    updates[SUB_COL.TOKEN_HASH] = "";
     updates[SUB_COL.LAST_ACTIVITY_EPOCH] = completedAt.getTime();
-    updates[SUB_COL.LAST_ERROR] = '';
+    updates[SUB_COL.LAST_ERROR] = "";
     updateSubmissionCells_(submission.row, updates);
 
     return {
       ok: true,
       submissionId: submissionId,
-      completedAt: Utilities.formatDate(completedAt, APP_CONFIG.TIME_ZONE, 'dd/MM/yyyy HH:mm:ss'),
+      completedAt: Utilities.formatDate(completedAt, APP_CONFIG.TIME_ZONE, "dd/MM/yyyy HH:mm:ss"),
       cccdImageCount: counts.cccdCount,
       gcnImageCount: counts.gcnCount,
       supportOfficer: APP_CONFIG.SUPPORT_OFFICER,
       supportPhone: APP_CONFIG.SUPPORT_PHONE,
     };
   } catch (error) {
-    console.error('finalizeSubmission failed', submissionId, error);
+    console.error("finalizeSubmission failed", submissionId, error);
     recordSubmissionError_(submissionId, error && error.message ? error.message : String(error));
     throw error;
   } finally {
@@ -298,12 +293,12 @@ function cancelSubmission(rawRequest) {
       try {
         DriveApp.getFolderById(submission.folderId).setTrashed(true);
       } catch (error) {
-        console.error('Unable to trash cancelled folder', error);
+        console.error("Unable to trash cancelled folder", error);
       }
     }
     const updates = {};
     updates[SUB_COL.STATUS] = STATUS.CANCELLED;
-    updates[SUB_COL.TOKEN_HASH] = '';
+    updates[SUB_COL.TOKEN_HASH] = "";
     updates[SUB_COL.LAST_ACTIVITY_EPOCH] = Date.now();
     updateSubmissionCells_(submission.row, updates);
     return { ok: true, status: STATUS.CANCELLED };
@@ -331,8 +326,8 @@ function assertRateLimit_(phone, deviceId) {
   let deviceDay = 0;
 
   values.forEach(function (row) {
-    const rowPhone = String(row[0] || '');
-    const rowDevice = String(row[SUB_COL.DEVICE_ID - SUB_COL.PHONE] || '');
+    const rowPhone = String(row[0] || "");
+    const rowDevice = String(row[SUB_COL.DEVICE_ID - SUB_COL.PHONE] || "");
     const startedEpoch = Number(row[SUB_COL.STARTED_EPOCH - SUB_COL.PHONE] || 0);
     if (!startedEpoch || startedEpoch < oneDayAgo) return;
     if (rowPhone === phone) phoneDay += 1;
@@ -350,8 +345,8 @@ function assertRateLimit_(phone, deviceId) {
     deviceDay >= APP_CONFIG.MAX_STARTS_PER_DEVICE_PER_DAY
   ) {
     throwPublicError_(
-      'Thiết bị hoặc số điện thoại đã tạo nhiều hồ sơ trong thời gian ngắn. ' +
-        'Vui lòng tiếp tục hồ sơ đang tải hoặc liên hệ cán bộ hỗ trợ.'
+      "Thiết bị hoặc số điện thoại đã tạo nhiều hồ sơ trong thời gian ngắn. " +
+        "Vui lòng tiếp tục hồ sơ đang tải hoặc liên hệ cán bộ hỗ trợ.",
     );
   }
 }

@@ -8,11 +8,11 @@
 
 ## Trạng thái nguồn sự thật sau PR #12 (2026-07-31)
 
-| Phạm vi | Trạng thái |
-| --- | --- |
-| Repository / code | PR #12 đã merge vào `main` tại `d898b7d`; đúng năm file `002`–`006` tồn tại; task post-merge không thêm/sửa/chạy migration |
+| Phạm vi             | Trạng thái                                                                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository / code   | PR #12 đã merge vào `main` tại `d898b7d`; đúng năm file `002`–`006` tồn tại; task post-merge không thêm/sửa/chạy migration                                                                    |
 | Rehearsal / Preview | Có log lịch sử cho project rehearsal cụ thể, nhưng phiên 2026-07-31 không có credential để xác minh project đang phục vụ Vercel Preview; phải chạy mục 0 trên đúng project trước khi kết luận |
-| Production | Chưa xác minh trong phiên 2026-07-31; không được ghi “migration đã chạy” hoặc “đã deploy” nếu thiếu project, lệnh/kết quả và thời điểm |
+| Production          | Chưa xác minh trong phiên 2026-07-31; không được ghi “migration đã chạy” hoặc “đã deploy” nếu thiếu project, lệnh/kết quả và thời điểm                                                        |
 
 > **Đổi số hiệu 2026-07-30 — đọc trước khi so với bản runbook cũ.** Bản đầu tiên của runbook này
 > ghi ghi chú nội bộ là `202607290005`, trong khi `main` đã cấp số đó cho
@@ -57,43 +57,43 @@ Tài liệu nội bộ đang có hai câu chuyện khác nhau về bốn migrati
       nội bộ_ (bản cũ của nhánh PR) chứ không phải cho _lazy Drive folder_:
 
       ```sql
-          select version, name from supabase_migrations.schema_migrations
-          where version >= '202607290002' order by version;
-          ```
+              select version, name from supabase_migrations.schema_migrations
+              where version >= '202607290002' order by version;
+              ```
 
-          Đối chiếu với schema thật — hai câu dưới phân biệt được database đã áp nội dung nào:
+              Đối chiếu với schema thật — hai câu dưới phân biệt được database đã áp nội dung nào:
 
-          ```sql
-          -- đã áp lazy Drive folder (đúng nghĩa 005)?
-          select count(*) from information_schema.columns
-          where table_schema='public' and table_name='public_submissions'
-            and column_name='drive_folder_state';
-
-          -- đã áp ghi chú nội bộ (nay là 006)?
-          select count(*) from information_schema.columns
-          where table_schema='public' and table_name='public_submissions'
-            and column_name='internal_notes';
-          ```
-
-          Nếu database đã có `internal_notes` nhưng `schema_migrations` ghi `202607290005`: **không xóa
-          cột**. Chèn thủ công dòng lịch sử cho số mới rồi để `db push` chạy tiếp phần còn thiếu —
-
-          ```sql
-          insert into supabase_migrations.schema_migrations (version, name)
-          values ('202607290006', 'submission_internal_notes')
-          on conflict (version) do nothing;
-
-          delete from supabase_migrations.schema_migrations
-          where version = '202607290005'
-            and not exists (
-              select 1 from information_schema.columns
+              ```sql
+              -- đã áp lazy Drive folder (đúng nghĩa 005)?
+              select count(*) from information_schema.columns
               where table_schema='public' and table_name='public_submissions'
-                and column_name='drive_folder_state'
-            );
-          ```
+                and column_name='drive_folder_state';
 
-          Câu `delete` chỉ gỡ dòng `005` khi schema **chưa** có cột của lazy Drive folder — tức dòng đó
-          thực sự là dấu vết của nội dung cũ, không phải của `005` hiện tại.
+              -- đã áp ghi chú nội bộ (nay là 006)?
+              select count(*) from information_schema.columns
+              where table_schema='public' and table_name='public_submissions'
+                and column_name='internal_notes';
+              ```
+
+              Nếu database đã có `internal_notes` nhưng `schema_migrations` ghi `202607290005`: **không xóa
+              cột**. Chèn thủ công dòng lịch sử cho số mới rồi để `db push` chạy tiếp phần còn thiếu —
+
+              ```sql
+              insert into supabase_migrations.schema_migrations (version, name)
+              values ('202607290006', 'submission_internal_notes')
+              on conflict (version) do nothing;
+
+              delete from supabase_migrations.schema_migrations
+              where version = '202607290005'
+                and not exists (
+                  select 1 from information_schema.columns
+                  where table_schema='public' and table_name='public_submissions'
+                    and column_name='drive_folder_state'
+                );
+              ```
+
+              Câu `delete` chỉ gỡ dòng `005` khi schema **chưa** có cột của lazy Drive folder — tức dòng đó
+              thực sự là dấu vết của nội dung cũ, không phải của `005` hiện tại.
 
 - [ ] Gọi `GET /api/health/database` trên deployment preview hiện tại — phải trả `status: "ok"`.
 

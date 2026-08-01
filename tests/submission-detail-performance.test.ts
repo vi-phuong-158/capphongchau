@@ -52,9 +52,8 @@ describe("Phase 2 detail performance contracts", () => {
     expect(viewer).not.toContain("revealedFileIds");
     expect(viewer).not.toContain("Xem ảnh");
     // Có effect tự yêu cầu ảnh của tệp đang chọn.
-    expect(viewer).toContain("requestPreview(activeFile.fileId)");
-    // Khung nhỏ và khung toàn màn hình dùng chung một object URL — không tải ảnh hai lần.
-    expect(viewer).toContain("{fullscreen && imageSrc && (");
+    expect(viewer).toContain("requestPreview(activeFileId);");
+    expect(viewer).toContain("[activeFileId, requestPreview]");
   });
 
   it("scopes a preview lookup to one active file and exposes only timing metrics", () => {

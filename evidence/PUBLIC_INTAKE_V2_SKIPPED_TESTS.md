@@ -20,13 +20,13 @@ pass**, không thêm test skip và không biến integration test thành mock.
 
 ## Bốn file / 28 test bị skip
 
-| File | Số test skip | Lý do | Có sau PR #12 |
-| --- | ---: | --- | --- |
-| `tests/officer-file-mutations.integration.test.ts` | 11 | Thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` trỏ tới Postgres thử nghiệm | **Có** — bảo vệ transaction upload/delete/reassign của cán bộ |
-| `tests/public-file-mutations.integration.test.ts` | 4 | Thiếu cùng biến database thử nghiệm | **Có** — bảo vệ transaction upload/delete công khai |
-| `tests/staging-rehearsal-acceptance-saga.integration.test.ts` | 12 | Thiếu cùng biến database thử nghiệm | Có từ trước; hiện gồm cả ca lazy-folder/concurrency |
-| `tests/canonical-projection.integration.test.ts` | 1 | Thiếu cùng biến database thử nghiệm | Có từ trước |
-| **Tổng** | **28** | | |
+| File                                                          | Số test skip | Lý do                                                                 | Có sau PR #12                                                 |
+| ------------------------------------------------------------- | -----------: | --------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `tests/officer-file-mutations.integration.test.ts`            |           11 | Thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` trỏ tới Postgres thử nghiệm | **Có** — bảo vệ transaction upload/delete/reassign của cán bộ |
+| `tests/public-file-mutations.integration.test.ts`             |            4 | Thiếu cùng biến database thử nghiệm                                   | **Có** — bảo vệ transaction upload/delete công khai           |
+| `tests/staging-rehearsal-acceptance-saga.integration.test.ts` |           12 | Thiếu cùng biến database thử nghiệm                                   | Có từ trước; hiện gồm cả ca lazy-folder/concurrency           |
+| `tests/canonical-projection.integration.test.ts`              |            1 | Thiếu cùng biến database thử nghiệm                                   | Có từ trước                                                   |
+| **Tổng**                                                      |       **28** |                                                                       |                                                               |
 
 Ba file đầu được gọi riêng trong phiên này:
 

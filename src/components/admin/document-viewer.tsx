@@ -103,8 +103,18 @@ function usePreviewImages(submissionId: string) {
           }
           return response.blob();
         })
-        .then((blob) => {
-          cache.current.set(fileId, URL.createObjectURL(blob));
+        .then(async (blob) => {
+          let objectUrlBlob = blob;
+          if (blob.type === "image/heic" || blob.type === "image/heif") {
+            try {
+              const heic2any = (await import("heic2any")).default;
+              const converted = await heic2any({ blob, toType: "image/jpeg" });
+              objectUrlBlob = Array.isArray(converted) ? converted[0] : converted;
+            } catch {
+              throw new Error("Không thể đọc định dạng HEIC/HEIF.");
+            }
+          }
+          cache.current.set(fileId, URL.createObjectURL(objectUrlBlob));
           bumpRender((value) => value + 1);
         })
         .catch((reason: unknown) => {
