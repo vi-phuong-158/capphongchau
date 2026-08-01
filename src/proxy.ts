@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authConfig } from "@/auth.config";
+import { isValidInternalRedirect } from "@/lib/validation";
 
 const { auth } = NextAuth(authConfig);
 
@@ -26,7 +27,14 @@ export default auth((request) => {
 
   const loginUrl = new URL("/", request.url);
   const currentUrl = new URL(request.url);
-  loginUrl.searchParams.set("callbackUrl", currentUrl.pathname + currentUrl.search);
+  const callbackPath = currentUrl.pathname + currentUrl.search;
+
+  if (isValidInternalRedirect(callbackPath)) {
+    loginUrl.searchParams.set("callbackUrl", callbackPath);
+  } else {
+    loginUrl.searchParams.set("callbackUrl", "/admin/dashboard");
+  }
+
   return NextResponse.redirect(loginUrl);
 });
 

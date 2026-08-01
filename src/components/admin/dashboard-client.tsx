@@ -6,11 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardSummary } from "@/modules/public-intake/repository";
 import { DashboardExportModal } from "./dashboard-export-modal";
 
-export function DashboardClient({
-  initialSummary,
-}: {
-  initialSummary: DashboardSummary;
-}) {
+export function DashboardClient({ initialSummary }: { initialSummary: DashboardSummary }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -23,24 +19,29 @@ export function DashboardClient({
   const officer = searchParams.get("officer") ?? "";
   const status = searchParams.get("status") ?? "";
 
-  const updateFilters = (newFilters: { from?: string; to?: string; officer?: string; status?: string }) => {
+  const updateFilters = (newFilters: {
+    from?: string;
+    to?: string;
+    officer?: string;
+    status?: string;
+  }) => {
     const params = new URLSearchParams(searchParams.toString());
-    
+
     if (newFilters.from !== undefined) {
       if (newFilters.from) params.set("from", newFilters.from);
       else params.delete("from");
     }
-    
+
     if (newFilters.to !== undefined) {
       if (newFilters.to) params.set("to", newFilters.to);
       else params.delete("to");
     }
-    
+
     if (newFilters.officer !== undefined) {
       if (newFilters.officer) params.set("officer", newFilters.officer);
       else params.delete("officer");
     }
-    
+
     if (newFilters.status !== undefined) {
       if (newFilters.status) params.set("status", newFilters.status);
       else params.delete("status");
@@ -51,7 +52,7 @@ export function DashboardClient({
 
   useEffect(() => {
     let active = true;
-    
+
     async function refresh() {
       setIsRefreshing(true);
       try {
@@ -69,18 +70,48 @@ export function DashboardClient({
     }
 
     refresh();
-    
+
     return () => {
       active = false;
     };
   }, [searchParams]);
 
   const cards = [
-    { label: "Tổng hiển thị", value: summary.totals.total, color: "text-stone-900", bg: "bg-white", href: "/submissions" },
-    { label: "Chờ tiếp nhận", value: summary.totals.pending, color: "text-amber-700", bg: "bg-amber-50", href: "/submissions?status=SUBMITTED" },
-    { label: "Đang xử lý", value: summary.totals.inProgress, color: "text-sky-700", bg: "bg-sky-50", href: "/submissions?status=UNDER_REVIEW" },
-    { label: "Đã tiếp nhận", value: summary.totals.accepted, color: "text-emerald-700", bg: "bg-emerald-50", href: "/submissions?status=ACCEPTED" },
-    { label: "Chưa phân công", value: summary.totals.unassigned, color: "text-rose-700", bg: "bg-rose-50", href: "/submissions?unassigned=1" },
+    {
+      label: "Tổng hiển thị",
+      value: summary.totals.total,
+      color: "text-stone-900",
+      bg: "bg-white",
+      href: "/submissions",
+    },
+    {
+      label: "Chờ tiếp nhận",
+      value: summary.totals.pending,
+      color: "text-amber-700",
+      bg: "bg-amber-50",
+      href: "/submissions?status=SUBMITTED",
+    },
+    {
+      label: "Đang xử lý",
+      value: summary.totals.inProgress,
+      color: "text-sky-700",
+      bg: "bg-sky-50",
+      href: "/submissions?status=UNDER_REVIEW",
+    },
+    {
+      label: "Đã tiếp nhận",
+      value: summary.totals.accepted,
+      color: "text-emerald-700",
+      bg: "bg-emerald-50",
+      href: "/submissions?status=ACCEPTED",
+    },
+    {
+      label: "Chưa phân công",
+      value: summary.totals.unassigned,
+      color: "text-rose-700",
+      bg: "bg-rose-50",
+      href: "/submissions?unassigned=1",
+    },
   ];
 
   return (
@@ -91,13 +122,13 @@ export function DashboardClient({
           <p className="text-stone-500 mt-1">Giám sát tiến độ xử lý hồ sơ của toàn bộ cán bộ.</p>
         </div>
         <div className="flex gap-3">
-          <button
-            onClick={() => setIsExportOpen(true)}
-            className="pc-button-quiet text-sm"
-          >
+          <button onClick={() => setIsExportOpen(true)} className="pc-button-quiet text-sm">
             Xuất PL3
           </button>
-          <Link href={`/submissions?${new URLSearchParams(searchParams.toString()).toString()}`} className="pc-button text-sm">
+          <Link
+            href={`/submissions?${new URLSearchParams(searchParams.toString()).toString()}`}
+            className="pc-button text-sm"
+          >
             Vào hàng chờ
           </Link>
         </div>
@@ -113,13 +144,17 @@ export function DashboardClient({
             disabled={isRefreshing}
           >
             <option value="">Tất cả cán bộ</option>
-            {summary.officers.map(o => (
-              <option key={o.email} value={o.email}>{o.displayName}</option>
+            {summary.officers.map((o) => (
+              <option key={o.email} value={o.email}>
+                {o.displayName}
+              </option>
             ))}
           </select>
         </div>
         <div className="w-40">
-          <label className="block text-xs font-semibold mb-1 text-stone-700">Từ ngày (cập nhật)</label>
+          <label className="block text-xs font-semibold mb-1 text-stone-700">
+            Từ ngày (cập nhật)
+          </label>
           <input
             type="date"
             className="pc-input w-full"
@@ -159,11 +194,13 @@ export function DashboardClient({
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {cards.map((card, i) => (
-          <Link href={card.href} key={i} className={`rounded-xl p-4 shadow-sm border border-stone-200 ${card.bg} block hover:opacity-80 transition`}>
+          <Link
+            href={card.href}
+            key={i}
+            className={`rounded-xl p-4 shadow-sm border border-stone-200 ${card.bg} block hover:opacity-80 transition`}
+          >
             <p className="text-sm font-medium text-stone-600 mb-1">{card.label}</p>
-            <p className={`text-3xl font-bold ${card.color}`}>
-              {card.value.toLocaleString()}
-            </p>
+            <p className={`text-3xl font-bold ${card.color}`}>{card.value.toLocaleString()}</p>
           </Link>
         ))}
       </div>
@@ -179,7 +216,9 @@ export function DashboardClient({
                     <th className="px-4 py-3 font-semibold">Cán bộ</th>
                     <th className="px-4 py-3 font-semibold text-right">Tổng</th>
                     <th className="px-4 py-3 font-semibold text-right text-sky-700">Đang xử lý</th>
-                    <th className="px-4 py-3 font-semibold text-right text-emerald-700">Đã hoàn thành</th>
+                    <th className="px-4 py-3 font-semibold text-right text-emerald-700">
+                      Đã hoàn thành
+                    </th>
                     <th className="px-4 py-3 font-semibold">Thao tác</th>
                   </tr>
                 </thead>
@@ -198,8 +237,12 @@ export function DashboardClient({
                           <div className="text-xs text-stone-500">{o.email}</div>
                         </td>
                         <td className="px-4 py-3 text-right font-medium">{o.total}</td>
-                        <td className="px-4 py-3 text-right font-medium text-sky-700">{o.inProgress}</td>
-                        <td className="px-4 py-3 text-right font-medium text-emerald-700">{o.accepted}</td>
+                        <td className="px-4 py-3 text-right font-medium text-sky-700">
+                          {o.inProgress}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-emerald-700">
+                          {o.accepted}
+                        </td>
                         <td className="px-4 py-3">
                           <Link
                             href={`/submissions?officer=${encodeURIComponent(o.email)}`}
@@ -222,7 +265,12 @@ export function DashboardClient({
           <div className="pc-card bg-white p-6 shadow-sm flex flex-col items-center justify-center text-center space-y-4 border-t-4 border-rose-500">
             <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
               </svg>
             </div>
             <div>
@@ -232,10 +280,7 @@ export function DashboardClient({
             <p className="text-xs text-stone-500 max-w-[200px]">
               Bao gồm các hồ sơ mới gửi hoặc cần bổ sung chưa có người phụ trách.
             </p>
-            <Link 
-              href="/submissions?status=SUBMITTED" 
-              className="pc-button-quiet w-full text-sm mt-2"
-            >
+            <Link href="/submissions?unassigned=1" className="pc-button-quiet w-full text-sm mt-2">
               Xem hàng chờ
             </Link>
           </div>

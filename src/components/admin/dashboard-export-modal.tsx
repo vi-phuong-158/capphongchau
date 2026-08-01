@@ -126,15 +126,22 @@ export function DashboardExportModal({
             disabled={busy}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
-        
+
         <div className="p-6 overflow-y-auto flex-1 space-y-5">
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold mb-1 text-stone-700">Phạm vi xuất</label>
+              <label className="block text-sm font-semibold mb-1 text-stone-700">
+                Phạm vi xuất
+              </label>
               <select
                 value={scope}
                 onChange={(e) => setScope(e.target.value as "all" | "official" | "backlog")}
@@ -148,7 +155,9 @@ export function DashboardExportModal({
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-1 text-stone-700">Lọc theo Cán bộ</label>
+              <label className="block text-sm font-semibold mb-1 text-stone-700">
+                Lọc theo Cán bộ
+              </label>
               <select
                 value={officer}
                 onChange={(e) => setOfficer(e.target.value)}
@@ -166,7 +175,9 @@ export function DashboardExportModal({
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-semibold mb-1 text-stone-700">Từ ngày (cập nhật)</label>
+                <label className="block text-sm font-semibold mb-1 text-stone-700">
+                  Từ ngày (cập nhật)
+                </label>
                 <input
                   type="date"
                   value={fromDate}
@@ -177,7 +188,9 @@ export function DashboardExportModal({
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-1 text-stone-700">Đến ngày (cập nhật)</label>
+                <label className="block text-sm font-semibold mb-1 text-stone-700">
+                  Đến ngày (cập nhật)
+                </label>
                 <input
                   type="date"
                   value={toDate}
@@ -202,15 +215,21 @@ export function DashboardExportModal({
                 {message}
               </div>
             )}
-            
+
             {truncatedWarning && (
-              <div className="p-3 rounded-md text-sm border bg-orange-50 text-orange-800 border-orange-200" role="alert">
+              <div
+                className="p-3 rounded-md text-sm border bg-orange-50 text-orange-800 border-orange-200"
+                role="alert"
+              >
                 {truncatedWarning}
               </div>
             )}
-            
+
             {auditNotice && (
-              <div className="p-3 rounded-md text-sm border bg-sky-50 text-sky-800 border-sky-200" role="alert">
+              <div
+                className="p-3 rounded-md text-sm border bg-sky-50 text-sky-800 border-sky-200"
+                role="alert"
+              >
                 {auditNotice}
               </div>
             )}
@@ -234,9 +253,24 @@ export function DashboardExportModal({
           >
             {busy ? (
               <>
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <svg
+                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
                 </svg>
                 Đang xuất…
               </>

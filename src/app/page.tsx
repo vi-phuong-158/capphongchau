@@ -6,10 +6,11 @@ import { signIn } from "@/auth";
 import { appMetadata } from "@/lib/app-metadata";
 import { CertificateLookup } from "@/components/certificate-lookup";
 import { PwaInstallButton } from "@/components/pwa-install-button";
+import { isValidInternalRedirect } from "@/lib/validation";
 
 export default function HomePage({ searchParams }: { searchParams: { [key: string]: string | string[] | undefined } }) {
   const rawCallback = searchParams?.callbackUrl;
-  const callbackUrl = (typeof rawCallback === "string" && rawCallback.startsWith("/")) ? rawCallback : "/admin/dashboard";
+  const callbackUrl = (typeof rawCallback === "string" && isValidInternalRedirect(rawCallback)) ? rawCallback : "/admin/dashboard";
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-16 sm:py-24">
       <section className="w-full space-y-12 text-center pc-fade-in">

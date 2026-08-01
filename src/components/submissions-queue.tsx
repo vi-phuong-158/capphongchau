@@ -63,7 +63,7 @@ export function SubmissionsQueue() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState(initialStatus);
   const [officer, setOfficer] = useState(initialOfficer);
-  const [unassigned, setUnassigned] = useState(initialUnassigned);
+  const [unassigned] = useState(initialUnassigned);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
