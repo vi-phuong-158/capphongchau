@@ -105,7 +105,7 @@ export default function HomePage() {
             <form
               action={async () => {
                 "use server";
-                await signIn("google", { redirectTo: "/profile" });
+                await signIn("google", { redirectTo: "/admin/dashboard" });
               }}
               className="w-full"
             >

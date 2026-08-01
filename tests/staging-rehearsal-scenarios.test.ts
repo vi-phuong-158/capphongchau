@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { uploadWithResume, UploadFailedError } from "@/modules/public-intake/resumable-upload";
-import { deriveCreationFingerprint } from "@/modules/public-intake/creation-idempotency";
 
 /**
  * Suite kiểm thử diễn tập cho 3 kịch bản Staging:
@@ -76,14 +75,12 @@ describe("Diễn tập Kịch bản Staging 2: 2 người bấm cùng lúc (Race
   it("TC 2.1: Cập nhật đồng thời cùng 1 hồ sơ - Người bấm sau bị từ chối bằng Optimistic Locking (Version Conflict)", async () => {
     // Mô phỏng DB record có version hiện tại = 1
     let dbRecordVersion = 1;
-    let dbNote = "Ghi chú ban đầu";
 
-    async function updateSubmissionNote(expectedVersion: number, newNote: string) {
+    async function updateSubmissionNote(expectedVersion: number) {
       // Mô phỏng SQL: UPDATE submissions SET note = $newNote, version = version + 1 WHERE version = $expectedVersion
       if (expectedVersion !== dbRecordVersion) {
         return { success: false, code: "VERSION_CONFLICT", status: 409 };
       }
-      dbNote = newNote;
       dbRecordVersion += 1;
       return { success: true, version: dbRecordVersion, status: 200 };
     }
@@ -93,8 +90,8 @@ describe("Diễn tập Kịch bản Staging 2: 2 người bấm cùng lúc (Race
     const officerBVersion = 1;
 
     // Cả 2 cùng bấm "Lưu" gần như đồng thời
-    const reqA = updateSubmissionNote(officerAVersion, "Cán bộ A cập nhật");
-    const reqB = updateSubmissionNote(officerBVersion, "Cán bộ B cập nhật");
+    const reqA = updateSubmissionNote(officerAVersion);
+    const reqB = updateSubmissionNote(officerBVersion);
 
     const [resA, resB] = await Promise.all([reqA, reqB]);
 
@@ -133,7 +130,7 @@ describe("Diễn tập Kịch bản Staging 3: Bấm lại sau khi xong (Idempot
   it("TC 3.1: Gửi đúp (Double Submission) với cùng Idempotency Key - Trả về kết quả cached, không tạo dữ liệu trùng", async () => {
     const requestStore = new Map<string, { status: number; body: Record<string, unknown> }>();
 
-    async function handleSubmission(idempotencyKey: string, payload: { phone: string }) {
+    async function handleSubmission(idempotencyKey: string) {
       if (requestStore.has(idempotencyKey)) {
         // Idempotency hit: trả kết quả cũ đã cache
         return { ...requestStore.get(idempotencyKey)!, cached: true };

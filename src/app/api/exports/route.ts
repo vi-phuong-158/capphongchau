@@ -71,6 +71,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const scopeParam = searchParams.get("scope");
     const fromParam = searchParams.get("from");
     const toParam = searchParams.get("to");
+    const officerParam = searchParams.get("officer");
 
     const statuses = parseStatuses(scopeParam);
     const fromDate = parseIsoDate(fromParam, false);
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       statuses,
       fromDate,
       toDate,
+      officer: officerParam || undefined,
       batchSize: 500,
     })) {
       if (totalSubmissionsProcessed + chunk.length > MAX_EXPORT_SUBMISSIONS) {

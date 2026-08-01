@@ -34,6 +34,7 @@ import {
   serializePublicTimelineEvent,
   type SupplementItem,
   type SupplementRequest,
+  PUBLIC_STATUSES,
 } from "./workflow";
 
 export { PUBLIC_STATUSES } from "./workflow";
@@ -160,6 +161,27 @@ export interface QueueSubmissionSummary {
   readonly updatedAt: string;
   readonly issueNumber: string;
   readonly ownerName: string;
+}
+
+export interface DashboardSummaryOfficerMetrics {
+  readonly email: string;
+  readonly displayName: string;
+  readonly total: number;
+  readonly inProgress: number;
+  readonly accepted: number;
+  readonly lastActivity: string | null;
+}
+
+export interface DashboardSummary {
+  readonly totals: {
+    readonly total: number;
+    readonly pending: number;
+    readonly inProgress: number;
+    readonly accepted: number;
+    readonly unassigned: number;
+  };
+  readonly officers: readonly DashboardSummaryOfficerMetrics[];
+  readonly statusBreakdown: Readonly<Record<PublicStatus, number>>;
 }
 
 export interface QueueSubmissionPage {
@@ -1613,6 +1635,7 @@ export class PublicIntakeRepository {
     statuses: readonly PublicStatus[];
     fromDate?: string;
     toDate?: string;
+    officer?: string;
     batchSize?: number;
   }): AsyncGenerator<SubmissionRecord[]> {
     const database = getDatabase();
@@ -1626,10 +1649,18 @@ export class PublicIntakeRepository {
          where status = any($1)
            and ($2::timestamptz is null or updated_at >= $2::timestamptz)
            and ($3::timestamptz is null or updated_at < $3::timestamptz)
-           and legacy_row_index > $4
+           and ($4::text is null or claimed_by = $4)
+           and legacy_row_index > $5
          order by legacy_row_index
-         limit $5`,
-        [input.statuses, input.fromDate || null, input.toDate || null, lastRowIndex, batchSize],
+         limit $6`,
+        [
+          input.statuses,
+          input.fromDate || null,
+          input.toDate || null,
+          input.officer || null,
+          lastRowIndex,
+          batchSize,
+        ],
       );
 
       if (rows.length === 0) {
@@ -1656,6 +1687,7 @@ export class PublicIntakeRepository {
     query?: string;
     cursor?: string | null;
     limit?: number;
+    officer?: string;
   }): Promise<QueueSubmissionPage> {
     const database = getDatabase();
     const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
@@ -1693,6 +1725,7 @@ export class PublicIntakeRepository {
            or updated_at < $3::timestamptz
            or (updated_at = $3::timestamptz and submission_id < $4)
          )
+         and ($6::text is null or claimed_by = $6)
        order by updated_at desc, submission_id desc
        limit $5`,
       [
@@ -1701,6 +1734,7 @@ export class PublicIntakeRepository {
         cursor?.updatedAt ?? null,
         cursor?.submissionId ?? null,
         pageLimit + 1,
+        input.officer ?? null,
       ],
     );
 
@@ -1728,6 +1762,117 @@ export class PublicIntakeRepository {
               submissionId: lastItem.submissionId,
             })
           : null,
+    };
+  }
+
+  async getDashboardSummary(input: {
+    fromDate?: string;
+    toDate?: string;
+    officer?: string;
+    status?: PublicStatus;
+  }): Promise<DashboardSummary> {
+    const database = getDatabase();
+    const rows = await database.unsafe<
+      {
+        officer_email: string;
+        officer_name: string;
+        status: PublicStatus;
+        count: number;
+        last_activity: Date;
+      }[]
+    >(
+      `select
+         coalesce(claimed_by, '') as officer_email,
+         coalesce(claimed_by_display_name, '') as officer_name,
+         status,
+         count(*)::int as count,
+         max(updated_at) as last_activity
+       from public.public_submissions
+       where ($1::timestamptz is null or updated_at >= $1::timestamptz)
+         and ($2::timestamptz is null or updated_at < $2::timestamptz)
+         and ($3::text is null or claimed_by = $3)
+         and ($4::text is null or status = $4)
+       group by claimed_by, claimed_by_display_name, status
+       order by coalesce(claimed_by, ''), status`,
+      [
+        input.fromDate || null,
+        input.toDate || null,
+        input.officer || null,
+        input.status || null,
+      ],
+    );
+
+    let total = 0;
+    let pending = 0;
+    let inProgress = 0;
+    let accepted = 0;
+    let unassigned = 0;
+
+    const statusBreakdown = Object.fromEntries(
+      PUBLIC_STATUSES.map((s: PublicStatus) => [s, 0])
+    ) as Record<PublicStatus, number>;
+
+    const officersMap = new Map<
+      string,
+      { email: string; displayName: string; total: number; inProgress: number; accepted: number; lastActivity: Date | null }
+    >();
+
+    for (const row of rows) {
+      const { officer_email, officer_name, status, count, last_activity } = row;
+      
+      total += count;
+      statusBreakdown[status] += count;
+
+      if (status === "SUBMITTED" || status === "RESUBMITTED" || status === "NEEDS_SUPPLEMENT") {
+        if (!officer_email) {
+          unassigned += count;
+          pending += count;
+        } else {
+          inProgress += count;
+        }
+      } else if (status === "UNDER_REVIEW" || status === "ACCEPTING") {
+        inProgress += count;
+      } else if (status === "ACCEPTED") {
+        accepted += count;
+      } else if (!officer_email) {
+        unassigned += count;
+      }
+
+      if (officer_email) {
+        let metrics = officersMap.get(officer_email);
+        if (!metrics) {
+          metrics = {
+            email: officer_email,
+            displayName: officer_name,
+            total: 0,
+            inProgress: 0,
+            accepted: 0,
+            lastActivity: null,
+          };
+          officersMap.set(officer_email, metrics);
+        }
+
+        metrics.total += count;
+        if (["UNDER_REVIEW", "NEEDS_SUPPLEMENT", "RESUBMITTED", "ACCEPTING", "SUBMITTED"].includes(status)) {
+          metrics.inProgress += count;
+        }
+        if (status === "ACCEPTED") {
+          metrics.accepted += count;
+        }
+        
+        if (!metrics.lastActivity || last_activity > metrics.lastActivity) {
+          metrics.lastActivity = last_activity;
+        }
+      }
+    }
+
+    return {
+      totals: { total, pending, inProgress, accepted, unassigned },
+      statusBreakdown,
+      officers: Array.from(officersMap.values()).map((o) => ({
+        ...o,
+        lastActivity: o.lastActivity ? o.lastActivity.toISOString() : null,
+      })),
     };
   }
 
