@@ -35,11 +35,11 @@ vi.mock("@/modules/public-intake/repository", () => ({
   }),
 }));
 
-const mockReadPreview = vi.fn();
+const mockReadOriginal = vi.fn();
 
 vi.mock("@/modules/public-intake/storage", () => ({
   getPublicIntakeStorage: vi.fn().mockReturnValue({
-    readPreview: (...args: unknown[]) => mockReadPreview(...args),
+    readOriginal: (...args: unknown[]) => mockReadOriginal(...args),
   }),
   PreviewUnavailableError: class PreviewUnavailableError extends Error {},
 }));
@@ -57,7 +57,7 @@ describe("GET /api/submissions/:id/files/:fileId — chỉ truy vấn đúng m�
     vi.clearAllMocks();
     mockFindById.mockResolvedValue({ submissionId: "sub_1" });
     mockAppendAudit.mockResolvedValue(undefined);
-    mockReadPreview.mockResolvedValue({
+    mockReadOriginal.mockResolvedValue({
       bytes: Buffer.from([1, 2, 3]),
       contentType: "image/jpeg",
     });
@@ -80,7 +80,7 @@ describe("GET /api/submissions/:id/files/:fileId — chỉ truy vấn đúng m�
     expect(response.status).toBe(200);
     expect(mockFindActiveFile).toHaveBeenCalledWith("sub_1", "file_2");
     expect(mockListFiles).not.toHaveBeenCalled();
-    expect(mockReadPreview).toHaveBeenCalledWith("drive_2");
+    expect(mockReadOriginal).toHaveBeenCalledWith("drive_2");
   });
 
   it("giữ no-store cho ảnh xem trước (ảnh giấy tờ là PII, không được nằm trong cache)", async () => {
@@ -103,7 +103,7 @@ describe("GET /api/submissions/:id/files/:fileId — chỉ truy vấn đúng m�
     const response = await GET(request, makeContext());
 
     expect(response.status).toBe(404);
-    expect(mockReadPreview).not.toHaveBeenCalled();
+    expect(mockReadOriginal).not.toHaveBeenCalled();
     expect(mockAppendAudit).not.toHaveBeenCalled();
   });
 });

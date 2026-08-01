@@ -492,9 +492,9 @@ function DocumentViewerState({
       </div>
 
       {/* Main Display Box */}
-      <div className="relative h-[480px] w-full flex-1 overflow-auto bg-stone-900/95 p-4 flex items-center justify-center">
+      <div className="relative h-[60vh] min-h-[360px] lg:h-[78vh] lg:min-h-[560px] w-full flex-1 overflow-auto bg-stone-900/95 p-4">
         {imageError ? (
-          <div className="text-center text-sm text-stone-200">
+          <div className="flex h-full flex-col items-center justify-center text-center text-sm text-stone-200">
             <p>{imageError}</p>
             <button
               type="button"
@@ -506,10 +506,14 @@ function DocumentViewerState({
           </div>
         ) : imageSrc ? (
           <div
-            className="transition-transform duration-200 ease-out flex items-center justify-center"
+            className="transition-all duration-200 ease-out"
             style={{
-              transform: `scale(${zoom}) rotate(${rotation}deg)`,
-              transformOrigin: "center center",
+              width: `${zoom * 100}%`,
+              height: `${zoom * 100}%`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "auto"
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -517,19 +521,24 @@ function DocumentViewerState({
               src={imageSrc}
               alt={activeLabel}
               decoding="async"
-              className="max-h-[440px] w-auto max-w-full rounded object-contain shadow-2xl transition-all"
+              style={{ transform: `rotate(${rotation}deg)` }}
+              className="max-h-full max-w-full rounded object-contain shadow-2xl transition-transform"
             />
           </div>
         ) : revealed ? (
-          <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh…</p>
+          <div className="flex h-full items-center justify-center">
+            <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh gốc…</p>
+          </div>
         ) : (
-          <button
-            type="button"
-            className="rounded-lg border border-stone-500 bg-stone-800 px-5 py-3 text-sm font-semibold text-white hover:bg-stone-700"
-            onClick={() => reveal(activeFile.fileId)}
-          >
-            Xem ảnh
-          </button>
+          <div className="flex h-full items-center justify-center">
+            <button
+              type="button"
+              className="rounded-lg border border-stone-500 bg-stone-800 px-5 py-3 text-sm font-semibold text-white hover:bg-stone-700"
+              onClick={() => reveal(activeFile.fileId)}
+            >
+              Xem ảnh
+            </button>
+          </div>
         )}
       </div>
 

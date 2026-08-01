@@ -72,7 +72,7 @@ export async function GET(
       );
     }
     const driveStartedAt = performance.now();
-    const preview = await getPublicIntakeStorage().readPreview(file.driveFileId);
+    const original = await getPublicIntakeStorage().readOriginal(file.driveFileId);
     const driveMs = performance.now() - driveStartedAt;
     await repository.appendAudit({
       actorEmail: user.email,
@@ -81,11 +81,12 @@ export async function GET(
       requestId,
       metadata: { documentType: file.documentType },
     });
-    return new NextResponse(new Uint8Array(preview.bytes).buffer, {
+    return new NextResponse(new Uint8Array(original.bytes).buffer, {
       headers: {
         "cache-control": "private, no-store",
-        "content-type": preview.contentType,
+        "content-type": original.contentType,
         "x-content-type-options": "nosniff",
+        "content-disposition": "inline",
         "server-timing": `preview_db;dur=${databaseMs.toFixed(1)}, preview_drive;dur=${driveMs.toFixed(1)}, preview_total;dur=${(performance.now() - totalStartedAt).toFixed(1)}`,
       },
     });
