@@ -48,13 +48,7 @@ function parseStatuses(scopeParam: string | null): readonly PublicStatus[] {
   return [...OFFICIAL_EXPORT_STATUSES, ...BACKLOG_EXPORT_STATUSES];
 }
 
-function parseIsoDate(param: string | null, isEnd: boolean): string | undefined {
-  if (!param) return undefined;
-  const trimmed = param.trim();
-  if (!trimmed) return undefined;
-  if (trimmed.includes("T")) return trimmed;
-  return isEnd ? `${trimmed}T23:59:59.999Z` : `${trimmed}T00:00:00.000Z`;
-}
+// parseIsoDate removed because parseDashboardDateRange is used in repository
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = request.headers.get("x-request-id") ?? randomUUID();
@@ -72,10 +66,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const fromParam = searchParams.get("from");
     const toParam = searchParams.get("to");
     const officerParam = searchParams.get("officer");
+    const statusParam = searchParams.get("status") as any;
 
-    const statuses = parseStatuses(scopeParam);
-    const fromDate = parseIsoDate(fromParam, false);
-    const toDate = parseIsoDate(toParam, true);
+    const statuses = statusParam ? [statusParam] : parseStatuses(scopeParam);
 
     const repository = getPublicIntakeRepository();
     const accumulator = createPl3Accumulator();
@@ -85,8 +78,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     for await (const chunk of repository.listForExport({
       statuses,
-      fromDate,
-      toDate,
+      fromDate: fromParam || undefined,
+      toDate: toParam || undefined,
       officer: officerParam || undefined,
       batchSize: 500,
     })) {
@@ -112,6 +105,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const warningCount = content.official.warnings.length + content.backlog.warnings.length;
     const submissionCount = content.officialSubmissionCount + content.backlogSubmissionCount;
     const scopeJson = JSON.stringify({
+      scope: scopeParam,
+      status: statusParam,
+      from: fromParam,
+      to: toParam,
+      officer: officerParam,
       officialRows: content.official.rows.length,
       backlogRows: content.backlog.rows.length,
       officialSubmissions: content.officialSubmissionCount,
@@ -161,7 +159,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         action: "PL3_EXPORTED",
         entityId: exportJobId,
         requestId,
-        metadata: { rowCount, submissionCount, warningCount, archived, truncated },
+        metadata: { 
+          scope: scopeParam || "", 
+          status: statusParam || "", 
+          from: fromParam || "", 
+          to: toParam || "", 
+          officer: officerParam || "", 
+          rowCount, 
+          submissionCount, 
+          warningCount, 
+          archived, 
+          truncated 
+        },
       });
     } catch {
       audited = false;

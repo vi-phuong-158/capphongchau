@@ -1688,6 +1688,7 @@ export class PublicIntakeRepository {
     cursor?: string | null;
     limit?: number;
     officer?: string;
+    unassigned?: boolean;
   }): Promise<QueueSubmissionPage> {
     const database = getDatabase();
     const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
@@ -1726,6 +1727,10 @@ export class PublicIntakeRepository {
            or (updated_at = $3::timestamptz and submission_id < $4)
          )
          and ($6::text is null or claimed_by = $6)
+         and (
+           $7::boolean is not true 
+           or (claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
+         )
        order by updated_at desc, submission_id desc
        limit $5`,
       [
@@ -1735,6 +1740,7 @@ export class PublicIntakeRepository {
         cursor?.submissionId ?? null,
         pageLimit + 1,
         input.officer ?? null,
+        input.unassigned ?? false,
       ],
     );
 

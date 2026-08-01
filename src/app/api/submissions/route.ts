@@ -46,6 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
     const cursor = request.nextUrl.searchParams.get("cursor");
     const officer = request.nextUrl.searchParams.get("officer");
+    const unassigned = request.nextUrl.searchParams.get("unassigned") === "1";
     const repository = getPublicIntakeRepository();
     const databaseStartedAt = performance.now();
     const page = await repository.listQueuePage({
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       query,
       cursor,
       officer: officer ?? undefined,
+      unassigned,
       limit: PAGE_LIMIT,
     });
     const databaseMs = performance.now() - databaseStartedAt;

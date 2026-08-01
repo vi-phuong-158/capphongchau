@@ -21,8 +21,9 @@ export function DashboardClient({
   const fromDate = searchParams.get("from") ?? "";
   const toDate = searchParams.get("to") ?? "";
   const officer = searchParams.get("officer") ?? "";
+  const status = searchParams.get("status") ?? "";
 
-  const updateFilters = (newFilters: { from?: string; to?: string; officer?: string }) => {
+  const updateFilters = (newFilters: { from?: string; to?: string; officer?: string; status?: string }) => {
     const params = new URLSearchParams(searchParams.toString());
     
     if (newFilters.from !== undefined) {
@@ -38,6 +39,11 @@ export function DashboardClient({
     if (newFilters.officer !== undefined) {
       if (newFilters.officer) params.set("officer", newFilters.officer);
       else params.delete("officer");
+    }
+    
+    if (newFilters.status !== undefined) {
+      if (newFilters.status) params.set("status", newFilters.status);
+      else params.delete("status");
     }
 
     router.push(`/admin/dashboard?${params.toString()}`);
@@ -70,11 +76,11 @@ export function DashboardClient({
   }, [searchParams]);
 
   const cards = [
-    { label: "Tổng hiển thị", value: summary.totals.total, color: "text-stone-900", bg: "bg-white" },
-    { label: "Chờ tiếp nhận", value: summary.totals.pending, color: "text-amber-700", bg: "bg-amber-50" },
-    { label: "Đang xử lý", value: summary.totals.inProgress, color: "text-sky-700", bg: "bg-sky-50" },
-    { label: "Đã tiếp nhận", value: summary.totals.accepted, color: "text-emerald-700", bg: "bg-emerald-50" },
-    { label: "Chưa phân công", value: summary.totals.unassigned, color: "text-rose-700", bg: "bg-rose-50" },
+    { label: "Tổng hiển thị", value: summary.totals.total, color: "text-stone-900", bg: "bg-white", href: "/submissions" },
+    { label: "Chờ tiếp nhận", value: summary.totals.pending, color: "text-amber-700", bg: "bg-amber-50", href: "/submissions?status=SUBMITTED" },
+    { label: "Đang xử lý", value: summary.totals.inProgress, color: "text-sky-700", bg: "bg-sky-50", href: "/submissions?status=UNDER_REVIEW" },
+    { label: "Đã tiếp nhận", value: summary.totals.accepted, color: "text-emerald-700", bg: "bg-emerald-50", href: "/submissions?status=ACCEPTED" },
+    { label: "Chưa phân công", value: summary.totals.unassigned, color: "text-rose-700", bg: "bg-rose-50", href: "/submissions?unassigned=1" },
   ];
 
   return (
@@ -91,7 +97,7 @@ export function DashboardClient({
           >
             Xuất PL3
           </button>
-          <Link href="/submissions" className="pc-button text-sm">
+          <Link href={`/submissions?${new URLSearchParams(searchParams.toString()).toString()}`} className="pc-button text-sm">
             Vào hàng chờ
           </Link>
         </div>
@@ -122,6 +128,23 @@ export function DashboardClient({
             disabled={isRefreshing}
           />
         </div>
+        <div className="flex-1 min-w-[160px]">
+          <label className="block text-xs font-semibold mb-1 text-stone-700">Trạng thái</label>
+          <select
+            className="pc-select w-full"
+            value={status}
+            onChange={(e) => updateFilters({ status: e.target.value })}
+            disabled={isRefreshing}
+          >
+            <option value="">Tất cả</option>
+            <option value="SUBMITTED">Chờ tiếp nhận</option>
+            <option value="UNDER_REVIEW">Đang xử lý</option>
+            <option value="NEEDS_SUPPLEMENT">Cần bổ sung</option>
+            <option value="RESUBMITTED">Đã gửi lại</option>
+            <option value="ACCEPTED">Đã tiếp nhận</option>
+            <option value="REJECTED">Từ chối</option>
+          </select>
+        </div>
         <div className="w-40">
           <label className="block text-xs font-semibold mb-1 text-stone-700">Đến ngày</label>
           <input
@@ -136,12 +159,12 @@ export function DashboardClient({
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {cards.map((card, i) => (
-          <div key={i} className={`rounded-xl p-4 shadow-sm border border-stone-200 ${card.bg}`}>
+          <Link href={card.href} key={i} className={`rounded-xl p-4 shadow-sm border border-stone-200 ${card.bg} block hover:opacity-80 transition`}>
             <p className="text-sm font-medium text-stone-600 mb-1">{card.label}</p>
             <p className={`text-3xl font-bold ${card.color}`}>
               {card.value.toLocaleString()}
             </p>
-          </div>
+          </Link>
         ))}
       </div>
 
@@ -226,6 +249,7 @@ export function DashboardClient({
         initialFromDate={fromDate}
         initialToDate={toDate}
         initialOfficer={officer}
+        initialStatus={status}
       />
     </div>
   );

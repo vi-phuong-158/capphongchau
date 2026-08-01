@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { loadEnvConfig } from "@next/env";
 import { UserRole } from "../src/modules/common/domain";
+import { loadSupabaseEnvironment } from "../src/modules/common/env";
 import { getDatabase } from "../src/modules/supabase/database";
 
 loadEnvConfig(process.cwd());
@@ -21,6 +22,7 @@ function entityHash(email: string): string {
 }
 
 async function addSystemAdmins(): Promise<void> {
+  const env = loadSupabaseEnvironment();
   const db = getDatabase();
 
   console.log("Đang khởi tạo kết nối Supabase PostgreSQL...");
@@ -35,7 +37,7 @@ async function addSystemAdmins(): Promise<void> {
 
     await db.begin(async (tx) => {
       // Upsert user in public.users
-      await tx`
+      const rows = await tx`
         insert into public.users (email, roles, active, display_name)
         values (
           ${email},
@@ -45,9 +47,10 @@ async function addSystemAdmins(): Promise<void> {
         )
         on conflict (email) do update set
           roles = excluded.roles,
-          active = excluded.active,
+          active = true,
           display_name = excluded.display_name,
           updated_at = now()
+        returning email::text, roles, active, display_name, created_at, updated_at
       `;
 
       // Log audit

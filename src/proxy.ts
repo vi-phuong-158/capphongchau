@@ -24,7 +24,10 @@ export default auth((request) => {
     return response;
   }
 
-  return NextResponse.redirect(new URL("/", request.url));
+  const loginUrl = new URL("/", request.url);
+  const currentUrl = new URL(request.url);
+  loginUrl.searchParams.set("callbackUrl", currentUrl.pathname + currentUrl.search);
+  return NextResponse.redirect(loginUrl);
 });
 
 // Next.js đọc `matcher` lúc build nên bắt buộc là literal tĩnh — không tách hằng số ra nơi khác

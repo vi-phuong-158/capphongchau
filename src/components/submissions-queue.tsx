@@ -57,11 +57,13 @@ export function SubmissionsQueue() {
   const searchParams = useSearchParams();
   const initialOfficer = searchParams?.get("officer") ?? "";
   const initialStatus = searchParams?.get("status") ?? "";
+  const initialUnassigned = searchParams?.get("unassigned") === "1";
 
   const [items, setItems] = useState<readonly Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState(initialStatus);
   const [officer, setOfficer] = useState(initialOfficer);
+  const [unassigned, setUnassigned] = useState(initialUnassigned);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -87,6 +89,7 @@ export function SubmissionsQueue() {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (officer) params.set("officer", officer);
+    if (unassigned) params.set("unassigned", "1");
     if (debouncedQuery) params.set("q", debouncedQuery);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
@@ -102,13 +105,14 @@ export function SubmissionsQueue() {
         if ((error as { name?: string }).name !== "AbortError") setState("error");
       });
     return () => controller.abort();
-  }, [status, officer, debouncedQuery]);
+  }, [status, officer, unassigned, debouncedQuery]);
 
   const loadMore = (cursor: string) => {
     setLoadingMore(true);
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (officer) params.set("officer", officer);
+    if (unassigned) params.set("unassigned", "1");
     if (debouncedQuery) params.set("q", debouncedQuery);
     params.set("cursor", cursor);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store" })

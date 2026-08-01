@@ -21,6 +21,7 @@ export function DashboardExportModal({
   initialFromDate,
   initialToDate,
   initialOfficer,
+  initialStatus,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -28,6 +29,7 @@ export function DashboardExportModal({
   initialFromDate: string;
   initialToDate: string;
   initialOfficer: string;
+  initialStatus: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [scope, setScope] = useState<"all" | "official" | "backlog">("all");
@@ -52,6 +54,7 @@ export function DashboardExportModal({
       if (fromDate) query.set("from", fromDate);
       if (toDate) query.set("to", toDate);
       if (officer) query.set("officer", officer);
+      if (initialStatus) query.set("status", initialStatus);
 
       const response = await fetch(`/api/exports?${query.toString()}`, {
         method: "POST",

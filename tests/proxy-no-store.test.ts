@@ -15,7 +15,7 @@ vi.mock("next-auth", () => ({
 }));
 vi.mock("@/auth.config", () => ({ authConfig: {} }));
 
-type ProxyRequest = { auth: { user?: { email?: string } } | null; url: string };
+type ProxyRequest = { auth: { user?: { email?: string } } | null; url: string; nextUrl: { pathname: string; search: string } };
 type ProxyHandler = (request: ProxyRequest) => Response;
 
 async function loadProxy(): Promise<ProxyHandler> {
@@ -27,6 +27,7 @@ function request(email: string | null): ProxyRequest {
   return {
     auth: email === null ? null : { user: { email } },
     url: "http://localhost/submissions/1a2b3c",
+    nextUrl: { pathname: "/submissions/1a2b3c", search: "" },
   };
 }
 
@@ -56,7 +57,7 @@ describe("proxy Edge — không để trang cán bộ nằm lại trong cache", 
     const response = proxy(request(null));
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://localhost/");
+    expect(response.headers.get("location")).toBe("http://localhost/?callbackUrl=%2Fsubmissions%2F1a2b3c");
   });
 
   /**
@@ -66,7 +67,11 @@ describe("proxy Edge — không để trang cán bộ nằm lại trong cache", 
   it("session không có email cũng bị coi là chưa đăng nhập", async () => {
     const proxy = await loadProxy();
 
-    expect(proxy({ auth: { user: {} }, url: "http://localhost/submissions/1" }).status).toBe(307);
-    expect(proxy(request("")).status).toBe(307);
+    const response1 = proxy({ auth: { user: {} }, url: "http://localhost/submissions/1", nextUrl: { pathname: "/submissions/1", search: "" } });
+    expect(response1.status).toBe(307);
+    expect(response1.headers.get("location")).toBe("http://localhost/?callbackUrl=%2Fsubmissions%2F1");
+    const response2 = proxy(request(""));
+    expect(response2.status).toBe(307);
+    expect(response2.headers.get("location")).toBe("http://localhost/?callbackUrl=%2Fsubmissions%2F1a2b3c");
   });
 });
