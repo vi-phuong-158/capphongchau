@@ -652,34 +652,38 @@ describe.skipIf(!hasTestDb)(
       30_000,
     );
 
-    it("Phase 5A: mười file hoàn tất theo năm nhóm, Drive peak không vượt 2 và dữ liệu chính thức không trùng", async () => {
-      const { record, fileSpecs } = await seedSubmission({}, 10);
-      const result = await runOfficialAcceptance({
-        ...baseInput(record),
-        idempotencyKey: `key-${randomUUID()}`,
-        mutationHash: "phase-5a-ten-files",
-      });
-      expect(result.status).toBe("ACCEPTED");
-      expect(drive.state.peakConcurrentUpdates()).toBe(2);
-      expect(drive.state.peakConcurrentUpdates()).toBeLessThanOrEqual(2);
+    it(
+      "Phase 5A: mười file hoàn tất theo năm nhóm, Drive peak không vượt 2 và dữ liệu chính thức không trùng",
+      async () => {
+        const { record, fileSpecs } = await seedSubmission({}, 10);
+        const result = await runOfficialAcceptance({
+          ...baseInput(record),
+          idempotencyKey: `key-${randomUUID()}`,
+          mutationHash: "phase-5a-ten-files",
+        });
+        expect(result.status).toBe("ACCEPTED");
+        expect(drive.state.peakConcurrentUpdates()).toBe(2);
+        expect(drive.state.peakConcurrentUpdates()).toBeLessThanOrEqual(2);
 
-      const [saga] = await bootstrapSql<
-        { moved_files: Record<string, string> | string; step: string }[]
-      >`select moved_files, step from public.public_acceptance_sagas where submission_id = ${record.submissionId}`;
-      const movedFiles =
-        typeof saga.moved_files === "string"
-          ? (JSON.parse(saga.moved_files) as Record<string, string>)
-          : saga.moved_files;
-      // Five durable checkpoint transactions are exercised by five chunks; the helper unit test
-      // asserts exact grouping because schema deliberately stores only the final map, not history.
-      expect(Object.keys(movedFiles)).toHaveLength(10);
-      expect(saga.step).toBe("COMPLETED");
-      const officialFiles = await bootstrapSql`
+        const [saga] = await bootstrapSql<
+          { moved_files: Record<string, string> | string; step: string }[]
+        >`select moved_files, step from public.public_acceptance_sagas where submission_id = ${record.submissionId}`;
+        const movedFiles =
+          typeof saga.moved_files === "string"
+            ? (JSON.parse(saga.moved_files) as Record<string, string>)
+            : saga.moved_files;
+        // Five durable checkpoint transactions are exercised by five chunks; the helper unit test
+        // asserts exact grouping because schema deliberately stores only the final map, not history.
+        expect(Object.keys(movedFiles)).toHaveLength(10);
+        expect(saga.step).toBe("COMPLETED");
+        const officialFiles = await bootstrapSql`
           select file_id from public.files where case_id = ${result.officialCaseId}
         `;
-      expect(officialFiles).toHaveLength(10);
-      for (const file of fileSpecs) expect(drive.state.updateCallsFor(file.driveFileId)).toBe(1);
-    }, 30_000);
+        expect(officialFiles).toHaveLength(10);
+        for (const file of fileSpecs) expect(drive.state.updateCallsFor(file.driveFileId)).toBe(1);
+      },
+      30_000,
+    );
 
     it(
       "Kịch bản 1b: GCN nhiều thửa nhiều mục đích → public.parcels và public.assets được ghi đủ, " +

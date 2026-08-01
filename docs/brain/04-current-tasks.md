@@ -11,12 +11,12 @@
 
 ## [2026-07-31] Post-merge hardening sau PR #12
 
-| Hạng mục              | Repository / code                                                                     | Rehearsal / Preview                                                                                | Production                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| PR #12                | **Đã merge** vào `main` tại `d898b7d`                                                 | Chỉ ghi nhận theo bằng chứng từng môi trường bên dưới                                              | Không suy ra trạng thái deploy từ Git                                                          |
-| Upload public/officer | Đã nguyên tử trong transaction; đợt hardening thêm replay sớm có validate, lọc `kind` | Integration Postgres chưa chạy trong phiên 2026-07-31 vì thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` | Không chạy test và không thao tác dữ liệu Production                                           |
-| Migration `002`–`006` | Năm file SQL đã có trong repository; task này không thêm/sửa migration                | Phải xác minh đúng project bằng preflight/lịch sử migration trước khi kết luận                     | **Chưa xác minh trong phiên này**; không được ghi “đã chạy” nếu thiếu project, lệnh, thời điểm |
-| Deploy/smoke test     | Không phải trạng thái của code                                                        | Chưa deploy/chưa smoke test trong phiên này                                                        | Không deploy                                                                                   |
+| Hạng mục | Repository / code | Rehearsal / Preview | Production |
+| --- | --- | --- | --- |
+| PR #12 | **Đã merge** vào `main` tại `d898b7d` | Chỉ ghi nhận theo bằng chứng từng môi trường bên dưới | Không suy ra trạng thái deploy từ Git |
+| Upload public/officer | Đã nguyên tử trong transaction; đợt hardening thêm replay sớm có validate, lọc `kind` | Integration Postgres chưa chạy trong phiên 2026-07-31 vì thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` | Không chạy test và không thao tác dữ liệu Production |
+| Migration `002`–`006` | Năm file SQL đã có trong repository; task này không thêm/sửa migration | Phải xác minh đúng project bằng preflight/lịch sử migration trước khi kết luận | **Chưa xác minh trong phiên này**; không được ghi “đã chạy” nếu thiếu project, lệnh, thời điểm |
+| Deploy/smoke test | Không phải trạng thái của code | Chưa deploy/chưa smoke test trong phiên này | Không deploy |
 
 Việc đang thực hiện trên `codex/post-merge-hardening-pr12`:
 

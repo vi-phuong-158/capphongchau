@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
 
 // `isEditable`/`isHeldByOfficer` KHÔNG bị mock — đây chính là chốt chặn cần kiểm.
 vi.mock("@/modules/public-intake/route-context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/modules/public-intake/route-context")>();
+  const actual =
+    await importOriginal<typeof import("@/modules/public-intake/route-context")>();
   return {
     ...actual,
     resolvePublicRequest: (...args: unknown[]) => mocks.resolvePublicRequest(...args),

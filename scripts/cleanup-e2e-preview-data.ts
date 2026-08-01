@@ -110,7 +110,9 @@ async function cleanup(options: Options): Promise<void> {
 
   if (!options.apply) {
     console.log("\nChạy khô — không xóa gì.");
-    console.log(`  npx tsx scripts/cleanup-e2e-preview-data.ts --apply --confirm=${token}`);
+    console.log(
+      `  npx tsx scripts/cleanup-e2e-preview-data.ts --apply --confirm=${token}`,
+    );
     return;
   }
 
@@ -135,18 +137,17 @@ async function cleanup(options: Options): Promise<void> {
     deletedThisPass = false;
     for (const table of [...remaining]) {
       try {
-        await database.unsafe(`delete from public.${table} where submission_id = any($1::text[])`, [
-          submissionIds,
-        ]);
+        await database.unsafe(
+          `delete from public.${table} where submission_id = any($1::text[])`,
+          [submissionIds],
+        );
         remaining.delete(table);
         deletedThisPass = true;
       } catch {
         // Còn bảng con khác phụ thuộc bảng này — thử lại ở lượt sau.
       }
     }
-    console.log(
-      `  Lượt ${pass}: còn ${remaining.size} bảng chưa xóa được (${[...remaining].join(", ") || "hết"}).`,
-    );
+    console.log(`  Lượt ${pass}: còn ${remaining.size} bảng chưa xóa được (${[...remaining].join(", ") || "hết"}).`);
   }
 
   if (remaining.size > 0) {

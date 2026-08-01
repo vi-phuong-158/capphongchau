@@ -33,10 +33,7 @@ import {
   getPublicIntakeRepository,
   OfficerFileMutationRejectedError,
 } from "@/modules/public-intake/repository";
-import {
-  MAX_CERTIFICATE_PHOTOS,
-  SUBMISSION_BYTE_BUDGET,
-} from "@/modules/public-intake/upload-commit";
+import { MAX_CERTIFICATE_PHOTOS, SUBMISSION_BYTE_BUDGET } from "@/modules/public-intake/upload-commit";
 
 const TEST_DB_URL = process.env.ACCEPTANCE_SAGA_TEST_DATABASE_URL;
 const hasTestDb = Boolean(TEST_DB_URL && TEST_DB_URL.trim().length > 0);
@@ -133,11 +130,7 @@ describe.skipIf(!hasTestDb)("Thao tác ảnh của cán bộ — nguyên tử tr
         (${submissionId}, ${`PC-TEST-${randomUUID()}`}, 'UNDER_REVIEW', '0912345678', 'test-hash',
          'v1', 'test-folder', ${OFFICER},
          ${JSON.stringify({
-           certificate: {
-             issueNumber: "AD 000001",
-             issueDate: "2020-01-01",
-             registryNumber: "CH1",
-           },
+           certificate: { issueNumber: "AD 000001", issueDate: "2020-01-01", registryNumber: "CH1" },
            owners: [
              { id: OWNER_ID, ownerType: "CA_NHAN", fullName: "Nguyễn Văn A" },
              { id: OTHER_OWNER_ID, ownerType: "CA_NHAN", fullName: "Trần Thị B" },

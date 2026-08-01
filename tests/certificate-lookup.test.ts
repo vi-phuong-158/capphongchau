@@ -167,18 +167,10 @@ describe("POST /api/public/certificate-lookup", () => {
 
   it("từ chối số GCN hoặc ngày cấp sai định dạng trước khi tra cứu", async () => {
     const badNumber = await POST(
-      createRequest({
-        method: "CERTIFICATE_NUMBER",
-        issueNumber: "CH/123",
-        issueDate: "2020-01-01",
-      }),
+      createRequest({ method: "CERTIFICATE_NUMBER", issueNumber: "CH/123", issueDate: "2020-01-01" }),
     );
     const badDate = await POST(
-      createRequest({
-        method: "CERTIFICATE_NUMBER",
-        issueNumber: "CH-123",
-        issueDate: "2020-02-30",
-      }),
+      createRequest({ method: "CERTIFICATE_NUMBER", issueNumber: "CH-123", issueDate: "2020-02-30" }),
     );
 
     expect(badNumber.status).toBe(400);
@@ -197,11 +189,7 @@ describe("POST /api/public/certificate-lookup", () => {
     mocks.lookupCertificateByIssue.mockRejectedValue(new CertificateLookupRateLimitError());
 
     const response = await POST(
-      createRequest({
-        method: "CERTIFICATE_NUMBER",
-        issueNumber: "CH-123",
-        issueDate: "2020-01-01",
-      }),
+      createRequest({ method: "CERTIFICATE_NUMBER", issueNumber: "CH-123", issueDate: "2020-01-01" }),
     );
     const body = (await response.json()) as { error?: { code?: string } };
 

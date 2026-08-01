@@ -910,7 +910,7 @@ scripts/ai/local-draft.ts enqueue → tạo job theo bộ ảnh GCN hiện tại
 
 - `src/modules/ai-extraction/local-draft-support.ts`: `parseLocalDraftOptions` và
   `decideResultOutcome` — bậc thang `PASSED/REVIEW_REQUIRED/BLOCKED` → `COMPLETED/NEEDS_REVIEW/
-QUARANTINED` dùng chung một định nghĩa với route API.
+  QUARANTINED` dùng chung một định nghĩa với route API.
 - Đường này **thay chỗ ghi, không nới quyền**: cùng guard quét CCCD/prompt injection, cùng điều kiện
   manifest join `public_files`, cùng kiểm `input_fingerprint`, cùng nhánh `STALE` + audit. Khác API ở
   ba điểm: không có lease/`workerInstanceId`, idempotency lấy theo `result_fingerprint` thay vì header

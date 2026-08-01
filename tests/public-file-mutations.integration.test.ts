@@ -107,12 +107,10 @@ describe.skipIf(!hasTestDb)("Thao tác ảnh công khai — nguyên tử trên P
         (${submissionId}, ${`PC-TEST-${randomUUID()}`}, 'DRAFT', '0912345678', 'test-hash',
          'v1', 'test-folder', '',
          ${JSON.stringify({
-           certificate: {
-             issueNumber: "AD 000001",
-             issueDate: "2020-01-01",
-             registryNumber: "CH1",
-           },
-           owners: [{ id: OWNER_ID, ownerType: "CA_NHAN", fullName: "Nguyễn Văn A" }],
+           certificate: { issueNumber: "AD 000001", issueDate: "2020-01-01", registryNumber: "CH1" },
+           owners: [
+             { id: OWNER_ID, ownerType: "CA_NHAN", fullName: "Nguyễn Văn A" },
+           ],
            parcels: [],
            assets: [],
            phone: "0912345678",

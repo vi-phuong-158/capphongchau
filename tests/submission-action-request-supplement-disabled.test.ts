@@ -114,7 +114,7 @@ describe("vị trí nút Từ chối trên màn duyệt hồ sơ", () => {
     expect(rejectButton).toBeGreaterThan(menuStart);
   });
 
-  it("vẫn giữ một lần xác nhận trước khi gọi REJECT", () => {
+  it('vẫn giữ một lần xác nhận trước khi gọi REJECT', () => {
     const rejectBlock = detail.slice(
       detail.indexOf("⋯ Thao tác khác"),
       detail.indexOf('void action("REJECT")'),

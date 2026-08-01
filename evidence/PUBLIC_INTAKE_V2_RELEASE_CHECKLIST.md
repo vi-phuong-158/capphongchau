@@ -2,11 +2,11 @@
 
 ## Trạng thái được xác minh sau PR #12 (2026-07-31)
 
-| Phạm vi             | Trạng thái có bằng chứng                                                                                                         | Không được suy ra                                                         |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Repository / code   | PR #12 đã merge vào `main` tại `d898b7d`; code có migration `002`–`006` và integration suite thao tác ảnh public/officer         | Không đồng nghĩa migration đã chạy hoặc deployment đã cập nhật            |
+| Phạm vi | Trạng thái có bằng chứng | Không được suy ra |
+| --- | --- | --- |
+| Repository / code | PR #12 đã merge vào `main` tại `d898b7d`; code có migration `002`–`006` và integration suite thao tác ảnh public/officer | Không đồng nghĩa migration đã chạy hoặc deployment đã cập nhật |
 | Rehearsal / Preview | Phiên post-merge này không có `ACCEPTANCE_SAGA_TEST_DATABASE_URL`, nên 4 file integration/28 ca bị skip; không deploy/smoke test | Không dùng log project rehearsal cũ để khẳng định Vercel Preview hiện tại |
-| Production          | Không chạy test DB, migration, Drive hoặc deploy trong phiên này                                                                 | Chưa xác minh migration/deployment/smoke test Production                  |
+| Production | Không chạy test DB, migration, Drive hoặc deploy trong phiên này | Chưa xác minh migration/deployment/smoke test Production |
 
 Checklist lịch sử bên dưới vẫn hữu ích cho thao tác vận hành, nhưng mọi câu “đã chạy migration”
 phải đọc kèm **project/database cụ thể và thời điểm**. Không dùng nó để thay thế preflight đọc trên

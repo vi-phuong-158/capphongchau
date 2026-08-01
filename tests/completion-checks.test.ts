@@ -190,9 +190,7 @@ describe("Completion checks validation rules", () => {
     );
     expect(detail).toBeDefined();
     // Phải gọi tên đúng tài sản thứ 2, không phải một câu chung chung.
-    expect(detail?.label).toBe(
-      "Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất",
-    );
+    expect(detail?.label).toBe("Tài sản 2 (Công trình xây dựng khác — Nhà kho sau vườn) chưa chọn thửa đất");
     expect(detail?.message).toContain("Thửa đất liên quan");
     // Tài sản đã gắn thửa không bị báo.
     expect(

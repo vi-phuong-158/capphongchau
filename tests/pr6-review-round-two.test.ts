@@ -375,9 +375,7 @@ describe("Chỉ mục tra cứu CCCD phủ cả hồ sơ MỨC A", () => {
   it("repository ghi chỉ mục với kind PENDING, idempotent", () => {
     const repository = read("../src/modules/public-intake/repository.ts");
     expect(repository).toContain("insert into public.public_lookup_index");
-    expect(repository).toContain(
-      "values ('PENDING', ${hmac}, ${submissionId}) on conflict do nothing",
-    );
+    expect(repository).toContain("values ('PENDING', ${hmac}, ${submissionId}) on conflict do nothing");
   });
 
   it("repository KHÔNG tự tính HMAC — pepper chỉ nằm ở tầng route", () => {
