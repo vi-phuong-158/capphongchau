@@ -273,6 +273,43 @@ export class PublicIntakeStorage {
     return { bytes, contentType: response.headers.get("content-type") ?? "image/jpeg" };
   }
 
+  /**
+   * Đọc trực tiếp tệp gốc từ Google Drive mà không qua thumbnail.
+   * Dành cho màn hình duyệt hồ sơ của cán bộ.
+   */
+  async readOriginal(driveFileId: string): Promise<PreviewFile> {
+    const { drive } = createGoogleWorkspaceClient(this.credentials);
+
+    // Kiểm tra kích thước trước khi tải toàn bộ file vào RAM
+    const metadata = await drive.files.get({
+      fileId: driveFileId,
+      fields: "size,mimeType",
+    });
+    const mimeType = metadata.data.mimeType ?? "";
+    if (!isCanonicalImageMimeType(mimeType)) {
+      throw new PreviewUnavailableError("Định dạng tệp không được chấp nhận.");
+    }
+    const sizeBytes = Number(metadata.data.size ?? 0);
+    // Giới hạn 30 MB giống luồng tải lên
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > 30 * 1024 * 1024) {
+      throw new PreviewUnavailableError(
+        "Kích thước tệp không hợp lệ hoặc vượt quá giới hạn 30 MB.",
+      );
+    }
+
+    const response = await drive.files.get(
+      { fileId: driveFileId, alt: "media" },
+      { responseType: "arraybuffer" },
+    );
+
+    const bytes = new Uint8Array(response.data as ArrayBuffer);
+    if (bytes.byteLength === 0) {
+      throw new PreviewUnavailableError("Tệp tin trống.");
+    }
+
+    return { bytes, contentType: mimeType };
+  }
+
   private get credentials() {
     return {
       clientId: this.environment.GOOGLE_DRIVE_CLIENT_ID,

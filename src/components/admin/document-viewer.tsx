@@ -103,8 +103,18 @@ function usePreviewImages(submissionId: string) {
           }
           return response.blob();
         })
-        .then((blob) => {
-          cache.current.set(fileId, URL.createObjectURL(blob));
+        .then(async (blob) => {
+          let objectUrlBlob = blob;
+          if (blob.type === "image/heic" || blob.type === "image/heif") {
+            try {
+              const heic2any = (await import("heic2any")).default;
+              const converted = await heic2any({ blob, toType: "image/jpeg" });
+              objectUrlBlob = Array.isArray(converted) ? converted[0] : converted;
+            } catch {
+              throw new Error("Không thể đọc định dạng HEIC/HEIF.");
+            }
+          }
+          cache.current.set(fileId, URL.createObjectURL(objectUrlBlob));
           bumpRender((value) => value + 1);
         })
         .catch((reason: unknown) => {
@@ -149,21 +159,15 @@ function DocumentViewerState({
   const [reassignError, setReassignError] = useState<string | null>(null);
   const lightboxTitleId = useId();
   const { request: requestPreview, sourceFor, errorFor } = usePreviewImages(submissionId);
-  /**
-   * Ảnh chỉ được tải khi cán bộ **bấm "Xem ảnh"** cho đúng tệp đó.
-   *
-   * Mở hồ sơ không kéo theo bất kỳ byte ảnh nào: phần lớn lượt mở màn duyệt là để đọc/sửa dữ liệu
-   * chứ không phải soi ảnh, mà mỗi ảnh giấy tờ là một lượt gọi Drive cộng một dòng audit. Tải ngầm
-   * "ảnh đang chọn" nghe như nhỏ nhưng chính là một lượt Drive cho **mọi** lần mở hồ sơ.
-   *
-   * Danh sách này chỉ nhớ những tệp đã được yêu cầu; `usePreviewImages` giữ cache blob nên bấm qua
-   * lại giữa các tab đã xem không tải lại.
-   */
-  const [revealedFileIds, setRevealedFileIds] = useState<readonly string[]>([]);
-  const reveal = (fileId: string) => {
-    setRevealedFileIds((current) => (current.includes(fileId) ? current : [...current, fileId]));
-    requestPreview(fileId);
-  };
+  const activeFile = files[selectedIndex] || files[0];
+
+  const activeFileId = activeFile?.fileId;
+
+  useEffect(() => {
+    if (activeFileId) {
+      requestPreview(activeFileId);
+    }
+  }, [activeFileId, requestPreview]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -195,7 +199,6 @@ function DocumentViewerState({
     );
   }
 
-  const activeFile = files[selectedIndex] || files[0];
   const activeLabel = documentFileLabel(activeFile, files, ownerIds);
   // Chỉ ảnh GCN gỡ được: CCCD là ràng buộc bắt buộc của `completionChecks`, luồng đúng là thay ảnh.
   const canDelete = Boolean(onDeleteFile) && activeFile.documentType === "CERTIFICATE";
@@ -216,9 +219,8 @@ function DocumentViewerState({
     setRotation(0);
   };
 
-  const revealed = revealedFileIds.includes(activeFile.fileId);
-  const imageSrc = revealed ? sourceFor(activeFile.fileId) : null;
-  const imageError = revealed ? errorFor(activeFile.fileId) : null;
+  const imageSrc = sourceFor(activeFile.fileId);
+  const imageError = errorFor(activeFile.fileId);
 
   return (
     <div className="flex flex-col rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden sticky top-4">
@@ -492,13 +494,13 @@ function DocumentViewerState({
       </div>
 
       {/* Main Display Box */}
-      <div className="relative h-[480px] w-full flex-1 overflow-auto bg-stone-900/95 p-4 flex items-center justify-center">
+      <div className="relative h-[60vh] min-h-[360px] lg:h-[78vh] lg:min-h-[560px] w-full flex-1 overflow-auto bg-stone-900/95 p-4">
         {imageError ? (
-          <div className="text-center text-sm text-stone-200">
+          <div className="flex h-full flex-col items-center justify-center text-center text-sm text-stone-200">
             <p>{imageError}</p>
             <button
               type="button"
-              onClick={() => reveal(activeFile.fileId)}
+              onClick={() => requestPreview(activeFile.fileId)}
               className="mt-3 rounded bg-stone-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-600"
             >
               Thử lại
@@ -506,10 +508,14 @@ function DocumentViewerState({
           </div>
         ) : imageSrc ? (
           <div
-            className="transition-transform duration-200 ease-out flex items-center justify-center"
+            className="transition-all duration-200 ease-out"
             style={{
-              transform: `scale(${zoom}) rotate(${rotation}deg)`,
-              transformOrigin: "center center",
+              width: `${zoom * 100}%`,
+              height: `${zoom * 100}%`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "auto",
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -517,19 +523,14 @@ function DocumentViewerState({
               src={imageSrc}
               alt={activeLabel}
               decoding="async"
-              className="max-h-[440px] w-auto max-w-full rounded object-contain shadow-2xl transition-all"
+              style={{ transform: `rotate(${rotation}deg)` }}
+              className="max-h-full max-w-full rounded object-contain shadow-2xl transition-transform"
             />
           </div>
-        ) : revealed ? (
-          <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh…</p>
         ) : (
-          <button
-            type="button"
-            className="rounded-lg border border-stone-500 bg-stone-800 px-5 py-3 text-sm font-semibold text-white hover:bg-stone-700"
-            onClick={() => reveal(activeFile.fileId)}
-          >
-            Xem ảnh
-          </button>
+          <div className="flex h-full items-center justify-center">
+            <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh gốc…</p>
+          </div>
         )}
       </div>
 
