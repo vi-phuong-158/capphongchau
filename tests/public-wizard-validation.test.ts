@@ -108,9 +108,7 @@ describe("Bước 1 — ảnh Giấy chứng nhận", () => {
   it("thiếu số điện thoại thì chặn đúng ô", () => {
     const draft = draftWithOwner();
     draft.phone = "12";
-    expect(
-      validatePublicWizardStep(input({ step, hasReceipt: false, draft })).phone,
-    ).toBeTruthy();
+    expect(validatePublicWizardStep(input({ step, hasReceipt: false, draft })).phone).toBeTruthy();
   });
 
   it("chưa đồng ý thì chặn", () => {

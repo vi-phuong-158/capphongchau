@@ -20,7 +20,9 @@ describe("staff Preview benchmark", () => {
 
   it("chỉ giữ Server-Timing duration nằm trong allowlist", () => {
     expect(
-      parseSafeServerTiming("auth;dur=2.4, queue_db;dur=11, drive_file_id;dur=9, total;desc=secret"),
+      parseSafeServerTiming(
+        "auth;dur=2.4, queue_db;dur=11, drive_file_id;dur=9, total;desc=secret",
+      ),
     ).toEqual({ auth: 2.4, queue_db: 11 });
   });
 

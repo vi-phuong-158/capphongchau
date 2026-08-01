@@ -10,12 +10,16 @@ const indexHtml = readFileSync(
 
 describe("emergency Apps Script CCCD QR intake", () => {
   it("loads the same pinned ZXing Browser runtime as the main project", () => {
-    expect(indexHtml).toContain("https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js");
+    expect(indexHtml).toContain(
+      "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js",
+    );
     expect(indexHtml).toContain("function loadZxingBrowser()");
   });
 
   it("places the CCCD scan before the form and keeps manual entry as fallback", () => {
-    expect(indexHtml.indexOf("CCCD và quét QR")).toBeLessThan(indexHtml.indexOf("Thông tin người kê khai"));
+    expect(indexHtml.indexOf("CCCD và quét QR")).toBeLessThan(
+      indexHtml.indexOf("Thông tin người kê khai"),
+    );
     expect(indexHtml).toContain("Bạn vẫn có thể nhập thông tin thủ công.");
   });
 

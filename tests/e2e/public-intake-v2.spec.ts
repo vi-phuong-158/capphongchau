@@ -52,7 +52,11 @@ const PHONE = "0912345678";
  * Cả hai kiểu chờ đó đều là chờ giả — bấm "Tiếp tục" tiếp theo có thể chạy trước khi máy chủ thật
  * sự xác nhận đã nhận ảnh, và bị chặn lại đúng bằng thông báo tưởng đã né được.
  */
-async function uploadAndAwaitComplete(page: Page, input: ReturnType<Page["locator"]>, filePath: string): Promise<void> {
+async function uploadAndAwaitComplete(
+  page: Page,
+  input: ReturnType<Page["locator"]>,
+  filePath: string,
+): Promise<void> {
   const [response] = await Promise.all([
     page.waitForResponse(
       (res) => res.url().includes("/uploads/complete") && res.request().method() === "POST",
@@ -109,19 +113,18 @@ async function fillMinimalStepOne(page: Page): Promise<void> {
  * chọn tới tận màn hình gửi cuối cùng.
  */
 async function fillMinimalStepTwo(page: Page): Promise<void> {
-  await page.getByLabel(/Họ và tên/i).first().fill("Nguyễn Văn Test");
+  await page
+    .getByLabel(/Họ và tên/i)
+    .first()
+    .fill("Nguyễn Văn Test");
   // Cùng lỗ a11y như ô ảnh GCN: chọn theo VỊ TRÍ, mặt trước luôn render trước mặt sau (mảng
   // `["CITIZEN_ID_FRONT", "CITIZEN_ID_BACK"]` trong wizard.tsx).
   const cccdFileInputs = page.locator('input[type="file"]');
   await uploadAndAwaitComplete(page, cccdFileInputs.nth(0), "tests/fixtures/cccd-truoc.png");
-  await expect(
-    page.getByRole("button", { name: /Chạm để tải ảnh khác thay thế/i }),
-  ).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /Chạm để tải ảnh khác thay thế/i })).toHaveCount(1);
   await expect(page.getByRole("button", { name: /Tiếp tục/i })).toBeEnabled();
   await uploadAndAwaitComplete(page, cccdFileInputs.nth(1), "tests/fixtures/cccd-sau.png");
-  await expect(
-    page.getByRole("button", { name: /Chạm để tải ảnh khác thay thế/i }),
-  ).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /Chạm để tải ảnh khác thay thế/i })).toHaveCount(2);
   // `readCitizenIdQr()` vẫn đang chạy sau khi server xác nhận ảnh; QR không đọc được không chặn
   // bước tiếp theo, nhưng wizard chỉ mở lại nút sau khi quá trình đó kết thúc.
   await expect(page.getByRole("button", { name: /Tiếp tục/i })).toBeEnabled();
@@ -216,12 +219,11 @@ test.describe("E2E-03 — Nhiều ảnh Giấy chứng nhận", () => {
   test("một ảnh hỏng không kéo theo ảnh khác — cả ba nhãn trang đều hiện", async ({ page }) => {
     await page.goto("/ke-khai");
     await createMinimalSubmission(page);
-    await certificatePhotoInput(page)
-      .setInputFiles([
-        "tests/fixtures/gcn-1.png",
-        "tests/fixtures/gcn-2.png",
-        "tests/fixtures/gcn-3.png",
-      ]);
+    await certificatePhotoInput(page).setInputFiles([
+      "tests/fixtures/gcn-1.png",
+      "tests/fixtures/gcn-2.png",
+      "tests/fixtures/gcn-3.png",
+    ]);
     // Hàng đợi tối đa 2 luồng song song (upload-queue.ts) — cả ba việc phải hoàn tất, không việc
     // nào bị bỏ lại dù không chạy đồng thời. Nhãn tạm của queue biến mất khi ảnh đã hoàn tất;
     // thẻ ảnh chính thức dùng vị trí dạng "Ảnh N/3".
@@ -274,7 +276,10 @@ test.describe("E2E-05 — Hàng rào tiếp nhận chính thức", () => {
   test("hồ sơ tối thiểu bị chặn kèm danh sách thiếu sót", async ({ page, context, baseURL }) => {
     await signInAs(context, OFFICER_EMAIL, baseURL!);
     await page.goto("/submissions");
-    await page.getByRole("link", { name: new RegExp(PHONE.slice(-4)) }).first().click();
+    await page
+      .getByRole("link", { name: new RegExp(PHONE.slice(-4)) })
+      .first()
+      .click();
     await page.getByRole("button", { name: /Tiếp nhận chính thức/i }).click();
 
     await expect(page.getByText(/chưa đủ điều kiện tiếp nhận chính thức/i)).toBeVisible();

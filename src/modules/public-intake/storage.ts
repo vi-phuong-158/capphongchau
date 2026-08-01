@@ -279,7 +279,7 @@ export class PublicIntakeStorage {
    */
   async readOriginal(driveFileId: string): Promise<PreviewFile> {
     const { drive } = createGoogleWorkspaceClient(this.credentials);
-    
+
     // Kiểm tra kích thước trước khi tải toàn bộ file vào RAM
     const metadata = await drive.files.get({
       fileId: driveFileId,
@@ -292,19 +292,21 @@ export class PublicIntakeStorage {
     const sizeBytes = Number(metadata.data.size ?? 0);
     // Giới hạn 30 MB giống luồng tải lên
     if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > 30 * 1024 * 1024) {
-      throw new PreviewUnavailableError("Kích thước tệp không hợp lệ hoặc vượt quá giới hạn 30 MB.");
+      throw new PreviewUnavailableError(
+        "Kích thước tệp không hợp lệ hoặc vượt quá giới hạn 30 MB.",
+      );
     }
 
     const response = await drive.files.get(
       { fileId: driveFileId, alt: "media" },
-      { responseType: "arraybuffer" }
+      { responseType: "arraybuffer" },
     );
-    
+
     const bytes = new Uint8Array(response.data as ArrayBuffer);
     if (bytes.byteLength === 0) {
       throw new PreviewUnavailableError("Tệp tin trống.");
     }
-    
+
     return { bytes, contentType: mimeType };
   }
 

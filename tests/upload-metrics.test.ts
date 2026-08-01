@@ -32,12 +32,8 @@ function read(relative: string): string {
 }
 
 const migration = read("../supabase/migrations/202607280003_upload_attempt_metrics.sql");
-const metricsRoute = read(
-  "../src/app/api/public/submissions/current/uploads/metrics/route.ts",
-);
-const completeRoute = read(
-  "../src/app/api/public/submissions/current/uploads/complete/route.ts",
-);
+const metricsRoute = read("../src/app/api/public/submissions/current/uploads/metrics/route.ts");
+const completeRoute = read("../src/app/api/public/submissions/current/uploads/complete/route.ts");
 const metricsModule = read("../src/modules/public-intake/upload-metrics.ts");
 
 describe("Schema telemetry không nhận trường tự do", () => {
@@ -264,7 +260,9 @@ describe("Số đo hỏng không phá luồng tải ảnh", () => {
    * thể lại bắt sang một `.catch` ở nơi khác.
    */
   it("complete route nuốt lỗi ghi metric", () => {
-    expect(completeRoute).toMatch(/appendUploadAttempt\([^;]*?\)\s*\.catch\(reportUploadMetricFailure\)/);
+    expect(completeRoute).toMatch(
+      /appendUploadAttempt\([^;]*?\)\s*\.catch\(reportUploadMetricFailure\)/,
+    );
   });
 
   /** Và bên nhận phải thật sự nuốt: `reportUploadMetricFailure` chỉ log, không ném lại. */

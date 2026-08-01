@@ -123,7 +123,9 @@ describe("trang duyệt hồ sơ — nhánh không tìm thấy so với nhánh l
   });
 
   it("phân quyền admin được suy ra từ vai trò", async () => {
-    loadStaffSubmissionDetail.mockResolvedValue({ id: "1a2b3c" } as unknown as StaffSubmissionDetail);
+    loadStaffSubmissionDetail.mockResolvedValue({
+      id: "1a2b3c",
+    } as unknown as StaffSubmissionDetail);
 
     requireActiveUser.mockResolvedValue({ ...OFFICER, roles: ["REVIEW_OFFICER"] });
     expect((await renderPage()).props.isAdministrator).toBe(false);

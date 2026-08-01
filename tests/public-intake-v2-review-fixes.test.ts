@@ -144,6 +144,8 @@ describe("Cờ chuẩn hóa ảnh vẫn tắt mặc định", () => {
 
   it("cờ tắt thì HEIC vẫn được chuyển như trước V2 — không đổi hành vi cũ", () => {
     const normalization = read("../src/modules/public-intake/image-normalization.client.ts");
-    expect(normalization).toContain("if (!isNormalizationEnabled() && !heic) return unchanged(\"DISABLED\")");
+    expect(normalization).toContain(
+      'if (!isNormalizationEnabled() && !heic) return unchanged("DISABLED")',
+    );
   });
 });

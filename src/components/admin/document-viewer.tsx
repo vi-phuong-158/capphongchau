@@ -515,7 +515,7 @@ function DocumentViewerState({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              margin: "auto"
+              margin: "auto",
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}

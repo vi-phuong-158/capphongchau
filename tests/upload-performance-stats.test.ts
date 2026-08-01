@@ -107,7 +107,13 @@ describe("groupByKey", () => {
   });
 
   it("mảng rỗng trả mảng rỗng", () => {
-    expect(groupByKey([], () => "x", () => 0)).toEqual([]);
+    expect(
+      groupByKey(
+        [],
+        () => "x",
+        () => 0,
+      ),
+    ).toEqual([]);
   });
 });
 

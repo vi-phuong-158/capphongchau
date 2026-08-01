@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { adoptServerDraftSnapshot } from "@/modules/public-intake/draft-adoption";
-import {
-  emptyDraft,
-  emptyLandUse,
-  emptyOwner,
-  emptyParcel,
-} from "@/modules/public-intake/types";
+import { emptyDraft, emptyLandUse, emptyOwner, emptyParcel } from "@/modules/public-intake/types";
 
 describe("adoptServerDraftSnapshot", () => {
   it("đồng bộ ID server và version nhưng giữ toàn bộ dữ liệu người dùng đã nhập", () => {
@@ -114,9 +109,7 @@ describe("adoptServerDraftSnapshot", () => {
   it("từ chối snapshot thiếu server version hợp lệ", () => {
     const server = emptyDraft("owner-server", "parcel-server", "land-use-server");
 
-    expect(
-      adoptServerDraftSnapshot({ serverDraft: server, serverVersion: undefined }),
-    ).toBeNull();
+    expect(adoptServerDraftSnapshot({ serverDraft: server, serverVersion: undefined })).toBeNull();
     expect(adoptServerDraftSnapshot({ serverDraft: server, serverVersion: 0 })).toBeNull();
   });
 });
