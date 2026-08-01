@@ -48,13 +48,11 @@ describe("Phase 2 detail performance contracts", () => {
     expect(aiPanel).toContain("if (!open || loadedVersion === version) return;");
     expect(detail).toContain("<AiDraftPanel");
 
-    // Ảnh: mở hồ sơ không kéo byte ảnh nào; phải bấm "Xem ảnh" cho đúng tệp đó.
-    expect(viewer).toContain("const [revealedFileIds, setRevealedFileIds] = useState");
-    expect(viewer).toContain("onClick={() => reveal(activeFile.fileId)}");
-    expect(viewer).toContain("Xem ảnh");
-    expect(viewer).toContain("const revealed = revealedFileIds.includes(activeFile.fileId);");
-    // Không có effect nào tự yêu cầu ảnh của tệp đang chọn.
-    expect(viewer).not.toContain("requestPreview(activeFileId)");
+    // Ảnh: mở hồ sơ nạp ảnh đang chọn; tự động load.
+    expect(viewer).not.toContain("revealedFileIds");
+    expect(viewer).not.toContain("Xem ảnh");
+    // Có effect tự yêu cầu ảnh của tệp đang chọn.
+    expect(viewer).toContain("requestPreview(activeFile.fileId)");
     // Khung nhỏ và khung toàn màn hình dùng chung một object URL — không tải ảnh hai lần.
     expect(viewer).toContain("{fullscreen && imageSrc && (");
   });

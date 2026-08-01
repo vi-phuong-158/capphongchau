@@ -285,6 +285,10 @@ export class PublicIntakeStorage {
       fileId: driveFileId,
       fields: "size,mimeType",
     });
+    const mimeType = metadata.data.mimeType ?? "";
+    if (!isCanonicalImageMimeType(mimeType)) {
+      throw new PreviewUnavailableError("Định dạng tệp không được chấp nhận.");
+    }
     const sizeBytes = Number(metadata.data.size ?? 0);
     // Giới hạn 30 MB giống luồng tải lên
     if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > 30 * 1024 * 1024) {
@@ -301,7 +305,7 @@ export class PublicIntakeStorage {
       throw new PreviewUnavailableError("Tệp tin trống.");
     }
     
-    return { bytes, contentType: metadata.data.mimeType ?? "application/octet-stream" };
+    return { bytes, contentType: mimeType };
   }
 
   private get credentials() {

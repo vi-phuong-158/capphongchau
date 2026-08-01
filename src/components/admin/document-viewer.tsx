@@ -149,21 +149,15 @@ function DocumentViewerState({
   const [reassignError, setReassignError] = useState<string | null>(null);
   const lightboxTitleId = useId();
   const { request: requestPreview, sourceFor, errorFor } = usePreviewImages(submissionId);
-  /**
-   * Ảnh chỉ được tải khi cán bộ **bấm "Xem ảnh"** cho đúng tệp đó.
-   *
-   * Mở hồ sơ không kéo theo bất kỳ byte ảnh nào: phần lớn lượt mở màn duyệt là để đọc/sửa dữ liệu
-   * chứ không phải soi ảnh, mà mỗi ảnh giấy tờ là một lượt gọi Drive cộng một dòng audit. Tải ngầm
-   * "ảnh đang chọn" nghe như nhỏ nhưng chính là một lượt Drive cho **mọi** lần mở hồ sơ.
-   *
-   * Danh sách này chỉ nhớ những tệp đã được yêu cầu; `usePreviewImages` giữ cache blob nên bấm qua
-   * lại giữa các tab đã xem không tải lại.
-   */
-  const [revealedFileIds, setRevealedFileIds] = useState<readonly string[]>([]);
-  const reveal = (fileId: string) => {
-    setRevealedFileIds((current) => (current.includes(fileId) ? current : [...current, fileId]));
-    requestPreview(fileId);
-  };
+  const activeFile = files[selectedIndex] || files[0];
+
+  const activeFileId = activeFile?.fileId;
+
+  useEffect(() => {
+    if (activeFileId) {
+      requestPreview(activeFileId);
+    }
+  }, [activeFileId, requestPreview]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -195,7 +189,6 @@ function DocumentViewerState({
     );
   }
 
-  const activeFile = files[selectedIndex] || files[0];
   const activeLabel = documentFileLabel(activeFile, files, ownerIds);
   // Chỉ ảnh GCN gỡ được: CCCD là ràng buộc bắt buộc của `completionChecks`, luồng đúng là thay ảnh.
   const canDelete = Boolean(onDeleteFile) && activeFile.documentType === "CERTIFICATE";
@@ -216,9 +209,8 @@ function DocumentViewerState({
     setRotation(0);
   };
 
-  const revealed = revealedFileIds.includes(activeFile.fileId);
-  const imageSrc = revealed ? sourceFor(activeFile.fileId) : null;
-  const imageError = revealed ? errorFor(activeFile.fileId) : null;
+  const imageSrc = sourceFor(activeFile.fileId);
+  const imageError = errorFor(activeFile.fileId);
 
   return (
     <div className="flex flex-col rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden sticky top-4">
@@ -498,7 +490,7 @@ function DocumentViewerState({
             <p>{imageError}</p>
             <button
               type="button"
-              onClick={() => reveal(activeFile.fileId)}
+              onClick={() => requestPreview(activeFile.fileId)}
               className="mt-3 rounded bg-stone-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-600"
             >
               Thử lại
@@ -525,19 +517,9 @@ function DocumentViewerState({
               className="max-h-full max-w-full rounded object-contain shadow-2xl transition-transform"
             />
           </div>
-        ) : revealed ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh gốc…</p>
-          </div>
         ) : (
           <div className="flex h-full items-center justify-center">
-            <button
-              type="button"
-              className="rounded-lg border border-stone-500 bg-stone-800 px-5 py-3 text-sm font-semibold text-white hover:bg-stone-700"
-              onClick={() => reveal(activeFile.fileId)}
-            >
-              Xem ảnh
-            </button>
+            <p className="animate-pulse text-sm text-stone-300">Đang tải ảnh gốc…</p>
           </div>
         )}
       </div>
