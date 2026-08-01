@@ -1,5 +1,22 @@
 # 06 — AI Working Log
 
+## [2026-08-01] Hiển thị ảnh gốc lớn trực tiếp trên trang duyệt hồ sơ (PR #13 & #14)
+
+- **Agent:** Antigravity (Gemini 3.6 Flash).
+- **Công việc:** 
+  1. Xử lý hiển thị ảnh nguyên kích thước (full resolution) cho cán bộ duyệt hồ sơ, thay cho thumbnail Google Drive bị mờ. Tự động nạp ảnh đầu tiên và ảnh chuyển tab dựa trên `activeFileId`.
+  2. Bổ sung Dynamic Import cho `heic2any` trên admin client view để chuyển đổi HEIC/HEIF sang JPEG trước khi tạo `objectUrl`.
+  3. Bổ sung `readOriginal` vào `PublicIntakeStorage`, gọi API Google Drive `.get({ alt: "media" })` với response type `arraybuffer`.
+  4. Đã tạo PR #14 (`fix(ci): synchronize npm lockfile for Node 22`) để khắc phục lỗi baseline `npm ci` của GitHub Actions, gộp vào `main` thành công.
+  5. PR #13 (`feat(admin): display full-resolution documents during review`) đã qua 100% CI (Quality check & Vercel Preview) và được squash merge vào `main` (commit `6bcadee`).
+- **File thay đổi trong PR #13:**
+  - `src/app/api/submissions/[submissionId]/files/[fileId]/route.ts`
+  - `src/components/admin/document-viewer.tsx`
+  - `src/modules/public-intake/storage.ts`
+  - `tests/storage-read-original.test.ts`
+  - `tests/submission-detail-performance.test.ts`
+  - `tests/submission-file-single-query.test.ts`
+
 ## [2026-08-01] Đọc nháp GCN cho 8 job AI cục bộ bằng Gemini 3.6 Flash
 
 - **Agent:** Antigravity (Gemini 3.6 Flash).
