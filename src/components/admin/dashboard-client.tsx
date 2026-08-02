@@ -143,7 +143,7 @@ export function DashboardClient({
       href: buildQueueUrl({ bucket: "in-progress", unassigned: null, actionType: null }),
     },
     {
-      label: "Đã tiếp nhận",
+      label: "Đã hoàn thành xử lý",
       value: summary.totals.accepted,
       color: "text-emerald-700",
       bg: "bg-emerald-50",
@@ -222,7 +222,7 @@ export function DashboardClient({
             <option value="UNDER_REVIEW">Đang xử lý</option>
             <option value="NEEDS_SUPPLEMENT">Cần bổ sung</option>
             <option value="RESUBMITTED">Đã gửi lại</option>
-            <option value="ACCEPTED">Đã tiếp nhận</option>
+            <option value="ACCEPTED">Đã hoàn thành xử lý</option>
             <option value="REJECTED">Từ chối</option>
           </select>
         </div>

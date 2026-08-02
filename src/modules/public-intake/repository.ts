@@ -1824,6 +1824,8 @@ export class PublicIntakeRepository {
     const fromDate: Date | null = input.fromDate ? new Date(input.fromDate) : null;
     const toDate: Date | null = input.toDate ? new Date(input.toDate) : null;
 
+
+
     // 1. Compute overall totals & status breakdown from public_submissions
     const submissionRows = await database.unsafe<
       {
@@ -1886,7 +1888,6 @@ export class PublicIntakeRepository {
         completed_count: number;
         last_claim_at: Date | null;
         last_completion_at: Date | null;
-        last_sub_updated_at: Date | null;
         last_audit_at: Date | null;
       }[]
     >(

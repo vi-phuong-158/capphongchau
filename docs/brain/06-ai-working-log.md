@@ -3373,13 +3373,13 @@ SUBMISSION_DECISION_ROLES)` + `verifyCsrfToken` + `mayStaffEdit` (đang giữ h�
 - **Agent:** Antigravity (Gemini)
 - **Thay đổi:**
   - Thay bảng thống kê cán bộ cũ bằng **"Kết quả xử lý theo tài khoản"** hiển thị danh sách toàn bộ tài khoản trong `public.users` (kể cả tài khoản 0 hồ sơ, tài khoản admin, người xem báo cáo và tài khoản đã khóa `active = false`).
-  - Thống kê 9 cột: Họ tên, Email/tài khoản, Vai trò (tiếng Việt), Trạng thái (Hoạt động / Đã khóa), Đã tiếp nhận (event-based từ `audit_logs`), Đang xử lý (`claimed_by` hiện tại thuộc `in-progress`), Đã hoàn thành xử lý (event-based từ `audit_logs`), Tỷ lệ hoàn thành (%), Hoạt động cuối (`Asia/Ho_Chi_Minh`).
+  - Thống kê 8 cột: Họ tên, Email/tài khoản, Vai trò (tiếng Việt), Trạng thái (Hoạt động / Đã khóa), Đã tiếp nhận (event-based từ `audit_logs`), Đang xử lý (`claimed_by` hiện tại thuộc `in-progress`), Đã hoàn thành xử lý (event-based từ `audit_logs`), Hoạt động cuối trong kỳ (`Asia/Ho_Chi_Minh`).
   - Hỗ trợ lọc drill-down từ Dashboard sang Hàng chờ (`/submissions`) theo `officer` + `actionType=claimed` / `actionType=completed` / `bucket=in-progress`.
-  - Viết test suite chuyên biệt `tests/account-processing-stats.test.ts` kiểm tra 12 kịch bản chi tiết.
+  - Viết test suite chuyên biệt `tests/account-processing-stats.test.ts` kiểm tra 14 kịch bản chi tiết.
 - **Kiểm tra:**
   - `npm run lint`: pass (0 error).
   - `npm run typecheck`: pass (0 error).
-  - `npm test`: pass **872/872 unit tests** (100 tệp test pass).
+  - `npm test`: pass **884/884 unit tests** (100 tập test pass, 28 skipped).
   - `npm run build`: pass 100% (Turbopack + Next.js build).
   - `git diff --check`: pass (không thừa khoảng trắng).
   - Branch `feat/account-processing-stats` đã được push và mở Draft PR #16 trên GitHub.
