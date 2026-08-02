@@ -6,6 +6,7 @@ import type { Sql } from "postgres";
 // `official-record.ts` chỉ phụ thuộc `./types`, không phụ thuộc repository — không tạo vòng import.
 import { syncOfficialRecord } from "@/modules/submissions/official-record";
 import { enqueueAiDraftForSubmission } from "@/modules/ai-extraction/repository";
+import { UserRole } from "@/modules/common/domain";
 import { getDatabase } from "@/modules/supabase/database";
 import {
   decodeQueueCursor,
@@ -170,10 +171,15 @@ export interface QueueSubmissionSummary {
 export interface DashboardSummaryOfficerMetrics {
   readonly email: string;
   readonly displayName: string;
+  readonly roles: readonly UserRole[];
+  readonly active: boolean;
+  readonly claimedCount: number;
+  readonly inProgressCount: number;
+  readonly completedCount: number;
+  readonly lastActivity: string | null;
   readonly total: number;
   readonly inProgress: number;
   readonly accepted: number;
-  readonly lastActivity: string | null;
 }
 
 export interface DashboardSummary {
@@ -1689,6 +1695,7 @@ export class PublicIntakeRepository {
   async listQueuePage(input: {
     status?: PublicStatus;
     bucket?: PublicBucket;
+    actionType?: "claimed" | "completed";
     fromDate?: string;
     toDate?: string;
     query?: string;
@@ -1734,7 +1741,7 @@ export class PublicIntakeRepository {
            or updated_at < $3::timestamptz
            or (updated_at = $3::timestamptz and submission_id < $4)
          )
-         and ($6::text is null or claimed_by = $6)
+         and ($6::text is null or $11::text is not null or claimed_by = $6)
          and (
            $7::boolean is not true
            or (claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
@@ -1742,8 +1749,27 @@ export class PublicIntakeRepository {
          and (
            ${QUEUE_BUCKET_SQL_CONDITION}
          )
-         and ($9::timestamptz is null or updated_at >= $9::timestamptz)
-         and ($10::timestamptz is null or updated_at <= $10::timestamptz)
+         and ($11::text is not null or $9::timestamptz is null or updated_at >= $9::timestamptz)
+         and ($11::text is not null or $10::timestamptz is null or updated_at < $10::timestamptz)
+         and (
+           $11::text is null
+           or ($11 = 'claimed' and submission_id in (
+             select entity_id from public.audit_logs
+             where entity_type = 'PUBLIC_SUBMISSION'
+               and ($6::text is null or actor_email = $6)
+               and action in ('SUBMISSION_CLAIMED', 'SUBMISSION_FORCE_CLAIMED')
+               and ($9::timestamptz is null or created_at >= $9::timestamptz)
+               and ($10::timestamptz is null or created_at < $10::timestamptz)
+           ))
+           or ($11 = 'completed' and submission_id in (
+             select entity_id from public.audit_logs
+             where entity_type = 'PUBLIC_SUBMISSION'
+               and ($6::text is null or actor_email = $6)
+               and action = 'OFFICIAL_ACCEPTANCE_COMPLETED'
+               and ($9::timestamptz is null or created_at >= $9::timestamptz)
+               and ($10::timestamptz is null or created_at < $10::timestamptz)
+           ))
+         )
        order by updated_at desc, submission_id desc
        limit $5`,
       [
@@ -1757,6 +1783,7 @@ export class PublicIntakeRepository {
         input.bucket ?? null,
         input.fromDate ?? null,
         input.toDate ?? null,
+        input.actionType ?? null,
       ],
     );
 
@@ -1797,43 +1824,23 @@ export class PublicIntakeRepository {
     const fromDate: Date | null = input.fromDate ? new Date(input.fromDate) : null;
     const toDate: Date | null = input.toDate ? new Date(input.toDate) : null;
 
-    const rows = await database.unsafe<
+
+
+    // 1. Compute overall totals & status breakdown from public_submissions
+    const submissionRows = await database.unsafe<
       {
-        officer_email: string;
-        officer_name: string;
-        status: PublicStatus | null;
+        claimed_by: string | null;
+        status: PublicStatus;
         count: number;
-        last_activity: Date | null;
       }[]
     >(
-      `with all_officers as (
-         select email as officer_email, display_name as officer_name
-         from public.users
-         where active = true and roles && array['INTAKE_OFFICER', 'REVIEW_OFFICER']::text[]
-       ),
-       all_submissions as (
-         select
-           coalesce(claimed_by, '') as officer_email,
-           coalesce(claimed_by_display_name, '') as officer_name,
-           status,
-           count(*)::int as count,
-           max(updated_at) as last_activity
-         from public.public_submissions
-         where ($1::timestamptz is null or updated_at >= $1::timestamptz)
-           and ($2::timestamptz is null or updated_at <= $2::timestamptz)
-           and ($3::text is null or claimed_by = $3)
-           and ($4::text is null or status = $4)
-         group by claimed_by, claimed_by_display_name, status
-       )
-       select
-         coalesce(o.officer_email, s.officer_email) as officer_email,
-         coalesce(o.officer_name, s.officer_name) as officer_name,
-         s.status,
-         coalesce(s.count, 0) as count,
-         s.last_activity
-       from all_officers o
-       full outer join all_submissions s on o.officer_email = s.officer_email
-       order by officer_email, status`,
+      `select claimed_by, status, count(*)::int as count
+       from public.public_submissions
+       where ($1::timestamptz is null or updated_at >= $1::timestamptz)
+         and ($2::timestamptz is null or updated_at < $2::timestamptz)
+         and ($3::text is null or claimed_by = $3)
+         and ($4::text is null or status = $4)
+       group by claimed_by, status`,
       [
         fromDate?.toISOString() || null,
         toDate?.toISOString() || null,
@@ -1852,69 +1859,155 @@ export class PublicIntakeRepository {
       PUBLIC_STATUSES.map((s: PublicStatus) => [s, 0]),
     ) as Record<PublicStatus, number>;
 
-    const officersMap = new Map<
-      string,
-      {
-        email: string;
-        displayName: string;
-        total: number;
-        inProgress: number;
-        accepted: number;
-        lastActivity: Date | null;
-      }
-    >();
+    for (const row of submissionRows) {
+      const rowObj = row as { claimed_by?: string | null; officer_email?: string | null; status: PublicStatus; count: number };
+      const claimed_by = rowObj.claimed_by || rowObj.officer_email || null;
+      const { status, count } = rowObj;
+      total += count;
+      statusBreakdown[status] += count;
 
-    for (const row of rows) {
-      const { officer_email, officer_name, status, count, last_activity } = row;
+      const bucket = getSubmissionBucket(status, !!claimed_by);
+      if (bucket === "pending") pending += count;
+      else if (bucket === "in-progress") inProgress += count;
+      else if (bucket === "accepted") accepted += count;
 
-      if (officer_email) {
-        let metrics = officersMap.get(officer_email);
-        if (!metrics) {
-          metrics = {
-            email: officer_email,
-            displayName: officer_name,
-            total: 0,
-            inProgress: 0,
-            accepted: 0,
-            lastActivity: null,
-          };
-          officersMap.set(officer_email, metrics);
-        }
-
-        if (status) {
-          metrics.total += count;
-          const bucket = getSubmissionBucket(status, true); // true because officer_email is present
-          if (bucket === "in-progress") metrics.inProgress += count;
-          else if (bucket === "accepted") metrics.accepted += count;
-
-          if (last_activity && (!metrics.lastActivity || last_activity > metrics.lastActivity)) {
-            metrics.lastActivity = last_activity;
-          }
-        }
-      }
-
-      if (status) {
-        total += count;
-        statusBreakdown[status] += count;
-
-        const bucket = getSubmissionBucket(status, !!officer_email);
-        if (bucket === "pending") pending += count;
-        else if (bucket === "in-progress") inProgress += count;
-        else if (bucket === "accepted") accepted += count;
-
-        if (!officer_email && bucket === "pending") {
-          unassigned += count;
-        }
+      if (!claimed_by && bucket === "pending") {
+        unassigned += count;
       }
     }
+
+    // 2. Query ALL users from public.users with LEFT JOINs for event-based stats
+    const accountRows = await database.unsafe<
+      {
+        email: string;
+        display_name: string;
+        roles: UserRole[];
+        active: boolean;
+        claimed_count: number;
+        in_progress_count: number;
+        completed_count: number;
+        last_claim_at: Date | null;
+        last_completion_at: Date | null;
+        last_audit_at: Date | null;
+      }[]
+    >(
+      `with all_users as (
+         select email::text, display_name::text, roles, active
+         from public.users
+       ),
+       claims as (
+         select
+           actor_email::text as email,
+           count(distinct entity_id)::int as claimed_count,
+           max(created_at) as last_claim_at
+         from public.audit_logs
+         where action in ('SUBMISSION_CLAIMED', 'SUBMISSION_FORCE_CLAIMED')
+           and entity_type = 'PUBLIC_SUBMISSION'
+           and ($1::timestamptz is null or created_at >= $1::timestamptz)
+           and ($2::timestamptz is null or created_at < $2::timestamptz)
+         group by actor_email
+       ),
+       completions as (
+         select
+           actor_email::text as email,
+           count(distinct entity_id)::int as completed_count,
+           max(created_at) as last_completion_at
+         from public.audit_logs
+         where action = 'OFFICIAL_ACCEPTANCE_COMPLETED'
+           and entity_type = 'PUBLIC_SUBMISSION'
+           and ($1::timestamptz is null or created_at >= $1::timestamptz)
+           and ($2::timestamptz is null or created_at < $2::timestamptz)
+         group by actor_email
+       ),
+       current_in_progress as (
+         select
+           claimed_by::text as email,
+           count(*)::int as in_progress_count
+         from public.public_submissions
+         where claimed_by is not null and claimed_by != ''
+           and (
+             status in ('UNDER_REVIEW', 'ACCEPTING')
+             or status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT')
+           )
+         group by claimed_by
+       ),
+       last_audits as (
+         select
+           actor_email::text as email,
+           max(created_at) as last_audit_at
+         from public.audit_logs
+         where entity_type = 'PUBLIC_SUBMISSION'
+           and action in (
+             'SUBMISSION_CLAIMED',
+             'SUBMISSION_FORCE_CLAIMED',
+             'SUBMISSION_TRANSFERRED',
+             'SUBMISSION_WORKING_PAYLOAD_EDITED',
+             'WORKING_PAYLOAD_UPDATED',
+             'OFFICIAL_ACCEPTANCE_STARTED',
+             'OFFICIAL_ACCEPTANCE_COMPLETED'
+           )
+           and ($1::timestamptz is null or created_at >= $1::timestamptz)
+           and ($2::timestamptz is null or created_at < $2::timestamptz)
+         group by actor_email
+       )
+       select
+         u.email,
+         u.display_name,
+         u.roles,
+         u.active,
+         coalesce(c.claimed_count, 0) as claimed_count,
+         coalesce(ip.in_progress_count, 0) as in_progress_count,
+         coalesce(cmp.completed_count, 0) as completed_count,
+         c.last_claim_at,
+         cmp.last_completion_at,
+         la.last_audit_at
+       from all_users u
+       left join claims c on u.email = c.email
+       left join completions cmp on u.email = cmp.email
+       left join current_in_progress ip on u.email = ip.email
+       left join last_audits la on u.email = la.email
+       where ($3::text is null or u.email = $3)
+       order by u.display_name, u.email`,
+      [
+        fromDate?.toISOString() || null,
+        toDate?.toISOString() || null,
+        input.officer || null,
+      ],
+    );
+
+    const officers: DashboardSummaryOfficerMetrics[] = (accountRows || []).map((row) => {
+      const claimedCount = Number(row.claimed_count || 0);
+      const inProgressCount = Number(row.in_progress_count || 0);
+      const completedCount = Number(row.completed_count || 0);
+
+      const timestamps = [
+        row.last_claim_at ? new Date(row.last_claim_at).getTime() : 0,
+        row.last_completion_at ? new Date(row.last_completion_at).getTime() : 0,
+        row.last_audit_at ? new Date(row.last_audit_at).getTime() : 0,
+      ].filter((t) => t > 0);
+
+      const maxTime = timestamps.length > 0 ? Math.max(...timestamps) : null;
+      const lastActivity = maxTime ? new Date(maxTime).toISOString() : null;
+
+      return {
+        email: row.email,
+        displayName: row.display_name,
+        roles: Array.isArray(row.roles) ? row.roles : [],
+        active: Boolean(row.active),
+        claimedCount,
+        inProgressCount,
+        completedCount,
+        lastActivity,
+        total: claimedCount,
+        inProgress: inProgressCount,
+        accepted: completedCount,
+      };
+    });
 
     return {
       totals: { total, pending, inProgress, accepted, unassigned },
       statusBreakdown,
-      officers: Array.from(officersMap.values()).map((o) => ({
-        ...o,
-        lastActivity: o.lastActivity ? o.lastActivity.toISOString() : null,
-      })),
+      officers,
     };
   }
 

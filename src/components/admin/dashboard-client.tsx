@@ -4,7 +4,26 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardSummary } from "@/modules/public-intake/repository";
+import { formatUserRoles } from "@/modules/common/domain";
 import { DashboardExportModal } from "./dashboard-export-modal";
+
+function formatDateVn(isoDate: string | null): string {
+  if (!isoDate) return "-";
+  try {
+    const d = new Date(isoDate);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "-";
+  }
+}
 
 export function DashboardClient({
   initialSummary,
@@ -89,10 +108,14 @@ export function DashboardClient({
     };
   }, [searchParams]);
 
-  const buildQueueUrl = (updates: Record<string, string>) => {
+  const buildQueueUrl = (updates: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString());
     for (const [key, value] of Object.entries(updates)) {
-      params.set(key, value);
+      if (value === null || value === "") {
+        params.delete(key);
+      } else {
+        params.set(key, value);
+      }
     }
     return `/submissions?${params.toString()}`;
   };
@@ -103,35 +126,35 @@ export function DashboardClient({
       value: summary.totals.total,
       color: "text-stone-700",
       bg: "bg-white border border-stone-200",
-      href: buildQueueUrl({}),
+      href: buildQueueUrl({ bucket: null, unassigned: null, actionType: null }),
     },
     {
       label: "Chờ tiếp nhận",
       value: summary.totals.pending,
       color: "text-amber-700",
       bg: "bg-amber-50",
-      href: buildQueueUrl({ bucket: "pending" }),
+      href: buildQueueUrl({ bucket: "pending", unassigned: null, actionType: null }),
     },
     {
       label: "Đang xử lý",
       value: summary.totals.inProgress,
       color: "text-sky-700",
       bg: "bg-sky-50",
-      href: buildQueueUrl({ bucket: "in-progress" }),
+      href: buildQueueUrl({ bucket: "in-progress", unassigned: null, actionType: null }),
     },
     {
-      label: "Đã tiếp nhận",
+      label: "Đã hoàn thành xử lý",
       value: summary.totals.accepted,
       color: "text-emerald-700",
       bg: "bg-emerald-50",
-      href: buildQueueUrl({ bucket: "accepted" }),
+      href: buildQueueUrl({ bucket: "accepted", unassigned: null, actionType: null }),
     },
     {
       label: "Chưa phân công",
       value: summary.totals.unassigned,
       color: "text-rose-700",
       bg: "bg-rose-50",
-      href: buildQueueUrl({ unassigned: "1" }),
+      href: buildQueueUrl({ unassigned: "1", bucket: null, actionType: null }),
     },
   ];
 
@@ -140,7 +163,7 @@ export function DashboardClient({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-cherry-900">Tổng quan điều hành</h1>
-          <p className="text-stone-500 mt-1">Giám sát tiến độ xử lý hồ sơ của toàn bộ cán bộ.</p>
+          <p className="text-stone-500 mt-1">Giám sát tiến độ xử lý hồ sơ của toàn bộ cán bộ và hệ thống.</p>
         </div>
         <div className="flex gap-3">
           {canExport && (
@@ -166,17 +189,17 @@ export function DashboardClient({
             onChange={(e) => updateFilters({ officer: e.target.value })}
             disabled={isRefreshing}
           >
-            <option value="">Tất cả cán bộ</option>
+            <option value="">Tất cả tài khoản</option>
             {summary.officers.map((o) => (
               <option key={o.email} value={o.email}>
-                {o.displayName}
+                {o.displayName} ({o.email})
               </option>
             ))}
           </select>
         </div>
         <div className="w-40">
           <label className="block text-xs font-semibold mb-1 text-stone-700">
-            Từ ngày (cập nhật)
+            Từ ngày (hành động)
           </label>
           <input
             type="date"
@@ -199,7 +222,7 @@ export function DashboardClient({
             <option value="UNDER_REVIEW">Đang xử lý</option>
             <option value="NEEDS_SUPPLEMENT">Cần bổ sung</option>
             <option value="RESUBMITTED">Đã gửi lại</option>
-            <option value="ACCEPTED">Đã tiếp nhận</option>
+            <option value="ACCEPTED">Đã hoàn thành xử lý</option>
             <option value="REJECTED">Từ chối</option>
           </select>
         </div>
@@ -228,84 +251,123 @@ export function DashboardClient({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-bold text-stone-800">Khối lượng công việc cán bộ</h2>
-          <div className="pc-card bg-white overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-stone-50 text-stone-500 border-b border-stone-200">
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-bold text-stone-800">Kết quả xử lý theo tài khoản</h2>
+          <p className="text-sm text-stone-500 mt-1">
+            Khoảng ngày áp dụng cho Đã tiếp nhận, Đã hoàn thành và Hoạt động cuối. Đang xử lý là số hồ sơ hiện tại.
+          </p>
+        </div>
+        <div className="pc-card bg-white overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-stone-50 text-stone-500 border-b border-stone-200">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Họ tên</th>
+                  <th className="px-4 py-3 font-semibold">Tài khoản</th>
+                  <th className="px-4 py-3 font-semibold">Vai trò</th>
+                  <th className="px-4 py-3 font-semibold">Trạng thái</th>
+                  <th className="px-4 py-3 font-semibold text-right text-indigo-700">
+                    Đã tiếp nhận
+                  </th>
+                  <th className="px-4 py-3 font-semibold text-right text-sky-700">Đang xử lý</th>
+                  <th className="px-4 py-3 font-semibold text-right text-emerald-700">
+                    Đã hoàn thành xử lý
+                  </th>
+                  <th className="px-4 py-3 font-semibold text-stone-500">Hoạt động cuối trong kỳ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {summary.officers.length === 0 ? (
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Cán bộ</th>
-                    <th className="px-4 py-3 font-semibold text-right">Tổng</th>
-                    <th className="px-4 py-3 font-semibold text-right text-sky-700">Đang xử lý</th>
-                    <th className="px-4 py-3 font-semibold text-right text-emerald-700">
-                      Đã hoàn thành
-                    </th>
-                    <th className="px-4 py-3 font-semibold">Thao tác</th>
+                    <td colSpan={8} className="px-4 py-8 text-center text-stone-500">
+                      Không có dữ liệu
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {summary.officers.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-stone-500">
-                        Không có dữ liệu
+                ) : (
+                  summary.officers.map((o) => (
+                    <tr key={o.email} className="hover:bg-stone-50/50">
+                      <td className="px-4 py-3 font-medium text-stone-900">{o.displayName}</td>
+                      <td className="px-4 py-3 text-xs text-stone-500">{o.email}</td>
+                      <td className="px-4 py-3 text-xs text-stone-700 font-medium">
+                        {formatUserRoles(o.roles)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${
+                            o.active
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-stone-100 text-stone-600 border-stone-300"
+                          }`}
+                        >
+                          {o.active ? "Hoạt động" : "Đã khóa"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-indigo-700">
+                        {o.claimedCount > 0 ? (
+                          <Link
+                            href={buildQueueUrl({
+                              officer: o.email,
+                              actionType: "claimed",
+                              bucket: null,
+                              unassigned: null,
+                              status: null,
+                            })}
+                            className="hover:underline font-bold"
+                          >
+                            {o.claimedCount}
+                          </Link>
+                        ) : (
+                          "0"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-sky-700">
+                        {o.inProgressCount > 0 ? (
+                          <Link
+                            href={buildQueueUrl({
+                              officer: o.email,
+                              bucket: "in-progress",
+                              actionType: null,
+                              unassigned: null,
+                              status: null,
+                              from: null,
+                              to: null,
+                            })}
+                            className="hover:underline font-bold"
+                          >
+                            {o.inProgressCount}
+                          </Link>
+                        ) : (
+                          "0"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-emerald-700">
+                        {o.completedCount > 0 ? (
+                          <Link
+                            href={buildQueueUrl({
+                              officer: o.email,
+                              actionType: "completed",
+                              bucket: null,
+                              unassigned: null,
+                              status: null,
+                            })}
+                            className="hover:underline font-bold"
+                          >
+                            {o.completedCount}
+                          </Link>
+                        ) : (
+                          "0"
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3 text-xs text-stone-500">
+                        {formatDateVn(o.lastActivity)}
                       </td>
                     </tr>
-                  ) : (
-                    summary.officers.map((o) => (
-                      <tr key={o.email} className="hover:bg-stone-50/50">
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-stone-900">{o.displayName}</div>
-                          <div className="text-xs text-stone-500">{o.email}</div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium">{o.total}</td>
-                        <td className="px-4 py-3 text-right font-medium text-sky-700">
-                          {o.inProgress}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-emerald-700">
-                          {o.accepted}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Link
-                            href={buildQueueUrl({ officer: o.email })}
-                            className="text-cherry-600 hover:text-cherry-800 font-medium"
-                          >
-                            Xem hồ sơ →
-                          </Link>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <h2 className="text-lg font-bold text-stone-800">Hồ sơ chưa phân công</h2>
-          <div className="pc-card bg-white p-6 shadow-sm flex flex-col items-center justify-center text-center space-y-4 border-t-4 border-rose-500">
-            <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-            </div>
-            <div>
-              <p className="text-4xl font-bold text-rose-600">{summary.totals.unassigned}</p>
-              <p className="text-sm font-medium text-stone-600 mt-1">Hồ sơ cần xử lý</p>
-            </div>
-            <p className="text-xs text-stone-500 max-w-[200px]">
-              Bao gồm các hồ sơ mới gửi hoặc cần bổ sung chưa có người phụ trách.
-            </p>
-            <Link href={buildQueueUrl({ unassigned: "1" })} className="pc-button-quiet w-full text-sm mt-2">
-              Xem hàng chờ
-            </Link>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
