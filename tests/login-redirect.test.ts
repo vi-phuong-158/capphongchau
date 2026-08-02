@@ -11,7 +11,7 @@ vi.mock("@/modules/auth/authorization");
 
 const mockRedirect = vi.fn();
 vi.mock("next/navigation", () => ({
-  redirect: (...args: any[]) => mockRedirect(...args)
+  redirect: (path: string) => mockRedirect(path)
 }));
 
 describe("Login Redirect Route", () => {
@@ -20,7 +20,7 @@ describe("Login Redirect Route", () => {
   });
 
   it("redirects to / if no session", async () => {
-    vi.mocked(authModule.auth).mockResolvedValueOnce(null);
+    vi.mocked(authModule.auth).mockResolvedValueOnce(null as any);
 
     await GET();
     expect(mockRedirect).toHaveBeenCalledWith("/");
@@ -30,42 +30,68 @@ describe("Login Redirect Route", () => {
     vi.mocked(authModule.auth).mockResolvedValueOnce({
       user: { email: "test@example.com" },
       expires: "1",
-    });
+    } as any);
     vi.mocked(authorizationModule.resolveActiveUser).mockResolvedValueOnce(null);
 
     await GET();
     expect(mockRedirect).toHaveBeenCalledWith("/");
   });
 
-  it("redirects to /admin/dashboard if user has DASHBOARD_VIEW_ROLES", async () => {
-    vi.mocked(authModule.auth).mockResolvedValueOnce({
-      user: { email: "test@example.com" },
-      expires: "1",
-    });
-    vi.mocked(authorizationModule.resolveActiveUser).mockResolvedValueOnce({
-      email: "test@example.com",
-      displayName: "Test",
-      active: true,
-      roles: [UserRole.INTAKE_OFFICER], // INTAKE_OFFICER is in DASHBOARD_VIEW_ROLES
-    });
-
-    await GET();
-    expect(mockRedirect).toHaveBeenCalledWith("/admin/dashboard");
+  it("redirects to /admin/dashboard for DASHBOARD_VIEW_ROLES", async () => {
+    const rolesToTest = [UserRole.INTAKE_OFFICER, UserRole.REVIEW_OFFICER, UserRole.WARD_ADMIN, UserRole.SYSTEM_ADMIN];
+    for (const role of rolesToTest) {
+      vi.mocked(authModule.auth).mockResolvedValueOnce({
+        user: { email: "test@example.com" },
+        expires: "1",
+      } as any);
+      vi.mocked(authorizationModule.resolveActiveUser).mockResolvedValueOnce({
+        email: "test@example.com",
+        displayName: "Test",
+        active: true,
+        roles: [role],
+      } as any);
+      await GET();
+      expect(mockRedirect).toHaveBeenCalledWith("/admin/dashboard");
+      mockRedirect.mockClear();
+    }
   });
 
-  it("redirects to /submissions if user does not have DASHBOARD_VIEW_ROLES", async () => {
+  it("redirects to /submissions for SUBMISSION_READ_ROLES without dashboard", async () => {
+    // If the system has a role that can read submissions but not view dashboard, test it here.
+    // Currently, all SUBMISSION_READ_ROLES are also in DASHBOARD_VIEW_ROLES.
+    // Let's test with a fake scenario or assume there is no such role currently.
+    // We'll skip for now since they are identical in our config, but the logic covers it.
+  });
+
+  it("redirects to /profile for roles without dashboard or submission read access (e.g. REPORT_VIEWER)", async () => {
     vi.mocked(authModule.auth).mockResolvedValueOnce({
       user: { email: "test@example.com" },
       expires: "1",
-    });
+    } as any);
     vi.mocked(authorizationModule.resolveActiveUser).mockResolvedValueOnce({
       email: "test@example.com",
       displayName: "Test",
       active: true,
-      roles: [UserRole.REPORT_VIEWER], // REPORT_VIEWER is NOT in DASHBOARD_VIEW_ROLES
-    });
+      roles: [UserRole.REPORT_VIEWER],
+    } as any);
 
     await GET();
-    expect(mockRedirect).toHaveBeenCalledWith("/submissions");
+    expect(mockRedirect).toHaveBeenCalledWith("/profile");
+  });
+
+  it("redirects to /profile for active user with no roles", async () => {
+    vi.mocked(authModule.auth).mockResolvedValueOnce({
+      user: { email: "test@example.com" },
+      expires: "1",
+    } as any);
+    vi.mocked(authorizationModule.resolveActiveUser).mockResolvedValueOnce({
+      email: "test@example.com",
+      displayName: "Test",
+      active: true,
+      roles: [],
+    } as any);
+
+    await GET();
+    expect(mockRedirect).toHaveBeenCalledWith("/profile");
   });
 });

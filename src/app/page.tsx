@@ -8,7 +8,7 @@ import { CertificateLookup } from "@/components/certificate-lookup";
 import { PwaInstallButton } from "@/components/pwa-install-button";
 import { isValidInternalRedirect } from "@/lib/validation";
 import { resolveActiveUser } from "@/modules/auth/authorization";
-import { DASHBOARD_VIEW_ROLES } from "@/modules/submissions/review";
+import { resolveInternalLandingPath } from "@/modules/submissions/review";
 import { redirect } from "next/navigation";
 
 export default async function HomePage({ searchParams }: { searchParams: { [key: string]: string | string[] | undefined } }) {
@@ -16,8 +16,7 @@ export default async function HomePage({ searchParams }: { searchParams: { [key:
   if (session?.user?.email) {
     const user = await resolveActiveUser(session.user.email);
     if (user) {
-      const hasDashboard = user.roles.some((r) => DASHBOARD_VIEW_ROLES.includes(r as typeof DASHBOARD_VIEW_ROLES[number]));
-      redirect(hasDashboard ? "/admin/dashboard" : "/submissions");
+      redirect(resolveInternalLandingPath(user.roles));
     }
   }
 

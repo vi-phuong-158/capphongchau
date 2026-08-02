@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { resolveActiveUser } from "@/modules/auth/authorization";
-import { DASHBOARD_VIEW_ROLES } from "@/modules/submissions/review";
+import { resolveInternalLandingPath } from "@/modules/submissions/review";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +16,6 @@ export async function GET() {
     return redirect("/");
   }
 
-  const hasDashboard = user.roles.some((r) => DASHBOARD_VIEW_ROLES.includes(r as typeof DASHBOARD_VIEW_ROLES[number]));
-  if (hasDashboard) {
-    return redirect("/admin/dashboard");
-  }
-
-  return redirect("/submissions");
+  const target = resolveInternalLandingPath(user.roles);
+  return redirect(target);
 }
