@@ -309,6 +309,7 @@ export function DashboardClient({
                               actionType: "claimed",
                               bucket: null,
                               unassigned: null,
+                              status: null,
                             })}
                             className="hover:underline font-bold"
                           >
@@ -326,6 +327,9 @@ export function DashboardClient({
                               bucket: "in-progress",
                               actionType: null,
                               unassigned: null,
+                              status: null,
+                              from: null,
+                              to: null,
                             })}
                             className="hover:underline font-bold"
                           >
@@ -343,6 +347,7 @@ export function DashboardClient({
                               actionType: "completed",
                               bucket: null,
                               unassigned: null,
+                              status: null,
                             })}
                             className="hover:underline font-bold"
                           >

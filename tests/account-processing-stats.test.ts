@@ -14,7 +14,7 @@ import { UserRole, formatUserRoles } from "@/modules/common/domain";
 describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
   const repository = new PublicIntakeRepository();
 
-  it("formatUserRoles translates roles correctly to Vietnamese", () => {
+  it("1. formatUserRoles translates roles correctly to Vietnamese", () => {
     expect(formatUserRoles([UserRole.INTAKE_OFFICER])).toBe("Cán bộ tiếp nhận");
     expect(formatUserRoles([UserRole.WARD_ADMIN, UserRole.SYSTEM_ADMIN])).toBe(
       "Quản trị phường, Quản trị hệ thống",
@@ -22,172 +22,176 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     expect(formatUserRoles([])).toBe("Chưa phân quyền");
   });
 
-  it("1. getDashboardSummary includes ALL accounts (active, locked, 0-activity, admins, officers)", async () => {
-    // 1st query: submission totals
+  it("2. getDashboardSummary includes ALL accounts regardless of activity or role", async () => {
+    databaseMock.unsafe.mockResolvedValueOnce([]); // Submissions totals
     databaseMock.unsafe.mockResolvedValueOnce([
-      { claimed_by: "officer_a@test.vn", status: "UNDER_REVIEW", count: 3 },
-      { claimed_by: "officer_a@test.vn", status: "ACCEPTED", count: 7 },
-      { claimed_by: "admin_b@test.vn", status: "ACCEPTED", count: 3 },
-      { claimed_by: "admin_c@test.vn", status: "ACCEPTED", count: 1 },
-      { claimed_by: null, status: "SUBMITTED", count: 2 },
-    ]);
+      { email: "a@vn", display_name: "A", roles: [UserRole.INTAKE_OFFICER], active: true },
+      { email: "b@vn", display_name: "B", roles: [UserRole.WARD_ADMIN], active: false },
+      { email: "c@vn", display_name: "C", roles: [UserRole.REPORT_VIEWER], active: true },
+    ]); // Users CTE
 
-    const dateA = new Date("2026-08-01T10:00:00.000Z");
-    const dateB = new Date("2026-08-02T11:00:00.000Z");
-    const dateE = new Date("2026-07-20T08:00:00.000Z");
-
-    // 2nd query: accountRows
-    databaseMock.unsafe.mockResolvedValueOnce([
-      {
-        email: "officer_a@test.vn",
-        display_name: "Cán bộ A",
-        roles: [UserRole.INTAKE_OFFICER],
-        active: true,
-        claimed_count: 10,
-        in_progress_count: 3,
-        completed_count: 7,
-        last_claim_at: dateA,
-        last_completion_at: dateB,
-        last_sub_updated_at: dateB,
-        last_audit_at: dateB,
-      },
-      {
-        email: "admin_b@test.vn",
-        display_name: "Quản trị B",
-        roles: [UserRole.WARD_ADMIN],
-        active: true,
-        claimed_count: 3,
-        in_progress_count: 0,
-        completed_count: 3,
-        last_claim_at: dateA,
-        last_completion_at: dateA,
-        last_sub_updated_at: dateA,
-        last_audit_at: dateA,
-      },
-      {
-        email: "admin_c@test.vn",
-        display_name: "Admin C",
-        roles: [UserRole.SYSTEM_ADMIN],
-        active: true,
-        claimed_count: 0,
-        in_progress_count: 0,
-        completed_count: 1,
-        last_claim_at: null,
-        last_completion_at: dateB,
-        last_sub_updated_at: null,
-        last_audit_at: dateB,
-      },
-      {
-        email: "user_d@test.vn",
-        display_name: "Tài khoản D",
-        roles: [UserRole.REPORT_VIEWER],
-        active: true,
-        claimed_count: 0,
-        in_progress_count: 0,
-        completed_count: 0,
-        last_claim_at: null,
-        last_completion_at: null,
-        last_sub_updated_at: null,
-        last_audit_at: null,
-      },
-      {
-        email: "user_e@test.vn",
-        display_name: "Tài khoản E cũ",
-        roles: [UserRole.REVIEW_OFFICER],
-        active: false,
-        claimed_count: 5,
-        in_progress_count: 0,
-        completed_count: 5,
-        last_claim_at: dateE,
-        last_completion_at: dateE,
-        last_sub_updated_at: null,
-        last_audit_at: dateE,
-      },
-    ]);
-
-    const summary = await repository.getDashboardSummary({
-      fromDate: "2026-08-01",
-      toDate: "2026-08-02",
-    });
-
-    // Check overall totals
-    expect(summary.totals.total).toBe(16);
-    expect(summary.totals.pending).toBe(2);
-    expect(summary.totals.unassigned).toBe(2);
-
-    // Check account officers array length (must contain ALL 5 accounts)
-    expect(summary.officers).toHaveLength(5);
-
-    // Account A
-    const accA = summary.officers.find((o) => o.email === "officer_a@test.vn")!;
-    expect(accA.displayName).toBe("Cán bộ A");
-    expect(accA.active).toBe(true);
-    expect(accA.claimedCount).toBe(10);
-    expect(accA.inProgressCount).toBe(3);
-    expect(accA.completedCount).toBe(7);
-    expect(accA.completionRate).toBe("70%");
-    expect(accA.lastActivity).toBe(dateB.toISOString());
-
-    // Account B
-    const accB = summary.officers.find((o) => o.email === "admin_b@test.vn")!;
-    expect(accB.claimedCount).toBe(3);
-    expect(accB.completedCount).toBe(3);
-    expect(accB.completionRate).toBe("100%");
-
-    // Account C (Admin completing submission originally assigned to A: claimed 0, completed 1)
-    const accC = summary.officers.find((o) => o.email === "admin_c@test.vn")!;
-    expect(accC.claimedCount).toBe(0);
-    expect(accC.completedCount).toBe(1);
-    expect(accC.completionRate).toBe("0%");
-
-    // Account D (Active with 0 submissions)
-    const accD = summary.officers.find((o) => o.email === "user_d@test.vn")!;
-    expect(accD.claimedCount).toBe(0);
-    expect(accD.inProgressCount).toBe(0);
-    expect(accD.completedCount).toBe(0);
-    expect(accD.completionRate).toBe("0%");
-    expect(accD.lastActivity).toBeNull();
-
-    // Account E (Locked account with history)
-    const accE = summary.officers.find((o) => o.email === "user_e@test.vn")!;
-    expect(accE.active).toBe(false);
-    expect(accE.claimedCount).toBe(5);
-    expect(accE.completedCount).toBe(5);
-    expect(accE.completionRate).toBe("100%");
-    expect(accE.lastActivity).toBe(dateE.toISOString());
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.officers).toHaveLength(3);
+    expect(summary.officers[1].active).toBe(false);
   });
 
-  it("2. listQueuePage handles drill-down by actionType='claimed' and actionType='completed'", async () => {
-    databaseMock.unsafe.mockClear();
+  it("3. getDashboardSummary overall totals correctly aggregate pending and unassigned", async () => {
     databaseMock.unsafe.mockResolvedValueOnce([
-      {
-        submission_id: "sub_1",
-        receipt_code: "PHONGCHAU-2026-000001",
-        status: "ACCEPTED",
-        phone: "0912345678",
-        version: 1,
-        claimed_by: "officer_a@test.vn",
-        claimed_by_display_name: "Cán bộ A",
-        updated_at: new Date("2026-08-01T12:00:00.000Z"),
-        queue_issue_number: "AD 123456",
-        queue_owner_name: "Nguyễn Văn A",
-      },
+      { claimed_by: "officer_a", status: "UNDER_REVIEW", count: 3 }, // in-progress
+      { claimed_by: "officer_a", status: "ACCEPTED", count: 7 }, // accepted
+      { claimed_by: null, status: "SUBMITTED", count: 2 }, // pending & unassigned
+      { claimed_by: "officer_b", status: "SUBMITTED", count: 1 }, // pending but assigned
+    ]);
+    databaseMock.unsafe.mockResolvedValueOnce([]); // Users CTE
+
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.totals.total).toBe(13);
+    expect(summary.totals.pending).toBe(2);
+    expect(summary.totals.inProgress).toBe(4);
+    expect(summary.totals.accepted).toBe(7);
+    expect(summary.totals.unassigned).toBe(2);
+  });
+
+  it("4. getDashboardSummary calculates claimedCount based on audit log CLAIM events", async () => {
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([
+      { email: "a@vn", display_name: "A", claimed_count: 5, roles: [], active: true },
     ]);
 
-    const pageClaimed = await repository.listQueuePage({
-      officer: "officer_a@test.vn",
-      actionType: "claimed",
-      fromDate: "2026-08-01T00:00:00.000Z",
-      toDate: "2026-08-02T23:59:59.999Z",
-    });
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.officers[0].claimedCount).toBe(5);
+    expect(summary.officers[0].total).toBe(5);
+  });
 
-    expect(pageClaimed.items).toHaveLength(1);
-    expect(pageClaimed.items[0].submissionId).toBe("sub_1");
+  it("5. getDashboardSummary calculates completedCount based on audit log ACCEPTED events", async () => {
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([
+      { email: "a@vn", display_name: "A", completed_count: 7, roles: [], active: true },
+    ]);
 
-    // Verify SQL query contains audit_logs subquery for actionType
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.officers[0].completedCount).toBe(7);
+    expect(summary.officers[0].accepted).toBe(7);
+  });
+
+  it("6. getDashboardSummary calculates inProgressCount based on current submissions state", async () => {
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([
+      { email: "a@vn", display_name: "A", in_progress_count: 3, roles: [], active: true },
+    ]);
+
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.officers[0].inProgressCount).toBe(3);
+    expect(summary.officers[0].inProgress).toBe(3);
+  });
+
+  it("7. getDashboardSummary completionRate calculates correctly and handles zero claims gracefully", async () => {
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([
+      { email: "a@vn", display_name: "A", claimed_count: 10, completed_count: 7, roles: [], active: true },
+      { email: "b@vn", display_name: "B", claimed_count: 0, completed_count: 1, roles: [], active: true },
+    ]);
+
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.officers[0].completionRate).toBe("70%");
+    expect(summary.officers[1].completionRate).toBe("0%");
+  });
+
+  it("8. getDashboardSummary lastActivity filters specifically for allowed business-critical actions", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([
+      { email: "a@vn", display_name: "A", last_audit_at: new Date("2026-08-01T12:00:00.000Z"), roles: [], active: true },
+    ]);
+
+    const summary = await repository.getDashboardSummary({});
+    expect(summary.officers[0].lastActivity).toBe("2026-08-01T12:00:00.000Z");
+
+    const sqlQuery = databaseMock.unsafe.mock.calls[1][0];
+    expect(sqlQuery).toContain("action in (");
+    expect(sqlQuery).toContain("'SUBMISSION_CLAIMED'");
+    expect(sqlQuery).toContain("'OFFICIAL_ACCEPTANCE_COMPLETED'");
+    expect(sqlQuery).toContain("'SUBMISSION_WORKING_PAYLOAD_EDITED'");
+  });
+
+  it("9. getDashboardSummary respects half-open fromDate filter (querying updated_at/created_at >= fromDate)", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.getDashboardSummary({ fromDate: "2026-08-01T00:00:00.000Z" });
+    const sqlParams1 = databaseMock.unsafe.mock.calls[0][1];
+    const sqlParams2 = databaseMock.unsafe.mock.calls[1][1];
+
+    expect(sqlParams1[0]).toBe("2026-08-01T00:00:00.000Z"); // $1
+    expect(sqlParams2[0]).toBe("2026-08-01T00:00:00.000Z"); // $1
+  });
+
+  it("10. getDashboardSummary respects half-open toDate filter (querying updated_at/created_at < toDate)", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.getDashboardSummary({ toDate: "2026-08-02T00:00:00.000Z" });
+    const sqlQuery1 = databaseMock.unsafe.mock.calls[0][0];
+    const sqlQuery2 = databaseMock.unsafe.mock.calls[1][0];
+
+    expect(sqlQuery1).toContain("updated_at < $2::timestamptz");
+    expect(sqlQuery2).toContain("created_at < $2::timestamptz");
+  });
+
+  it("11. listQueuePage filters by actionType=claimed correctly", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.listQueuePage({ officer: "officer_a@test.vn", actionType: "claimed" });
+
     const [sqlQuery, sqlParams] = databaseMock.unsafe.mock.calls[0];
-    expect(sqlQuery).toContain("public.audit_logs");
     expect(sqlQuery).toContain("action in ('SUBMISSION_CLAIMED', 'SUBMISSION_FORCE_CLAIMED')");
     expect(sqlParams).toContain("claimed");
+    expect(sqlParams).toContain("officer_a@test.vn");
+  });
+
+  it("12. listQueuePage filters by actionType=completed correctly", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.listQueuePage({ officer: "officer_a@test.vn", actionType: "completed" });
+
+    const [sqlQuery, sqlParams] = databaseMock.unsafe.mock.calls[0];
+    expect(sqlQuery).toContain("action = 'OFFICIAL_ACCEPTANCE_COMPLETED'");
+    expect(sqlParams).toContain("completed");
+    expect(sqlParams).toContain("officer_a@test.vn");
+  });
+
+  it("13. listQueuePage drops date filters when querying bucket=in-progress is handled by UI", async () => {
+    // This is essentially just verifying the SQL allows it; the actual drop is in dashboard-client.tsx
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.listQueuePage({ bucket: "in-progress" });
+
+    const sqlQuery = databaseMock.unsafe.mock.calls[0][0];
+    const sqlParams = databaseMock.unsafe.mock.calls[0][1];
+    
+    // Bucket filter condition includes the in-progress specific logic
+    expect(sqlParams).toContain("in-progress");
+  });
+
+  it("14. listQueuePage filters correctly by half-open date logic when using actionType", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.listQueuePage({
+      actionType: "completed",
+      fromDate: "2026-08-01T00:00:00.000Z",
+      toDate: "2026-08-02T00:00:00.000Z"
+    });
+
+    const [sqlQuery, sqlParams] = databaseMock.unsafe.mock.calls[0];
+    // Check that we're using `<` for `$10`
+    expect(sqlQuery).toContain("created_at < $10::timestamptz");
+    expect(sqlParams[8]).toBe("2026-08-01T00:00:00.000Z"); // $9
+    expect(sqlParams[9]).toBe("2026-08-02T00:00:00.000Z"); // $10
   });
 });

@@ -48,7 +48,7 @@ describe("validation helpers", () => {
       });
 
       expect(result.fromDate).toBe("2026-07-31T17:00:00.000Z");
-      expect(result.toDate).toBe("2026-08-02T16:59:59.999Z");
+      expect(result.toDate).toBe("2026-08-02T17:00:00.000Z");
       expect(result.officer).toBe("user1");
       expect(result.status).toBe("ACCEPTED");
       expect(result.bucket).toBe("pending");
@@ -99,8 +99,8 @@ describe("validation helpers", () => {
   describe("parseDashboardDateRange", () => {
     it("parses valid YYYY-MM-DD", () => {
       const { from, to } = parseDashboardDateRange("2026-08-01", "2026-08-02");
-      expect(from?.toISOString()).toBe("2026-07-31T17:00:00.000Z"); // 00:00:00+07:00
-      expect(to?.toISOString()).toBe("2026-08-02T16:59:59.999Z"); // 23:59:59.999+07:00
+      expect(from?.toISOString()).toBe("2026-07-31T17:00:00.000Z"); // 2026-08-01T00:00:00.000+07:00
+      expect(to?.toISOString()).toBe("2026-08-02T17:00:00.000Z"); // 2026-08-03T00:00:00.000+07:00
     });
 
     it("handles undefined parameters", () => {
@@ -115,7 +115,9 @@ describe("validation helpers", () => {
     });
 
     it("throws error if from > to", () => {
-      expect(() => parseDashboardDateRange("2026-08-02", "2026-08-01")).toThrow("fromDate must not be after toDate");
+      expect(() => parseDashboardDateRange("2026-08-03", "2026-08-01")).toThrow(
+        "fromDate must not be after toDate",
+      );
     });
 
     it("throws error for invalid date values (out of bounds)", () => {

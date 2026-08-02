@@ -48,8 +48,9 @@ export function parseDashboardDateRange(
   if (toDate) {
     if (!isoDateRegex.test(toDate)) throw new Error("Invalid toDate format");
     if (!isValidRealDate(toDate)) throw new Error("Invalid toDate value");
-    to = new Date(`${toDate}T23:59:59.999+07:00`);
+    to = new Date(`${toDate}T00:00:00.000+07:00`);
     if (isNaN(to.getTime())) throw new Error("Invalid toDate value");
+    to.setDate(to.getDate() + 1);
   }
 
   if (from && to && from > to) {
