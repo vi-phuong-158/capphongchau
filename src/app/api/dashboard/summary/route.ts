@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
+import { parseDashboardDateRange } from "@/lib/validation";
 import { getPublicIntakeRepository, PUBLIC_STATUSES } from "@/modules/public-intake/repository";
 import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
@@ -45,11 +46,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     const status = statusParam as (typeof PUBLIC_STATUSES)[number] | undefined;
 
+    let validFromDate = fromDate;
+    let validToDate = toDate;
+    try {
+      const parsedDates = parseDashboardDateRange(fromDate, toDate);
+      validFromDate = parsedDates.from?.toISOString() ?? undefined;
+      validToDate = parsedDates.to?.toISOString() ?? undefined;
+    } catch (err: unknown) {
+      const error = err as Error;
+      return responseError("VALIDATION_FAILED", error.message || "Định dạng ngày không hợp lệ.", requestId);
+    }
+
     const repository = getPublicIntakeRepository();
     const databaseStartedAt = performance.now();
     const summary = await repository.getDashboardSummary({
-      fromDate,
-      toDate,
+      fromDate: validFromDate,
+      toDate: validToDate,
       officer,
       status,
     });

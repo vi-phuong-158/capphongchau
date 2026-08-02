@@ -31,8 +31,16 @@ function fail(
   message: string,
   requestId: string,
 ) {
+  const statusCode =
+    code === "UNAUTHENTICATED"
+      ? 401
+      : code === "ACCESS_DENIED"
+        ? 403
+        : code === "VALIDATION_FAILED"
+          ? 400
+          : 500;
   return NextResponse.json(createApiErrorPayload({ code, message, requestId }), {
-    status: code === "UNAUTHENTICATED" ? 401 : code === "ACCESS_DENIED" ? 403 : 500,
+    status: statusCode,
     headers: { "cache-control": "no-store" },
   });
 }

@@ -19,6 +19,16 @@ export function isValidInternalRedirect(url: string | null | undefined): boolean
   }
 }
 
+function isValidRealDate(dateString: string): boolean {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
 export function parseDashboardDateRange(
   fromDate: string | undefined,
   toDate: string | undefined,
@@ -30,12 +40,14 @@ export function parseDashboardDateRange(
 
   if (fromDate) {
     if (!isoDateRegex.test(fromDate)) throw new Error("Invalid fromDate format");
+    if (!isValidRealDate(fromDate)) throw new Error("Invalid fromDate value");
     from = new Date(`${fromDate}T00:00:00.000+07:00`);
     if (isNaN(from.getTime())) throw new Error("Invalid fromDate value");
   }
 
   if (toDate) {
     if (!isoDateRegex.test(toDate)) throw new Error("Invalid toDate format");
+    if (!isValidRealDate(toDate)) throw new Error("Invalid toDate value");
     to = new Date(`${toDate}T23:59:59.999+07:00`);
     if (isNaN(to.getTime())) throw new Error("Invalid toDate value");
   }

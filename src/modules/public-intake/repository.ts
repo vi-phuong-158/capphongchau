@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { parseDashboardDateRange } from "@/lib/validation";
+
 
 import type { Sql } from "postgres";
 
@@ -1393,7 +1393,7 @@ export class PublicIntakeRepository {
   /**
    * Điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức.
    *
-   * Khác `commitStaffDraftEdit` ở đúng một việc, nhưng là việc quyết định: ngoài `draft_json` v�
+   * Khác `commitStaffDraftEdit` ở đúng một việc, nhưng là việc quyết định: ngoài `draft_json` v�
    * hình chiếu chuẩn hóa phía bản kê khai, hàm này còn **ghi lại dữ liệu chính thức**
    * (`certificates`/`owners`/`parcels`/`assets` theo `case_id`) trong CÙNG transaction.
    *
@@ -1779,18 +1779,8 @@ export class PublicIntakeRepository {
     status?: PublicStatus;
   }): Promise<DashboardSummary> {
     const database = getDatabase();
-    let fromDate: Date | null = null;
-    let toDate: Date | null = null;
-
-    if (input.fromDate || input.toDate) {
-      try {
-        const parsed = parseDashboardDateRange(input.fromDate, input.toDate);
-        fromDate = parsed.from;
-        toDate = parsed.to;
-      } catch {
-        // Fallback or just ignore if invalid
-      }
-    }
+    const fromDate: Date | null = input.fromDate ? new Date(input.fromDate) : null;
+    const toDate: Date | null = input.toDate ? new Date(input.toDate) : null;
 
     const rows = await database.unsafe<
       {
@@ -2528,7 +2518,7 @@ export class PublicIntakeRepository {
       } else {
         /*
          * Chủ sử dụng đọc từ **lớp dữ liệu đang có hiệu lực** của bản ghi vừa khóa, không từ
-         * `draft_json`: khi hồ sơ đã được nhận xử lý thì cán bộ làm việc trên `working_payload`, v�
+         * `draft_json`: khi hồ sơ đã được nhận xử lý thì cán bộ làm việc trên `working_payload`, v�
          * chủ sử dụng cán bộ vừa thêm ở Bàn làm việc chỉ tồn tại ở lớp đó.
          */
         const owners = effectivePayload(record)?.owners;

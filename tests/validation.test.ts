@@ -53,8 +53,12 @@ describe("validation helpers", () => {
       expect(() => parseDashboardDateRange("2026-08-02", "2026-08-01")).toThrow("fromDate must not be after toDate");
     });
 
-    it("throws error for invalid date values", () => {
+    it("throws error for invalid date values (out of bounds)", () => {
       expect(() => parseDashboardDateRange("2026-13-45", undefined)).toThrow("Invalid fromDate value");
+      expect(() => parseDashboardDateRange("2026-02-30", undefined)).toThrow("Invalid fromDate value");
+      expect(() => parseDashboardDateRange("2026-04-31", undefined)).toThrow("Invalid fromDate value");
+      expect(() => parseDashboardDateRange(undefined, "2026-02-30")).toThrow("Invalid toDate value");
+      expect(() => parseDashboardDateRange("0000-00-00", undefined)).toThrow("Invalid fromDate value");
     });
   });
 });

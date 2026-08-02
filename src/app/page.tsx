@@ -109,7 +109,7 @@ export default function HomePage({ searchParams }: { searchParams: { [key: strin
               action={async (formData: FormData) => {
                 "use server";
                 const cb = formData.get("callbackUrl");
-                const safeCb = (typeof cb === "string" && cb.startsWith("/")) ? cb : "/admin/dashboard";
+                const safeCb = (typeof cb === "string" && isValidInternalRedirect(cb)) ? cb : "/admin/dashboard";
                 await signIn("google", { redirectTo: safeCb });
               }}
               className="w-full"

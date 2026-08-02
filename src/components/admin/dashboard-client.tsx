@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardSummary } from "@/modules/public-intake/repository";
@@ -50,7 +50,14 @@ export function DashboardClient({ initialSummary }: { initialSummary: DashboardS
     router.push(`/admin/dashboard?${params.toString()}`);
   };
 
+  const isFirstRender = useRef(true);
+
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+
     let active = true;
 
     async function refresh() {
