@@ -65,11 +65,11 @@ export function SubmissionsQueue() {
   const [items, setItems] = useState<readonly Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState(initialStatus);
-  const [bucket] = useState(initialBucket);
-  const [from] = useState(initialFrom);
-  const [to] = useState(initialTo);
+  const [bucket, setBucket] = useState(initialBucket);
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
   const [officer, setOfficer] = useState(initialOfficer);
-  const [unassigned] = useState(initialUnassigned);
+  const [unassigned, setUnassigned] = useState(initialUnassigned);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -218,6 +218,45 @@ export function SubmissionsQueue() {
           <p className="text-xs text-stone-500 md:col-span-2">Nhập ít nhất 2 ký tự để tìm kiếm.</p>
         ) : null}
       </div>
+
+      {/* Active Filter Chips */}
+      {(bucket || officer || from || to || unassigned) && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-sm text-stone-500 mr-1">Đang lọc theo:</span>
+          {bucket && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Nhóm: {bucket === "pending" ? "Chờ tiếp nhận" : bucket === "in-progress" ? "Đang xử lý" : "Đã tiếp nhận"}
+              <button onClick={() => setBucket("")} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {unassigned && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Chưa phân công
+              <button onClick={() => setUnassigned(false)} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {officer && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Cán bộ: {officer}
+              <button onClick={() => setOfficer("")} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {(from || to) && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Thời gian: {from || "..."} → {to || "..."}
+              <button onClick={() => { setFrom(""); setTo(""); }} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       {state === "loading" && items.length === 0 ? (
         <p className="rounded-xl bg-stone-100 p-5 text-stone-600">Đang tải hàng chờ…</p>

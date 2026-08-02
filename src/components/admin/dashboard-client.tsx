@@ -6,7 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardSummary } from "@/modules/public-intake/repository";
 import { DashboardExportModal } from "./dashboard-export-modal";
 
-export function DashboardClient({ initialSummary }: { initialSummary: DashboardSummary }) {
+export function DashboardClient({
+  initialSummary,
+  canExport = false,
+}: {
+  initialSummary: DashboardSummary;
+  canExport?: boolean;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -83,41 +89,49 @@ export function DashboardClient({ initialSummary }: { initialSummary: DashboardS
     };
   }, [searchParams]);
 
+  const buildQueueUrl = (updates: Record<string, string>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) {
+      params.set(key, value);
+    }
+    return `/submissions?${params.toString()}`;
+  };
+
   const cards = [
     {
-      label: "Tổng hiển thị",
+      label: "Tổng cộng",
       value: summary.totals.total,
-      color: "text-stone-900",
-      bg: "bg-white",
-      href: `/submissions?${officer ? `officer=${officer}` : ""}${fromDate ? `&from=${fromDate}` : ""}${toDate ? `&to=${toDate}` : ""}`,
+      color: "text-stone-700",
+      bg: "bg-white border border-stone-200",
+      href: buildQueueUrl({}),
     },
     {
       label: "Chờ tiếp nhận",
       value: summary.totals.pending,
       color: "text-amber-700",
       bg: "bg-amber-50",
-      href: `/submissions?bucket=pending${officer ? `&officer=${officer}` : ""}${fromDate ? `&from=${fromDate}` : ""}${toDate ? `&to=${toDate}` : ""}`,
+      href: buildQueueUrl({ bucket: "pending" }),
     },
     {
       label: "Đang xử lý",
       value: summary.totals.inProgress,
       color: "text-sky-700",
       bg: "bg-sky-50",
-      href: `/submissions?bucket=in-progress${officer ? `&officer=${officer}` : ""}${fromDate ? `&from=${fromDate}` : ""}${toDate ? `&to=${toDate}` : ""}`,
+      href: buildQueueUrl({ bucket: "in-progress" }),
     },
     {
       label: "Đã tiếp nhận",
       value: summary.totals.accepted,
       color: "text-emerald-700",
       bg: "bg-emerald-50",
-      href: `/submissions?bucket=accepted${officer ? `&officer=${officer}` : ""}${fromDate ? `&from=${fromDate}` : ""}${toDate ? `&to=${toDate}` : ""}`,
+      href: buildQueueUrl({ bucket: "accepted" }),
     },
     {
       label: "Chưa phân công",
       value: summary.totals.unassigned,
       color: "text-rose-700",
       bg: "bg-rose-50",
-      href: `/submissions?unassigned=1${fromDate ? `&from=${fromDate}` : ""}${toDate ? `&to=${toDate}` : ""}`,
+      href: buildQueueUrl({ unassigned: "1" }),
     },
   ];
 
@@ -129,9 +143,11 @@ export function DashboardClient({ initialSummary }: { initialSummary: DashboardS
           <p className="text-stone-500 mt-1">Giám sát tiến độ xử lý hồ sơ của toàn bộ cán bộ.</p>
         </div>
         <div className="flex gap-3">
-          <button onClick={() => setIsExportOpen(true)} className="pc-button-quiet text-sm">
-            Xuất PL3
-          </button>
+          {canExport && (
+            <button onClick={() => setIsExportOpen(true)} className="pc-button-quiet text-sm">
+              Xuất PL3
+            </button>
+          )}
           <Link
             href={`/submissions?${new URLSearchParams(searchParams.toString()).toString()}`}
             className="pc-button text-sm"
@@ -252,7 +268,7 @@ export function DashboardClient({ initialSummary }: { initialSummary: DashboardS
                         </td>
                         <td className="px-4 py-3">
                           <Link
-                            href={`/submissions?officer=${encodeURIComponent(o.email)}`}
+                            href={buildQueueUrl({ officer: o.email })}
                             className="text-cherry-600 hover:text-cherry-800 font-medium"
                           >
                             Xem hồ sơ →
@@ -287,7 +303,7 @@ export function DashboardClient({ initialSummary }: { initialSummary: DashboardS
             <p className="text-xs text-stone-500 max-w-[200px]">
               Bao gồm các hồ sơ mới gửi hoặc cần bổ sung chưa có người phụ trách.
             </p>
-            <Link href="/submissions?unassigned=1" className="pc-button-quiet w-full text-sm mt-2">
+            <Link href={buildQueueUrl({ unassigned: "1" })} className="pc-button-quiet w-full text-sm mt-2">
               Xem hàng chờ
             </Link>
           </div>

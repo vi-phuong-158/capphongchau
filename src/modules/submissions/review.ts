@@ -15,6 +15,13 @@ export const SUBMISSION_DECISION_ROLES = [
 ] as const;
 
 export const DASHBOARD_VIEW_ROLES = [
+  UserRole.INTAKE_OFFICER,
+  UserRole.REVIEW_OFFICER,
+  UserRole.WARD_ADMIN,
+  UserRole.SYSTEM_ADMIN,
+] as const;
+
+export const EXPORT_ROLES = [
   UserRole.REPORT_VIEWER,
   UserRole.WARD_ADMIN,
   UserRole.SYSTEM_ADMIN,

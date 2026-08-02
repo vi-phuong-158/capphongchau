@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { requireActiveUser } from "@/modules/auth/authorization";
 import { getPublicIntakeRepository, type PublicStatus } from "@/modules/public-intake/repository";
-import { DASHBOARD_VIEW_ROLES } from "@/modules/submissions/review";
+import { DASHBOARD_VIEW_ROLES, EXPORT_ROLES } from "@/modules/submissions/review";
 import { DashboardClient } from "@/components/admin/dashboard-client";
 import { normalizeDashboardFilters } from "@/lib/validation";
 import { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "@/modules/public-intake/workflow";
@@ -14,11 +14,7 @@ export default async function DashboardPage({
 }: {
   searchParams: { [key: string]: string | string[] | undefined };
 }) {
-  try {
-    await requireActiveUser(DASHBOARD_VIEW_ROLES);
-  } catch {
-    redirect("/");
-  }
+  const user = await requireActiveUser(DASHBOARD_VIEW_ROLES);
 
   let filters;
   try {
@@ -41,6 +37,8 @@ export default async function DashboardPage({
     officer: filters.officer,
     status: filters.status as PublicStatus | undefined,
   });
+  
+  const canExport = user.roles.some((role) => EXPORT_ROLES.includes(role as typeof EXPORT_ROLES[number]));
 
-  return <DashboardClient initialSummary={initialSummary} />;
+  return <DashboardClient initialSummary={initialSummary} canExport={canExport} />;
 }

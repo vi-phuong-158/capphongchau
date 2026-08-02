@@ -37,6 +37,8 @@ import {
   type SupplementItem,
   type SupplementRequest,
   PUBLIC_STATUSES,
+  getSubmissionBucket,
+  QUEUE_BUCKET_SQL_CONDITION,
 } from "./workflow";
 
 export { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "./workflow";
@@ -1702,6 +1704,7 @@ export class PublicIntakeRepository {
     const searchPattern = normalizedQuery
       ? `%${normalizedQuery.replace(/[!%_]/g, (character) => `!${character}`)}%`
       : null;
+
     const rows = await database.unsafe<
       {
         submission_id: string;
@@ -1737,10 +1740,7 @@ export class PublicIntakeRepository {
            or (claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
          )
          and (
-           $8::text is null
-           or ($8 = 'pending' and claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
-           or ($8 = 'in-progress' and status in ('UNDER_REVIEW', 'NEEDS_SUPPLEMENT', 'RESUBMITTED', 'ACCEPTING', 'SUBMITTED'))
-           or ($8 = 'accepted' and status = 'ACCEPTED')
+           ${QUEUE_BUCKET_SQL_CONDITION}
          )
          and ($9::timestamptz is null or updated_at >= $9::timestamptz)
          and ($10::timestamptz is null or updated_at <= $10::timestamptz)
@@ -1883,17 +1883,9 @@ export class PublicIntakeRepository {
 
         if (status) {
           metrics.total += count;
-
-          if (
-            ["UNDER_REVIEW", "NEEDS_SUPPLEMENT", "RESUBMITTED", "ACCEPTING", "SUBMITTED"].includes(
-              status,
-            )
-          ) {
-            metrics.inProgress += count;
-          }
-          if (status === "ACCEPTED") {
-            metrics.accepted += count;
-          }
+          const bucket = getSubmissionBucket(status, true); // true because officer_email is present
+          if (bucket === "in-progress") metrics.inProgress += count;
+          else if (bucket === "accepted") metrics.accepted += count;
 
           if (last_activity && (!metrics.lastActivity || last_activity > metrics.lastActivity)) {
             metrics.lastActivity = last_activity;
@@ -1905,18 +1897,12 @@ export class PublicIntakeRepository {
         total += count;
         statusBreakdown[status] += count;
 
-        if (status === "SUBMITTED" || status === "RESUBMITTED" || status === "NEEDS_SUPPLEMENT") {
-          if (!officer_email) {
-            unassigned += count;
-            pending += count;
-          } else {
-            inProgress += count;
-          }
-        } else if (status === "UNDER_REVIEW" || status === "ACCEPTING") {
-          inProgress += count;
-        } else if (status === "ACCEPTED") {
-          accepted += count;
-        } else if (!officer_email) {
+        const bucket = getSubmissionBucket(status, !!officer_email);
+        if (bucket === "pending") pending += count;
+        else if (bucket === "in-progress") inProgress += count;
+        else if (bucket === "accepted") accepted += count;
+
+        if (!officer_email) {
           unassigned += count;
         }
       }

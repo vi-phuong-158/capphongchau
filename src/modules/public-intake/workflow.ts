@@ -20,6 +20,25 @@ export type PublicStatus = (typeof PUBLIC_STATUSES)[number];
 export const PUBLIC_BUCKETS = ["pending", "in-progress", "accepted"] as const;
 export type PublicBucket = (typeof PUBLIC_BUCKETS)[number];
 
+export function getSubmissionBucket(status: PublicStatus, isClaimed: boolean): PublicBucket | null {
+  if (status === "ACCEPTED") return "accepted";
+  if (["UNDER_REVIEW", "ACCEPTING"].includes(status)) return "in-progress";
+  if (["SUBMITTED", "RESUBMITTED", "NEEDS_SUPPLEMENT"].includes(status)) {
+    return isClaimed ? "in-progress" : "pending";
+  }
+  return null;
+}
+
+export const QUEUE_BUCKET_SQL_CONDITION = `
+  $8::text is null
+  or ($8 = 'pending' and claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
+  or ($8 = 'in-progress' and (
+    status in ('UNDER_REVIEW', 'ACCEPTING')
+    or (claimed_by is not null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
+  ))
+  or ($8 = 'accepted' and status = 'ACCEPTED')
+`;
+
 export const PUBLIC_STATUS_LABELS: Readonly<Record<PublicStatus, string>> = {
   DRAFT: "Chưa gửi",
   SUBMITTED: "Đã gửi",

@@ -5,7 +5,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { verifyCsrfToken } from "@/modules/auth/csrf";
 import { createApiErrorPayload } from "@/modules/common/api-error";
-import { UserRole } from "@/modules/common/domain";
 import { loadServerEnvironment } from "@/modules/common/env";
 import {
   BACKLOG_EXPORT_STATUSES,
@@ -21,7 +20,7 @@ import { parseDashboardDateRange } from "@/lib/validation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_ROLES = [UserRole.REPORT_VIEWER, UserRole.WARD_ADMIN, UserRole.SYSTEM_ADMIN] as const;
+import { EXPORT_ROLES } from "@/modules/submissions/review";
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const MAX_EXPORT_SUBMISSIONS = 20000;

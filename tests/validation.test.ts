@@ -75,13 +75,24 @@ describe("validation helpers", () => {
       ).toThrow("Invalid bucket");
     });
 
-    it("handles array inputs (picks first)", () => {
-      const result = normalizeDashboardFilters({
-        officer: ["user1", "user2"],
-        validStatuses,
-        validBuckets,
-      });
-      expect(result.officer).toBe("user1");
+    it("throws error on array inputs", () => {
+      expect(() =>
+        normalizeDashboardFilters({
+          officer: ["user1", "user2"],
+          validStatuses,
+          validBuckets,
+        }),
+      ).toThrow("VALIDATION_FAILED: Tham số officer không được là mảng.");
+    });
+
+    it("throws error on invalid unassigned", () => {
+      expect(() =>
+        normalizeDashboardFilters({
+          unassigned: "2",
+          validStatuses,
+          validBuckets,
+        }),
+      ).toThrow("VALIDATION_FAILED: Tham số unassigned không hợp lệ.");
     });
   });
 

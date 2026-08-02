@@ -76,15 +76,23 @@ export function normalizeDashboardFilters(input: {
   bucket?: string;
   unassigned?: string;
 } {
-  const normalizeString = (val: string | string[] | null | undefined) =>
-    (Array.isArray(val) ? val[0] : val) || undefined;
+  const normalizeString = (val: string | string[] | null | undefined, name: string) => {
+    if (Array.isArray(val)) {
+      throw new Error(`VALIDATION_FAILED: Tham số ${name} không được là mảng.`);
+    }
+    return val || undefined;
+  };
 
-  const rawFrom = normalizeString(input.from);
-  const rawTo = normalizeString(input.to);
-  const rawOfficer = normalizeString(input.officer);
-  const rawStatus = normalizeString(input.status);
-  const rawBucket = normalizeString(input.bucket);
-  const rawUnassigned = normalizeString(input.unassigned);
+  const rawFrom = normalizeString(input.from, "from");
+  const rawTo = normalizeString(input.to, "to");
+  const rawOfficer = normalizeString(input.officer, "officer");
+  const rawStatus = normalizeString(input.status, "status");
+  const rawBucket = normalizeString(input.bucket, "bucket");
+  const rawUnassigned = normalizeString(input.unassigned, "unassigned");
+
+  if (rawUnassigned !== undefined && rawUnassigned !== "0" && rawUnassigned !== "1") {
+    throw new Error("VALIDATION_FAILED: Tham số unassigned không hợp lệ.");
+  }
 
   let fromDate: string | undefined;
   let toDate: string | undefined;
