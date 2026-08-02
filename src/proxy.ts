@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authConfig } from "@/auth.config";
+import { isValidInternalRedirect } from "@/lib/validation";
 
 const { auth } = NextAuth(authConfig);
 
@@ -24,7 +25,17 @@ export default auth((request) => {
     return response;
   }
 
-  return NextResponse.redirect(new URL("/", request.url));
+  const loginUrl = new URL("/", request.url);
+  const currentUrl = new URL(request.url);
+  const callbackPath = currentUrl.pathname + currentUrl.search;
+
+  if (isValidInternalRedirect(callbackPath)) {
+    loginUrl.searchParams.set("callbackUrl", callbackPath);
+  } else {
+    loginUrl.searchParams.set("callbackUrl", "/admin/dashboard");
+  }
+
+  return NextResponse.redirect(loginUrl);
 });
 
 // Next.js đọc `matcher` lúc build nên bắt buộc là literal tĩnh — không tách hằng số ra nơi khác
@@ -39,6 +50,7 @@ export const config = {
     "/profile/:path*",
     "/users/:path*",
     "/submissions/:path*",
+    "/admin/:path*",
     "/ke-khai-ho/:path*",
     "/api/staff/:path*",
   ],

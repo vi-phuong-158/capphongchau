@@ -14,6 +14,28 @@ export const SUBMISSION_DECISION_ROLES = [
   UserRole.SYSTEM_ADMIN,
 ] as const;
 
+export const DASHBOARD_VIEW_ROLES = [
+  UserRole.INTAKE_OFFICER,
+  UserRole.REVIEW_OFFICER,
+  UserRole.WARD_ADMIN,
+  UserRole.SYSTEM_ADMIN,
+] as const;
+
+export const EXPORT_ROLES = [
+  UserRole.WARD_ADMIN,
+  UserRole.SYSTEM_ADMIN,
+] as const;
+
+export function resolveInternalLandingPath(roles: readonly UserRole[]): string {
+  if (roles.some((r) => DASHBOARD_VIEW_ROLES.includes(r as typeof DASHBOARD_VIEW_ROLES[number]))) {
+    return "/admin/dashboard";
+  }
+  if (roles.some((r) => SUBMISSION_READ_ROLES.includes(r as typeof SUBMISSION_READ_ROLES[number]))) {
+    return "/submissions";
+  }
+  return "/profile";
+}
+
 /**
  * Ai được **lập hồ sơ hộ người dân** ở `/ke-khai-ho`.
  *

@@ -22,7 +22,7 @@ function entityHash(email: string): string {
 }
 
 async function addSystemAdmins(): Promise<void> {
-  const env = loadSupabaseEnvironment();
+  loadSupabaseEnvironment();
   const db = getDatabase();
 
   console.log("Đang khởi tạo kết nối Supabase PostgreSQL...");
@@ -37,7 +37,7 @@ async function addSystemAdmins(): Promise<void> {
 
     await db.begin(async (tx) => {
       // Upsert user in public.users
-      const rows = await tx`
+      await tx`
         insert into public.users (email, roles, active, display_name)
         values (
           ${email},

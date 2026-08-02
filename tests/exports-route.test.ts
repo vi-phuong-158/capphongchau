@@ -261,4 +261,40 @@ describe("POST /api/exports route tests", () => {
 
     expect(String(col49Value || "")).toContain("AD 123456-GCN.jpg");
   });
+  it("T7: invalid scope -> 400 VALIDATION_FAILED", async () => {
+    const req = new NextRequest("http://localhost:3000/api/exports?scope=invalid", {
+      method: "POST",
+      headers: {
+        "x-csrf-token": "valid-csrf",
+        "x-request-id": "req-test-1",
+      },
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.message).toContain("Phạm vi xuất (scope) không hợp lệ");
+  });
+
+  it("T8: repeated query params (scope, status, from, to, officer) -> 400 VALIDATION_FAILED", async () => {
+    const paramsToTest = ["scope", "status", "from", "to", "officer"];
+    for (const param of paramsToTest) {
+      const req = new NextRequest(
+        `http://localhost:3000/api/exports?${param}=val1&${param}=val2`,
+        {
+          method: "POST",
+          headers: {
+            "x-csrf-token": "valid-csrf",
+            "x-request-id": "req-test-repeated",
+          },
+        },
+      );
+
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("VALIDATION_FAILED");
+    }
+  });
 });

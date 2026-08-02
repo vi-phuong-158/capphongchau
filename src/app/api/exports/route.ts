@@ -5,7 +5,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { verifyCsrfToken } from "@/modules/auth/csrf";
 import { createApiErrorPayload } from "@/modules/common/api-error";
-import { UserRole } from "@/modules/common/domain";
 import { loadServerEnvironment } from "@/modules/common/env";
 import {
   BACKLOG_EXPORT_STATUSES,
@@ -15,23 +14,32 @@ import {
 } from "@/modules/public-intake/pl3-export";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
-import type { PublicStatus } from "@/modules/public-intake/workflow";
+import { type PublicStatus, PUBLIC_STATUSES } from "@/modules/public-intake/workflow";
+import { getSingleQueryParam, parseDashboardDateRange } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_ROLES = [UserRole.REPORT_VIEWER, UserRole.WARD_ADMIN, UserRole.SYSTEM_ADMIN] as const;
+import { EXPORT_ROLES } from "@/modules/submissions/review";
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const MAX_EXPORT_SUBMISSIONS = 20000;
 
 function fail(
-  code: "ACCESS_DENIED" | "UNAUTHENTICATED" | "INTERNAL_ERROR",
+  code: "ACCESS_DENIED" | "UNAUTHENTICATED" | "INTERNAL_ERROR" | "VALIDATION_FAILED",
   message: string,
   requestId: string,
 ) {
+  const statusCode =
+    code === "UNAUTHENTICATED"
+      ? 401
+      : code === "ACCESS_DENIED"
+        ? 403
+        : code === "VALIDATION_FAILED"
+          ? 400
+          : 500;
   return NextResponse.json(createApiErrorPayload({ code, message, requestId }), {
-    status: code === "UNAUTHENTICATED" ? 401 : code === "ACCESS_DENIED" ? 403 : 500,
+    status: statusCode,
     headers: { "cache-control": "no-store" },
   });
 }
@@ -48,13 +56,7 @@ function parseStatuses(scopeParam: string | null): readonly PublicStatus[] {
   return [...OFFICIAL_EXPORT_STATUSES, ...BACKLOG_EXPORT_STATUSES];
 }
 
-function parseIsoDate(param: string | null, isEnd: boolean): string | undefined {
-  if (!param) return undefined;
-  const trimmed = param.trim();
-  if (!trimmed) return undefined;
-  if (trimmed.includes("T")) return trimmed;
-  return isEnd ? `${trimmed}T23:59:59.999Z` : `${trimmed}T00:00:00.000Z`;
-}
+// parseIsoDate removed because parseDashboardDateRange is used in repository
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestId = request.headers.get("x-request-id") ?? randomUUID();
@@ -68,13 +70,64 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const scopeParam = searchParams.get("scope");
-    const fromParam = searchParams.get("from");
-    const toParam = searchParams.get("to");
+    let scopeParam: string | null;
+    let fromParam: string | null;
+    let toParam: string | null;
+    let officerParam: string | null;
+    let statusParam: string | null;
 
-    const statuses = parseStatuses(scopeParam);
-    const fromDate = parseIsoDate(fromParam, false);
-    const toDate = parseIsoDate(toParam, true);
+    try {
+      scopeParam = getSingleQueryParam(searchParams, "scope");
+      fromParam = getSingleQueryParam(searchParams, "from");
+      toParam = getSingleQueryParam(searchParams, "to");
+      officerParam = getSingleQueryParam(searchParams, "officer");
+      statusParam = getSingleQueryParam(searchParams, "status");
+    } catch (error) {
+      return fail(
+        "VALIDATION_FAILED",
+        error instanceof Error ? error.message : "Tham số truy vấn không hợp lệ.",
+        requestId,
+      );
+    }
+
+    if (scopeParam !== null && scopeParam !== "official" && scopeParam !== "backlog") {
+      return fail("VALIDATION_FAILED", "Phạm vi xuất (scope) không hợp lệ.", requestId);
+    }
+
+    const statusesAllowedByScope = parseStatuses(scopeParam);
+    let statusesToExport = statusesAllowedByScope;
+
+    if (statusParam) {
+      if (!PUBLIC_STATUSES.includes(statusParam as PublicStatus)) {
+        return fail("VALIDATION_FAILED", "Trạng thái không hợp lệ.", requestId);
+      }
+      if (!statusesAllowedByScope.includes(statusParam as PublicStatus)) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Trạng thái không được phép xuất trong phạm vi này.",
+          requestId,
+        );
+      }
+      statusesToExport = [statusParam as PublicStatus];
+    }
+
+    let fromDateForExport: string | undefined = undefined;
+    let toDateForExport: string | undefined = undefined;
+
+    if (fromParam || toParam) {
+      try {
+        const parsedDates = parseDashboardDateRange(fromParam || undefined, toParam || undefined);
+        fromDateForExport = parsedDates.from?.toISOString();
+        toDateForExport = parsedDates.to?.toISOString();
+      } catch (err: unknown) {
+        const error = err as Error;
+        return fail(
+          "VALIDATION_FAILED",
+          error.message || "Định dạng ngày không hợp lệ.",
+          requestId,
+        );
+      }
+    }
 
     const repository = getPublicIntakeRepository();
     const accumulator = createPl3Accumulator();
@@ -83,9 +136,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     let truncated = false;
 
     for await (const chunk of repository.listForExport({
-      statuses,
-      fromDate,
-      toDate,
+      statuses: statusesToExport,
+      fromDate: fromDateForExport,
+      toDate: toDateForExport,
+      officer: officerParam || undefined,
       batchSize: 500,
     })) {
       if (totalSubmissionsProcessed + chunk.length > MAX_EXPORT_SUBMISSIONS) {
@@ -110,6 +164,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const warningCount = content.official.warnings.length + content.backlog.warnings.length;
     const submissionCount = content.officialSubmissionCount + content.backlogSubmissionCount;
     const scopeJson = JSON.stringify({
+      scope: scopeParam,
+      status: statusParam,
+      from: fromParam,
+      to: toParam,
+      officer: officerParam,
       officialRows: content.official.rows.length,
       backlogRows: content.backlog.rows.length,
       officialSubmissions: content.officialSubmissionCount,
@@ -159,7 +218,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         action: "PL3_EXPORTED",
         entityId: exportJobId,
         requestId,
-        metadata: { rowCount, submissionCount, warningCount, archived, truncated },
+        metadata: {
+          scope: scopeParam || "",
+          status: statusParam || "",
+          from: fromParam || "",
+          to: toParam || "",
+          officer: officerParam || "",
+          rowCount,
+          submissionCount,
+          warningCount,
+          archived,
+          truncated,
+        },
       });
     } catch {
       audited = false;

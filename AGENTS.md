@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## Bổ sung PR: Xây dựng Dashboard Quản lý và Xuất PL3 (2026-08-01)
+
+- Dashboard Điều hành nằm tại `/admin/dashboard` và được bảo vệ nghiêm ngặt qua Proxy Middleware. Mọi dữ liệu trả về đều bắt buộc `Cache-Control: private, no-store`.
+- Hàng chờ `/submissions` và tính năng Xuất PL3 `/api/exports` nay hỗ trợ lọc theo cán bộ (`officer`), query param được truyền liền lạc từ Dashboard sang Hàng chờ, cho phép lọc công việc riêng lẻ theo từng người.
+
 ## Bổ sung post-merge PR #12 — replay upload và cache công khai (2026-07-31)
 
 - Upload-complete public/officer phải đọc replay đã hoàn tất trước mọi thao tác hồ sơ/Drive. Query

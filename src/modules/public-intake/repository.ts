@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+
 import type { Sql } from "postgres";
 
 // `official-record.ts` chỉ phụ thuộc `./types`, không phụ thuộc repository — không tạo vòng import.
@@ -30,14 +31,18 @@ import { summarizeWorkingPayloadChanges } from "./working-payload-audit";
 import {
   type PublicFileSummary,
   type PublicStatus,
+  type PublicBucket,
   type PublicTimelineEvent,
   serializePublicTimelineEvent,
   type SupplementItem,
   type SupplementRequest,
+  PUBLIC_STATUSES,
+  getSubmissionBucket,
+  QUEUE_BUCKET_SQL_CONDITION,
 } from "./workflow";
 
-export { PUBLIC_STATUSES } from "./workflow";
-export type { PublicStatus } from "./workflow";
+export { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "./workflow";
+export type { PublicStatus, PublicBucket } from "./workflow";
 
 /**
  * Nguồn của hồ sơ.
@@ -160,6 +165,27 @@ export interface QueueSubmissionSummary {
   readonly updatedAt: string;
   readonly issueNumber: string;
   readonly ownerName: string;
+}
+
+export interface DashboardSummaryOfficerMetrics {
+  readonly email: string;
+  readonly displayName: string;
+  readonly total: number;
+  readonly inProgress: number;
+  readonly accepted: number;
+  readonly lastActivity: string | null;
+}
+
+export interface DashboardSummary {
+  readonly totals: {
+    readonly total: number;
+    readonly pending: number;
+    readonly inProgress: number;
+    readonly accepted: number;
+    readonly unassigned: number;
+  };
+  readonly officers: readonly DashboardSummaryOfficerMetrics[];
+  readonly statusBreakdown: Readonly<Record<PublicStatus, number>>;
 }
 
 export interface QueueSubmissionPage {
@@ -1370,7 +1396,7 @@ export class PublicIntakeRepository {
   /**
    * Điều chỉnh hồ sơ ĐÃ tiếp nhận chính thức.
    *
-   * Khác `commitStaffDraftEdit` ở đúng một việc, nhưng là việc quyết định: ngoài `draft_json` và
+   * Khác `commitStaffDraftEdit` ở đúng một việc, nhưng là việc quyết định: ngoài `draft_json` v�
    * hình chiếu chuẩn hóa phía bản kê khai, hàm này còn **ghi lại dữ liệu chính thức**
    * (`certificates`/`owners`/`parcels`/`assets` theo `case_id`) trong CÙNG transaction.
    *
@@ -1613,6 +1639,7 @@ export class PublicIntakeRepository {
     statuses: readonly PublicStatus[];
     fromDate?: string;
     toDate?: string;
+    officer?: string;
     batchSize?: number;
   }): AsyncGenerator<SubmissionRecord[]> {
     const database = getDatabase();
@@ -1626,10 +1653,18 @@ export class PublicIntakeRepository {
          where status = any($1)
            and ($2::timestamptz is null or updated_at >= $2::timestamptz)
            and ($3::timestamptz is null or updated_at < $3::timestamptz)
-           and legacy_row_index > $4
+           and ($4::text is null or claimed_by = $4)
+           and legacy_row_index > $5
          order by legacy_row_index
-         limit $5`,
-        [input.statuses, input.fromDate || null, input.toDate || null, lastRowIndex, batchSize],
+         limit $6`,
+        [
+          input.statuses,
+          input.fromDate || null,
+          input.toDate || null,
+          input.officer || null,
+          lastRowIndex,
+          batchSize,
+        ],
       );
 
       if (rows.length === 0) {
@@ -1653,9 +1688,14 @@ export class PublicIntakeRepository {
    */
   async listQueuePage(input: {
     status?: PublicStatus;
+    bucket?: PublicBucket;
+    fromDate?: string;
+    toDate?: string;
     query?: string;
     cursor?: string | null;
     limit?: number;
+    officer?: string;
+    unassigned?: boolean;
   }): Promise<QueueSubmissionPage> {
     const database = getDatabase();
     const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
@@ -1664,6 +1704,7 @@ export class PublicIntakeRepository {
     const searchPattern = normalizedQuery
       ? `%${normalizedQuery.replace(/[!%_]/g, (character) => `!${character}`)}%`
       : null;
+
     const rows = await database.unsafe<
       {
         submission_id: string;
@@ -1693,6 +1734,16 @@ export class PublicIntakeRepository {
            or updated_at < $3::timestamptz
            or (updated_at = $3::timestamptz and submission_id < $4)
          )
+         and ($6::text is null or claimed_by = $6)
+         and (
+           $7::boolean is not true
+           or (claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
+         )
+         and (
+           ${QUEUE_BUCKET_SQL_CONDITION}
+         )
+         and ($9::timestamptz is null or updated_at >= $9::timestamptz)
+         and ($10::timestamptz is null or updated_at <= $10::timestamptz)
        order by updated_at desc, submission_id desc
        limit $5`,
       [
@@ -1701,6 +1752,11 @@ export class PublicIntakeRepository {
         cursor?.updatedAt ?? null,
         cursor?.submissionId ?? null,
         pageLimit + 1,
+        input.officer ?? null,
+        input.unassigned ?? false,
+        input.bucket ?? null,
+        input.fromDate ?? null,
+        input.toDate ?? null,
       ],
     );
 
@@ -1728,6 +1784,137 @@ export class PublicIntakeRepository {
               submissionId: lastItem.submissionId,
             })
           : null,
+    };
+  }
+
+  async getDashboardSummary(input: {
+    fromDate?: string;
+    toDate?: string;
+    officer?: string;
+    status?: PublicStatus;
+  }): Promise<DashboardSummary> {
+    const database = getDatabase();
+    const fromDate: Date | null = input.fromDate ? new Date(input.fromDate) : null;
+    const toDate: Date | null = input.toDate ? new Date(input.toDate) : null;
+
+    const rows = await database.unsafe<
+      {
+        officer_email: string;
+        officer_name: string;
+        status: PublicStatus | null;
+        count: number;
+        last_activity: Date | null;
+      }[]
+    >(
+      `with all_officers as (
+         select email as officer_email, display_name as officer_name
+         from public.users
+         where active = true and roles && array['INTAKE_OFFICER', 'REVIEW_OFFICER']::text[]
+       ),
+       all_submissions as (
+         select
+           coalesce(claimed_by, '') as officer_email,
+           coalesce(claimed_by_display_name, '') as officer_name,
+           status,
+           count(*)::int as count,
+           max(updated_at) as last_activity
+         from public.public_submissions
+         where ($1::timestamptz is null or updated_at >= $1::timestamptz)
+           and ($2::timestamptz is null or updated_at <= $2::timestamptz)
+           and ($3::text is null or claimed_by = $3)
+           and ($4::text is null or status = $4)
+         group by claimed_by, claimed_by_display_name, status
+       )
+       select
+         coalesce(o.officer_email, s.officer_email) as officer_email,
+         coalesce(o.officer_name, s.officer_name) as officer_name,
+         s.status,
+         coalesce(s.count, 0) as count,
+         s.last_activity
+       from all_officers o
+       full outer join all_submissions s on o.officer_email = s.officer_email
+       order by officer_email, status`,
+      [
+        fromDate?.toISOString() || null,
+        toDate?.toISOString() || null,
+        input.officer || null,
+        input.status || null,
+      ],
+    );
+
+    let total = 0;
+    let pending = 0;
+    let inProgress = 0;
+    let accepted = 0;
+    let unassigned = 0;
+
+    const statusBreakdown = Object.fromEntries(
+      PUBLIC_STATUSES.map((s: PublicStatus) => [s, 0]),
+    ) as Record<PublicStatus, number>;
+
+    const officersMap = new Map<
+      string,
+      {
+        email: string;
+        displayName: string;
+        total: number;
+        inProgress: number;
+        accepted: number;
+        lastActivity: Date | null;
+      }
+    >();
+
+    for (const row of rows) {
+      const { officer_email, officer_name, status, count, last_activity } = row;
+
+      if (officer_email) {
+        let metrics = officersMap.get(officer_email);
+        if (!metrics) {
+          metrics = {
+            email: officer_email,
+            displayName: officer_name,
+            total: 0,
+            inProgress: 0,
+            accepted: 0,
+            lastActivity: null,
+          };
+          officersMap.set(officer_email, metrics);
+        }
+
+        if (status) {
+          metrics.total += count;
+          const bucket = getSubmissionBucket(status, true); // true because officer_email is present
+          if (bucket === "in-progress") metrics.inProgress += count;
+          else if (bucket === "accepted") metrics.accepted += count;
+
+          if (last_activity && (!metrics.lastActivity || last_activity > metrics.lastActivity)) {
+            metrics.lastActivity = last_activity;
+          }
+        }
+      }
+
+      if (status) {
+        total += count;
+        statusBreakdown[status] += count;
+
+        const bucket = getSubmissionBucket(status, !!officer_email);
+        if (bucket === "pending") pending += count;
+        else if (bucket === "in-progress") inProgress += count;
+        else if (bucket === "accepted") accepted += count;
+
+        if (!officer_email && bucket === "pending") {
+          unassigned += count;
+        }
+      }
+    }
+
+    return {
+      totals: { total, pending, inProgress, accepted, unassigned },
+      statusBreakdown,
+      officers: Array.from(officersMap.values()).map((o) => ({
+        ...o,
+        lastActivity: o.lastActivity ? o.lastActivity.toISOString() : null,
+      })),
     };
   }
 
@@ -2332,7 +2519,7 @@ export class PublicIntakeRepository {
       } else {
         /*
          * Chủ sử dụng đọc từ **lớp dữ liệu đang có hiệu lực** của bản ghi vừa khóa, không từ
-         * `draft_json`: khi hồ sơ đã được nhận xử lý thì cán bộ làm việc trên `working_payload`, và
+         * `draft_json`: khi hồ sơ đã được nhận xử lý thì cán bộ làm việc trên `working_payload`, v�
          * chủ sử dụng cán bộ vừa thêm ở Bàn làm việc chỉ tồn tại ở lớp đó.
          */
         const owners = effectivePayload(record)?.owners;

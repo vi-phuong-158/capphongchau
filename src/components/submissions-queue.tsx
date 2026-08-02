@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { assignedOfficerLabel } from "@/modules/submissions/assigned-officer";
 import type { PublicStatus } from "@/modules/public-intake/repository";
 import { mayClaim } from "@/modules/submissions/review";
@@ -53,9 +54,22 @@ const statusStyles: Record<string, { label: string; bg: string }> = {
 const SEARCH_DEBOUNCE_MS = 350;
 
 export function SubmissionsQueue() {
+  const searchParams = useSearchParams();
+  const initialOfficer = searchParams?.get("officer") ?? "";
+  const initialStatus = searchParams?.get("status") ?? "";
+  const initialBucket = searchParams?.get("bucket") ?? "";
+  const initialFrom = searchParams?.get("from") ?? "";
+  const initialTo = searchParams?.get("to") ?? "";
+  const initialUnassigned = searchParams?.get("unassigned") === "1";
+
   const [items, setItems] = useState<readonly Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [bucket, setBucket] = useState(initialBucket);
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
+  const [officer, setOfficer] = useState(initialOfficer);
+  const [unassigned, setUnassigned] = useState(initialUnassigned);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -80,6 +94,11 @@ export function SubmissionsQueue() {
     const controller = new AbortController();
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (bucket) params.set("bucket", bucket);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (officer) params.set("officer", officer);
+    if (unassigned) params.set("unassigned", "1");
     if (debouncedQuery) params.set("q", debouncedQuery);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
@@ -95,12 +114,17 @@ export function SubmissionsQueue() {
         if ((error as { name?: string }).name !== "AbortError") setState("error");
       });
     return () => controller.abort();
-  }, [status, debouncedQuery]);
+  }, [status, bucket, from, to, officer, unassigned, debouncedQuery]);
 
   const loadMore = (cursor: string) => {
     setLoadingMore(true);
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (bucket) params.set("bucket", bucket);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (officer) params.set("officer", officer);
+    if (unassigned) params.set("unassigned", "1");
     if (debouncedQuery) params.set("q", debouncedQuery);
     params.set("cursor", cursor);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store" })
@@ -149,34 +173,90 @@ export function SubmissionsQueue() {
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-stone-200 bg-white p-4 md:grid-cols-[1fr_220px]">
-        <input
-          className="pc-input"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Tìm theo Mã tiếp nhận, số GCN hoặc tên Chủ sử dụng"
-          aria-label="Tìm hồ sơ"
-        />
-        <select
-          className="pc-input"
-          value={status}
-          onChange={(event) => {
-            setState("loading");
-            setStatus(event.target.value);
-          }}
-          aria-label="Lọc trạng thái"
-        >
-          <option value="">Tất cả trạng thái</option>
-          {Object.entries(labels).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+      {/* Filters Toolbar */}
+      <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-3.5 shadow-sm sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            placeholder="Tìm mã tiếp nhận, tên chủ hoặc số GCN…"
+            className="pc-input w-full pl-9"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <svg
+            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            className="pc-select w-full sm:w-48"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="">Tất cả trạng thái</option>
+            {Object.entries(labels).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {officer && (
+            <button
+              onClick={() => setOfficer("")}
+              className="text-xs text-stone-500 hover:text-stone-700 underline shrink-0"
+            >
+              Bỏ lọc cán bộ
+            </button>
+          )}
+        </div>
         {query.trim().length === 1 ? (
           <p className="text-xs text-stone-500 md:col-span-2">Nhập ít nhất 2 ký tự để tìm kiếm.</p>
         ) : null}
       </div>
+
+      {/* Active Filter Chips */}
+      {(bucket || officer || from || to || unassigned) && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-sm text-stone-500 mr-1">Đang lọc theo:</span>
+          {bucket && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Nhóm: {bucket === "pending" ? "Chờ tiếp nhận" : bucket === "in-progress" ? "Đang xử lý" : "Đã tiếp nhận"}
+              <button onClick={() => setBucket("")} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {unassigned && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Chưa phân công
+              <button onClick={() => setUnassigned(false)} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {officer && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Cán bộ: {officer}
+              <button onClick={() => setOfficer("")} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {(from || to) && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Thời gian: {from || "..."} → {to || "..."}
+              <button onClick={() => { setFrom(""); setTo(""); }} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       {state === "loading" && items.length === 0 ? (
         <p className="rounded-xl bg-stone-100 p-5 text-stone-600">Đang tải hàng chờ…</p>
