@@ -37,7 +37,7 @@ export default async function DashboardPage({
     officer: filters.officer,
     status: filters.status as PublicStatus | undefined,
   });
-  
+
   const canExport = user.roles.some((role) => EXPORT_ROLES.includes(role as typeof EXPORT_ROLES[number]));
 
   return <DashboardClient initialSummary={initialSummary} canExport={canExport} />;

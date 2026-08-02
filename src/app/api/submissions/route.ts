@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
 import { getPublicIntakeRepository, PUBLIC_STATUSES, PUBLIC_BUCKETS } from "@/modules/public-intake/repository";
-import { normalizeDashboardFilters } from "@/lib/validation";
+import { normalizeDashboardFilters, getSingleQueryParam } from "@/lib/validation";
 import { InvalidQueueCursorError } from "@/modules/submissions/queue-pagination";
 import { maskPhone, SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
@@ -39,16 +39,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const authStartedAt = performance.now();
     await requireActiveUser(SUBMISSION_READ_ROLES);
     const authMs = performance.now() - authStartedAt;
-    
+
     let filters;
     try {
       filters = normalizeDashboardFilters({
-        from: request.nextUrl.searchParams.get("from"),
-        to: request.nextUrl.searchParams.get("to"),
-        officer: request.nextUrl.searchParams.get("officer"),
-        status: request.nextUrl.searchParams.get("status"),
-        bucket: request.nextUrl.searchParams.get("bucket"),
-        unassigned: request.nextUrl.searchParams.get("unassigned"),
+        from: getSingleQueryParam(request.nextUrl.searchParams, "from"),
+        to: getSingleQueryParam(request.nextUrl.searchParams, "to"),
+        officer: getSingleQueryParam(request.nextUrl.searchParams, "officer"),
+        status: getSingleQueryParam(request.nextUrl.searchParams, "status"),
+        bucket: getSingleQueryParam(request.nextUrl.searchParams, "bucket"),
+        unassigned: getSingleQueryParam(request.nextUrl.searchParams, "unassigned"),
         validStatuses: PUBLIC_STATUSES,
         validBuckets: PUBLIC_BUCKETS,
       });
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const error = err as Error;
       return responseError("VALIDATION_FAILED", error.message || "Tham số lọc không hợp lệ.", requestId);
     }
-    
+
     const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
     const cursor = request.nextUrl.searchParams.get("cursor");
     const unassigned = filters.unassigned === "1";

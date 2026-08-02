@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
-import { normalizeDashboardFilters } from "@/lib/validation";
+import { normalizeDashboardFilters, getSingleQueryParam } from "@/lib/validation";
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { DASHBOARD_VIEW_ROLES } from "@/modules/submissions/review";
 import { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "@/modules/public-intake/workflow";
@@ -40,10 +40,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let filters;
     try {
       filters = normalizeDashboardFilters({
-        from: request.nextUrl.searchParams.get("from"),
-        to: request.nextUrl.searchParams.get("to"),
-        officer: request.nextUrl.searchParams.get("officer"),
-        status: request.nextUrl.searchParams.get("status"),
+        from: getSingleQueryParam(request.nextUrl.searchParams, "from"),
+        to: getSingleQueryParam(request.nextUrl.searchParams, "to"),
+        officer: getSingleQueryParam(request.nextUrl.searchParams, "officer"),
+        status: getSingleQueryParam(request.nextUrl.searchParams, "status"),
         validStatuses: PUBLIC_STATUSES,
         validBuckets: PUBLIC_BUCKETS,
       });

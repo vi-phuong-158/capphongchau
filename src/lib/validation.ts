@@ -59,6 +59,15 @@ export function parseDashboardDateRange(
   return { from, to };
 }
 
+export function getSingleQueryParam(searchParams: URLSearchParams, name: string): string | null {
+  const vals = searchParams.getAll(name);
+  if (vals.length === 0) return null;
+  if (vals.length > 1) {
+    throw new Error(`VALIDATION_FAILED: Tham số ${name} không được xuất hiện nhiều lần.`);
+  }
+  return vals[0];
+}
+
 export function normalizeDashboardFilters(input: {
   from?: string | string[] | null;
   to?: string | string[] | null;

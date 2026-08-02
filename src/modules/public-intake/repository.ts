@@ -1902,7 +1902,7 @@ export class PublicIntakeRepository {
         else if (bucket === "in-progress") inProgress += count;
         else if (bucket === "accepted") accepted += count;
 
-        if (!officer_email) {
+        if (!officer_email && bucket === "pending") {
           unassigned += count;
         }
       }

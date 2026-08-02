@@ -15,7 +15,7 @@ import {
 import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { getPublicIntakeStorage } from "@/modules/public-intake/storage";
 import { type PublicStatus, PUBLIC_STATUSES } from "@/modules/public-intake/workflow";
-import { parseDashboardDateRange } from "@/lib/validation";
+import { getSingleQueryParam, parseDashboardDateRange } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,15 +70,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const scopeParam = searchParams.get("scope");
-    
+    const scopeParam = getSingleQueryParam(searchParams, "scope");
+
     if (scopeParam !== null && scopeParam !== "official" && scopeParam !== "backlog") {
       return fail("VALIDATION_FAILED", "Phạm vi xuất (scope) không hợp lệ.", requestId);
     }
-    const fromParam = searchParams.get("from");
-    const toParam = searchParams.get("to");
-    const officerParam = searchParams.get("officer");
-    const statusParam = searchParams.get("status");
+    const fromParam = getSingleQueryParam(searchParams, "from");
+    const toParam = getSingleQueryParam(searchParams, "to");
+    const officerParam = getSingleQueryParam(searchParams, "officer");
+    const statusParam = getSingleQueryParam(searchParams, "status");
 
     const statusesAllowedByScope = parseStatuses(scopeParam);
     let statusesToExport = statusesAllowedByScope;

@@ -52,18 +52,19 @@ describe("Bucket Logic", () => {
     it("Dashboard Summary correctly aggregates in-progress and pending buckets using getSubmissionBucket", async () => {
       // Mocking DB response for getDashboardSummary
       databaseMock.unsafe.mockResolvedValueOnce([
-        { officer_email: null, officer_name: null, status: "SUBMITTED", count: 10, last_activity: new Date() }, // pending
+        { officer_email: null, officer_name: null, status: "SUBMITTED", count: 10, last_activity: new Date() }, // pending, unassigned=10
+        { officer_email: null, officer_name: null, status: "DRAFT", count: 7, last_activity: new Date() }, // other bucket, unassigned=0
         { officer_email: "a@test", officer_name: "A", status: "SUBMITTED", count: 5, last_activity: new Date() }, // in-progress
-        { officer_email: null, officer_name: null, status: "UNDER_REVIEW", count: 2, last_activity: new Date() }, // in-progress
+        { officer_email: null, officer_name: null, status: "UNDER_REVIEW", count: 2, last_activity: new Date() }, // in-progress, not pending -> unassigned=0
         { officer_email: "a@test", officer_name: "A", status: "ACCEPTED", count: 3, last_activity: new Date() }, // accepted
       ]);
 
       const repo = new PublicIntakeRepository();
       const summary = await repo.getDashboardSummary({});
-
       expect(summary.totals.pending).toBe(10);
-      expect(summary.totals.inProgress).toBe(5 + 2); // 7
+      expect(summary.totals.inProgress).toBe(7); // 5 + 2
       expect(summary.totals.accepted).toBe(3);
+      expect(summary.totals.unassigned).toBe(10); // only SUBMITTED + null officer
     });
   });
 });

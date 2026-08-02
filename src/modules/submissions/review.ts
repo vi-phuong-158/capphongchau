@@ -22,7 +22,6 @@ export const DASHBOARD_VIEW_ROLES = [
 ] as const;
 
 export const EXPORT_ROLES = [
-  UserRole.REPORT_VIEWER,
   UserRole.WARD_ADMIN,
   UserRole.SYSTEM_ADMIN,
 ] as const;

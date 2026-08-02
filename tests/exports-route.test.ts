@@ -171,6 +171,10 @@ describe("POST /api/exports route tests", () => {
     mockListForExport.mockReturnValueOnce(toAsyncGen([[makeRecord("1")]]));
     const res = await POST(makeRequest());
 
+    if (res.status !== 200) {
+      console.log(await res.json());
+    }
+
     expect(res.status).toBe(200);
     expect(res.headers.get("x-export-row-count")).toBe("1");
     const buf = await res.arrayBuffer();
@@ -269,7 +273,7 @@ describe("POST /api/exports route tests", () => {
         "x-request-id": "req-test-1",
       },
     });
-    
+
     const res = await POST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
