@@ -176,7 +176,6 @@ export interface DashboardSummaryOfficerMetrics {
   readonly claimedCount: number;
   readonly inProgressCount: number;
   readonly completedCount: number;
-  readonly completionRate: string;
   readonly lastActivity: string | null;
   readonly total: number;
   readonly inProgress: number;
@@ -1922,8 +1921,7 @@ export class PublicIntakeRepository {
        current_in_progress as (
          select
            claimed_by::text as email,
-           count(*)::int as in_progress_count,
-           max(updated_at) as last_sub_updated_at
+           count(*)::int as in_progress_count
          from public.public_submissions
          where claimed_by is not null and claimed_by != ''
            and (
@@ -1937,15 +1935,18 @@ export class PublicIntakeRepository {
            actor_email::text as email,
            max(created_at) as last_audit_at
          from public.audit_logs
-         where action in (
-           'SUBMISSION_CLAIMED',
-           'SUBMISSION_FORCE_CLAIMED',
-           'SUBMISSION_TRANSFERRED',
-           'SUBMISSION_WORKING_PAYLOAD_EDITED',
-           'WORKING_PAYLOAD_UPDATED',
-           'OFFICIAL_ACCEPTANCE_STARTED',
-           'OFFICIAL_ACCEPTANCE_COMPLETED'
-         )
+         where entity_type = 'PUBLIC_SUBMISSION'
+           and action in (
+             'SUBMISSION_CLAIMED',
+             'SUBMISSION_FORCE_CLAIMED',
+             'SUBMISSION_TRANSFERRED',
+             'SUBMISSION_WORKING_PAYLOAD_EDITED',
+             'WORKING_PAYLOAD_UPDATED',
+             'OFFICIAL_ACCEPTANCE_STARTED',
+             'OFFICIAL_ACCEPTANCE_COMPLETED'
+           )
+           and ($1::timestamptz is null or created_at >= $1::timestamptz)
+           and ($2::timestamptz is null or created_at < $2::timestamptz)
          group by actor_email
        )
        select
@@ -1958,7 +1959,6 @@ export class PublicIntakeRepository {
          coalesce(cmp.completed_count, 0) as completed_count,
          c.last_claim_at,
          cmp.last_completion_at,
-         ip.last_sub_updated_at,
          la.last_audit_at
        from all_users u
        left join claims c on u.email = c.email
@@ -1979,14 +1979,10 @@ export class PublicIntakeRepository {
       const inProgressCount = Number(row.in_progress_count || 0);
       const completedCount = Number(row.completed_count || 0);
 
-      const completionRate =
-        claimedCount === 0 ? "0%" : `${Math.round((completedCount / claimedCount) * 100)}%`;
-
       const timestamps = [
         row.last_claim_at ? new Date(row.last_claim_at).getTime() : 0,
         row.last_completion_at ? new Date(row.last_completion_at).getTime() : 0,
         row.last_audit_at ? new Date(row.last_audit_at).getTime() : 0,
-        row.last_sub_updated_at ? new Date(row.last_sub_updated_at).getTime() : 0,
       ].filter((t) => t > 0);
 
       const maxTime = timestamps.length > 0 ? Math.max(...timestamps) : null;
@@ -2000,7 +1996,6 @@ export class PublicIntakeRepository {
         claimedCount,
         inProgressCount,
         completedCount,
-        completionRate,
         lastActivity,
         total: claimedCount,
         inProgress: inProgressCount,

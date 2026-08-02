@@ -114,8 +114,14 @@ describe("validation helpers", () => {
       expect(() => parseDashboardDateRange(undefined, "2026/08/01")).toThrow("Invalid toDate format");
     });
 
-    it("throws error if from > to", () => {
-      expect(() => parseDashboardDateRange("2026-08-03", "2026-08-01")).toThrow(
+    it("handles same day valid range (02/08 to 02/08)", () => {
+      const { from, to } = parseDashboardDateRange("2026-08-02", "2026-08-02");
+      expect(from?.toISOString()).toBe("2026-08-01T17:00:00.000Z");
+      expect(to?.toISOString()).toBe("2026-08-02T17:00:00.000Z");
+    });
+
+    it("throws error if from > to (e.g. 03/08 to 02/08)", () => {
+      expect(() => parseDashboardDateRange("2026-08-03", "2026-08-02")).toThrow(
         "fromDate must not be after toDate",
       );
     });

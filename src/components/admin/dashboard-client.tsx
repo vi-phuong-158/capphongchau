@@ -252,7 +252,12 @@ export function DashboardClient({
       </div>
 
       <div className="space-y-4">
-        <h2 className="text-lg font-bold text-stone-800">Kết quả xử lý theo tài khoản</h2>
+        <div>
+          <h2 className="text-lg font-bold text-stone-800">Kết quả xử lý theo tài khoản</h2>
+          <p className="text-sm text-stone-500 mt-1">
+            Khoảng ngày áp dụng cho Đã tiếp nhận, Đã hoàn thành và Hoạt động cuối. Đang xử lý là số hồ sơ hiện tại.
+          </p>
+        </div>
         <div className="pc-card bg-white overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
@@ -269,16 +274,13 @@ export function DashboardClient({
                   <th className="px-4 py-3 font-semibold text-right text-emerald-700">
                     Đã hoàn thành xử lý
                   </th>
-                  <th className="px-4 py-3 font-semibold text-right text-stone-700">
-                    Tỷ lệ hoàn thành
-                  </th>
-                  <th className="px-4 py-3 font-semibold text-stone-500">Hoạt động cuối</th>
+                  <th className="px-4 py-3 font-semibold text-stone-500">Hoạt động cuối trong kỳ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
                 {summary.officers.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-stone-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-stone-500">
                       Không có dữ liệu
                     </td>
                   </tr>
@@ -357,9 +359,7 @@ export function DashboardClient({
                           "0"
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-stone-800">
-                        {o.completionRate}
-                      </td>
+
                       <td className="px-4 py-3 text-xs text-stone-500">
                         {formatDateVn(o.lastActivity)}
                       </td>

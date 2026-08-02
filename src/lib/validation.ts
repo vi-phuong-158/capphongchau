@@ -53,7 +53,7 @@ export function parseDashboardDateRange(
     to.setDate(to.getDate() + 1);
   }
 
-  if (from && to && from > to) {
+  if (from && to && from >= to) {
     throw new Error("fromDate must not be after toDate");
   }
 
