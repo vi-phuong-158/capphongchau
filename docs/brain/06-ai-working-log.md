@@ -1,29 +1,19 @@
 # 06 — AI Working Log
 
-## [2026-08-01] Xây dựng Dashboard Quản lý và Xuất PL3 theo Cán bộ
+## [2026-08-02] Hoàn tất và Squash Merge PR #15 — Dashboard Quản lý và Xuất PL3
 
 - **Agent:** Antigravity (Gemini 3.6 Flash).
 - **Công việc:**
-  1. Xây dựng Dashboard Điều hành (Admin Dashboard) tại `/admin/dashboard` để theo dõi tiến độ xử lý hồ sơ.
-  2. Implement Proxy middleware `src/proxy.ts` để chặn truy cập `/admin/*` khi chưa đăng nhập. Redirect login thành công về `/admin/dashboard`.
-  3. Cung cấp bộ lọc theo cán bộ (`officer`), lọc từ ngày đến ngày; cập nhật `src/modules/public-intake/repository.ts` với câu query aggregation tối ưu hiệu năng.
-  4. Hiển thị thông số tổng quát, khối lượng công việc cán bộ, và cảnh báo hồ sơ chưa phân công. Liên kết trực tiếp từ Dashboard sang Hàng chờ (`/submissions`) với tham số lọc tương ứng.
-  5. Phát triển `DashboardExportModal` để thay thế nút xuất hiện tại, hỗ trợ xuất PL3 và Tồn đọng kèm bộ lọc cán bộ.
-- **File đã sửa:**
-  - `src/app/page.tsx`
-  - `src/proxy.ts`
-  - `src/modules/public-intake/repository.ts`
-  - `src/app/api/submissions/route.ts`
-  - `src/app/api/exports/route.ts`
-  - `src/components/submissions-queue.tsx`
-  - `scripts/add-system-admins.ts`
-  - `tests/staging-rehearsal-scenarios.test.ts`
-- **File tạo mới:**
-  - `src/app/admin/layout.tsx`
-  - `src/app/admin/dashboard/page.tsx`
-  - `src/components/admin/dashboard-client.tsx`
-  - `src/components/admin/dashboard-export-modal.tsx`
-- **Kiểm tra:** Pass typecheck (`npm run typecheck`), pass lint (`npm run lint`), pass tests (`npm test`). Không phá vỡ luồng cũ. Mọi response đều set cache control `no-store, private` theo đúng chuẩn.
+  1. Xây dựng Dashboard Điều hành (Admin Dashboard) tại `/admin/dashboard` và bảo vệ qua Proxy Middleware (`src/proxy.ts`).
+  2. Bổ sung `getSingleQueryParam` chống query param dạng mảng lặp lại ở tất cả các route handler (`/api/dashboard/summary`, `/api/submissions`, `/api/exports`), đảm bảo trả HTTP 400 `VALIDATION_FAILED`.
+  3. Hoàn thiện helper `resolveInternalLandingPath(roles)` điều hướng an toàn sau đăng nhập cho các vai trò (`DASHBOARD_VIEW_ROLES` → `/admin/dashboard`, `SUBMISSION_READ_ROLES` → `/submissions`, role khác như `REPORT_VIEWER` → `/profile`).
+  4. Đếm `summary.totals.unassigned` chính xác: chỉ tính hồ sơ thuộc bucket `pending` chưa có `claimed_by`.
+  5. Viết lại bộ test `tests/login-redirect.test.ts` dùng typed hoisted mocks hoàn toàn sạch `any`.
+  6. PR #15 đã pass 100% GitHub Actions CI run #57 (869 pass, 28 skip, lint xanh, build xanh, whitespace xanh).
+  7. Squash merge thành công vào nhánh `main` (Subject: `feat(admin): add operations dashboard and filtered PL3 export`).
+- **File chính:** `src/app/admin/dashboard/page.tsx`, `src/app/admin/login-redirect/route.ts`, `src/app/api/dashboard/summary/route.ts`, `src/app/api/exports/route.ts`, `src/lib/validation.ts`, `src/modules/submissions/review.ts`.
+
+
 
 ## [2026-08-01] Hiển thị ảnh gốc lớn trực tiếp trên trang duyệt hồ sơ (PR #13 & #14)
 - **Agent:** Antigravity (Gemini 3.6 Flash).
