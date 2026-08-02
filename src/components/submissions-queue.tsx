@@ -61,6 +61,7 @@ export function SubmissionsQueue() {
   const initialFrom = searchParams?.get("from") ?? "";
   const initialTo = searchParams?.get("to") ?? "";
   const initialUnassigned = searchParams?.get("unassigned") === "1";
+  const initialActionType = searchParams?.get("actionType") ?? "";
 
   const [items, setItems] = useState<readonly Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -70,6 +71,7 @@ export function SubmissionsQueue() {
   const [to, setTo] = useState(initialTo);
   const [officer, setOfficer] = useState(initialOfficer);
   const [unassigned, setUnassigned] = useState(initialUnassigned);
+  const [actionType, setActionType] = useState(initialActionType);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -99,6 +101,7 @@ export function SubmissionsQueue() {
     if (to) params.set("to", to);
     if (officer) params.set("officer", officer);
     if (unassigned) params.set("unassigned", "1");
+    if (actionType) params.set("actionType", actionType);
     if (debouncedQuery) params.set("q", debouncedQuery);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
@@ -114,7 +117,7 @@ export function SubmissionsQueue() {
         if ((error as { name?: string }).name !== "AbortError") setState("error");
       });
     return () => controller.abort();
-  }, [status, bucket, from, to, officer, unassigned, debouncedQuery]);
+  }, [status, bucket, from, to, officer, unassigned, actionType, debouncedQuery]);
 
   const loadMore = (cursor: string) => {
     setLoadingMore(true);
@@ -125,6 +128,7 @@ export function SubmissionsQueue() {
     if (to) params.set("to", to);
     if (officer) params.set("officer", officer);
     if (unassigned) params.set("unassigned", "1");
+    if (actionType) params.set("actionType", actionType);
     if (debouncedQuery) params.set("q", debouncedQuery);
     params.set("cursor", cursor);
     fetch(`/api/submissions?${params.toString()}`, { cache: "no-store" })
@@ -220,13 +224,21 @@ export function SubmissionsQueue() {
       </div>
 
       {/* Active Filter Chips */}
-      {(bucket || officer || from || to || unassigned) && (
+      {(bucket || officer || from || to || unassigned || actionType) && (
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-sm text-stone-500 mr-1">Đang lọc theo:</span>
           {bucket && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
               Nhóm: {bucket === "pending" ? "Chờ tiếp nhận" : bucket === "in-progress" ? "Đang xử lý" : "Đã tiếp nhận"}
               <button onClick={() => setBucket("")} className="hover:text-cherry-600 focus:outline-none">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          )}
+          {actionType && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-700">
+              Hành động: {actionType === "claimed" ? "Đã tiếp nhận" : "Đã hoàn thành"}
+              <button onClick={() => setActionType("")} className="hover:text-cherry-600 focus:outline-none">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </span>

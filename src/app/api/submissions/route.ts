@@ -49,6 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         status: getSingleQueryParam(request.nextUrl.searchParams, "status"),
         bucket: getSingleQueryParam(request.nextUrl.searchParams, "bucket"),
         unassigned: getSingleQueryParam(request.nextUrl.searchParams, "unassigned"),
+        actionType: getSingleQueryParam(request.nextUrl.searchParams, "actionType"),
         validStatuses: PUBLIC_STATUSES,
         validBuckets: PUBLIC_BUCKETS,
       });
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const page = await repository.listQueuePage({
       status: filters.status as (typeof PUBLIC_STATUSES)[number] | undefined,
       bucket: filters.bucket as (typeof PUBLIC_BUCKETS)[number] | undefined,
+      actionType: filters.actionType,
       fromDate: filters.fromDate,
       toDate: filters.toDate,
       query,

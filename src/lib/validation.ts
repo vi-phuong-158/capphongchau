@@ -75,6 +75,7 @@ export function normalizeDashboardFilters(input: {
   status?: string | string[] | null;
   bucket?: string | string[] | null;
   unassigned?: string | string[] | null;
+  actionType?: string | string[] | null;
   validStatuses: readonly string[];
   validBuckets: readonly string[];
 }): {
@@ -84,6 +85,7 @@ export function normalizeDashboardFilters(input: {
   status?: string;
   bucket?: string;
   unassigned?: string;
+  actionType?: "claimed" | "completed";
 } {
   const normalizeString = (val: string | string[] | null | undefined, name: string) => {
     if (Array.isArray(val)) {
@@ -98,9 +100,18 @@ export function normalizeDashboardFilters(input: {
   const rawStatus = normalizeString(input.status, "status");
   const rawBucket = normalizeString(input.bucket, "bucket");
   const rawUnassigned = normalizeString(input.unassigned, "unassigned");
+  const rawActionType = normalizeString(input.actionType, "actionType");
 
   if (rawUnassigned !== undefined && rawUnassigned !== "0" && rawUnassigned !== "1") {
     throw new Error("VALIDATION_FAILED: Tham số unassigned không hợp lệ.");
+  }
+
+  if (
+    rawActionType !== undefined &&
+    rawActionType !== "claimed" &&
+    rawActionType !== "completed"
+  ) {
+    throw new Error("VALIDATION_FAILED: Tham số actionType không hợp lệ.");
   }
 
   let fromDate: string | undefined;
@@ -127,5 +138,6 @@ export function normalizeDashboardFilters(input: {
     status: rawStatus,
     bucket: rawBucket,
     unassigned: rawUnassigned,
+    actionType: rawActionType as "claimed" | "completed" | undefined,
   };
 }
