@@ -88,7 +88,6 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
 
     await repository.getDashboardSummary({});
     const sqlQuery = databaseMock.unsafe.mock.calls[1][0];
-    // Check that we only take max(created_at) from audit logs, not updated_at from public_submissions
     expect(sqlQuery).not.toContain("max(updated_at) as last_sub_updated_at");
   });
 
@@ -106,7 +105,7 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     expect(sqlQuery).toContain("'SUBMISSION_WORKING_PAYLOAD_EDITED'");
   });
 
-  it("9. getDashboardSummary lastActivity respects fromDate and toDate filters", async () => {
+  it("9. getDashboardSummary lastActivity uses occurred_at and respects date filters", async () => {
     databaseMock.unsafe.mockClear();
     databaseMock.unsafe.mockResolvedValueOnce([]);
     databaseMock.unsafe.mockResolvedValueOnce([]);
@@ -115,9 +114,11 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     const sqlQuery = databaseMock.unsafe.mock.calls[1][0];
     const sqlParams = databaseMock.unsafe.mock.calls[1][1];
 
-    // Check the last_audits CTE applies date filters
-    expect(sqlQuery).toContain("created_at >= $1::timestamptz");
-    expect(sqlQuery).toContain("created_at < $2::timestamptz");
+    expect(sqlQuery).toContain("max(occurred_at) as last_claim_at");
+    expect(sqlQuery).toContain("max(occurred_at) as last_completion_at");
+    expect(sqlQuery).toContain("max(occurred_at) as last_audit_at");
+    expect(sqlQuery).toContain("occurred_at >= $1::timestamptz");
+    expect(sqlQuery).toContain("occurred_at < $2::timestamptz");
     expect(sqlParams[0]).toBe("2026-08-01T00:00:00.000Z");
     expect(sqlParams[1]).toBe("2026-08-02T00:00:00.000Z");
   });
@@ -142,7 +143,7 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     expect(sqlQuery).toContain("updated_at < $2::timestamptz");
   });
 
-  it("12. listQueuePage filters by actionType=claimed correctly", async () => {
+  it("12. listQueuePage filters by actionType=claimed with occurred_at", async () => {
     databaseMock.unsafe.mockClear();
     databaseMock.unsafe.mockResolvedValueOnce([]);
 
@@ -154,7 +155,7 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     expect(sqlParams).toContain("officer_a@test.vn");
   });
 
-  it("13. listQueuePage filters by actionType=completed correctly", async () => {
+  it("13. listQueuePage filters by actionType=completed with occurred_at", async () => {
     databaseMock.unsafe.mockClear();
     databaseMock.unsafe.mockResolvedValueOnce([]);
 
@@ -166,7 +167,7 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     expect(sqlParams).toContain("officer_a@test.vn");
   });
 
-  it("14. listQueuePage uses half-open date logic for actionType", async () => {
+  it("14. listQueuePage uses occurred_at and half-open date logic for actionType", async () => {
     databaseMock.unsafe.mockClear();
     databaseMock.unsafe.mockResolvedValueOnce([]);
 
@@ -177,9 +178,42 @@ describe("Account Processing Results Statistics (Dashboard & Queue)", () => {
     });
 
     const [sqlQuery, sqlParams] = databaseMock.unsafe.mock.calls[0];
-    // verify the query uses < for the upper bound (parameter $10)
-    expect(sqlQuery).toContain("created_at < $10::timestamptz");
+    expect(sqlQuery).toContain("occurred_at >= $9::timestamptz");
+    expect(sqlQuery).toContain("occurred_at < $10::timestamptz");
     expect(sqlParams[8]).toBe("2026-08-01T00:00:00.000Z"); // $9
     expect(sqlParams[9]).toBe("2026-08-02T00:00:00.000Z"); // $10
+  });
+
+  it("15. Schema-contract: audit queries use occurred_at (not created_at), submissions queries use updated_at", async () => {
+    databaseMock.unsafe.mockClear();
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+    databaseMock.unsafe.mockResolvedValueOnce([]);
+
+    await repository.getDashboardSummary({
+      fromDate: "2026-08-01T00:00:00.000Z",
+      toDate: "2026-08-02T00:00:00.000Z",
+    });
+
+    await repository.listQueuePage({
+      actionType: "claimed",
+      fromDate: "2026-08-01T00:00:00.000Z",
+      toDate: "2026-08-02T00:00:00.000Z",
+    });
+
+    // Check all SQL queries executed against audit_logs
+    for (const call of databaseMock.unsafe.mock.calls) {
+      const sql = call[0] as string;
+      if (sql.includes("public.audit_logs")) {
+        expect(sql).not.toContain("created_at");
+        expect(sql).toContain("occurred_at");
+      }
+    }
+
+    // Check main submission total query and queue list query use updated_at for date ordering/filtering
+    const summaryQuery = databaseMock.unsafe.mock.calls[0][0] as string;
+    const queueQuery = databaseMock.unsafe.mock.calls[2][0] as string;
+    expect(summaryQuery).toContain("updated_at >= $1::timestamptz");
+    expect(queueQuery).toContain("updated_at desc");
   });
 });
