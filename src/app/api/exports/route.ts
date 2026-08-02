@@ -70,15 +70,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const scopeParam = getSingleQueryParam(searchParams, "scope");
+    let scopeParam: string | null;
+    let fromParam: string | null;
+    let toParam: string | null;
+    let officerParam: string | null;
+    let statusParam: string | null;
+
+    try {
+      scopeParam = getSingleQueryParam(searchParams, "scope");
+      fromParam = getSingleQueryParam(searchParams, "from");
+      toParam = getSingleQueryParam(searchParams, "to");
+      officerParam = getSingleQueryParam(searchParams, "officer");
+      statusParam = getSingleQueryParam(searchParams, "status");
+    } catch (error) {
+      return fail(
+        "VALIDATION_FAILED",
+        error instanceof Error ? error.message : "Tham số truy vấn không hợp lệ.",
+        requestId,
+      );
+    }
 
     if (scopeParam !== null && scopeParam !== "official" && scopeParam !== "backlog") {
       return fail("VALIDATION_FAILED", "Phạm vi xuất (scope) không hợp lệ.", requestId);
     }
-    const fromParam = getSingleQueryParam(searchParams, "from");
-    const toParam = getSingleQueryParam(searchParams, "to");
-    const officerParam = getSingleQueryParam(searchParams, "officer");
-    const statusParam = getSingleQueryParam(searchParams, "status");
 
     const statusesAllowedByScope = parseStatuses(scopeParam);
     let statusesToExport = statusesAllowedByScope;
