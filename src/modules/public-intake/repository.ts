@@ -1758,16 +1758,16 @@ export class PublicIntakeRepository {
              where entity_type = 'PUBLIC_SUBMISSION'
                and ($6::text is null or actor_email = $6)
                and action in ('SUBMISSION_CLAIMED', 'SUBMISSION_FORCE_CLAIMED')
-               and ($9::timestamptz is null or created_at >= $9::timestamptz)
-               and ($10::timestamptz is null or created_at < $10::timestamptz)
+               and ($9::timestamptz is null or occurred_at >= $9::timestamptz)
+               and ($10::timestamptz is null or occurred_at < $10::timestamptz)
            ))
            or ($11 = 'completed' and submission_id in (
              select entity_id from public.audit_logs
              where entity_type = 'PUBLIC_SUBMISSION'
                and ($6::text is null or actor_email = $6)
                and action = 'OFFICIAL_ACCEPTANCE_COMPLETED'
-               and ($9::timestamptz is null or created_at >= $9::timestamptz)
-               and ($10::timestamptz is null or created_at < $10::timestamptz)
+               and ($9::timestamptz is null or occurred_at >= $9::timestamptz)
+               and ($10::timestamptz is null or occurred_at < $10::timestamptz)
            ))
          )
        order by updated_at desc, submission_id desc
@@ -1899,24 +1899,24 @@ export class PublicIntakeRepository {
          select
            actor_email::text as email,
            count(distinct entity_id)::int as claimed_count,
-           max(created_at) as last_claim_at
+           max(occurred_at) as last_claim_at
          from public.audit_logs
          where action in ('SUBMISSION_CLAIMED', 'SUBMISSION_FORCE_CLAIMED')
            and entity_type = 'PUBLIC_SUBMISSION'
-           and ($1::timestamptz is null or created_at >= $1::timestamptz)
-           and ($2::timestamptz is null or created_at < $2::timestamptz)
+           and ($1::timestamptz is null or occurred_at >= $1::timestamptz)
+           and ($2::timestamptz is null or occurred_at < $2::timestamptz)
          group by actor_email
        ),
        completions as (
          select
            actor_email::text as email,
            count(distinct entity_id)::int as completed_count,
-           max(created_at) as last_completion_at
+           max(occurred_at) as last_completion_at
          from public.audit_logs
          where action = 'OFFICIAL_ACCEPTANCE_COMPLETED'
            and entity_type = 'PUBLIC_SUBMISSION'
-           and ($1::timestamptz is null or created_at >= $1::timestamptz)
-           and ($2::timestamptz is null or created_at < $2::timestamptz)
+           and ($1::timestamptz is null or occurred_at >= $1::timestamptz)
+           and ($2::timestamptz is null or occurred_at < $2::timestamptz)
          group by actor_email
        ),
        current_in_progress as (
@@ -1934,7 +1934,7 @@ export class PublicIntakeRepository {
        last_audits as (
          select
            actor_email::text as email,
-           max(created_at) as last_audit_at
+           max(occurred_at) as last_audit_at
          from public.audit_logs
          where entity_type = 'PUBLIC_SUBMISSION'
            and action in (
@@ -1946,8 +1946,8 @@ export class PublicIntakeRepository {
              'OFFICIAL_ACCEPTANCE_STARTED',
              'OFFICIAL_ACCEPTANCE_COMPLETED'
            )
-           and ($1::timestamptz is null or created_at >= $1::timestamptz)
-           and ($2::timestamptz is null or created_at < $2::timestamptz)
+           and ($1::timestamptz is null or occurred_at >= $1::timestamptz)
+           and ($2::timestamptz is null or occurred_at < $2::timestamptz)
          group by actor_email
        )
        select
