@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
-import { parseDashboardDateRange } from "@/lib/validation";
-import { getPublicIntakeRepository, PUBLIC_STATUSES } from "@/modules/public-intake/repository";
-import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
+import { normalizeDashboardFilters } from "@/lib/validation";
+import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
+import { DASHBOARD_VIEW_ROLES } from "@/modules/submissions/review";
+import { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "@/modules/public-intake/workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,37 +34,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const totalStartedAt = performance.now();
   try {
     const authStartedAt = performance.now();
-    await requireActiveUser(SUBMISSION_READ_ROLES);
+    await requireActiveUser(DASHBOARD_VIEW_ROLES);
     const authMs = performance.now() - authStartedAt;
 
-    const fromDate = request.nextUrl.searchParams.get("from") ?? undefined;
-    const toDate = request.nextUrl.searchParams.get("to") ?? undefined;
-    const officer = request.nextUrl.searchParams.get("officer") ?? undefined;
-    const statusParam = request.nextUrl.searchParams.get("status");
-
-    if (statusParam && !PUBLIC_STATUSES.includes(statusParam as (typeof PUBLIC_STATUSES)[number])) {
-      return responseError("VALIDATION_FAILED", "Trạng thái lọc không hợp lệ.", requestId);
-    }
-    const status = statusParam as (typeof PUBLIC_STATUSES)[number] | undefined;
-
-    let validFromDate = fromDate;
-    let validToDate = toDate;
+    let filters;
     try {
-      const parsedDates = parseDashboardDateRange(fromDate, toDate);
-      validFromDate = parsedDates.from?.toISOString() ?? undefined;
-      validToDate = parsedDates.to?.toISOString() ?? undefined;
+      filters = normalizeDashboardFilters({
+        from: request.nextUrl.searchParams.get("from"),
+        to: request.nextUrl.searchParams.get("to"),
+        officer: request.nextUrl.searchParams.get("officer"),
+        status: request.nextUrl.searchParams.get("status"),
+        validStatuses: PUBLIC_STATUSES,
+        validBuckets: PUBLIC_BUCKETS,
+      });
     } catch (err: unknown) {
       const error = err as Error;
-      return responseError("VALIDATION_FAILED", error.message || "Định dạng ngày không hợp lệ.", requestId);
+      return responseError("VALIDATION_FAILED", error.message || "Tham số lọc không hợp lệ.", requestId);
     }
 
     const repository = getPublicIntakeRepository();
     const databaseStartedAt = performance.now();
     const summary = await repository.getDashboardSummary({
-      fromDate: validFromDate,
-      toDate: validToDate,
-      officer,
-      status,
+      fromDate: filters.fromDate,
+      toDate: filters.toDate,
+      officer: filters.officer,
+      status: filters.status as (typeof PUBLIC_STATUSES)[number] | undefined,
     });
     const databaseMs = performance.now() - databaseStartedAt;
 

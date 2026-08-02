@@ -72,6 +72,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const searchParams = request.nextUrl.searchParams;
     const scopeParam = searchParams.get("scope");
+    
+    if (scopeParam !== null && scopeParam !== "official" && scopeParam !== "backlog") {
+      return fail("VALIDATION_FAILED", "Phạm vi xuất (scope) không hợp lệ.", requestId);
+    }
     const fromParam = searchParams.get("from");
     const toParam = searchParams.get("to");
     const officerParam = searchParams.get("officer");

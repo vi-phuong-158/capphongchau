@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { createApiErrorPayload } from "@/modules/common/api-error";
-import { getPublicIntakeRepository, PUBLIC_STATUSES } from "@/modules/public-intake/repository";
+import { getPublicIntakeRepository, PUBLIC_STATUSES, PUBLIC_BUCKETS } from "@/modules/public-intake/repository";
+import { normalizeDashboardFilters } from "@/lib/validation";
 import { InvalidQueueCursorError } from "@/modules/submissions/queue-pagination";
 import { maskPhone, SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
@@ -38,22 +39,37 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const authStartedAt = performance.now();
     await requireActiveUser(SUBMISSION_READ_ROLES);
     const authMs = performance.now() - authStartedAt;
-    const statusParam = request.nextUrl.searchParams.get("status");
-    if (statusParam && !PUBLIC_STATUSES.includes(statusParam as (typeof PUBLIC_STATUSES)[number])) {
-      return responseError("VALIDATION_FAILED", "Trạng thái lọc không hợp lệ.", requestId);
+    
+    let filters;
+    try {
+      filters = normalizeDashboardFilters({
+        from: request.nextUrl.searchParams.get("from"),
+        to: request.nextUrl.searchParams.get("to"),
+        officer: request.nextUrl.searchParams.get("officer"),
+        status: request.nextUrl.searchParams.get("status"),
+        bucket: request.nextUrl.searchParams.get("bucket"),
+        unassigned: request.nextUrl.searchParams.get("unassigned"),
+        validStatuses: PUBLIC_STATUSES,
+        validBuckets: PUBLIC_BUCKETS,
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+      return responseError("VALIDATION_FAILED", error.message || "Tham số lọc không hợp lệ.", requestId);
     }
-    const status = statusParam as (typeof PUBLIC_STATUSES)[number] | null;
+    
     const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
     const cursor = request.nextUrl.searchParams.get("cursor");
-    const officer = request.nextUrl.searchParams.get("officer");
-    const unassigned = request.nextUrl.searchParams.get("unassigned") === "1";
+    const unassigned = filters.unassigned === "1";
     const repository = getPublicIntakeRepository();
     const databaseStartedAt = performance.now();
     const page = await repository.listQueuePage({
-      status: status ?? undefined,
+      status: filters.status as (typeof PUBLIC_STATUSES)[number] | undefined,
+      bucket: filters.bucket as (typeof PUBLIC_BUCKETS)[number] | undefined,
+      fromDate: filters.fromDate,
+      toDate: filters.toDate,
       query,
       cursor,
-      officer: officer ?? undefined,
+      officer: filters.officer,
       unassigned,
       limit: PAGE_LIMIT,
     });

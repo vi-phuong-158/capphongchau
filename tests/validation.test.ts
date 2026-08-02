@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isValidInternalRedirect, parseDashboardDateRange } from "@/lib/validation";
+import { isValidInternalRedirect, parseDashboardDateRange, normalizeDashboardFilters } from "@/lib/validation";
 
 describe("validation helpers", () => {
   describe("isValidInternalRedirect", () => {
@@ -28,6 +28,60 @@ describe("validation helpers", () => {
     it("returns false for non-strings", () => {
       expect(isValidInternalRedirect(null)).toBe(false);
       expect(isValidInternalRedirect(undefined)).toBe(false);
+    });
+  });
+
+  describe("normalizeDashboardFilters", () => {
+    const validStatuses = ["SUBMITTED", "ACCEPTED"];
+    const validBuckets = ["pending", "in-progress"];
+
+    it("normalizes valid inputs", () => {
+      const result = normalizeDashboardFilters({
+        from: "2026-08-01",
+        to: "2026-08-02",
+        officer: "user1",
+        status: "ACCEPTED",
+        bucket: "pending",
+        unassigned: "1",
+        validStatuses,
+        validBuckets,
+      });
+
+      expect(result.fromDate).toBe("2026-07-31T17:00:00.000Z");
+      expect(result.toDate).toBe("2026-08-02T16:59:59.999Z");
+      expect(result.officer).toBe("user1");
+      expect(result.status).toBe("ACCEPTED");
+      expect(result.bucket).toBe("pending");
+      expect(result.unassigned).toBe("1");
+    });
+
+    it("throws error on invalid status", () => {
+      expect(() =>
+        normalizeDashboardFilters({
+          status: "INVALID_STATUS",
+          validStatuses,
+          validBuckets,
+        }),
+      ).toThrow("Invalid status");
+    });
+
+    it("throws error on invalid bucket", () => {
+      expect(() =>
+        normalizeDashboardFilters({
+          bucket: "invalid-bucket",
+          validStatuses,
+          validBuckets,
+        }),
+      ).toThrow("Invalid bucket");
+    });
+
+    it("handles array inputs (picks first)", () => {
+      const result = normalizeDashboardFilters({
+        officer: ["user1", "user2"],
+        validStatuses,
+        validBuckets,
+      });
+      expect(result.officer).toBe("user1");
     });
   });
 

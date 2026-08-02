@@ -31,6 +31,7 @@ import { summarizeWorkingPayloadChanges } from "./working-payload-audit";
 import {
   type PublicFileSummary,
   type PublicStatus,
+  type PublicBucket,
   type PublicTimelineEvent,
   serializePublicTimelineEvent,
   type SupplementItem,
@@ -38,8 +39,8 @@ import {
   PUBLIC_STATUSES,
 } from "./workflow";
 
-export { PUBLIC_STATUSES } from "./workflow";
-export type { PublicStatus } from "./workflow";
+export { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "./workflow";
+export type { PublicStatus, PublicBucket } from "./workflow";
 
 /**
  * Nguồn của hồ sơ.
@@ -1685,6 +1686,9 @@ export class PublicIntakeRepository {
    */
   async listQueuePage(input: {
     status?: PublicStatus;
+    bucket?: PublicBucket;
+    fromDate?: string;
+    toDate?: string;
     query?: string;
     cursor?: string | null;
     limit?: number;
@@ -1732,6 +1736,14 @@ export class PublicIntakeRepository {
            $7::boolean is not true
            or (claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
          )
+         and (
+           $8::text is null
+           or ($8 = 'pending' and claimed_by is null and status in ('SUBMITTED', 'RESUBMITTED', 'NEEDS_SUPPLEMENT'))
+           or ($8 = 'in-progress' and status in ('UNDER_REVIEW', 'NEEDS_SUPPLEMENT', 'RESUBMITTED', 'ACCEPTING', 'SUBMITTED'))
+           or ($8 = 'accepted' and status = 'ACCEPTED')
+         )
+         and ($9::timestamptz is null or updated_at >= $9::timestamptz)
+         and ($10::timestamptz is null or updated_at <= $10::timestamptz)
        order by updated_at desc, submission_id desc
        limit $5`,
       [
@@ -1742,6 +1754,9 @@ export class PublicIntakeRepository {
         pageLimit + 1,
         input.officer ?? null,
         input.unassigned ?? false,
+        input.bucket ?? null,
+        input.fromDate ?? null,
+        input.toDate ?? null,
       ],
     );
 

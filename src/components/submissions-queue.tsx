@@ -57,11 +57,17 @@ export function SubmissionsQueue() {
   const searchParams = useSearchParams();
   const initialOfficer = searchParams?.get("officer") ?? "";
   const initialStatus = searchParams?.get("status") ?? "";
+  const initialBucket = searchParams?.get("bucket") ?? "";
+  const initialFrom = searchParams?.get("from") ?? "";
+  const initialTo = searchParams?.get("to") ?? "";
   const initialUnassigned = searchParams?.get("unassigned") === "1";
 
   const [items, setItems] = useState<readonly Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState(initialStatus);
+  const [bucket] = useState(initialBucket);
+  const [from] = useState(initialFrom);
+  const [to] = useState(initialTo);
   const [officer, setOfficer] = useState(initialOfficer);
   const [unassigned] = useState(initialUnassigned);
   const [query, setQuery] = useState("");
@@ -88,6 +94,9 @@ export function SubmissionsQueue() {
     const controller = new AbortController();
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (bucket) params.set("bucket", bucket);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
     if (officer) params.set("officer", officer);
     if (unassigned) params.set("unassigned", "1");
     if (debouncedQuery) params.set("q", debouncedQuery);
@@ -105,12 +114,15 @@ export function SubmissionsQueue() {
         if ((error as { name?: string }).name !== "AbortError") setState("error");
       });
     return () => controller.abort();
-  }, [status, officer, unassigned, debouncedQuery]);
+  }, [status, bucket, from, to, officer, unassigned, debouncedQuery]);
 
   const loadMore = (cursor: string) => {
     setLoadingMore(true);
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (bucket) params.set("bucket", bucket);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
     if (officer) params.set("officer", officer);
     if (unassigned) params.set("unassigned", "1");
     if (debouncedQuery) params.set("q", debouncedQuery);

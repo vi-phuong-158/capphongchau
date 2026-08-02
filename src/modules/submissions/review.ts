@@ -14,6 +14,12 @@ export const SUBMISSION_DECISION_ROLES = [
   UserRole.SYSTEM_ADMIN,
 ] as const;
 
+export const DASHBOARD_VIEW_ROLES = [
+  UserRole.REPORT_VIEWER,
+  UserRole.WARD_ADMIN,
+  UserRole.SYSTEM_ADMIN,
+] as const;
+
 /**
  * Ai được **lập hồ sơ hộ người dân** ở `/ke-khai-ho`.
  *

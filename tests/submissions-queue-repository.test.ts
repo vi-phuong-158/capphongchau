@@ -54,7 +54,7 @@ describe("PublicIntakeRepository.listQueuePage", () => {
     });
     expect(databaseMock.unsafe).toHaveBeenCalledWith(
       expect.stringContaining("order by updated_at desc, submission_id desc"),
-      ["SUBMITTED", "%Nguyen!%!_%", null, null, 3, null, false],
+      ["SUBMITTED", "%Nguyen!%!_%", null, null, 3, null, false, null, null, null],
     );
   });
 
@@ -71,7 +71,7 @@ describe("PublicIntakeRepository.listQueuePage", () => {
     expect(result).toEqual({ items: [], nextCursor: null });
     expect(databaseMock.unsafe).toHaveBeenCalledWith(
       expect.stringContaining("updated_at = $3::timestamptz and submission_id < $4"),
-      [null, null, ROW_TIME.toISOString(), "submission-b", 101, null, false],
+      [null, null, ROW_TIME.toISOString(), "submission-b", 101, null, false, null, null, null],
     );
   });
 });

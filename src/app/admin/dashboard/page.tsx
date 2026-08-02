@@ -2,8 +2,10 @@ import { redirect } from "next/navigation";
 
 import { requireActiveUser } from "@/modules/auth/authorization";
 import { getPublicIntakeRepository, type PublicStatus } from "@/modules/public-intake/repository";
-import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
+import { DASHBOARD_VIEW_ROLES } from "@/modules/submissions/review";
 import { DashboardClient } from "@/components/admin/dashboard-client";
+import { normalizeDashboardFilters } from "@/lib/validation";
+import { PUBLIC_STATUSES, PUBLIC_BUCKETS } from "@/modules/public-intake/workflow";
 
 export const dynamic = "force-dynamic";
 
@@ -13,22 +15,31 @@ export default async function DashboardPage({
   searchParams: { [key: string]: string | string[] | undefined };
 }) {
   try {
-    await requireActiveUser(SUBMISSION_READ_ROLES);
+    await requireActiveUser(DASHBOARD_VIEW_ROLES);
   } catch {
     redirect("/");
   }
 
-  const fromDate = typeof searchParams.from === "string" ? searchParams.from : undefined;
-  const toDate = typeof searchParams.to === "string" ? searchParams.to : undefined;
-  const officer = typeof searchParams.officer === "string" ? searchParams.officer : undefined;
-  const statusParam = typeof searchParams.status === "string" ? searchParams.status : undefined;
+  let filters;
+  try {
+    filters = normalizeDashboardFilters({
+      from: searchParams.from,
+      to: searchParams.to,
+      officer: searchParams.officer,
+      status: searchParams.status,
+      validStatuses: PUBLIC_STATUSES,
+      validBuckets: PUBLIC_BUCKETS,
+    });
+  } catch {
+    redirect("/admin/dashboard");
+  }
 
   const repository = getPublicIntakeRepository();
   const initialSummary = await repository.getDashboardSummary({
-    fromDate,
-    toDate,
-    officer,
-    status: statusParam as PublicStatus | undefined,
+    fromDate: filters.fromDate,
+    toDate: filters.toDate,
+    officer: filters.officer,
+    status: filters.status as PublicStatus | undefined,
   });
 
   return <DashboardClient initialSummary={initialSummary} />;

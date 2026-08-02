@@ -58,3 +58,57 @@ export function parseDashboardDateRange(
 
   return { from, to };
 }
+
+export function normalizeDashboardFilters(input: {
+  from?: string | string[] | null;
+  to?: string | string[] | null;
+  officer?: string | string[] | null;
+  status?: string | string[] | null;
+  bucket?: string | string[] | null;
+  unassigned?: string | string[] | null;
+  validStatuses: readonly string[];
+  validBuckets: readonly string[];
+}): {
+  fromDate?: string;
+  toDate?: string;
+  officer?: string;
+  status?: string;
+  bucket?: string;
+  unassigned?: string;
+} {
+  const normalizeString = (val: string | string[] | null | undefined) =>
+    (Array.isArray(val) ? val[0] : val) || undefined;
+
+  const rawFrom = normalizeString(input.from);
+  const rawTo = normalizeString(input.to);
+  const rawOfficer = normalizeString(input.officer);
+  const rawStatus = normalizeString(input.status);
+  const rawBucket = normalizeString(input.bucket);
+  const rawUnassigned = normalizeString(input.unassigned);
+
+  let fromDate: string | undefined;
+  let toDate: string | undefined;
+
+  if (rawFrom || rawTo) {
+    const parsed = parseDashboardDateRange(rawFrom, rawTo);
+    fromDate = parsed.from?.toISOString();
+    toDate = parsed.to?.toISOString();
+  }
+
+  if (rawStatus && !input.validStatuses.includes(rawStatus)) {
+    throw new Error("Invalid status");
+  }
+
+  if (rawBucket && !input.validBuckets.includes(rawBucket)) {
+    throw new Error("Invalid bucket");
+  }
+
+  return {
+    fromDate,
+    toDate,
+    officer: rawOfficer,
+    status: rawStatus,
+    bucket: rawBucket,
+    unassigned: rawUnassigned,
+  };
+}

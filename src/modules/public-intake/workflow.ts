@@ -17,6 +17,9 @@ export const PUBLIC_STATUSES = [
 
 export type PublicStatus = (typeof PUBLIC_STATUSES)[number];
 
+export const PUBLIC_BUCKETS = ["pending", "in-progress", "accepted"] as const;
+export type PublicBucket = (typeof PUBLIC_BUCKETS)[number];
+
 export const PUBLIC_STATUS_LABELS: Readonly<Record<PublicStatus, string>> = {
   DRAFT: "Chưa gửi",
   SUBMITTED: "Đã gửi",
