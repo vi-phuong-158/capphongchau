@@ -69,7 +69,9 @@ fixture phải import hoặc được test đối chiếu với registry đó.
 | Tài sản   | `assets[].ownershipForm`               | Hình thức sở hữu            | AU                        | Không                          | AU/46              | Có                          | string          | Không        |
 | Tài sản   | `assets[].ownershipTerm`               | Thời hạn sở hữu             | AV                        | Không                          | AV/47              | Có                          | string          | Không        |
 | Tài sản   | `assets[].grade`                       | Cấp hạng                    | AW                        | Không                          | AW/48              | Có                          | string          | Không        |
-| Biến động | `registeredChanges[]`                  | Nội dung biến động          | panel AI review           | Không                          | Không              | Có                          | array           | Không        |
+| Biến động | `registeredChanges[].confirmedDate`    | Ngày xác nhận biến động     | panel AI review           | Không                          | Không              | Có                          | date            | Không        |
+| Biến động | `registeredChanges[].content`          | Nội dung biến động          | panel AI review           | Không                          | Không              | Có                          | string          | Không        |
+| Biến động | `registeredChanges[].confirmedBy`      | Cơ quan xác nhận biến động  | panel AI review           | Không                          | Không              | Có                          | string          | Không        |
 
 Nguồn form: `src/components/admin/working-payload-editor.tsx` và
 `src/components/admin/editable-parcel-table.tsx`. Nguồn completion:
@@ -106,13 +108,18 @@ Provenance hiển thị cho từng comparison:
 
 ## Stable key và merge mảng
 
-- AI tạo `stableKey` xác định bằng hash của loại phần tử, khóa nghiệp vụ đã chuẩn hóa nếu đủ,
-  evidence file/page và ordinal. Stable key không chứa raw PII.
+- AI tạo `stableKey` xác định bằng hash của loại phần tử và **source anchor lần xuất hiện đầu**
+  (file/page/ordinal; thêm stable key thửa cha cho land use/tài sản). Text OCR không là định danh
+  duy nhất, nên sửa text cùng source anchor không sinh phần tử mới. Stable key không chứa raw PII.
 - Owner ưu tiên ghép với ID nội bộ đã có khi tên/tổ chức khớp duy nhất; không duy nhất thì conflict.
-- Parcel chỉ dùng `mapSheetNumber + parcelNumber` làm khóa nghiệp vụ khi cả hai có và duy nhất.
+- `mapSheetNumber + parcelNumber` chỉ là tín hiệu đối chiếu, không phải identity của stable key.
 - Land use ghép trong đúng parcel; không tách parcel chỉ vì nhiều mục đích.
 - Asset nối thửa qua `parcelStableKey`, rồi chuyển thành `parcelId` nội bộ khi nạp.
-- Rerun được cập nhật trường đang `EMPTY` hoặc `AI_PROPOSED`; không ghi đè citizen/officer/confirmed.
+- Khi job mới được tạo do bộ ảnh, phiên bản citizen, prompt hoặc schema đổi, rerun chỉ cập nhật trường
+  `EMPTY` hoặc `AI_PROPOSED`; không ghi đè citizen/officer/confirmed. Đọc lại **cùng** input/job đã
+  hoàn tất chưa có run-generation append-only; cần quyết định schema riêng, không được reset job cũ.
+- Thay ảnh bằng file ID/source anchor mới là input mới và phải tạo job mới; không được map ngầm sang
+  phần tử AI cũ nếu không có bằng chứng đối chiếu duy nhất.
 - Không thay cả mảng. Phần tử mới được append bằng ID ổn định; conflict không tự append/replace.
 
 ## Tương thích

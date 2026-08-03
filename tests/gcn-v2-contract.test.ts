@@ -62,6 +62,12 @@ describe("GCN v2 field contract", () => {
     expect(paths.some((path) => path.startsWith("parcels[]."))).toBe(true);
     expect(paths.some((path) => path.includes("landUses[]"))).toBe(true);
     expect(paths.some((path) => path.startsWith("assets[]."))).toBe(true);
-    expect(paths).toContain("registeredChanges[]");
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "registeredChanges[].confirmedDate",
+        "registeredChanges[].content",
+        "registeredChanges[].confirmedBy",
+      ]),
+    );
   });
 });

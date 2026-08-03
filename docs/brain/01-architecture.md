@@ -870,18 +870,24 @@ ETL fail-closed: dữ liệu trùng/không hợp lệ làm rollback toàn bộ. 
 Runtime production không còn đọc/ghi Google Sheets. Sheet cũ chỉ giữ read-only/restricted làm nguồn
 legacy/rollback; không chạy lại ETL nếu không có kế hoạch phục hồi được phê duyệt.
 
-## AI draft GCN — Antigravity local station (2026-07-26)
+## AI draft GCN v2 — Antigravity local station (cập nhật 2026-08-03)
 
 ```text
 PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/checksum)
-→ local station poll READY_FOR_AGENT/lease hết hạn → claim idempotent manifest
-→ Antigravity/Gemini 3.6 Flash đọc GCN gốc theo whitelist
-→ POST /api/ai/results với workerInstanceId + lease còn hạn → schema/checksum/version/idempotency
+→ local station lấy manifest đã xác minh và đọc từng trang GCN
+→ hợp nhất theo stable key, giữ conflict/evidence và validate `gcn-v2.0`
+→ local submit (hoặc API cũ khi flag bật) kiểm metadata + manifest + PII + idempotency
 → ai_extraction_results + ai_field_comparisons + audit
-→ cán bộ GET /ai-draft → POST /ai-draft/apply → working_payload (CLEAR + trống)
+→ cán bộ GET /ai-draft → chọn trường → POST /ai-draft/apply
+→ server tính lại provenance/applyable + version guard → working_payload/history/audit một transaction
 ```
 
-- `src/modules/ai-extraction/{draft,repository}.ts`: schema v2, so sánh dữ liệu và enqueue job.
+- `src/modules/ai-extraction/gcn-v2-contract.ts`: registry duy nhất nối form cán bộ,
+  `completionChecks`, PL3 và whitelist AI.
+- `src/modules/ai-extraction/{gcn-v2-schema,gcn-v2-normalizer,gcn-v2-merge}.ts`: schema strict,
+  chuẩn hóa không làm mất số 0 đầu và hợp nhất nhiều trang có conflict rõ ràng.
+- `src/modules/ai-extraction/{draft,gcn-v2-application-backend,repository}.ts`: dung nạp legacy,
+  tạo comparison/provenance và safe-merge vào `IntakeDraft`.
 - `src/app/api/ai/jobs/{ready,claim}`: giao manifest không có Drive link/CCCD; `results` nhận output
   idempotent và chặn kết quả cũ.
 - `agent/AGENTS.md`: ranh giới local station. Máy dùng tài khoản quản trị mang nhãn
@@ -893,9 +899,16 @@ PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/
 - Nhánh `STALE` cũng ghi `REQUEST_LOG` trong transaction, nên retry cùng idempotency key luôn nhận cùng
   lỗi `409`. Một trường `CLEAR` bắt buộc evidence có `fileId` thuộc manifest đã xác minh; server kiểm
   lại điều kiện này lúc nhập result và lúc lấy kết quả cũ để nạp nháp.
-- AI không gọi từ Vercel, không ghi chính thức, không đọc CCCD/QR; chỉ số phát hành, ngày cấp, số
-  vào sổ dạng chữ đánh máy cùng bằng chứng. Ảnh mờ/chữ viết tay trả `MANUAL_REQUIRED`. Server quét toàn
-  bộ JSON trước persist: chuỗi giống CCCD 12 số bị từ chối fail-closed, không được lưu raw/normalized JSON.
+- AI không gọi từ Vercel, không ghi chính thức và không đọc CCCD/QR. `gcn-v2.0` đọc certificate,
+  nhiều chủ, nhiều thửa/mục đích, tài sản và biến động trong whitelist; biến động chỉ đối chiếu.
+  Ảnh mờ/chữ viết tay/không thấy trả `null` cùng status tương ứng. Server quét toàn bộ JSON trước
+  persist: chuỗi giống CCCD 12 số bị từ chối fail-closed, không được lưu raw/normalized JSON.
+- Rerun chỉ được thay giá trị có provenance `AI_PROPOSED`; `CITIZEN_PROVIDED`, `OFFICER_EDITED`,
+  `OFFICER_CONFIRMED`, `CONFLICT`, `UNREADABLE` đều không apply. Hệ thống giữ snapshot/result cũ và
+  dùng version/idempotency hiện có để chống hai phiên ghi đè nhau.
+- Không có migration GCN v2: `normalized_json`/`raw_json`/`evidence_json` là JSONB mở rộng được,
+  `ai_field_comparisons.field_status` tiếp tục dùng ba mã tương thích `CLEAR/CHECK/MANUAL_REQUIRED`,
+  còn evidence status/provenance mới nằm trong evidence JSON. `working_payload_json` vẫn là đích.
 
 ### Đường ghi thứ hai: coding agent đọc ảnh tại máy trạm (2026-07-31)
 
@@ -910,7 +923,7 @@ scripts/ai/local-draft.ts enqueue → tạo job theo bộ ảnh GCN hiện tại
 
 - `src/modules/ai-extraction/local-draft-support.ts`: `parseLocalDraftOptions` và
   `decideResultOutcome` — bậc thang `PASSED/REVIEW_REQUIRED/BLOCKED` → `COMPLETED/NEEDS_REVIEW/
-  QUARANTINED` dùng chung một định nghĩa với route API.
+QUARANTINED` dùng chung một định nghĩa với route API.
 - Đường này **thay chỗ ghi, không nới quyền**: cùng guard quét CCCD/prompt injection, cùng điều kiện
   manifest join `public_files`, cùng kiểm `input_fingerprint`, cùng nhánh `STALE` + audit. Khác API ở
   ba điểm: không có lease/`workerInstanceId`, idempotency lấy theo `result_fingerprint` thay vì header

@@ -1,5 +1,17 @@
 # Kiến trúc GCN v2 đã khóa
 
+## Trước và sau
+
+| Lớp         | Trước GCN v2                                                | Sau GCN v2                                                                                               |
+| ----------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Output AI   | Schema `v2.0` chỉ có số phát hành, ngày cấp, số vào sổ      | `gcn-v2.0` có certificate, owners, parcels/landUses, assets, registered changes, pages/evidence/metadata |
+| Nhiều trang | Agent tự tổng hợp vào ba trường, không có page graph        | Mỗi trang có loại/chất lượng/rotation/stable keys; merger giữ conflict và liên kết thửa                  |
+| Persistence | Result JSONB + ba comparison                                | Vẫn các bảng đó; một comparison/field path, evidence JSON chứa provenance/template/stable key            |
+| Apply       | Tự tìm mọi `CLEAR` đang trống                               | Cán bộ chọn `selectedFieldPaths`; server tính lại applyable/provenance và merge copy-on-write            |
+| Rerun       | Không phân biệt rõ giá trị AI cũ với cán bộ sửa             | Chỉ `AI_PROPOSED` được cập nhật; citizen/officer/confirmed bất biến với AI                               |
+| UI          | Một bảng ba trường                                          | Sáu nhóm, current/AI/raw/page/confidence/status/provenance và checkbox fail-closed                       |
+| Downstream  | Working payload đã có PL3 đầy đủ nhưng AI không cấp dữ liệu | Cùng `IntakeDraft` đi qua completion và PL3; không tạo mô hình đích thứ hai                              |
+
 ## Luồng đề xuất
 
 ```mermaid
@@ -46,7 +58,7 @@ Vì vậy không thêm cột provenance. Lịch sử result/comparison hiện c�
 ## Apply
 
 - API giữ nguyên auth, role, CSRF, idempotency, expectedVersion, claim và `UNDER_REVIEW`.
-- Request có thể chọn `fieldPaths`; server tính lại comparison, không tin danh sách applyable từ UI.
+- Request có thể chọn `selectedFieldPaths`; server tính lại comparison, không tin danh sách applyable từ UI.
 - Chỉ evidence `EXTRACTED`, file manifest hợp lệ và provenance `EMPTY`/`AI_PROPOSED` được ghi.
 - Merge copy-on-write vào clone `IntakeDraft`; không thay cả mảng.
 - Các phần tử mới dùng ID băm ổn định; không ghi raw PII vào ID/audit.
@@ -56,8 +68,9 @@ Vì vậy không thêm cột provenance. Lịch sử result/comparison hiện c�
 ## UI
 
 Panel nhóm: Giấy chứng nhận, Chủ sử dụng, Thửa đất, Mục đích, Tài sản, Biến động. Mỗi dòng hiển thị
-giá trị hiện có, gợi ý, raw evidence rút gọn, trang, confidence, provenance/status và checkbox khi
-server cho phép. Có chọn tất cả trường an toàn nhưng mặc định không chọn conflict/unreadable.
+ordinal an toàn (Chủ/Thửa/Mục đích/Tài sản), giá trị hiện có, gợi ý, toàn bộ raw evidence, Ảnh GCN
+theo ordinal manifest + trang, confidence, provenance/status và checkbox khi server cho phép. Có
+chọn tất cả trường an toàn nhưng mặc định không chọn conflict/unreadable.
 
 ## Database
 
@@ -87,3 +100,6 @@ deviation; không chạy migration thật trong task này.
 - Job/version mới tách idempotency key khỏi job cũ.
 - Không backfill result cũ và không thay payload đã accepted.
 - Feature có thể rollback bằng code về parser/prompt cũ; không có dữ liệu schema phải xóa.
+- Đọc lại đúng cùng bộ ảnh/version/prompt/schema sau khi job kết thúc chưa được mở lại bằng reset job:
+  cần thiết kế run-generation append-only (migration/decision riêng) để không thay manifest gắn với
+  result lịch sử. Không suy diễn khả năng này từ các test provenance thuần hàm.

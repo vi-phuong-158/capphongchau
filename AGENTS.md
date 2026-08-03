@@ -434,15 +434,22 @@ Không dùng `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_VI
   tối thiểu 32 ký tự khi `AI_EXTRACTION_ENABLED=true`.
 - Server chặn toàn bộ JSON AI có chuỗi giống CCCD trước khi lưu `raw_json`/`normalized_json`; cảnh báo
   không được chứa lại giá trị đã chặn.
-- Trường AI `CLEAR` bắt buộc có evidence; `fileId` phải thuộc manifest GCN đã join/revalidate. Kết quả
-  cũ thiếu/sai evidence không được nạp nháp. Cả nhánh `STALE` phải ghi cache `REQUEST_LOG` trong cùng
-  transaction để replay cùng idempotency key trả đúng `409` cũ.
+- Kết quả mới dùng hợp đồng `gcn-v2.0`: dữ liệu GCN, nhiều chủ, nhiều thửa, tối đa ba mục đích được
+  nạp cho mỗi thửa, tài sản và nội dung biến động đối chiếu phải đi kèm evidence theo field path,
+  trang và file thuộc manifest đã join/revalidate. Schema/prompt/model/page count/source hash phải
+  khớp metadata mà server biết; sai hoặc thiếu thì fail closed. Kết quả legacy ba trường vẫn đọc được.
+  Cả nhánh `STALE` phải ghi cache `REQUEST_LOG` trong cùng transaction để replay cùng idempotency key
+  trả đúng `409` cũ.
 - Máy trạm đang dùng tài khoản quản trị có nhãn rủi ro `ADMIN_BROAD_ACCESS`: `agent/AGENTS.md` và
   manifest chỉ là giới hạn quy trình, không được mô tả là rào chắn quyền tuyệt đối với CCCD.
-- AI chỉ trả `CLEAR`, `CHECK`, `MANUAL_REQUIRED` cho số phát hành, ngày cấp, số vào sổ cùng bằng
-  chứng. Ảnh mờ/chữ viết tay phải để giá trị `null`, không suy đoán và không kết luận pháp lý.
-- Cán bộ chỉ có thể “Nạp nháp AI”: hệ thống điền trường `CLEAR` đang trống; không ghi đè giá trị
-  hiện có, không xác nhận hồ sơ và mọi lần nạp/ghi đè phải audit.
+- AI v2 trả dữ liệu đề xuất cho whitelist trong `GCN_V2_FIELD_CONTRACT`; ảnh mờ/chữ viết tay hoặc
+  không nhìn thấy phải để `null`, không suy đoán và không kết luận pháp lý. Số định danh cá nhân/CCCD
+  12 chữ số, dữ liệu người sử dụng hiện tại, trường địa chính/hệ thống B/V/AX và quyết định nghiệp vụ
+  vẫn nằm ngoài output/apply của AI. Nội dung biến động chỉ để đối chiếu, không tự sửa dữ liệu gốc.
+- Cán bộ chỉ có thể “Nạp nháp AI” cho trường đã tích chọn và server xác định là `EXTRACTED` với
+  provenance `EMPTY` hoặc `AI_PROPOSED`; không ghi đè dữ liệu người dân, trường cán bộ đã sửa/xác nhận,
+  conflict, low-confidence hoặc unreadable. Mỗi lần nạp dùng version/idempotency hiện có, ghi lịch sử
+  và audit trong transaction; AI không xác nhận hồ sơ.
 - Địa chỉ thường trú sửa bình thường. Sửa họ tên/CCCD/ngày sinh/giới tính sau `QR_CONFIRMED` cần lý
   do, lưu audit và chuyển `QR_OVERRIDE_PENDING_REVIEW`; QR đã tách không bị xóa.
 - Khi hồ sơ đang `UNDER_REVIEW`, chỉ cán bộ đang giữ hồ sơ mới được xác nhận định danh thủ công sau

@@ -9,14 +9,26 @@
 
 ---
 
+## [2026-08-03] GCN v2 — đang tích hợp và nghiệm thu trên branch riêng
+
+- Branch `codex/gcn-v2-full-extraction`; contract-first commit `b4c850b` đã khóa field registry,
+  kiến trúc và test matrix trước khi chia agent.
+- Phạm vi code: schema/prompt đa trang, normalize/merge/evidence, lưu result/comparison, safe apply có
+  provenance, panel đối chiếu sáu nhóm, kiểm thử completion/PL3 nhiều chủ và 18 thửa.
+- Không có migration; không deploy, không merge `main`, không dùng Drive/database/GCN thật.
+- Code đã qua lint/typecheck/full Vitest/build và có báo cáo `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md`.
+  Điều kiện vận hành còn lại: Preview E2E có session cán bộ, transaction rehearsal và đánh giá độ
+  chính xác trên GCN đã ẩn danh là cổng riêng, không được suy ra từ unit test. Same-input rerun cần
+  run-generation/migration riêng.
+
 ## [2026-07-31] Post-merge hardening sau PR #12
 
-| Hạng mục | Repository / code | Rehearsal / Preview | Production |
-| --- | --- | --- | --- |
-| PR #12 | **Đã merge** vào `main` tại `d898b7d` | Chỉ ghi nhận theo bằng chứng từng môi trường bên dưới | Không suy ra trạng thái deploy từ Git |
-| Upload public/officer | Đã nguyên tử trong transaction; đợt hardening thêm replay sớm có validate, lọc `kind` | Integration Postgres chưa chạy trong phiên 2026-07-31 vì thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` | Không chạy test và không thao tác dữ liệu Production |
-| Migration `002`–`006` | Năm file SQL đã có trong repository; task này không thêm/sửa migration | Phải xác minh đúng project bằng preflight/lịch sử migration trước khi kết luận | **Chưa xác minh trong phiên này**; không được ghi “đã chạy” nếu thiếu project, lệnh, thời điểm |
-| Deploy/smoke test | Không phải trạng thái của code | Chưa deploy/chưa smoke test trong phiên này | Không deploy |
+| Hạng mục              | Repository / code                                                                     | Rehearsal / Preview                                                                                | Production                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| PR #12                | **Đã merge** vào `main` tại `d898b7d`                                                 | Chỉ ghi nhận theo bằng chứng từng môi trường bên dưới                                              | Không suy ra trạng thái deploy từ Git                                                          |
+| Upload public/officer | Đã nguyên tử trong transaction; đợt hardening thêm replay sớm có validate, lọc `kind` | Integration Postgres chưa chạy trong phiên 2026-07-31 vì thiếu `ACCEPTANCE_SAGA_TEST_DATABASE_URL` | Không chạy test và không thao tác dữ liệu Production                                           |
+| Migration `002`–`006` | Năm file SQL đã có trong repository; task này không thêm/sửa migration                | Phải xác minh đúng project bằng preflight/lịch sử migration trước khi kết luận                     | **Chưa xác minh trong phiên này**; không được ghi “đã chạy” nếu thiếu project, lệnh, thời điểm |
+| Deploy/smoke test     | Không phải trạng thái của code                                                        | Chưa deploy/chưa smoke test trong phiên này                                                        | Không deploy                                                                                   |
 
 Việc đang thực hiện trên `codex/post-merge-hardening-pr12`:
 

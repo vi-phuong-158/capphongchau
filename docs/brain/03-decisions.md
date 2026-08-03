@@ -1,5 +1,28 @@
 # 03 — Technical Decisions
 
+## [2026-08-03] GCN v2 đọc đầy đủ whitelist nghiệp vụ nhưng không tự xác nhận
+
+- **Quyết định:** thay output ba trường bằng hợp đồng `gcn-v2.0` lấy từ hợp của form cán bộ,
+  `completionChecks` và PL3. Output gồm certificate, nhiều owners, nhiều parcels với land uses lồng,
+  assets, registered changes review-only, pages/evidence/metadata. `IntakeDraft` tiếp tục là đích nên
+  không thiết kế lại database.
+- **Giữ ranh giới PII:** AI không trả/apply `identityNumber`, `currentUserCitizenId` hoặc dữ liệu CCCD;
+  scanner 12 chữ số vẫn fail closed trên toàn JSON. Các trường hệ thống/địa chính tự suy ra và quyết
+  định người sử dụng hiện tại cũng không do AI điền.
+- **Merge/rerun:** server tính provenance tại thời điểm GET/apply. Chỉ `EXTRACTED` với provenance
+  `EMPTY`/`AI_PROPOSED` mới có thể nạp; citizen/officer/confirmed/conflict/unreadable không bị ghi đè.
+  Cán bộ phải chọn trường, còn version/idempotency/history/audit dùng transaction hiện có.
+- **Identity mảng:** stable key ưu tiên source anchor lần xuất hiện đầu (file/trang/dòng; bảng con có
+  thửa cha), không lấy text OCR làm identity. Rerun chỉ là job mới khi input/version prompt/schema đổi;
+  mở lại cùng job/input cần run-generation append-only và migration/quyết định riêng, không reset job cũ.
+- **Tương thích:** payload ba trường cũ tiếp tục parse/apply theo rule cũ. `field_status` trong database
+  giữ ba mã `CLEAR/CHECK/MANUAL_REQUIRED`; evidence status/provenance mới nằm trong JSONB.
+- **Migration:** không có. Các cột JSONB và `working_payload_json` hiện có chứa được cấu trúc mới;
+  tạo migration chỉ để đổi tên hoặc tách cột lúc này tăng rủi ro mà không thêm invariant cần thiết.
+- **Vận hành:** model thực tế vẫn truyền bằng cấu hình/CLI và được ghi cùng schema/prompt version để
+  rollback bằng payload legacy hoặc prompt/model trước. Không đổi nhà cung cấp, không bật API AI,
+  không deploy và không tác động Production trong đợt này.
+
 ## [2026-07-31] Bỏ yêu cầu xuất `CHATGPT_HANDOFF.md`
 
 - **Quyết định:** agent không còn phải tạo/cập nhật `CHATGPT_HANDOFF.md` sau mỗi đợt thi công. Báo

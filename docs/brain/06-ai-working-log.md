@@ -1,5 +1,22 @@
 # 06 — AI Working Log
 
+## [2026-08-03] Khóa contract và triển khai GCN v2 đa trang, đa chủ, đa thửa
+
+- **Agent:** Codex trưởng, phối hợp các subagent AI/schema, backend/persistence và officer UI.
+- **Phạm vi:** khảo sát toàn luồng ảnh → local station → result/comparison → working payload →
+  completion → PL3; tạo contract-first commit `b4c850b`; triển khai `gcn-v2.0` theo whitelist dùng
+  chung thay vì chỉ ba trường certificate.
+- **Bất biến:** AI chỉ đề xuất; không đọc/lưu CCCD 12 số; không ghi đè citizen/officer/confirmed;
+  conflict/low-confidence/unreadable fail closed; registered changes chỉ đối chiếu; version,
+  idempotency, history và audit vẫn được giữ.
+- **Database:** không migration vì JSONB và working payload hiện có đủ; payload legacy vẫn được hỗ trợ.
+- **Kiểm tra cuối:** `npm.cmd run lint` PASS; `npm.cmd run typecheck` PASS; `npm.cmd test` PASS
+  (108 files, 976 pass, 28 skip). Kiểm toán độc lập đã rà schema/evidence, merger, provenance, mảng,
+  UI ordinal và idempotency: PASS WITH CONDITIONS. Báo cáo/điều kiện Preview, accuracy và same-input rerun ở
+  `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md`.
+- **Vận hành:** không deploy, không merge `main`, không chạy migration/database/Drive thật và không dùng
+  fixture có PII thật.
+
 ## [2026-08-02] Hoàn tất và Squash Merge PR #15 — Dashboard Quản lý và Xuất PL3
 
 - **Agent:** Antigravity (Gemini 3.6 Flash).
@@ -13,11 +30,10 @@
   7. Squash merge thành công vào nhánh `main` (Subject: `feat(admin): add operations dashboard and filtered PL3 export`).
 - **File chính:** `src/app/admin/dashboard/page.tsx`, `src/app/admin/login-redirect/route.ts`, `src/app/api/dashboard/summary/route.ts`, `src/app/api/exports/route.ts`, `src/lib/validation.ts`, `src/modules/submissions/review.ts`.
 
-
-
 ## [2026-08-01] Hiển thị ảnh gốc lớn trực tiếp trên trang duyệt hồ sơ (PR #13 & #14)
+
 - **Agent:** Antigravity (Gemini 3.6 Flash).
-- **Công việc:** 
+- **Công việc:**
   1. Xử lý hiển thị ảnh nguyên kích thước (full resolution) cho cán bộ duyệt hồ sơ, thay cho thumbnail Google Drive bị mờ. Tự động nạp ảnh đầu tiên và ảnh chuyển tab dựa trên `activeFileId`.
   2. Bổ sung Dynamic Import cho `heic2any` trên admin client view để chuyển đổi HEIC/HEIF sang JPEG trước khi tạo `objectUrl`.
   3. Bổ sung `readOriginal` vào `PublicIntakeStorage`, gọi API Google Drive `.get({ alt: "media" })` với response type `arraybuffer`.

@@ -24,27 +24,38 @@ import { loadEnvConfig } from "@next/env";
 import type { Sql } from "postgres";
 
 import {
-  aiExtractionPayloadSchema,
-  buildAiFieldComparisons,
-  findInvalidClearEvidence,
-  type AiExtractionPayload,
+  findInvalidGcnV2Evidence,
+  gcnExtractionPayloadV2Schema,
+  type GcnExtractionPayloadV2,
 } from "../../src/modules/ai-extraction/draft";
+import {
+  buildGcnV2BackendComparisons,
+  buildGcnV2LeafSuggestions,
+  comparisonEvidenceForStorage,
+  findGcnV2PersonalInfoInNotes,
+  hydrateGcnV2ApplicationDraft,
+  validateGcnV2RuntimeMetadata,
+} from "../../src/modules/ai-extraction/gcn-v2-application-backend";
 import {
   computeInputFingerprint,
   computeResultFingerprint,
 } from "../../src/modules/ai-extraction/fingerprints";
 import {
   decideResultOutcome,
-  findPersonalInfoInFreeText,
   parseLocalDraftOptions,
   parseStoredLocalResult,
   resolveManifestFilePath,
   type LocalDraftOptions,
 } from "../../src/modules/ai-extraction/local-draft-support";
 import {
+  AI_PROMPT_VERSION,
   AI_SCHEMA_VERSION,
   enqueueAiDraftForSubmission,
 } from "../../src/modules/ai-extraction/repository";
+import {
+  aiJobCoverageKey,
+  aiJobExpectedMetadata,
+} from "../../src/modules/ai-extraction/gcn-v2-repository-job-key";
 import type { IntakeDraft } from "../../src/modules/public-intake/types";
 import { getDatabase } from "../../src/modules/supabase/database";
 import { validateAiResultPayload } from "./validator";
@@ -83,12 +94,23 @@ async function checksumStateOf(filePath: string, expected: string): Promise<stri
 
 async function list(options: LocalDraftOptions): Promise<void> {
   const database = getDatabase();
-  const jobs = await database<{ job_id: string; submission_id: string; status: string }[]>`
-    select job_id, submission_id, status
+  const jobs = await database<
+    {
+      job_id: string;
+      submission_id: string;
+      status: string;
+      input_fingerprint: string;
+      prompt_version: string;
+      schema_version: string;
+    }[]
+  >`
+    select job_id, submission_id, status, input_fingerprint, prompt_version, schema_version
     from public.ai_extraction_jobs
     where subject_type = 'PUBLIC_SUBMISSION'
       and submission_id is not null
       and status in ('READY_FOR_AGENT', 'PROCESSING')
+      and prompt_version = ${AI_PROMPT_VERSION}
+      and schema_version = ${AI_SCHEMA_VERSION}
     order by created_at
     limit ${options.limit}
   `;
@@ -100,6 +122,15 @@ async function list(options: LocalDraftOptions): Promise<void> {
   for (const job of jobs) {
     const files = await selectManifestFiles(database, job.job_id, job.submission_id);
     console.log(`job ${job.job_id}  [${job.status}]  submission ${job.submission_id}`);
+    console.log(
+      `  expectedMetadata=${JSON.stringify(
+        aiJobExpectedMetadata({
+          inputFingerprint: job.input_fingerprint,
+          promptVersion: job.prompt_version,
+          schemaVersion: job.schema_version,
+        }),
+      )}`,
+    );
     if (files.length === 0) {
       console.log("  (manifest rỗng hoặc không còn khớp public_files — chạy lại `enqueue`)");
     }
@@ -133,13 +164,28 @@ async function list(options: LocalDraftOptions): Promise<void> {
     join public.public_submissions s on s.submission_id = pf.submission_id
     where pf.document_type = 'CERTIFICATE' and pf.variant = 'ORIGINAL' and pf.status = 'UPLOADED'
   `;
-  const covered = await database<{ submission_id: string; input_fingerprint: string }[]>`
-    select submission_id, input_fingerprint from public.ai_extraction_jobs
+  const covered = await database<
+    {
+      submission_id: string;
+      input_fingerprint: string;
+      prompt_version: string;
+      schema_version: string;
+    }[]
+  >`
+    select submission_id, input_fingerprint, prompt_version, schema_version
+    from public.ai_extraction_jobs
     where submission_id is not null
       and status in ('READY_FOR_AGENT', 'PROCESSING', 'COMPLETED', 'NEEDS_REVIEW', 'QUARANTINED')
   `;
   const coveredKeys = new Set(
-    covered.map((job) => `${job.submission_id}:${job.input_fingerprint}`),
+    covered.map((job) =>
+      aiJobCoverageKey({
+        submissionId: job.submission_id,
+        inputFingerprint: job.input_fingerprint,
+        promptVersion: job.prompt_version,
+        schemaVersion: job.schema_version,
+      }),
+    ),
   );
   const bySubmission = new Map<string, { version: number; checksums: string[] }>();
   for (const row of rows) {
@@ -154,7 +200,12 @@ async function list(options: LocalDraftOptions): Promise<void> {
     .filter(
       ([submissionId, entry]) =>
         !coveredKeys.has(
-          `${submissionId}:${computeInputFingerprint(submissionId, entry.version, entry.checksums)}`,
+          aiJobCoverageKey({
+            submissionId,
+            inputFingerprint: computeInputFingerprint(submissionId, entry.version, entry.checksums),
+            promptVersion: AI_PROMPT_VERSION,
+            schemaVersion: AI_SCHEMA_VERSION,
+          }),
         ),
     )
     .map(([submissionId]) => submissionId)
@@ -234,23 +285,21 @@ async function submit(options: LocalDraftOptions): Promise<void> {
   if (issues.some((issue) => issue.code === "CITIZEN_ID_LIKE_VALUE")) {
     throw new Error("Kết quả có chuỗi giống số CCCD nên không được ghi.");
   }
-  const parsed = aiExtractionPayloadSchema.safeParse(parsedFile);
+  const parsed = gcnExtractionPayloadV2Schema.safeParse(parsedFile);
   if (!parsed.success) {
     throw new Error("Kết quả không đúng schema đọc GCN được phép.");
   }
-  const payload: AiExtractionPayload = parsed.data;
-  const personalInfoFields = findPersonalInfoInFreeText(payload);
+  const payload: GcnExtractionPayloadV2 = parsed.data;
+  if (payload.metadata.modelIdentifier !== options.modelName) {
+    throw new Error("Metadata model không khớp tham số --model.");
+  }
+  const personalInfoFields = findGcnV2PersonalInfoInNotes(payload);
   if (personalInfoFields.length > 0) {
     throw new Error(
       `Ghi chú có dấu hiệu chứa thông tin định danh cá nhân (${personalInfoFields.join(", ")}); ` +
         "viết lại ghi chú chỉ mô tả chất lượng ảnh rồi chạy lại.",
     );
   }
-  const resultFingerprint = computeResultFingerprint(options.jobId, payload);
-  const idempotencyKey = `AI_LOCAL_RESULT:${options.jobId}:${resultFingerprint}`;
-  const mutationHash = createHash("sha256")
-    .update(JSON.stringify({ jobId: options.jobId, resultFingerprint, model: options.modelName }))
-    .digest("hex");
   const requestId = `local-station-${randomUUID()}`;
   const database = getDatabase();
 
@@ -261,14 +310,33 @@ async function submit(options: LocalDraftOptions): Promise<void> {
   await verifyLocalImages(database, options);
 
   const outcome = await database.begin<SubmitOutcome>(async (transaction) => {
+    const jobs = await transaction<
+      {
+        submission_id: string | null;
+        citizen_payload_version: number;
+        input_fingerprint: string;
+        prompt_version: string;
+        schema_version: string;
+        status: string;
+      }[]
+    >`
+      select submission_id, citizen_payload_version, input_fingerprint, prompt_version,
+        schema_version, status
+      from public.ai_extraction_jobs where job_id = ${options.jobId} for update
+    `;
+    const job = jobs[0];
+    if (!job || !job.submission_id) throw new Error("Không tìm thấy job AI tương ứng.");
+    const resultFingerprint = computeResultFingerprint(options.jobId, payload);
+    const idempotencyKey = `AI_LOCAL_RESULT:${options.jobId}:${resultFingerprint}`;
+    const mutationHash = createHash("sha256")
+      .update(JSON.stringify({ jobId: options.jobId, resultFingerprint, model: options.modelName }))
+      .digest("hex");
     await transaction`select pg_advisory_xact_lock(hashtextextended(${idempotencyKey}, 0))`;
     const cached = await transaction<{ mutation_hash: string; response_json: unknown }[]>`
       select mutation_hash, response_json from public.request_log
       where idempotency_key = ${idempotencyKey} and kind = 'AI_LOCAL_RESULT'
     `;
     if (cached[0]) {
-      // Cùng khóa nghĩa là cùng job và cùng payload, nên `mutation_hash` lệch chỉ có thể do `--model`
-      // khác lần ghi trước. Im lặng trả kết quả cũ sẽ ghi sai truy nguyên ai đã đọc ảnh.
       if (cached[0].mutation_hash !== mutationHash) {
         throw new Error(
           "Job này đã được ghi bằng model khác với cùng nội dung kết quả; kiểm tra lại --model.",
@@ -280,21 +348,6 @@ async function submit(options: LocalDraftOptions): Promise<void> {
       }
       return { ...replay, kind: "REPLAY" };
     }
-
-    const jobs = await transaction<
-      {
-        submission_id: string | null;
-        citizen_payload_version: number;
-        input_fingerprint: string;
-        schema_version: string;
-        status: string;
-      }[]
-    >`
-      select submission_id, citizen_payload_version, input_fingerprint, schema_version, status
-      from public.ai_extraction_jobs where job_id = ${options.jobId} for update
-    `;
-    const job = jobs[0];
-    if (!job || !job.submission_id) throw new Error("Không tìm thấy job AI tương ứng.");
     if (job.status !== "READY_FOR_AGENT" && job.status !== "PROCESSING") {
       throw new Error(`Job đang ở trạng thái ${job.status}, không nhận kết quả mới.`);
     }
@@ -303,9 +356,14 @@ async function submit(options: LocalDraftOptions): Promise<void> {
     }
 
     const submissions = await transaction<
-      { citizen_payload_version: number; draft_json: unknown }[]
+      {
+        citizen_payload_version: number;
+        citizen_payload_json: unknown;
+        working_payload_json: unknown;
+        draft_json: unknown;
+      }[]
     >`
-      select citizen_payload_version, draft_json
+      select citizen_payload_version, citizen_payload_json, working_payload_json, draft_json
       from public.public_submissions where submission_id = ${job.submission_id}
     `;
     const submission = submissions[0];
@@ -359,10 +417,21 @@ async function submit(options: LocalDraftOptions): Promise<void> {
       };
     }
 
-    const evidenceIssues = findInvalidClearEvidence(
+    const evidenceIssues = findInvalidGcnV2Evidence(
       payload,
       new Set(manifestFiles.map((file) => file.file_id)),
-    ).filter((issue) => issue.code === "CLEAR_EVIDENCE_NOT_IN_MANIFEST");
+    ).filter((issue) => issue.code === "V2_EVIDENCE_NOT_IN_MANIFEST");
+    const metadataIssues = validateGcnV2RuntimeMetadata({
+      payload,
+      expectedSchemaVersion: job.schema_version,
+      expectedPromptVersion: job.prompt_version,
+      expectedModelIdentifier: options.modelName,
+      expectedSourceHash: job.input_fingerprint,
+      allowedFileIds: new Set(manifestFiles.map((file) => file.file_id)),
+    });
+    if (metadataIssues.length > 0) {
+      throw new Error("Metadata kết quả không khớp job hoặc manifest hiện hành.");
+    }
     const decision = decideResultOutcome(issues, evidenceIssues.length);
 
     const versions = await transaction<{ next_version: number }[]>`
@@ -382,18 +451,41 @@ async function submit(options: LocalDraftOptions): Promise<void> {
         (select prompt_version from public.ai_extraction_jobs where job_id = ${options.jobId}), now()
       )
     `;
-    const draft =
-      typeof submission.draft_json === "string"
-        ? (JSON.parse(submission.draft_json) as IntakeDraft)
-        : (submission.draft_json as IntakeDraft);
-    for (const comparison of buildAiFieldComparisons(draft, payload)) {
+    const draft = parseDraft(submission.working_payload_json ?? submission.draft_json);
+    const citizenDraft = submission.citizen_payload_json
+      ? parseDraft(submission.citizen_payload_json)
+      : null;
+    const priorRows = await transaction<{ field_path: string; ai_value: string | null }[]>`
+      select c.field_path, c.ai_value
+      from public.ai_field_comparisons c
+      join public.ai_extraction_jobs j on j.job_id = c.job_id
+      where j.submission_id = ${job.submission_id} and c.decision = 'APPLIED'
+      order by c.decided_at desc nulls last, c.created_at desc
+    `;
+    const priorAppliedValues = new Map<string, string>();
+    for (const prior of priorRows) {
+      if (prior.ai_value !== null && !priorAppliedValues.has(prior.field_path)) {
+        priorAppliedValues.set(prior.field_path, prior.ai_value);
+      }
+    }
+    const comparisons = buildGcnV2BackendComparisons({
+      current: draft,
+      citizen: citizenDraft,
+      payload,
+      suggestions: buildGcnV2LeafSuggestions(
+        payload,
+        new Map(manifestFiles.map((file) => [file.file_id, file.ordinal + 1])),
+      ),
+      priorAppliedValues,
+    });
+    for (const comparison of comparisons) {
       await transaction`
         insert into public.ai_field_comparisons (
           job_id, result_id, field_path, current_value, ai_value, source_value, field_status, evidence_json
         ) values (
           ${options.jobId}, ${resultId}, ${comparison.fieldPath}, ${comparison.currentValue},
           ${comparison.aiValue}, ${comparison.sourceValue}, ${comparison.fieldStatus},
-          ${JSON.stringify(comparison.evidence)}::jsonb
+          ${JSON.stringify(comparisonEvidenceForStorage(comparison))}::jsonb
         )
       `;
     }
@@ -461,6 +553,12 @@ async function main(): Promise<void> {
   if (options.mode === "list") return list(options);
   if (options.mode === "enqueue") return enqueue(options);
   return submit(options);
+}
+
+function parseDraft(value: unknown): IntakeDraft {
+  const draft = hydrateGcnV2ApplicationDraft(value);
+  if (!draft) throw new Error("Payload hồ sơ đã lưu không hợp lệ.");
+  return draft;
 }
 
 main()

@@ -32,3 +32,13 @@ Trạng thái ban đầu: contract locked; các test implementation được đ�
 
 Các guard bổ sung phải có test: CCCD-like value, prompt injection, evidence file ngoài manifest,
 checksum/fingerprint stale, max 3 land uses ở payload đích, stable key collision và array ambiguity.
+
+## Kết quả thực thi 2026-08-03
+
+- **PASS synthetic/unit-domain:** GCN-01 đến GCN-21, GCN-24 và GCN-25 được bao phủ bởi contract,
+  schema/prompt, merger, backend, UI, completion/PL3 và end-to-end domain tests; fixture có 2 chủ,
+  18 thửa × 3 mục đích, tài sản, nhiều trang, xoay/mờ/thiếu/conflict/leading zero.
+- **PASS route/mock:** GCN-22 và GCN-23 được bao phủ bởi replay/idempotency/version tests của route
+  và repository helper; nhánh legacy cũng giữ compatibility.
+- **Điều kiện vận hành:** không suy diễn Browser E2E authenticated, transaction PostgreSQL V2-success
+  hoặc độ chính xác model từ kết quả trên. Xem `GCN_V2_IMPLEMENTATION_REPORT.md`.
