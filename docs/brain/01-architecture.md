@@ -875,7 +875,8 @@ legacy/rollback; không chạy lại ETL nếu không có kế hoạch phục h�
 ```text
 PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/checksum)
 → local station lấy manifest đã xác minh và đọc từng trang GCN
-→ hợp nhất theo stable key, giữ conflict/evidence và validate `gcn-v2.0`
+→ AGENT hợp nhất các trang theo stable key rồi nộp MỘT JSON (server không thấy dữ liệu từng trang)
+→ server validate `gcn-v2.0` + giữ conflict/evidence agent đã khai
 → local submit (hoặc API cũ khi flag bật) kiểm metadata + manifest + PII + idempotency
 → ai_extraction_results + ai_field_comparisons + audit
 → cán bộ GET /ai-draft → chọn trường → POST /ai-draft/apply
@@ -884,8 +885,13 @@ PUBLIC_SUBMIT transaction → ai_extraction_jobs + ai_extraction_job_files (GCN/
 
 - `src/modules/ai-extraction/gcn-v2-contract.ts`: registry duy nhất nối form cán bộ,
   `completionChecks`, PL3 và whitelist AI.
-- `src/modules/ai-extraction/{gcn-v2-schema,gcn-v2-normalizer,gcn-v2-merge}.ts`: schema strict,
-  chuẩn hóa không làm mất số 0 đầu và hợp nhất nhiều trang có conflict rõ ràng.
+- `src/modules/ai-extraction/{gcn-v2-schema,gcn-v2-normalizer}.ts`: schema strict và chuẩn hóa không
+  làm mất số 0 đầu.
+- `src/modules/ai-extraction/gcn-v2-merge.ts`: **thư viện hợp nhất nhiều trang chưa có caller
+  production** — chỉ test gọi. Việc hợp nhất hiện do agent làm theo prompt, nên server không phát
+  hiện được mâu thuẫn giữa các trang bị agent giấu (chỉ bắt được `CONFLICT` khai không nhất quán).
+  Đừng sửa `gcn-v2-merge.ts` mà tưởng đang đổi hành vi chạy thật. Xem "Giới hạn đã biết" trong
+  `docs/gcn-v2/GCN_V2_ARCHITECTURE.md`.
 - `src/modules/ai-extraction/{draft,gcn-v2-application-backend,repository}.ts`: dung nạp legacy,
   tạo comparison/provenance và safe-merge vào `IntakeDraft`.
 - `src/app/api/ai/jobs/{ready,claim}`: giao manifest không có Drive link/CCCD; `results` nhận output

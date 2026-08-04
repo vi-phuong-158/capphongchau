@@ -1,5 +1,25 @@
 # 03 — Technical Decisions
 
+## [2026-08-04] Hoãn nối merger vào CLI; agent tiếp tục tự hợp nhất các trang GCN
+
+- **Quyết định:** giữ nguyên giao thức hiện tại — agent đọc từng trang, tự hợp nhất, nộp **một** JSON
+  qua `scripts/ai/local-draft.ts submit`. `src/modules/ai-extraction/gcn-v2-merge.ts` ở lại repo như
+  thư viện có unit test nhưng **không** được nối vào luồng chạy trong đợt này.
+- **Lỗ hổng chấp nhận có ý thức:** vì server chỉ nhận kết quả đã hợp nhất, nó không thể phát hiện
+  agent đọc hai giá trị khác nhau ở hai trang rồi âm thầm chọn một và khai `EXTRACTED`. Schema chỉ
+  bắt được trường hợp khai `CONFLICT` không nhất quán (value phải null, phải có ≥2 nguồn raw).
+  Rủi ro nằm ở đúng các trường khó soát bằng mắt: diện tích, số tờ, số thửa.
+- **Vì sao vẫn chấp nhận được lúc này:** AI chỉ đề xuất, không tự ghi vào hồ sơ. Cán bộ phải tích
+  chọn từng trường, và mỗi evidence chỉ rõ ảnh/trang nguồn để đối chiếu. Đang là giai đoạn thử
+  nghiệm với số lượng nhỏ và có người duyệt chặn ở cuối.
+- **Vì sao không làm ngay:** bịt lỗ hổng đòi hỏi agent nộp kết quả **từng trang** để server tự hợp
+  nhất — đổi giao thức nộp, CLI, prompt, JSON Schema và test. Công lớn, trong khi rào chắn con người
+  vẫn còn hiệu lực.
+- **Phải đánh giá lại khi:** chạy thật ở quy mô lớn, giảm mức đối chiếu bắt buộc của cán bộ, hoặc
+  cho phép nạp tự động không cần tích chọn. Lúc đó nối merger là điều kiện tiên quyết.
+- **Đã làm thay:** sửa tài liệu cho khớp thực tế (`GCN_V2_ARCHITECTURE.md`, `01-architecture.md`) để
+  agent/người đọc sau không tưởng merger đang chạy.
+
 ## [2026-08-03] GCN v2 đọc đầy đủ whitelist nghiệp vụ nhưng không tự xác nhận
 
 - **Quyết định:** thay output ba trường bằng hợp đồng `gcn-v2.0` lấy từ hợp của form cán bộ,

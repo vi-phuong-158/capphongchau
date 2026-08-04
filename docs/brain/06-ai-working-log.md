@@ -47,8 +47,27 @@
   unreadable" (payload mặc định thiếu trường tùy chọn → không cảnh báo; chủ tổ chức thiếu ngày
   sinh/giới tính → không cảnh báo; thiếu `parcels[].area` → cảnh báo đúng 1 trường).
   `npm run lint` PASS; `npm run typecheck` PASS; `npm test` PASS (108 files, 978 pass, 28 skip).
-- **Còn lại:** merger nhiều trang vẫn chưa nối vào CLI (chỉ có unit test); thống nhất sửa tài liệu
-  `01-architecture.md` / `GCN_V2_ARCHITECTURE.md` cho khớp thực tế thay vì nối code trong đợt này.
+
+## [2026-08-04] Sửa tài liệu cho khớp thực tế: agent hợp nhất trang, không phải server
+
+- **Agent:** Claude Code
+- **Thay đổi:** không đụng code. Sửa tài liệu ở ba chỗ vẽ/mô tả `gcn-v2-merge.ts` như thể nó đang
+  chạy trong luồng:
+  - `GCN_V2_ARCHITECTURE.md`: đưa bước đọc/chuẩn hóa/hợp nhất vào subgraph "Agent trong trạm cục bộ";
+    thêm mục "Giới hạn đã biết" với bảng phân biệt cái server bắt được và cái không.
+  - `01-architecture.md`: sơ đồ text ghi rõ agent hợp nhất rồi nộp MỘT JSON; tách `gcn-v2-merge.ts`
+    thành mục riêng đánh dấu chưa có caller production.
+  - `03-decisions.md`: entry quyết định hoãn, kèm điều kiện phải đánh giá lại.
+- **File đã sửa:** `docs/gcn-v2/GCN_V2_ARCHITECTURE.md`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** `mergeGcnV2PageExtractions()` không có caller nào ngoài test, nhưng tài liệu vẽ nó nằm
+  trong flow. Agent đọc tài liệu sau sẽ tin nhầm là sửa file đó thì đổi được hành vi chạy thật, hoặc
+  tưởng luật hợp nhất đã được code ép buộc trong khi nó mới chỉ là chỉ dẫn prompt.
+- **Rủi ro đã ghi lại (chưa xử lý):** server nhận JSON đã hợp nhất nên không phát hiện được agent
+  đọc hai giá trị khác nhau ở hai trang rồi âm thầm chọn một và khai `EXTRACTED`. Schema chỉ bắt được
+  khai `CONFLICT` không nhất quán. Rào chắn còn lại là cán bộ đối chiếu ảnh gốc.
+- **Kiểm tra:** `npm test` PASS (108 files, 978 pass, 28 skip) — xác nhận không đụng code.
+  `npx prettier --check` PASS trên các file đã sửa.
 
 ## [2026-08-03] Khóa contract và triển khai GCN v2 đa trang, đa chủ, đa thửa
 
