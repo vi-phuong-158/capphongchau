@@ -1,6 +1,6 @@
 # Báo cáo triển khai GCN v2
 
-Ngày: 2026-08-03
+Ngày: 2026-08-04 (cập nhật sau review PR #18, head `e0c5465`)
 Branch: `codex/gcn-v2-full-extraction`
 Contract-first commit: `b4c850b`
 
@@ -9,6 +9,18 @@ Contract-first commit: `b4c850b`
 **PASS WITH CONDITIONS.** Bản triển khai nguồn đã qua lint, TypeScript và toàn bộ Vitest; contract
 `gcn-v2.0` đi hết schema/prompt/merge/repository/API/panel/apply/completion/PL3 bằng fixture tổng hợp.
 Không có migration, deploy, merge `main`, Drive/database/GCN thật hay dữ liệu định danh thật trong đợt này.
+
+Sau bản snapshot ban đầu (`6a84e93`, 2026-08-03), review PR #18 đã yêu cầu và ba commit sau đã sửa:
+
+1. **Giới hạn ba mục đích/thửa PL3** — trước đây đếm số mục đích dựa trên dòng AI đã ánh xạ, có thể vượt giới
+   hạn PL3; nay tính bằng `projectedLandUseCount()` trên toàn bộ dòng thực có trong thửa (kể cả ô trống có thể
+   tái dùng), và `validateWorkingPayloadForSave()` chạy song song với `draftSchema.safeParse()` khi áp dụng AI.
+2. **Cảnh báo `FIELD_REQUIRES_MANUAL_REVIEW`** — thu hẹp: chỉ đếm trường AI được phép đọc, bắt buộc lúc hoàn
+   tất, và chưa có evidence `EXTRACTED`; loại các trường ngày sinh/giới tính khi chủ là tổ chức/cộng đồng dân cư.
+3. **Nhãn provenance `OFFICER_EDITED`** — đổi hiển thị thành "Đã có dữ liệu — không ghi đè" để phản ánh đúng
+   hành vi fail-closed khi backend không xác định được nguồn, không quy nhầm thao tác cho cán bộ.
+
+Xem chi tiết từng thay đổi tại `docs/brain/06-ai-working-log.md` (các entry ngày 2026-08-04).
 
 ## Phạm vi đã hoàn thành
 
@@ -35,7 +47,7 @@ legacy `v2.0` vẫn parse và apply qua nhánh cũ.
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `npm.cmd run lint`                                    | PASS                                                                                                 |
 | `npm.cmd run typecheck`                               | PASS                                                                                                 |
-| `npm.cmd test`                                        | PASS — 108 files, 976 tests; 4 files/28 tests skip có chủ đích                                       |
+| `npm.cmd test`                                        | PASS — 108 files, 978 tests; 4 files/28 tests skip có chủ đích                                       |
 | Focus GCN v2                                          | PASS — 11 files/124 tests: contract/schema/prompt/backend/API/UI/completion/PL3/end-to-end synthetic |
 | `git diff --check`                                    | PASS tại các lần kiểm tra trước final snapshot                                                       |
 | Browser E2E authenticated                             | Chưa chạy: không dùng Preview/session/DB thật                                                        |
