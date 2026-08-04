@@ -10,7 +10,7 @@ import {
 } from "@/modules/ai-extraction/gcn-v2-application-backend";
 import type { GcnExtractionPayloadV2 } from "@/modules/ai-extraction/gcn-v2-contract";
 import { emptyDraft } from "@/modules/public-intake/types";
-import { draftSchema } from "@/modules/public-intake/validation";
+import { draftSchema, validateWorkingPayloadForSave } from "@/modules/public-intake/validation";
 
 function payload(): GcnExtractionPayloadV2 {
   return {
@@ -507,6 +507,59 @@ describe("GCN v2 backend comparison and safe application", () => {
     expect(comparisons[3]).toMatchObject({ provenance: "CONFLICT", applyable: false });
     const applied = applyGcnV2BackendComparisons({ draft: current, comparisons });
     expect(applied.draft.parcels[0].landUses).toHaveLength(3);
+  });
+
+  /**
+   * Thửa đã đủ ba dòng do người dân/cán bộ khai, AI đọc ra mục đích khác: giới hạn phải tính trên
+   * dòng thực tế của thửa đích. Đếm theo số dòng AI ánh xạ sẽ cho ghi thành 4+ dòng — PL3 chỉ có ba
+   * bộ cột nên dòng thừa mất im lặng lúc xuất, còn cán bộ không lưu tay lại được nữa.
+   */
+  it("refuses to add a land use when the destination parcel already holds three", () => {
+    const current = emptyDraft("owner-existing", "parcel-existing", "land-existing");
+    const [parcel] = current.parcels;
+    parcel.mapSheetNumber = "01";
+    parcel.parcelNumber = "10";
+    parcel.landUses = ["LUC", "BHK", "RSX"].map((purposeCode, index) => ({
+      id: `land-existing-${index + 1}`,
+      purposeCode,
+      purposeFreeText: "",
+      originCode: "NHA_NUOC_CONG_NHAN",
+      formCode: "SU_DUNG_RIENG",
+      termCode: "SU_DUNG_ON_DINH_LAU_DAI",
+      area: "10",
+    }));
+    const input = payload();
+    input.data.parcels[0].mapSheetNumber = "01";
+    input.data.parcels[0].parcelNumber = "10";
+    input.data.parcels[0].landUses = [
+      {
+        stableKey: "land-ai-new",
+        purposeCode: "ODT",
+        purposeFreeText: null,
+        area: "10",
+        originCode: "NHA_NUOC_CONG_NHAN",
+        formCode: "SU_DUNG_RIENG",
+        termCode: "SU_DUNG_ON_DINH_LAU_DAI",
+      },
+    ];
+    const comparisons = buildGcnV2BackendComparisons({
+      current,
+      citizen: structuredClone(current),
+      payload: input,
+      suggestions: [
+        suggestion(
+          "parcels[].landUses[].purposeCode",
+          "parcels[parcel-a].landUses[land-ai-new].purposeCode",
+          "ODT",
+        ),
+      ],
+    });
+
+    expect(comparisons[0]).toMatchObject({ provenance: "CONFLICT", applyable: false });
+    const applied = applyGcnV2BackendComparisons({ draft: current, comparisons });
+    expect(applied.appliedFieldPaths).toEqual([]);
+    expect(applied.draft.parcels[0].landUses).toHaveLength(3);
+    expect(validateWorkingPayloadForSave(applied.draft)).toBeNull();
   });
 
   it("applies a complete 18-parcel selection without truncating field paths", () => {

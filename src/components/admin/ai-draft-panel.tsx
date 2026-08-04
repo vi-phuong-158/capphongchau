@@ -127,7 +127,14 @@ export function AiDraftPanel({
   }, [open, submissionId, version, loadedVersion]);
 
   async function apply() {
-    if (!aiDraft || selectedFieldPaths.size === 0) return;
+    if (!aiDraft) return;
+    // Gửi đúng tập server còn cho phép nạp: nút hiển thị `selectedCount` đã lọc theo applyable, gửi
+    // cả path đã hết điều kiện chỉ khiến server từ chối trọn lô.
+    const applyableFieldPaths = allApplyableFieldPaths(aiDraft.comparisons);
+    const fieldPaths = [...selectedFieldPaths]
+      .filter((path) => applyableFieldPaths.has(path))
+      .sort();
+    if (fieldPaths.length === 0) return;
     setApplying(true);
     setError(null);
     try {
@@ -142,7 +149,7 @@ export function AiDraftPanel({
         body: JSON.stringify({
           expectedVersion: version,
           resultId: aiDraft.resultId,
-          selectedFieldPaths: [...selectedFieldPaths].sort(),
+          selectedFieldPaths: fieldPaths,
         }),
       });
       const data = (await response.json()) as { error?: { message?: string } };

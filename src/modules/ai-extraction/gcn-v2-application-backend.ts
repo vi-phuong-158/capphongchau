@@ -21,7 +21,7 @@ import {
   type Owner,
   type Parcel,
 } from "../public-intake/types";
-import { draftSchema } from "../public-intake/validation";
+import { draftSchema, validateWorkingPayloadForSave } from "../public-intake/validation";
 
 export type PersistedAiFieldStatus = "CLEAR" | "CHECK" | "MANUAL_REQUIRED";
 
@@ -482,6 +482,23 @@ function currentLandUseBusinessKey(landUse: LandUse): string {
   return landUseBusinessKey(landUse);
 }
 
+/**
+ * Số dòng mục đích thửa đích sẽ có sau khi nạp. `ensureLandUse` chèn dòng mới vào ô trống nếu còn,
+ * hết ô trống mới push, nên phải đếm trên dòng thực tế của thửa — đếm theo số dòng AI ánh xạ sẽ bỏ
+ * sót các dòng cán bộ/người dân đã khai và cho phép vượt giới hạn ba mục đích của PL3.
+ */
+function projectedLandUseCount(
+  currentLandUses: readonly LandUse[],
+  plannedIds: ReadonlySet<string>,
+): number {
+  const existingIds = new Set(currentLandUses.map((landUse) => landUse.id));
+  const addedRows = [...plannedIds].filter((id) => !existingIds.has(id)).length;
+  const freeBlankRows = currentLandUses.filter(
+    (landUse) => isBlankLandUse(landUse) && !plannedIds.has(landUse.id),
+  ).length;
+  return currentLandUses.length + Math.max(0, addedRows - freeBlankRows);
+}
+
 function assetBusinessKey(asset: {
   assetType: string | null;
   description: string | null;
@@ -594,7 +611,10 @@ function buildDestinationPlan(
         (landUse) => !usedLandUseIds.has(landUse.id) && isBlankLandUse(landUse),
       );
       const destinationId = matches[0]?.id ?? blank?.id ?? deterministic;
-      const projectedCount = new Set([...usedLandUseIds, destinationId]).size;
+      const projectedCount = projectedLandUseCount(
+        currentLandUses,
+        new Set([...usedLandUseIds, destinationId]),
+      );
       if (projectedCount > MAX_LAND_USES_PER_PARCEL) {
         conflictPrefixes.add(`parcels[${aiParcel.stableKey}].landUses[${aiLandUse.stableKey}]`);
         continue;
@@ -1071,7 +1091,13 @@ export function applyGcnV2BackendComparisons(input: {
       appliedFieldPaths.push(fieldPath);
     }
   }
-  if (appliedFieldPaths.length > 0 && !draftSchema.safeParse(next).success) {
+  // `draftSchema` cố tình không mang các luật PL3 (xem `validateWorkingPayloadForSave`), nên đường
+  // nạp AI phải gọi thêm cùng bộ luật mà bàn làm việc dùng khi lưu — nếu không, AI ghi được bản
+  // payload mà chính cán bộ không lưu lại được.
+  if (
+    appliedFieldPaths.length > 0 &&
+    (!draftSchema.safeParse(next).success || validateWorkingPayloadForSave(next) !== null)
+  ) {
     return { draft: input.draft, appliedFieldPaths: [], invalidFieldPaths: appliedFieldPaths };
   }
   return { draft: next, appliedFieldPaths, invalidFieldPaths: [] };

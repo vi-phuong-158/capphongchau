@@ -1,5 +1,31 @@
 # 06 — AI Working Log
 
+## [2026-08-04] Sửa lỗi nạp AI vượt giới hạn ba mục đích/thửa của PL3 (review PR #18)
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - `buildDestinationPlan()` đếm giới hạn `MAX_LAND_USES_PER_PARCEL` bằng hàm mới
+    `projectedLandUseCount()` — tính trên số dòng thực tế của thửa đích (có tính ô trống mà
+    `ensureLandUse()` sẽ tái sử dụng), thay vì đếm số dòng AI ánh xạ được.
+  - `applyGcnV2BackendComparisons()` gọi thêm `validateWorkingPayloadForSave()` bên cạnh
+    `draftSchema` làm lớp chắn thứ hai: các luật PL3 cố ý nằm ngoài `draftSchema`, nên trước đó
+    đường nạp AI không có gì chặn.
+  - `ai-draft-panel.tsx` lọc `selectedFieldPaths` theo `allApplyableFieldPaths()` trước khi gửi để
+    số trường gửi đi khớp với số nút hiển thị.
+  - `markAmbiguousGroup()` hoist `collectGcnV2FieldObservations()` ra khỏi vòng lặp trong cùng.
+- **File đã sửa:** `src/modules/ai-extraction/gcn-v2-application-backend.ts`,
+  `src/modules/ai-extraction/gcn-v2-merge.ts`, `src/components/admin/ai-draft-panel.tsx`,
+  `tests/gcn-v2-backend-application.test.ts`.
+- **Lý do:** thửa đã đủ ba dòng mục đích mà AI đọc ra mã khác thì guard cũ vẫn cho nạp, tạo thửa 4–6
+  dòng. PL3 chỉ có ba bộ cột Z–AD/AE–AI/AJ–AN nên dòng thừa mất im lặng lúc xuất, đồng thời cán bộ
+  không lưu tay lại được vì `validateWorkingPayloadForSave()` chặn — hồ sơ rơi vào trạng thái kẹt.
+- **Kiểm tra:** dựng lại lỗi bằng fixture `buildSyntheticGcnV2Payload` trước khi sửa (thửa ra 6 dòng,
+  `invalidFieldPaths` rỗng); thêm test hồi quy
+  "refuses to add a land use when the destination parcel already holds three".
+  `npm run lint` PASS; `npm run typecheck` PASS; `npm test` PASS (108 files, 977 pass, 28 skip).
+- **Còn lại:** ba nội dung cần người dùng duyệt (merger chưa nối vào CLI, ngưỡng cảnh báo
+  `FIELD_REQUIRES_MANUAL_REVIEW`, provenance khi rerun) chưa sửa — xem phần đề xuất trong PR.
+
 ## [2026-08-03] Khóa contract và triển khai GCN v2 đa trang, đa chủ, đa thửa
 
 - **Agent:** Codex trưởng, phối hợp các subagent AI/schema, backend/persistence và officer UI.

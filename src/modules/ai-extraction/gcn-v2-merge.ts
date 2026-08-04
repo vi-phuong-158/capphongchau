@@ -414,15 +414,14 @@ function markAmbiguousGroup<T>(
     group.push(item);
     groups.set(key, group);
   }
+  const observations = collectGcnV2FieldObservations(payload);
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const keys = new Set(group.map(stableKey));
     if (keys.size < 2) continue;
-    for (const item of group) {
-      for (const observation of collectGcnV2FieldObservations(payload)) {
-        if (observation.stableKey === stableKey(item)) {
-          recordConflict(observation.fieldPath, "AMBIGUOUS_ARRAY_MATCH", conflicts, ambiguousPaths);
-        }
+    for (const observation of observations) {
+      if (keys.has(observation.stableKey ?? "")) {
+        recordConflict(observation.fieldPath, "AMBIGUOUS_ARRAY_MATCH", conflicts, ambiguousPaths);
       }
     }
   }
