@@ -1,5 +1,16 @@
 # 06 — AI Working Log
 
+## [2026-08-04] Cập nhật báo cáo GCN v2 theo review PR #18 (976→978 test)
+- **Agent:** Claude Code
+- **Thay đổi:** cập nhật `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md` để khớp head `e0c5465`: số test
+  976→978, thêm tóm tắt ba fix đã vào sau snapshot ban đầu (giới hạn ba mục đích/thửa PL3, thu hẹp cảnh
+  báo `FIELD_REQUIRES_MANUAL_REVIEW`, đổi nhãn provenance `OFFICER_EDITED`).
+- **File đã sửa:** `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md`.
+- **Lý do:** review PR #18 (P2) yêu cầu báo cáo và mô tả PR phản ánh đúng số test và các thay đổi trước
+  khi chuyển PR sang Ready/merge.
+- **Kiểm tra:** `npx vitest run` PASS cục bộ (108 files, 978 pass, 28 skip), khớp CI head `e0c5465`. Không
+  đụng code nguồn.
+
 ## [2026-08-04] Sửa lỗi nạp AI vượt giới hạn ba mục đích/thửa của PL3 (review PR #18)
 
 - **Agent:** Claude Code
