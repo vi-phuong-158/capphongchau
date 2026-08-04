@@ -1,5 +1,48 @@
 # 03 — Technical Decisions
 
+## [2026-08-04] Hoãn nối merger vào CLI; agent tiếp tục tự hợp nhất các trang GCN
+
+- **Quyết định:** giữ nguyên giao thức hiện tại — agent đọc từng trang, tự hợp nhất, nộp **một** JSON
+  qua `scripts/ai/local-draft.ts submit`. `src/modules/ai-extraction/gcn-v2-merge.ts` ở lại repo như
+  thư viện có unit test nhưng **không** được nối vào luồng chạy trong đợt này.
+- **Lỗ hổng chấp nhận có ý thức:** vì server chỉ nhận kết quả đã hợp nhất, nó không thể phát hiện
+  agent đọc hai giá trị khác nhau ở hai trang rồi âm thầm chọn một và khai `EXTRACTED`. Schema chỉ
+  bắt được trường hợp khai `CONFLICT` không nhất quán (value phải null, phải có ≥2 nguồn raw).
+  Rủi ro nằm ở đúng các trường khó soát bằng mắt: diện tích, số tờ, số thửa.
+- **Vì sao vẫn chấp nhận được lúc này:** AI chỉ đề xuất, không tự ghi vào hồ sơ. Cán bộ phải tích
+  chọn từng trường, và mỗi evidence chỉ rõ ảnh/trang nguồn để đối chiếu. Đang là giai đoạn thử
+  nghiệm với số lượng nhỏ và có người duyệt chặn ở cuối.
+- **Vì sao không làm ngay:** bịt lỗ hổng đòi hỏi agent nộp kết quả **từng trang** để server tự hợp
+  nhất — đổi giao thức nộp, CLI, prompt, JSON Schema và test. Công lớn, trong khi rào chắn con người
+  vẫn còn hiệu lực.
+- **Phải đánh giá lại khi:** chạy thật ở quy mô lớn, giảm mức đối chiếu bắt buộc của cán bộ, hoặc
+  cho phép nạp tự động không cần tích chọn. Lúc đó nối merger là điều kiện tiên quyết.
+- **Đã làm thay:** sửa tài liệu cho khớp thực tế (`GCN_V2_ARCHITECTURE.md`, `01-architecture.md`) để
+  agent/người đọc sau không tưởng merger đang chạy.
+
+## [2026-08-03] GCN v2 đọc đầy đủ whitelist nghiệp vụ nhưng không tự xác nhận
+
+- **Quyết định:** thay output ba trường bằng hợp đồng `gcn-v2.0` lấy từ hợp của form cán bộ,
+  `completionChecks` và PL3. Output gồm certificate, nhiều owners, nhiều parcels với land uses lồng,
+  assets, registered changes review-only, pages/evidence/metadata. `IntakeDraft` tiếp tục là đích nên
+  không thiết kế lại database.
+- **Giữ ranh giới PII:** AI không trả/apply `identityNumber`, `currentUserCitizenId` hoặc dữ liệu CCCD;
+  scanner 12 chữ số vẫn fail closed trên toàn JSON. Các trường hệ thống/địa chính tự suy ra và quyết
+  định người sử dụng hiện tại cũng không do AI điền.
+- **Merge/rerun:** server tính provenance tại thời điểm GET/apply. Chỉ `EXTRACTED` với provenance
+  `EMPTY`/`AI_PROPOSED` mới có thể nạp; citizen/officer/confirmed/conflict/unreadable không bị ghi đè.
+  Cán bộ phải chọn trường, còn version/idempotency/history/audit dùng transaction hiện có.
+- **Identity mảng:** stable key ưu tiên source anchor lần xuất hiện đầu (file/trang/dòng; bảng con có
+  thửa cha), không lấy text OCR làm identity. Rerun chỉ là job mới khi input/version prompt/schema đổi;
+  mở lại cùng job/input cần run-generation append-only và migration/quyết định riêng, không reset job cũ.
+- **Tương thích:** payload ba trường cũ tiếp tục parse/apply theo rule cũ. `field_status` trong database
+  giữ ba mã `CLEAR/CHECK/MANUAL_REQUIRED`; evidence status/provenance mới nằm trong JSONB.
+- **Migration:** không có. Các cột JSONB và `working_payload_json` hiện có chứa được cấu trúc mới;
+  tạo migration chỉ để đổi tên hoặc tách cột lúc này tăng rủi ro mà không thêm invariant cần thiết.
+- **Vận hành:** model thực tế vẫn truyền bằng cấu hình/CLI và được ghi cùng schema/prompt version để
+  rollback bằng payload legacy hoặc prompt/model trước. Không đổi nhà cung cấp, không bật API AI,
+  không deploy và không tác động Production trong đợt này.
+
 ## [2026-07-31] Bỏ yêu cầu xuất `CHATGPT_HANDOFF.md`
 
 - **Quyết định:** agent không còn phải tạo/cập nhật `CHATGPT_HANDOFF.md` sau mỗi đợt thi công. Báo

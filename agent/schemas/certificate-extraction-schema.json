@@ -1,56 +1,468 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "CertificateExtractionResultV2",
+  "$id": "https://land-ocr-180.local/schemas/gcn-v2.0.json",
+  "title": "GcnExtractionPayloadV2",
+  "description": "Strict GCN-only extraction contract. identityNumber and current-user fields are intentionally absent.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "quality": { "$ref": "#/definitions/quality" },
+    "data": { "$ref": "#/definitions/data" },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": { "$ref": "#/definitions/page" }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 25000,
+      "items": { "$ref": "#/definitions/evidence" }
+    },
+    "metadata": { "$ref": "#/definitions/metadata" },
+    "warnings": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/definitions/warning" }
+    }
+  },
+  "required": ["quality", "data", "pages", "evidence", "metadata", "warnings"],
+  "definitions": {
+    "shortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "nullableShortText": {
+      "anyOf": [{ "$ref": "#/definitions/shortText" }, { "type": "null" }]
+    },
+    "longText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "pattern": "\\S"
+    },
+    "nullableLongText": {
+      "anyOf": [{ "$ref": "#/definitions/longText" }, { "type": "null" }]
+    },
+    "isoDate": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "nullableIsoDate": {
+      "anyOf": [{ "$ref": "#/definitions/isoDate" }, { "type": "null" }]
+    },
+    "decimalString": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+    },
+    "nullableDecimalString": {
+      "anyOf": [{ "$ref": "#/definitions/decimalString" }, { "type": "null" }]
+    },
+    "stableKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{7,99}$"
+    },
+    "warning": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "\\S"
+    },
     "quality": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "documentType": { "enum": ["CERTIFICATE", "OTHER", "UNKNOWN"] },
         "imageStatus": { "enum": ["CLEAR", "BLURRY", "HANDWRITING", "MIXED"] },
-        "note": { "type": "string" }
+        "note": { "type": "string", "maxLength": 500 }
       },
       "required": ["documentType", "imageStatus", "note"]
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "certificate": { "$ref": "#/definitions/certificate" },
+        "owners": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/definitions/owner" }
+        },
+        "parcels": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/definitions/parcel" }
+        },
+        "assets": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/definitions/asset" }
+        },
+        "registeredChanges": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/definitions/registeredChange" }
+        }
+      },
+      "required": ["certificate", "owners", "parcels", "assets", "registeredChanges"]
     },
     "certificate": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "issueNumber": { "$ref": "#/definitions/field" },
-        "issueDate": { "$ref": "#/definitions/field" },
-        "registryNumber": { "$ref": "#/definitions/field" }
+        "issueNumber": { "$ref": "#/definitions/nullableShortText" },
+        "issueDate": { "$ref": "#/definitions/nullableIsoDate" },
+        "registryNumber": { "$ref": "#/definitions/nullableShortText" }
       },
       "required": ["issueNumber", "issueDate", "registryNumber"]
     },
-    "unreadableFields": { "type": "array", "items": { "type": "string" } }
-  },
-  "required": ["quality", "certificate", "unreadableFields"],
-  "definitions": {
-    "field": {
+    "owner": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "value": { "type": ["string", "null"] },
-        "sourceValue": { "type": ["string", "null"] },
-        "status": { "enum": ["CLEAR", "CHECK", "MANUAL_REQUIRED"] },
-        "evidence": {
-          "type": ["object", "null"],
-          "properties": {
-            "fileId": { "type": "string" },
-            "pageLabel": { "type": "string" },
-            "note": { "type": "string" }
-          },
-          "required": ["fileId", "pageLabel", "note"]
+        "stableKey": { "$ref": "#/definitions/stableKey" },
+        "ownerType": {
+          "type": ["string", "null"],
+          "enum": [
+            "CA_NHAN",
+            "HO_GIA_DINH",
+            "VO_CHONG",
+            "DONG_SU_DUNG",
+            "CONG_DONG_DAN_CU",
+            "TO_CHUC",
+            null
+          ]
+        },
+        "organisationName": { "$ref": "#/definitions/nullableShortText" },
+        "organisationIdentityNumber": { "$ref": "#/definitions/nullableShortText" },
+        "fullName": { "$ref": "#/definitions/nullableShortText" },
+        "dateOfBirth": { "$ref": "#/definitions/nullableIsoDate" },
+        "gender": { "type": ["string", "null"], "enum": ["NAM", "NU", null] },
+        "residenceAddress": { "$ref": "#/definitions/nullableLongText" },
+        "roleOnCertificate": {
+          "type": ["string", "null"],
+          "enum": ["CA_NHAN", "CHU_HO", "CHONG", "VO", "NGUOI_DAI_DIEN", "THANH_VIEN", null]
         }
       },
-      "required": ["value", "sourceValue", "status", "evidence"],
+      "required": [
+        "stableKey",
+        "ownerType",
+        "organisationName",
+        "organisationIdentityNumber",
+        "fullName",
+        "dateOfBirth",
+        "gender",
+        "residenceAddress",
+        "roleOnCertificate"
+      ]
+    },
+    "landUse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stableKey": { "$ref": "#/definitions/stableKey" },
+        "purposeCode": {
+          "type": ["string", "null"],
+          "enum": [
+            "LUC",
+            "LUK",
+            "HNK",
+            "CLN",
+            "RDD",
+            "RPH",
+            "RSX",
+            "NTS",
+            "CNT",
+            "LMU",
+            "NKH",
+            "ONT",
+            "ODT",
+            "TSC",
+            "CQP",
+            "CAN",
+            "DVH",
+            "DYT",
+            "DGD",
+            "DTT",
+            "DKH",
+            "DSK",
+            "DSO",
+            "CSK",
+            "TMD",
+            "SKC",
+            "SKS",
+            "SKN",
+            "DGT",
+            "DTL",
+            "DDT",
+            "DRA",
+            "DCK",
+            "DPC",
+            "DSH",
+            "DNL",
+            "DNG",
+            "TON",
+            "TIN",
+            "SON",
+            "MNC",
+            "PNK",
+            "BCS",
+            "DCS",
+            "NCS",
+            "GHI_THEO_BIA",
+            "CAN_DOI_CHIEU",
+            null
+          ]
+        },
+        "purposeFreeText": { "$ref": "#/definitions/nullableShortText" },
+        "area": { "$ref": "#/definitions/nullableDecimalString" },
+        "originCode": {
+          "type": ["string", "null"],
+          "enum": [
+            "NHA_NUOC_GIAO_CO_THU",
+            "NHA_NUOC_GIAO_KHONG_THU",
+            "NHA_NUOC_CONG_NHAN",
+            "NHA_NUOC_CHO_THUE",
+            "NHAN_CHUYEN_QUYEN",
+            "THUA_KE_TANG_CHO",
+            "NGUON_GOC_KHAC",
+            null
+          ]
+        },
+        "formCode": {
+          "type": ["string", "null"],
+          "enum": ["SU_DUNG_RIENG", "SU_DUNG_CHUNG", "SU_DUNG_RIENG_VA_CHUNG", null]
+        },
+        "termCode": {
+          "type": ["string", "null"],
+          "enum": ["SU_DUNG_ON_DINH_LAU_DAI", "SU_DUNG_CO_THOI_HAN", null]
+        }
+      },
+      "required": [
+        "stableKey",
+        "purposeCode",
+        "purposeFreeText",
+        "area",
+        "originCode",
+        "formCode",
+        "termCode"
+      ]
+    },
+    "parcel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stableKey": { "$ref": "#/definitions/stableKey" },
+        "parcelIdCode": { "$ref": "#/definitions/nullableShortText" },
+        "mapSheetNumber": { "$ref": "#/definitions/nullableShortText" },
+        "parcelNumber": { "$ref": "#/definitions/nullableShortText" },
+        "addressOnCertificate": { "$ref": "#/definitions/nullableLongText" },
+        "oldWard": {
+          "type": ["string", "null"],
+          "enum": ["PHU_HO", "HA_THACH", "PHONG_CHAU_CU", "KHONG_RO", null]
+        },
+        "area": { "$ref": "#/definitions/nullableDecimalString" },
+        "landUses": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/definitions/landUse" }
+        }
+      },
+      "required": [
+        "stableKey",
+        "parcelIdCode",
+        "mapSheetNumber",
+        "parcelNumber",
+        "addressOnCertificate",
+        "oldWard",
+        "area",
+        "landUses"
+      ]
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stableKey": { "$ref": "#/definitions/stableKey" },
+        "parcelStableKey": {
+          "anyOf": [{ "$ref": "#/definitions/stableKey" }, { "type": "null" }]
+        },
+        "assetType": {
+          "type": ["string", "null"],
+          "enum": ["NHA_O", "CONG_TRINH", "CAY_LAU_NAM", "RUNG_TRONG", null]
+        },
+        "description": { "$ref": "#/definitions/nullableLongText" },
+        "mixedUseBuildingName": { "$ref": "#/definitions/nullableShortText" },
+        "apartmentBuildingName": { "$ref": "#/definitions/nullableShortText" },
+        "apartmentNumber": { "$ref": "#/definitions/nullableShortText" },
+        "constructionArea": { "$ref": "#/definitions/nullableDecimalString" },
+        "floorArea": { "$ref": "#/definitions/nullableDecimalString" },
+        "ownershipForm": { "$ref": "#/definitions/nullableShortText" },
+        "ownershipTerm": { "$ref": "#/definitions/nullableShortText" },
+        "grade": { "$ref": "#/definitions/nullableShortText" }
+      },
+      "required": [
+        "stableKey",
+        "parcelStableKey",
+        "assetType",
+        "description",
+        "mixedUseBuildingName",
+        "apartmentBuildingName",
+        "apartmentNumber",
+        "constructionArea",
+        "floorArea",
+        "ownershipForm",
+        "ownershipTerm",
+        "grade"
+      ]
+    },
+    "registeredChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stableKey": { "$ref": "#/definitions/stableKey" },
+        "confirmedDate": { "$ref": "#/definitions/nullableIsoDate" },
+        "content": { "$ref": "#/definitions/nullableLongText" },
+        "confirmedBy": { "$ref": "#/definitions/nullableShortText" }
+      },
+      "required": ["stableKey", "confirmedDate", "content", "confirmedBy"]
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fileId": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S" },
+        "pageNumber": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "pageType": {
+          "enum": [
+            "COVER",
+            "OWNER_AND_PARCEL",
+            "ASSET",
+            "SUPPLEMENT",
+            "REGISTERED_CHANGE",
+            "OTHER",
+            "UNKNOWN"
+          ]
+        },
+        "rotationDegrees": { "enum": [0, 90, 180, 270] },
+        "imageStatus": { "enum": ["CLEAR", "BLURRY", "HANDWRITING", "MIXED"] },
+        "ownerStableKeys": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/definitions/stableKey" }
+        },
+        "parcelStableKeys": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/definitions/stableKey" }
+        },
+        "registeredChangeStableKeys": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/definitions/stableKey" }
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/definitions/warning" }
+        }
+      },
+      "required": [
+        "fileId",
+        "pageNumber",
+        "pageType",
+        "rotationDegrees",
+        "imageStatus",
+        "ownerStableKeys",
+        "parcelStableKeys",
+        "registeredChangeStableKeys",
+        "warnings"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fieldPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "\\S"
+        },
+        "rawText": { "$ref": "#/definitions/nullableLongText" },
+        "fileId": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S" },
+        "pageNumber": {
+          "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 10000 }, { "type": "null" }]
+        },
+        "confidence": {
+          "anyOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "null" }]
+        },
+        "status": {
+          "enum": ["EXTRACTED", "LOW_CONFIDENCE", "UNREADABLE", "CONFLICT", "NOT_FOUND"]
+        }
+      },
+      "required": ["fieldPath", "rawText", "fileId", "pageNumber", "confidence", "status"],
       "allOf": [
         {
-          "if": { "properties": { "status": { "const": "CLEAR" } } },
-          "then": { "properties": { "evidence": { "type": "object" } } }
+          "if": {
+            "properties": { "status": { "enum": ["EXTRACTED", "LOW_CONFIDENCE"] } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "rawText": { "$ref": "#/definitions/longText" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "NOT_FOUND" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "rawText": { "type": "null" },
+              "confidence": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "CONFLICT" } }, "required": ["status"] },
+          "then": { "properties": { "rawText": { "$ref": "#/definitions/longText" } } }
         }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": "gcn-v2.0" },
+        "promptVersion": { "const": "gcn-v2.0" },
+        "modelIdentifier": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "pagesProcessed": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "sourceDocumentHash": {
+          "anyOf": [{ "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }, { "type": "null" }]
+        },
+        "processedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "T.*(?:Z|[+-]\\d{2}:\\d{2})$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "promptVersion",
+        "modelIdentifier",
+        "pagesProcessed",
+        "sourceDocumentHash",
+        "processedAt"
       ]
     }
   }

@@ -6,7 +6,13 @@ import { z } from "zod";
 import { AuthorizationError, requireActiveUser } from "@/modules/auth/authorization";
 import { verifyCsrfToken } from "@/modules/auth/csrf";
 import { createApiErrorPayload } from "@/modules/common/api-error";
-import { applyClearAiFields } from "@/modules/ai-extraction/draft";
+import { applyClearAiFields, type AiFieldComparisonDraft } from "@/modules/ai-extraction/draft";
+import {
+  applyGcnV2BackendComparisons,
+  hydrateGcnV2ApplicationDraft,
+  type GcnV2BackendComparison,
+} from "@/modules/ai-extraction/gcn-v2-application-backend";
+import { isGcnExtractionPayloadV2 } from "@/modules/ai-extraction/gcn-v2-schema";
 import { getAiExtractionRepository } from "@/modules/ai-extraction/repository";
 import { loadServerEnvironment } from "@/modules/common/env";
 import { citizenIdsForLookup } from "@/modules/public-intake/validation";
@@ -19,13 +25,26 @@ import {
 import { SUBMISSION_DECISION_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
+const PRIVATE_NO_STORE_HEADERS = { "cache-control": "private, no-store" } as const;
 
 const bodySchema = z
   .object({
     expectedVersion: z.number().int().positive(),
     resultId: z.string().trim().min(1).max(100),
+    selectedFieldPaths: z
+      .array(z.string().trim().min(1).max(300))
+      .max(5_000)
+      .refine((paths) => new Set(paths).size === paths.length, "Danh sách trường bị trùng.")
+      .optional(),
   })
   .strict();
+
+function sameFieldSelection(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((fieldPath, index) => fieldPath === sortedRight[index]);
+}
 
 function fail(
   code:
@@ -42,7 +61,7 @@ function fail(
 ) {
   return NextResponse.json(createApiErrorPayload({ code, message, requestId }), {
     status,
-    headers: { "cache-control": "no-store" },
+    headers: PRIVATE_NO_STORE_HEADERS,
   });
 }
 
@@ -87,7 +106,22 @@ export async function POST(
       }
       const version = replay.response.version;
       if (typeof version === "number") {
-        const appliedFieldPaths = replay.response.appliedFieldPaths;
+        const appliedFieldPaths = Array.isArray(replay.response.appliedFieldPaths)
+          ? replay.response.appliedFieldPaths.filter(
+              (fieldPath): fieldPath is string => typeof fieldPath === "string",
+            )
+          : [];
+        if (
+          body.data.selectedFieldPaths &&
+          !sameFieldSelection(body.data.selectedFieldPaths, appliedFieldPaths)
+        ) {
+          return fail(
+            "IDEMPOTENCY_CONFLICT",
+            "Khóa chống gửi trùng đã dùng cho thao tác khác.",
+            requestId,
+            409,
+          );
+        }
         return NextResponse.json(
           {
             submission: {
@@ -95,11 +129,11 @@ export async function POST(
               updatedAt:
                 typeof replay.response.updatedAt === "string" ? replay.response.updatedAt : "",
             },
-            appliedFieldPaths: Array.isArray(appliedFieldPaths) ? appliedFieldPaths : [],
+            appliedFieldPaths,
             requestId:
               typeof replay.response.requestId === "string" ? replay.response.requestId : requestId,
           },
-          { headers: { "cache-control": "no-store" } },
+          { headers: PRIVATE_NO_STORE_HEADERS },
         );
       }
     }
@@ -117,10 +151,7 @@ export async function POST(
         403,
       );
     }
-    const resolved = await getAiExtractionRepository().getCurrentComparisons(
-      submissionId,
-      record.draft,
-    );
+    const resolved = await getAiExtractionRepository().getCurrentComparisons(submissionId, record);
     if (!resolved || resolved.draft.resultId !== body.data.resultId) {
       return fail(
         "VALIDATION_FAILED",
@@ -137,7 +168,60 @@ export async function POST(
         400,
       );
     }
-    const applied = applyClearAiFields(record.draft, resolved.comparisons);
+    const currentDraft = hydrateGcnV2ApplicationDraft(record.workingPayload ?? record.draft);
+    if (!currentDraft) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Dữ liệu hồ sơ hiện tại không thể chuẩn hóa để nạp nháp AI.",
+        requestId,
+        400,
+      );
+    }
+    let applied: {
+      draft: typeof currentDraft;
+      appliedFieldPaths: string[];
+      invalidFieldPaths: string[];
+    };
+    if (isGcnExtractionPayloadV2(resolved.draft.payload)) {
+      applied = applyGcnV2BackendComparisons({
+        draft: currentDraft,
+        comparisons: resolved.comparisons.filter(isGcnV2Comparison),
+        selectedFieldPaths: body.data.selectedFieldPaths,
+      });
+      if (applied.invalidFieldPaths.length > 0) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Một hoặc nhiều trường đã chọn không còn đủ điều kiện nạp từ AI.",
+          requestId,
+          400,
+        );
+      }
+    } else {
+      const legacyComparisons = resolved.comparisons.filter(isLegacyComparison);
+      if (
+        body.data.selectedFieldPaths?.some((fieldPath) => {
+          const comparison = legacyComparisons.find((entry) => entry.fieldPath === fieldPath);
+          return !comparison || !isLegacyComparisonApplyable(comparison);
+        })
+      ) {
+        return fail(
+          "VALIDATION_FAILED",
+          "Một hoặc nhiều trường đã chọn không còn đủ điều kiện nạp từ AI.",
+          requestId,
+          400,
+        );
+      }
+      const selected = body.data.selectedFieldPaths
+        ? new Set(body.data.selectedFieldPaths)
+        : undefined;
+      const legacyApplied = applyClearAiFields(
+        currentDraft,
+        selected
+          ? legacyComparisons.filter((comparison) => selected.has(comparison.fieldPath))
+          : legacyComparisons,
+      );
+      applied = { ...legacyApplied, invalidFieldPaths: [] };
+    }
     if (applied.appliedFieldPaths.length === 0) {
       return fail(
         "VALIDATION_FAILED",
@@ -183,7 +267,7 @@ export async function POST(
         appliedFieldPaths: applied.appliedFieldPaths,
         requestId,
       },
-      { headers: { "cache-control": "no-store" } },
+      { headers: PRIVATE_NO_STORE_HEADERS },
     );
   } catch (error) {
     if (error instanceof AuthorizationError) {
@@ -200,4 +284,30 @@ export async function POST(
       return fail("IDEMPOTENCY_CONFLICT", error.message, requestId, 409);
     return fail("INTERNAL_ERROR", "Không thể nạp bản nháp AI.", requestId, 500);
   }
+}
+
+function isGcnV2Comparison(
+  comparison: AiFieldComparisonDraft | GcnV2BackendComparison,
+): comparison is GcnV2BackendComparison {
+  return "templatePath" in comparison;
+}
+
+function isLegacyComparison(
+  comparison: AiFieldComparisonDraft | GcnV2BackendComparison,
+): comparison is AiFieldComparisonDraft {
+  return !("templatePath" in comparison);
+}
+
+/** Giữ replay idempotent: mọi field client chọn phải thực sự đi vào appliedFieldPaths. */
+function isLegacyComparisonApplyable(comparison: AiFieldComparisonDraft): boolean {
+  return (
+    comparison.fieldStatus === "CLEAR" &&
+    !!comparison.aiValue?.trim() &&
+    !comparison.currentValue.trim() &&
+    !!comparison.evidence &&
+    typeof comparison.evidence === "object" &&
+    !Array.isArray(comparison.evidence) &&
+    typeof (comparison.evidence as { fileId?: unknown }).fileId === "string" &&
+    (comparison.evidence as { fileId: string }).fileId.trim().length > 0
+  );
 }

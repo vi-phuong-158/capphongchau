@@ -61,14 +61,19 @@ trước khi mở), rồi ghi kết quả bằng `submit` trong một transactio
 Các ràng buộc `workerInstanceId`/lease dưới đây thuộc đường API cũ (`AI_EXTRACTION_ENABLED=false`);
 đường cục bộ giữ nguyên mọi guard còn lại và chống ghi trùng bằng `result_fingerprint`.
 
-Server kiểm tra schema v2, model/prompt, checksum và phiên bản payload trước khi lưu result cùng
-`ai_field_comparisons`/audit. Cán bộ thấy bảng đối chiếu rồi chỉ có thể nạp các trường `CLEAR` đang
-trống vào working payload; AI không được ghi dữ liệu chính thức hay duyệt. Trạm đang dùng tài khoản
+Server kiểm tra schema/prompt `gcn-v2.0`, model, số trang, source hash, manifest/checksum và phiên bản
+payload trước khi lưu result cùng `ai_field_comparisons`/audit. Output mới giữ cấu trúc certificate,
+nhiều owners, nhiều parcels/landUses, assets, registered changes và evidence theo từng field path;
+output ba trường legacy vẫn được đọc để không làm hỏng job cũ. Cán bộ thấy bảng đối chiếu theo nhóm rồi
+chỉ có thể nạp các trường đã chọn mà server xác định `EXTRACTED` và có provenance `EMPTY` hoặc
+`AI_PROPOSED`; dữ liệu người dân/cán bộ, trường đã xác nhận, conflict/low-confidence/unreadable không
+bị ghi đè. AI không được ghi dữ liệu chính thức hay duyệt. Trạm đang dùng tài khoản
 quản trị có rủi ro `ADMIN_BROAD_ACCESS`, nên `agent/AGENTS.md` chỉ giới hạn quy trình, không phải
 rào chắn kỹ thuật tuyệt đối với CCCD. Ảnh CCCD/QR không nằm trong manifest/schema/prompt. Claim và
 result bị buộc với `workerInstanceId`/lease/idempotency; server tái kiểm manifest với `PUBLIC_FILES`
-và chặn JSON chứa chuỗi giống CCCD trước khi persist. Một trường `CLEAR` chỉ có thể được nạp khi
-evidence trỏ tới `fileId` nằm trong manifest GCN đã xác minh; mọi kết quả `STALE` cũng được cache
+và chặn JSON chứa chuỗi giống CCCD trước khi persist. Số định danh cá nhân 12 chữ số không thuộc
+schema GCN v2; biến động chỉ hiển thị để đối chiếu. Mỗi evidence phải trỏ tới `fileId`/trang nằm trong
+manifest GCN đã xác minh; mọi kết quả `STALE` cũng được cache
 trong `REQUEST_LOG` để retry cùng key trả lại đúng phản hồi.
 
 ## Mô hình dữ liệu

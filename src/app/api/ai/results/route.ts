@@ -10,10 +10,19 @@ import {
   AI_SCHEMA_VERSION,
 } from "@/modules/ai-extraction/repository";
 import {
-  aiExtractionPayloadSchema,
+  aiExtractionPayloadAnySchema,
   buildAiFieldComparisons,
-  findInvalidClearEvidence,
+  findInvalidAnyAiEvidence,
+  isGcnExtractionPayloadV2,
 } from "@/modules/ai-extraction/draft";
+import {
+  buildGcnV2BackendComparisons,
+  buildGcnV2LeafSuggestions,
+  comparisonEvidenceForStorage,
+  findGcnV2PersonalInfoInNotes,
+  hydrateGcnV2ApplicationDraft,
+  validateGcnV2RuntimeMetadata,
+} from "@/modules/ai-extraction/gcn-v2-application-backend";
 import {
   computeInputFingerprint,
   computeResultFingerprint,
@@ -30,9 +39,9 @@ const schema = z
     jobId: z.string().trim().min(1).max(100),
     workerInstanceId: z.string().trim().min(1).max(100),
     inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-    rawJson: aiExtractionPayloadSchema,
+    rawJson: aiExtractionPayloadAnySchema,
     modelName: z.literal(AI_MODEL_NAME),
-    promptVersion: z.literal(AI_PROMPT_VERSION),
+    promptVersion: z.union([z.literal(AI_PROMPT_VERSION), z.literal("v2.0")]),
   })
   .strict();
 
@@ -59,6 +68,7 @@ function fail(
 class AiIdempotencyConflictError extends Error {}
 class AiJobNotFoundError extends Error {}
 class AiJobUnavailableError extends Error {}
+class AiResultMetadataInvalidError extends Error {}
 
 interface AiResultResponse {
   readonly resultId: string;
@@ -96,6 +106,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const { jobId, workerInstanceId, inputFingerprint, rawJson, modelName, promptVersion } =
       body.data;
+    if (
+      isGcnExtractionPayloadV2(rawJson) &&
+      (rawJson.metadata.modelIdentifier !== modelName ||
+        rawJson.metadata.sourceDocumentHash !== inputFingerprint)
+    ) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Metadata kết quả AI không khớp request hiện hành.",
+        requestId,
+        400,
+      );
+    }
+    if (isGcnExtractionPayloadV2(rawJson) && findGcnV2PersonalInfoInNotes(rawJson).length > 0) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Ghi chú kết quả AI chứa dữ liệu định danh không được phép.",
+        requestId,
+        400,
+      );
+    }
     const issues = validateAiResultPayload(rawJson);
     const blockingCount = issues.filter(
       (issue: ValidationIssue) => issue.severity === "BLOCKING",
@@ -187,24 +217,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (
         job.input_fingerprint !== inputFingerprint ||
         job.prompt_version !== promptVersion ||
-        job.schema_version !== AI_SCHEMA_VERSION ||
-        job.model_name !== modelName
+        job.model_name !== modelName ||
+        !(
+          (job.schema_version === AI_SCHEMA_VERSION && isGcnExtractionPayloadV2(rawJson)) ||
+          (job.schema_version === "v2.0" && !isGcnExtractionPayloadV2(rawJson))
+        )
       ) {
         throw new AiJobUnavailableError();
       }
 
       const submissions = await transaction<
-        { citizen_payload_version: number; draft_json: unknown }[]
+        {
+          citizen_payload_version: number;
+          citizen_payload_json: unknown;
+          working_payload_json: unknown;
+          draft_json: unknown;
+        }[]
       >`
-        select citizen_payload_version, draft_json
+        select citizen_payload_version, citizen_payload_json, working_payload_json, draft_json
         from public.public_submissions where submission_id = ${job.submission_id}
       `;
       const submission = submissions[0];
       const declaredFiles = await transaction<{ count: string | number }[]>`
         select count(*) as count from public.ai_extraction_job_files where job_id = ${jobId}
       `;
-      const verifiedManifestFiles = await transaction<{ file_id: string }[]>`
-        select jf.file_id
+      const verifiedManifestFiles = await transaction<{ file_id: string; ordinal: number }[]>`
+        select jf.file_id, jf.ordinal
         from public.ai_extraction_job_files jf
         join public.public_files pf on pf.file_id = jf.file_id
         where jf.job_id = ${jobId}
@@ -230,10 +268,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const manifestInvalid =
         Number(declaredFiles[0]?.count ?? 0) === 0 ||
         verifiedManifestFiles.length !== Number(declaredFiles[0]?.count ?? 0);
-      const clearEvidenceInvalid = findInvalidClearEvidence(
+      const evidenceInvalid = findInvalidAnyAiEvidence(
         rawJson,
         new Set(verifiedManifestFiles.map((file) => file.file_id)),
-      ).filter((issue) => issue.code === "CLEAR_EVIDENCE_NOT_IN_MANIFEST");
+      ).filter(
+        (issue) =>
+          issue.code === "V2_EVIDENCE_NOT_IN_MANIFEST" ||
+          issue.code === "CLEAR_EVIDENCE_NOT_IN_MANIFEST",
+      );
       if (
         !submission ||
         !submission.draft_json ||
@@ -261,7 +303,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return { kind: "STALE" };
       }
 
-      const finalBlockingCount = blockingCount + clearEvidenceInvalid.length;
+      if (isGcnExtractionPayloadV2(rawJson)) {
+        const runtimeMetadataIssues = validateGcnV2RuntimeMetadata({
+          payload: rawJson,
+          expectedSchemaVersion: job.schema_version,
+          expectedPromptVersion: job.prompt_version,
+          expectedModelIdentifier: modelName,
+          expectedSourceHash: job.input_fingerprint,
+          allowedFileIds: new Set(verifiedManifestFiles.map((file) => file.file_id)),
+        });
+        if (runtimeMetadataIssues.length > 0) throw new AiResultMetadataInvalidError();
+      }
+
+      const finalBlockingCount = blockingCount + evidenceInvalid.length;
       const finalValidationStatus =
         finalBlockingCount > 0 ? "BLOCKED" : warningCount > 0 ? "REVIEW_REQUIRED" : "PASSED";
 
@@ -281,20 +335,57 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ${resultFingerprint}, ${modelName}, ${promptVersion}, now()
         )
       `;
-      const draft =
-        typeof submission.draft_json === "string"
-          ? (JSON.parse(submission.draft_json) as IntakeDraft)
-          : (submission.draft_json as IntakeDraft);
-      for (const comparison of buildAiFieldComparisons(draft, rawJson)) {
-        await transaction`
-          insert into public.ai_field_comparisons (
-            job_id, result_id, field_path, current_value, ai_value, source_value, field_status, evidence_json
-          ) values (
-            ${jobId}, ${resultId}, ${comparison.fieldPath}, ${comparison.currentValue},
-            ${comparison.aiValue}, ${comparison.sourceValue}, ${comparison.fieldStatus},
-            ${JSON.stringify(comparison.evidence)}::jsonb
-          )
+      const draft = parseDraft(submission.working_payload_json ?? submission.draft_json);
+      const citizenDraft = submission.citizen_payload_json
+        ? parseDraft(submission.citizen_payload_json)
+        : null;
+      if (isGcnExtractionPayloadV2(rawJson)) {
+        const priorRows = await transaction<{ field_path: string; ai_value: string | null }[]>`
+          select c.field_path, c.ai_value
+          from public.ai_field_comparisons c
+          join public.ai_extraction_jobs j on j.job_id = c.job_id
+          where j.submission_id = ${job.submission_id} and c.decision = 'APPLIED'
+          order by c.decided_at desc nulls last, c.created_at desc
         `;
+        const priorAppliedValues = new Map<string, string>();
+        for (const prior of priorRows) {
+          if (prior.ai_value !== null && !priorAppliedValues.has(prior.field_path)) {
+            priorAppliedValues.set(prior.field_path, prior.ai_value);
+          }
+        }
+        const comparisons = buildGcnV2BackendComparisons({
+          current: draft,
+          citizen: citizenDraft,
+          payload: rawJson,
+          suggestions: buildGcnV2LeafSuggestions(
+            rawJson,
+            new Map(verifiedManifestFiles.map((file) => [file.file_id, file.ordinal + 1])),
+          ),
+          priorAppliedValues,
+        });
+        for (const comparison of comparisons) {
+          await transaction`
+            insert into public.ai_field_comparisons (
+              job_id, result_id, field_path, current_value, ai_value, source_value, field_status, evidence_json
+            ) values (
+              ${jobId}, ${resultId}, ${comparison.fieldPath}, ${comparison.currentValue},
+              ${comparison.aiValue}, ${comparison.sourceValue}, ${comparison.fieldStatus},
+              ${JSON.stringify(comparisonEvidenceForStorage(comparison))}::jsonb
+            )
+          `;
+        }
+      } else {
+        for (const comparison of buildAiFieldComparisons(draft, rawJson)) {
+          await transaction`
+            insert into public.ai_field_comparisons (
+              job_id, result_id, field_path, current_value, ai_value, source_value, field_status, evidence_json
+            ) values (
+              ${jobId}, ${resultId}, ${comparison.fieldPath}, ${comparison.currentValue},
+              ${comparison.aiValue}, ${comparison.sourceValue}, ${comparison.fieldStatus},
+              ${JSON.stringify(comparison.evidence)}::jsonb
+            )
+          `;
+        }
       }
       const newStatus =
         finalValidationStatus === "PASSED"
@@ -315,7 +406,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             validationStatus: finalValidationStatus,
             warningCount,
             blockingCount: finalBlockingCount,
-            clearEvidenceInvalidCount: clearEvidenceInvalid.length,
+            evidenceInvalidCount: evidenceInvalid.length,
             resultVersion,
             modelName,
           })}::jsonb
@@ -365,6 +456,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         409,
       );
     }
+    if (error instanceof AiResultMetadataInvalidError) {
+      return fail(
+        "VALIDATION_FAILED",
+        "Metadata kết quả AI không khớp job hoặc manifest hiện hành.",
+        requestId,
+        400,
+      );
+    }
     return fail("INTERNAL_ERROR", "Không thể lưu kết quả trích xuất AI.", requestId, 500);
   }
+}
+
+function parseDraft(value: unknown): IntakeDraft {
+  const draft = hydrateGcnV2ApplicationDraft(value);
+  if (!draft) throw new Error("Stored submission payload is invalid.");
+  return draft;
 }

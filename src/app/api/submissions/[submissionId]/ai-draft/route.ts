@@ -9,6 +9,7 @@ import { getPublicIntakeRepository } from "@/modules/public-intake/repository";
 import { SUBMISSION_READ_ROLES } from "@/modules/submissions/review";
 
 export const runtime = "nodejs";
+const PRIVATE_NO_STORE_HEADERS = { "cache-control": "private, no-store" } as const;
 
 export async function GET(
   _: NextRequest,
@@ -27,12 +28,12 @@ export async function GET(
           message: "Không tìm thấy bản kê khai.",
           requestId,
         }),
-        { status: 404 },
+        { status: 404, headers: PRIVATE_NO_STORE_HEADERS },
       );
     }
     const aiDraft = await getAiExtractionRepository().getCurrentComparisons(
       submissionId,
-      submission.draft,
+      submission,
     );
     await repository.appendAudit({
       actorEmail: user.email,
@@ -50,7 +51,7 @@ export async function GET(
           : null,
         requestId,
       },
-      { headers: { "cache-control": "no-store" } },
+      { headers: PRIVATE_NO_STORE_HEADERS },
     );
   } catch (error) {
     const code = error instanceof AuthorizationError ? error.kind : "INTERNAL_ERROR";
@@ -58,6 +59,7 @@ export async function GET(
       error instanceof AuthorizationError ? error.message : "Không thể tải bản nháp AI.";
     return NextResponse.json(createApiErrorPayload({ code, message, requestId }), {
       status: code === "UNAUTHENTICATED" ? 401 : code === "ACCESS_DENIED" ? 403 : 500,
+      headers: PRIVATE_NO_STORE_HEADERS,
     });
   }
 }

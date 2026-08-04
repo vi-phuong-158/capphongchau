@@ -1,5 +1,102 @@
 # 06 — AI Working Log
 
+## [2026-08-04] Cập nhật báo cáo GCN v2 theo review PR #18 (976→978 test)
+- **Agent:** Claude Code
+- **Thay đổi:** cập nhật `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md` để khớp head `e0c5465`: số test
+  976→978, thêm tóm tắt ba fix đã vào sau snapshot ban đầu (giới hạn ba mục đích/thửa PL3, thu hẹp cảnh
+  báo `FIELD_REQUIRES_MANUAL_REVIEW`, đổi nhãn provenance `OFFICER_EDITED`).
+- **File đã sửa:** `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md`.
+- **Lý do:** review PR #18 (P2) yêu cầu báo cáo và mô tả PR phản ánh đúng số test và các thay đổi trước
+  khi chuyển PR sang Ready/merge.
+- **Kiểm tra:** `npx vitest run` PASS cục bộ (108 files, 978 pass, 28 skip), khớp CI head `e0c5465`. Không
+  đụng code nguồn.
+
+## [2026-08-04] Sửa lỗi nạp AI vượt giới hạn ba mục đích/thửa của PL3 (review PR #18)
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - `buildDestinationPlan()` đếm giới hạn `MAX_LAND_USES_PER_PARCEL` bằng hàm mới
+    `projectedLandUseCount()` — tính trên số dòng thực tế của thửa đích (có tính ô trống mà
+    `ensureLandUse()` sẽ tái sử dụng), thay vì đếm số dòng AI ánh xạ được.
+  - `applyGcnV2BackendComparisons()` gọi thêm `validateWorkingPayloadForSave()` bên cạnh
+    `draftSchema` làm lớp chắn thứ hai: các luật PL3 cố ý nằm ngoài `draftSchema`, nên trước đó
+    đường nạp AI không có gì chặn.
+  - `ai-draft-panel.tsx` lọc `selectedFieldPaths` theo `allApplyableFieldPaths()` trước khi gửi để
+    số trường gửi đi khớp với số nút hiển thị.
+  - `markAmbiguousGroup()` hoist `collectGcnV2FieldObservations()` ra khỏi vòng lặp trong cùng.
+- **File đã sửa:** `src/modules/ai-extraction/gcn-v2-application-backend.ts`,
+  `src/modules/ai-extraction/gcn-v2-merge.ts`, `src/components/admin/ai-draft-panel.tsx`,
+  `tests/gcn-v2-backend-application.test.ts`.
+- **Lý do:** thửa đã đủ ba dòng mục đích mà AI đọc ra mã khác thì guard cũ vẫn cho nạp, tạo thửa 4–6
+  dòng. PL3 chỉ có ba bộ cột Z–AD/AE–AI/AJ–AN nên dòng thừa mất im lặng lúc xuất, đồng thời cán bộ
+  không lưu tay lại được vì `validateWorkingPayloadForSave()` chặn — hồ sơ rơi vào trạng thái kẹt.
+- **Kiểm tra:** dựng lại lỗi bằng fixture `buildSyntheticGcnV2Payload` trước khi sửa (thửa ra 6 dòng,
+  `invalidFieldPaths` rỗng); thêm test hồi quy
+  "refuses to add a land use when the destination parcel already holds three".
+  `npm run lint` PASS; `npm run typecheck` PASS; `npm test` PASS (108 files, 977 pass, 28 skip).
+
+## [2026-08-04] Thu hẹp cảnh báo FIELD_REQUIRES_MANUAL_REVIEW và sửa nhãn provenance
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - `validateGcnV2Payload()` chỉ bật `FIELD_REQUIRES_MANUAL_REVIEW` khi trường **AI đọc và
+    completion bắt buộc** chưa có evidence `EXTRACTED` (hàm mới `countUnreadableRequiredFields()`),
+    thay vì bật khi có bất kỳ evidence `LOW_CONFIDENCE`/`UNREADABLE`/`NOT_FOUND` nào. Ngày sinh và
+    giới tính của chủ `TO_CHUC`/`CONG_DONG_DAN_CU` được loại trừ vì GCN không in.
+  - `PROVENANCE_LABEL.OFFICER_EDITED` đổi từ "Cán bộ đã sửa" thành "Đã có dữ liệu — không ghi đè".
+- **File đã sửa:** `scripts/ai/validator.ts`, `src/components/admin/ai-draft-panel.tsx`,
+  `tests/gcn-v2-ai-core.test.ts`.
+- **Lý do:**
+  - Với hợp đồng đầy đủ, GCN thật hầu như luôn thiếu tổ chức/tài sản/biến động nên cảnh báo bật ở
+    gần như mọi hồ sơ, `validationStatus` gần như không bao giờ đạt `PASSED` và cán bộ mất tín hiệu
+    để biết hồ sơ nào thực sự cần mở lại ảnh.
+  - `OFFICER_EDITED` gộp hai tình huống: cán bộ thật sự sửa, và ô đã có dữ liệu mà backend không
+    truy được nguồn (rerun sinh stable key mới nên `priorAppliedValues` tra hụt). Nhãn cũ quy cho
+    cán bộ một thao tác có thể họ không làm; nhãn mới nói đúng hệ quả. Logic apply giữ nguyên vì đã
+    fail-closed đúng — chỉ hiển thị là sai.
+- **Kiểm tra:** thêm test "only asks for manual review when a completion-required field is
+  unreadable" (payload mặc định thiếu trường tùy chọn → không cảnh báo; chủ tổ chức thiếu ngày
+  sinh/giới tính → không cảnh báo; thiếu `parcels[].area` → cảnh báo đúng 1 trường).
+  `npm run lint` PASS; `npm run typecheck` PASS; `npm test` PASS (108 files, 978 pass, 28 skip).
+
+## [2026-08-04] Sửa tài liệu cho khớp thực tế: agent hợp nhất trang, không phải server
+
+- **Agent:** Claude Code
+- **Thay đổi:** không đụng code. Sửa tài liệu ở ba chỗ vẽ/mô tả `gcn-v2-merge.ts` như thể nó đang
+  chạy trong luồng:
+  - `GCN_V2_ARCHITECTURE.md`: đưa bước đọc/chuẩn hóa/hợp nhất vào subgraph "Agent trong trạm cục bộ";
+    thêm mục "Giới hạn đã biết" với bảng phân biệt cái server bắt được và cái không.
+  - `01-architecture.md`: sơ đồ text ghi rõ agent hợp nhất rồi nộp MỘT JSON; tách `gcn-v2-merge.ts`
+    thành mục riêng đánh dấu chưa có caller production.
+  - `03-decisions.md`: entry quyết định hoãn, kèm điều kiện phải đánh giá lại.
+- **File đã sửa:** `docs/gcn-v2/GCN_V2_ARCHITECTURE.md`, `docs/brain/01-architecture.md`,
+  `docs/brain/03-decisions.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** `mergeGcnV2PageExtractions()` không có caller nào ngoài test, nhưng tài liệu vẽ nó nằm
+  trong flow. Agent đọc tài liệu sau sẽ tin nhầm là sửa file đó thì đổi được hành vi chạy thật, hoặc
+  tưởng luật hợp nhất đã được code ép buộc trong khi nó mới chỉ là chỉ dẫn prompt.
+- **Rủi ro đã ghi lại (chưa xử lý):** server nhận JSON đã hợp nhất nên không phát hiện được agent
+  đọc hai giá trị khác nhau ở hai trang rồi âm thầm chọn một và khai `EXTRACTED`. Schema chỉ bắt được
+  khai `CONFLICT` không nhất quán. Rào chắn còn lại là cán bộ đối chiếu ảnh gốc.
+- **Kiểm tra:** `npm test` PASS (108 files, 978 pass, 28 skip) — xác nhận không đụng code.
+  `npx prettier --check` PASS trên các file đã sửa.
+
+## [2026-08-03] Khóa contract và triển khai GCN v2 đa trang, đa chủ, đa thửa
+
+- **Agent:** Codex trưởng, phối hợp các subagent AI/schema, backend/persistence và officer UI.
+- **Phạm vi:** khảo sát toàn luồng ảnh → local station → result/comparison → working payload →
+  completion → PL3; tạo contract-first commit `b4c850b`; triển khai `gcn-v2.0` theo whitelist dùng
+  chung thay vì chỉ ba trường certificate.
+- **Bất biến:** AI chỉ đề xuất; không đọc/lưu CCCD 12 số; không ghi đè citizen/officer/confirmed;
+  conflict/low-confidence/unreadable fail closed; registered changes chỉ đối chiếu; version,
+  idempotency, history và audit vẫn được giữ.
+- **Database:** không migration vì JSONB và working payload hiện có đủ; payload legacy vẫn được hỗ trợ.
+- **Kiểm tra cuối:** `npm.cmd run lint` PASS; `npm.cmd run typecheck` PASS; `npm.cmd test` PASS
+  (108 files, 976 pass, 28 skip). Kiểm toán độc lập đã rà schema/evidence, merger, provenance, mảng,
+  UI ordinal và idempotency: PASS WITH CONDITIONS. Báo cáo/điều kiện Preview, accuracy và same-input rerun ở
+  `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md`.
+- **Vận hành:** không deploy, không merge `main`, không chạy migration/database/Drive thật và không dùng
+  fixture có PII thật.
+
 ## [2026-08-02] Hoàn tất và Squash Merge PR #15 — Dashboard Quản lý và Xuất PL3
 
 - **Agent:** Antigravity (Gemini 3.6 Flash).
@@ -13,11 +110,10 @@
   7. Squash merge thành công vào nhánh `main` (Subject: `feat(admin): add operations dashboard and filtered PL3 export`).
 - **File chính:** `src/app/admin/dashboard/page.tsx`, `src/app/admin/login-redirect/route.ts`, `src/app/api/dashboard/summary/route.ts`, `src/app/api/exports/route.ts`, `src/lib/validation.ts`, `src/modules/submissions/review.ts`.
 
-
-
 ## [2026-08-01] Hiển thị ảnh gốc lớn trực tiếp trên trang duyệt hồ sơ (PR #13 & #14)
+
 - **Agent:** Antigravity (Gemini 3.6 Flash).
-- **Công việc:** 
+- **Công việc:**
   1. Xử lý hiển thị ảnh nguyên kích thước (full resolution) cho cán bộ duyệt hồ sơ, thay cho thumbnail Google Drive bị mờ. Tự động nạp ảnh đầu tiên và ảnh chuyển tab dựa trên `activeFileId`.
   2. Bổ sung Dynamic Import cho `heic2any` trên admin client view để chuyển đổi HEIC/HEIF sang JPEG trước khi tạo `objectUrl`.
   3. Bổ sung `readOriginal` vào `PublicIntakeStorage`, gọi API Google Drive `.get({ alt: "media" })` với response type `arraybuffer`.
