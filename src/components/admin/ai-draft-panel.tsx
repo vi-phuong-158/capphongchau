@@ -47,11 +47,16 @@ const EVIDENCE_STATUS_LABEL: Readonly<Record<GcnEvidenceStatus, string>> = {
   NOT_FOUND: "Không tìm thấy",
 };
 
+/**
+ * `OFFICER_EDITED` gộp hai tình huống: cán bộ thực sự sửa, và ô đã có dữ liệu mà backend không truy
+ * được nguồn (đọc lại lần sau sinh stable key mới nên mất liên kết với giá trị AI đã nạp). Nhãn vì
+ * vậy nói đúng hệ quả — không ghi đè — thay vì quy cho cán bộ một thao tác có thể họ không làm.
+ */
 const PROVENANCE_LABEL: Readonly<Record<GcnFieldProvenance, string>> = {
   EMPTY: "Đang trống",
   AI_PROPOSED: "AI đã đề xuất",
   CITIZEN_PROVIDED: "Người dân đã cung cấp",
-  OFFICER_EDITED: "Cán bộ đã sửa",
+  OFFICER_EDITED: "Đã có dữ liệu — không ghi đè",
   OFFICER_CONFIRMED: "Cán bộ đã xác nhận",
   CONFLICT: "Có mâu thuẫn",
   UNREADABLE: "Không đọc được",

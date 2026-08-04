@@ -280,6 +280,45 @@ describe("GCN v2 strict schema", () => {
     );
   });
 
+  it("only asks for manual review when a completion-required field is unreadable", () => {
+    // GCN thật hầu như luôn thiếu tổ chức/tài sản/biến động. Cảnh báo bật ở mọi hồ sơ thì cán bộ
+    // sẽ bỏ qua nó, nên trường không bắt buộc thiếu là bình thường, không phải tín hiệu.
+    const optionalMissing = gcnExtractionPayloadV2Schema.parse(makePayload());
+    expect(optionalMissing.evidence.some((item) => item.status === "NOT_FOUND")).toBe(true);
+    expect(validateAiResultPayload(optionalMissing)).not.toContainEqual(
+      expect.objectContaining({ code: "FIELD_REQUIRES_MANUAL_REVIEW" }),
+    );
+
+    const organisation = gcnExtractionPayloadV2Schema.parse(
+      makePayload({
+        owners: [
+          owner({
+            ownerType: "TO_CHUC",
+            organisationName: "Công ty mẫu",
+            organisationIdentityNumber: "MST-PC-001",
+            roleOnCertificate: "NGUOI_DAI_DIEN",
+            dateOfBirth: null,
+            gender: null,
+          }),
+        ],
+      }),
+    );
+    expect(validateAiResultPayload(organisation)).not.toContainEqual(
+      expect.objectContaining({ code: "FIELD_REQUIRES_MANUAL_REVIEW" }),
+    );
+
+    const requiredMissing = gcnExtractionPayloadV2Schema.parse(
+      makePayload({ parcels: [{ ...parcel(), area: null }] }),
+    );
+    expect(validateAiResultPayload(requiredMissing)).toContainEqual(
+      expect.objectContaining({
+        code: "FIELD_REQUIRES_MANUAL_REVIEW",
+        message: expect.stringContaining("1 trường bắt buộc"),
+        severity: "WARNING",
+      }),
+    );
+  });
+
   it("records blurred, rotated and incomplete-page evidence without inventing a value", () => {
     const payload = makePayload({
       certificate: { issueDate: null },

@@ -7,6 +7,8 @@ import {
   type AiExtractionPayload,
   type GcnExtractionPayloadV2,
 } from "@/modules/ai-extraction/draft";
+import { GCN_V2_FIELD_CONTRACT } from "@/modules/ai-extraction/gcn-v2-contract";
+import { collectGcnV2FieldObservations } from "@/modules/ai-extraction/gcn-v2-schema";
 import { scanForCitizenIdLikeValues } from "@/modules/ai-extraction/pii-safety";
 
 export interface ValidationIssue {
@@ -159,17 +161,13 @@ function validateGcnV2Payload(payload: GcnExtractionPayloadV2, issues: Validatio
       severity: "WARNING",
     });
   }
-  if (
-    payload.evidence.some(
-      (evidence) =>
-        evidence.status === "LOW_CONFIDENCE" ||
-        evidence.status === "UNREADABLE" ||
-        evidence.status === "NOT_FOUND",
-    )
-  ) {
+  const unreadableRequiredCount = countUnreadableRequiredFields(payload);
+  if (unreadableRequiredCount > 0) {
     issues.push({
       code: "FIELD_REQUIRES_MANUAL_REVIEW",
-      message: "Kết quả có trường thiếu hoặc độ tin cậy thấp; cán bộ phải đối chiếu ảnh gốc.",
+      message:
+        `Có ${unreadableRequiredCount} trường bắt buộc chưa đọc rõ; ` +
+        "cán bộ phải đối chiếu ảnh gốc.",
       severity: "WARNING",
     });
   }
@@ -181,4 +179,44 @@ function validateGcnV2Payload(payload: GcnExtractionPayloadV2, issues: Validatio
       severity: "WARNING",
     });
   }
+}
+
+/** Chỉ các trường AI đọc mà completion bắt buộc mới đáng để cán bộ mở lại ảnh gốc. */
+const REQUIRED_AI_TEMPLATE_PATHS: ReadonlySet<string> = new Set(
+  GCN_V2_FIELD_CONTRACT.filter((entry) => entry.aiRead && entry.requiredAtCompletion).map(
+    (entry) => entry.path,
+  ),
+);
+
+/**
+ * Ngày sinh và giới tính không in trên GCN của tổ chức/cộng đồng dân cư, nên `NOT_FOUND` ở đó là
+ * đúng nghiệp vụ chứ không phải trường cần đối chiếu lại.
+ */
+function isExpectedMissingForOrganisation(
+  payload: GcnExtractionPayloadV2,
+  templatePath: string,
+  stableKey: string | null,
+): boolean {
+  if (templatePath !== "owners[].dateOfBirth" && templatePath !== "owners[].gender") return false;
+  const ownerType = payload.data.owners.find((owner) => owner.stableKey === stableKey)?.ownerType;
+  return ownerType === "TO_CHUC" || ownerType === "CONG_DONG_DAN_CU";
+}
+
+/**
+ * Trước đây bất kỳ evidence `LOW_CONFIDENCE`/`UNREADABLE`/`NOT_FOUND` nào cũng bật cảnh báo. Với
+ * hợp đồng đầy đủ, GCN thật hầu như luôn thiếu tổ chức, tài sản hoặc biến động, nên cảnh báo bật ở
+ * gần như mọi hồ sơ và mất hết ý nghĩa. Chỉ đếm trường bắt buộc để tín hiệu còn đáng đọc.
+ */
+function countUnreadableRequiredFields(payload: GcnExtractionPayloadV2): number {
+  const readablePaths = new Set(
+    payload.evidence
+      .filter((evidence) => evidence.status === "EXTRACTED")
+      .map((evidence) => evidence.fieldPath),
+  );
+  return collectGcnV2FieldObservations(payload).filter(
+    (observation) =>
+      REQUIRED_AI_TEMPLATE_PATHS.has(observation.templatePath) &&
+      !readablePaths.has(observation.fieldPath) &&
+      !isExpectedMissingForOrganisation(payload, observation.templatePath, observation.stableKey),
+  ).length;
 }

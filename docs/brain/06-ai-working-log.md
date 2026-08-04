@@ -23,8 +23,32 @@
   `invalidFieldPaths` rỗng); thêm test hồi quy
   "refuses to add a land use when the destination parcel already holds three".
   `npm run lint` PASS; `npm run typecheck` PASS; `npm test` PASS (108 files, 977 pass, 28 skip).
-- **Còn lại:** ba nội dung cần người dùng duyệt (merger chưa nối vào CLI, ngưỡng cảnh báo
-  `FIELD_REQUIRES_MANUAL_REVIEW`, provenance khi rerun) chưa sửa — xem phần đề xuất trong PR.
+
+## [2026-08-04] Thu hẹp cảnh báo FIELD_REQUIRES_MANUAL_REVIEW và sửa nhãn provenance
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - `validateGcnV2Payload()` chỉ bật `FIELD_REQUIRES_MANUAL_REVIEW` khi trường **AI đọc và
+    completion bắt buộc** chưa có evidence `EXTRACTED` (hàm mới `countUnreadableRequiredFields()`),
+    thay vì bật khi có bất kỳ evidence `LOW_CONFIDENCE`/`UNREADABLE`/`NOT_FOUND` nào. Ngày sinh và
+    giới tính của chủ `TO_CHUC`/`CONG_DONG_DAN_CU` được loại trừ vì GCN không in.
+  - `PROVENANCE_LABEL.OFFICER_EDITED` đổi từ "Cán bộ đã sửa" thành "Đã có dữ liệu — không ghi đè".
+- **File đã sửa:** `scripts/ai/validator.ts`, `src/components/admin/ai-draft-panel.tsx`,
+  `tests/gcn-v2-ai-core.test.ts`.
+- **Lý do:**
+  - Với hợp đồng đầy đủ, GCN thật hầu như luôn thiếu tổ chức/tài sản/biến động nên cảnh báo bật ở
+    gần như mọi hồ sơ, `validationStatus` gần như không bao giờ đạt `PASSED` và cán bộ mất tín hiệu
+    để biết hồ sơ nào thực sự cần mở lại ảnh.
+  - `OFFICER_EDITED` gộp hai tình huống: cán bộ thật sự sửa, và ô đã có dữ liệu mà backend không
+    truy được nguồn (rerun sinh stable key mới nên `priorAppliedValues` tra hụt). Nhãn cũ quy cho
+    cán bộ một thao tác có thể họ không làm; nhãn mới nói đúng hệ quả. Logic apply giữ nguyên vì đã
+    fail-closed đúng — chỉ hiển thị là sai.
+- **Kiểm tra:** thêm test "only asks for manual review when a completion-required field is
+  unreadable" (payload mặc định thiếu trường tùy chọn → không cảnh báo; chủ tổ chức thiếu ngày
+  sinh/giới tính → không cảnh báo; thiếu `parcels[].area` → cảnh báo đúng 1 trường).
+  `npm run lint` PASS; `npm run typecheck` PASS; `npm test` PASS (108 files, 978 pass, 28 skip).
+- **Còn lại:** merger nhiều trang vẫn chưa nối vào CLI (chỉ có unit test); thống nhất sửa tài liệu
+  `01-architecture.md` / `GCN_V2_ARCHITECTURE.md` cho khớp thực tế thay vì nối code trong đợt này.
 
 ## [2026-08-03] Khóa contract và triển khai GCN v2 đa trang, đa chủ, đa thửa
 
