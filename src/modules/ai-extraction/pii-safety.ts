@@ -8,15 +8,33 @@ export interface CitizenIdLikeFinding {
   readonly fieldPath: string;
 }
 
-export function scanForCitizenIdLikeValues(value: unknown, path = "$"): CitizenIdLikeFinding[] {
+export interface CitizenIdLikeScanOptions {
+  /**
+   * Tên khóa của object cần bỏ qua khi quét: các định danh do máy sinh (fileId là UUID, hash bộ
+   * ảnh sha256, stable key, metadata phiên bản/model) chứ KHÔNG phải chữ đọc từ ảnh GCN. UUID/sha256
+   * có thể chứa 12 chữ số liền hoặc ngăn bằng gạch nên bị nhận nhầm là CCCD. Chỉ áp cho khóa của
+   * object; mọi giá trị nghiệp vụ và evidence.rawText/note/warning vẫn bị quét đầy đủ.
+   */
+  readonly skipKeys?: ReadonlySet<string>;
+}
+
+export function scanForCitizenIdLikeValues(
+  value: unknown,
+  options: CitizenIdLikeScanOptions = {},
+  path = "$",
+): CitizenIdLikeFinding[] {
   if (typeof value === "string") {
     return CITIZEN_ID_LIKE_PATTERN.test(value) ? [{ fieldPath: path }] : [];
   }
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) => scanForCitizenIdLikeValues(item, `${path}[${index}]`));
+    return value.flatMap((item, index) =>
+      scanForCitizenIdLikeValues(item, options, `${path}[${index}]`),
+    );
   }
   if (!value || typeof value !== "object") return [];
   return Object.entries(value).flatMap(([key, nested]) =>
-    scanForCitizenIdLikeValues(nested, path === "$" ? key : `${path}.${key}`),
+    options.skipKeys?.has(key)
+      ? []
+      : scanForCitizenIdLikeValues(nested, options, path === "$" ? key : `${path}.${key}`),
   );
 }

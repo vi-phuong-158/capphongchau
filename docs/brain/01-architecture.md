@@ -645,6 +645,11 @@ src/modules/ai-extraction/ + scripts/ai/ + agent/ (Phase 9-11, khung sườn —
 ├── scripts/ai/validator.ts
 │   validateAiResultPayload — ĐƯỜNG GỌI THẬT DUY NHẤT nhận JSON từ AI: kiểm certificate/parcels,
 │   gọi scanForPromptInjection (khớp → BLOCKING), kiểm unreadableFields (thiếu → WARNING)
+│   ├── quét CCCD gọi scanForCitizenIdLikeValues với AI_TECHNICAL_KEYS (skipKeys): loại fileId,
+│   │   sourceDocumentHash, stableKey*, pageNumber, metadata phiên bản/model khỏi phạm vi quét vì
+│   │   UUID/sha256 có thể chứa 12 chữ số → nhận nhầm CCCD, chặn oan (2026-08-07). Giá trị nghiệp vụ
+│   │   và evidence.rawText/note/warning VẪN bị quét. Manifest bắt fileId phải có trong pages[] nên
+│   │   không thể né bằng cách bỏ file → phải loại ở tầng quét.
 ├── src/app/api/ai/results/route.ts (POST, worker gọi bằng header x-ai-worker-key)
 │   ├── Chặn bằng AI_EXTRACTION_ENABLED qua loadServerEnvironment() — tắt → 503
 │   │   SERVICE_UNAVAILABLE (trước 2026-07-25 vòng 2 review, cờ không chặn gì)

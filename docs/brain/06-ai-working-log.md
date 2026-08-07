@@ -1,6 +1,38 @@
 # 06 — AI Working Log
 
+## [2026-08-07] Sửa chặn oan CCCD do UUID fileId ở trạm AI GCN v2
+
+- **Agent:** Claude Code
+- **Thay đổi:**
+  - `scanForCitizenIdLikeValues()` nhận thêm option `skipKeys` (`pii-safety.ts`): khi duyệt object,
+    bỏ qua các khóa có tên trong `skipKeys`. Chữ ký đổi thành `(value, options = {}, path = "$")`;
+    `path` vẫn là tham số nội bộ của đệ quy nên các caller cũ (chỉ truyền `value`) không đổi.
+  - `validator.ts` khai báo `AI_TECHNICAL_KEYS` (fileId, pageNumber, sourceDocumentHash, stableKey,
+    ownerStableKeys, parcelStableKeys, registeredChangeStableKeys, schemaVersion, promptVersion,
+    modelIdentifier, pagesProcessed) và truyền vào lời gọi quét trên toàn payload AI.
+  - Thêm test hồi quy trong `gcn-v2-ai-core.test.ts`.
+- **File đã sửa:** `src/modules/ai-extraction/pii-safety.ts`, `scripts/ai/validator.ts`,
+  `tests/gcn-v2-ai-core.test.ts`, `docs/brain/01-architecture.md`, `docs/brain/06-ai-working-log.md`.
+- **Lý do:** `CITIZEN_ID_LIKE_PATTERN` coi dấu gạch là phân tách chữ số, nên UUID của
+  `public_files.file_id` (ví dụ `3c525586-3646-4832-8015-dfc9b3504e95` → `3646-4832-8015` = 12 chữ số)
+  bị nhận nhầm là CCCD. Quét chạy trên TOÀN payload (gồm fileId ở evidence/pages), còn
+  `validateGcnV2RuntimeMetadata` bắt mọi fileId trong manifest phải xuất hiện ở `pages[]` (issue
+  `MANIFEST_FILE_NOT_PROCESSED`), nên không né được bằng cách bỏ file → mọi job có fileId dạng này
+  KHÔNG BAO GIỜ submit được (2/4 job đang chờ bị chặn: `2e01239d…`, `4ff033e1…`). Chọn loại khóa kỹ
+  thuật thay vì sửa regex vì `metadata.sourceDocumentHash` là sha256 KHÔNG có dấu phân tách — 12 chữ
+  số liền trong hash vẫn khớp regex dù có chỉnh dấu gạch, chỉ loại theo khóa mới xử lý triệt để. Các
+  khóa này do máy sinh, không phải chữ đọc từ ảnh; một CCCD trần đặt vào cũng bị các guard khác chặn
+  (manifest, STABLE_KEY_PATTERN bắt đầu bằng chữ cái, SOURCE_HASH_PATTERN).
+- **Kiểm tra:** dựng lại lỗi bằng test (assert UUID khớp `scanForCitizenIdLikeValues` khi quét trực
+  tiếp, nhưng `validateAiResultPayload` không còn ra `CITIZEN_ID_LIKE_VALUE`); khẳng định CCCD thật
+  trong `evidence.rawText` (`0123 4567 8901`) và trong `certificate.issueNumber` VẪN bị chặn.
+  `npm run lint` PASS; `npm run typecheck` PASS; `npx vitest run` PASS (108 files, 979 pass, 28 skip —
+  +1 test so với 978 trước đó).
+- **Rủi ro/còn lại:** thu hẹp phạm vi quét ở các khóa kỹ thuật; nếu về sau có khóa dữ liệu nghiệp vụ
+  mới trùng tên một khóa trong `AI_TECHNICAL_KEYS` thì sẽ bị bỏ quét (hiện không có trùng tên).
+
 ## [2026-08-04] Cập nhật báo cáo GCN v2 theo review PR #18 (976→978 test)
+
 - **Agent:** Claude Code
 - **Thay đổi:** cập nhật `docs/gcn-v2/GCN_V2_IMPLEMENTATION_REPORT.md` để khớp head `e0c5465`: số test
   976→978, thêm tóm tắt ba fix đã vào sau snapshot ban đầu (giới hạn ba mục đích/thửa PL3, thu hẹp cảnh
