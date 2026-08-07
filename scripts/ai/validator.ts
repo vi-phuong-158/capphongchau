@@ -17,9 +17,32 @@ export interface ValidationIssue {
   severity: "BLOCKING" | "WARNING";
 }
 
+/**
+ * Khóa kỹ thuật trong kết quả AI: định danh file, hash bộ ảnh, stable key và metadata phiên bản/model
+ * đều do máy sinh chứ không phải chữ đọc từ ảnh GCN. UUID của `public_files.file_id` (ví dụ
+ * `3c525586-3646-4832-8015-dfc9b3504e95` → `3646-4832-8015` = 12 chữ số) và sha256 có thể chứa chuỗi
+ * 12 chữ số nên bị `scanForCitizenIdLikeValues` nhận nhầm là CCCD, chặn oan mọi job có fileId dạng
+ * này. Loại các khóa này khỏi phạm vi quét; giá trị nghiệp vụ và evidence.rawText/note/warning vẫn bị
+ * quét đầy đủ. An toàn vì các khóa này còn được đối chiếu manifest/pattern ở đường ghi, một CCCD trần
+ * đặt vào đó cũng không qua được các guard khác.
+ */
+const AI_TECHNICAL_KEYS: ReadonlySet<string> = new Set([
+  "fileId",
+  "pageNumber",
+  "sourceDocumentHash",
+  "stableKey",
+  "ownerStableKeys",
+  "parcelStableKeys",
+  "registeredChangeStableKeys",
+  "schemaVersion",
+  "promptVersion",
+  "modelIdentifier",
+  "pagesProcessed",
+]);
+
 export function validateAiResultPayload(data: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  for (const finding of scanForCitizenIdLikeValues(data)) {
+  for (const finding of scanForCitizenIdLikeValues(data, { skipKeys: AI_TECHNICAL_KEYS })) {
     issues.push({
       code: "CITIZEN_ID_LIKE_VALUE",
       message: `Trường ${finding.fieldPath} chứa chuỗi giống số CCCD; hệ thống không nhận kết quả này.`,
